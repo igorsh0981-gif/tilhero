@@ -1,7 +1,7 @@
 /**
  * Лимиты Mini App (спринт 9, INTERNAL_API §2.3) — единый лимитер ts-common (GCRA на Redis, общий для реплик,
  * переопределения из админки без деплоя, метрики для ops-monitor, fail open / closed по политике).
- * Значения по умолчанию — прежние env RATE_LIMIT_* (config.rateLimits); `tg.support_create` — из каталога.
+ * Значения по умолчанию — env RATE_LIMIT_* (config.rateLimits); `tg.support_create` — из каталога.
  */
 import type { Redis } from "ioredis";
 import { RateLimiter, policyDefaults, type Logger } from "@tilhero/ts-common";
@@ -16,10 +16,6 @@ export function telegramPolicies(config: Config) {
     "tg.session_ip": r.sessionPerIpPerMinute,
     "tg.pin": r.pinPerMinute,
     "tg.public_ip": r.publicPerIpPerMinute,
-    "tg.offers": r.offersPerMinute,
-    "tg.reactions": r.reactionsPerMinute,
-    "tg.watch": r.watchCommandsPerMinute,
-    "tg.ai": r.aiTurnsPerMinute,
   });
 }
 

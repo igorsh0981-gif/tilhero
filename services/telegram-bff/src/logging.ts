@@ -44,7 +44,13 @@ export const SENSITIVE_KEYS = new Set([
   "first_name",
   "last_name",
   "display_name",
+  "teen_display_name",
+  "inviter_display_name",
   "hash",
+  // TilHero: ссылки и параметры запуска несут токены приглашений и согласия родителя
+  "link",
+  "start_param",
+  "startapp",
 ]);
 
 const CENSOR = "[redacted]";

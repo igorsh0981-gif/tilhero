@@ -4,7 +4,7 @@
  *
  *   npx tsx scripts/dev-init-data.ts --user-id 900001 --name Игорь
  *   npx tsx scripts/dev-init-data.ts --user-id 900001 --name Игорь --username test_user_1 --lang ru --json
- *   BOT_TOKEN=... npx tsx scripts/dev-init-data.ts --user-id 900002 --name Anna --lang en --start-param ticket_TCK-3001
+ *   BOT_TOKEN=... npx tsx scripts/dev-init-data.ts --user-id 900002 --name Anna --lang uz --start-param inv_AbCdEfGhIjKlMnOpQrStUvWxYz012345
  *
  * Токен бота: --bot-token, иначе BOT_TOKEN из окружения, иначе dev-значение по умолчанию (совпадает с конфигом BFF
  * вне production). При NODE_ENV=production скрипт не запускается.

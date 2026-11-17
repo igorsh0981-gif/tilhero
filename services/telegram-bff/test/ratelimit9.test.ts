@@ -28,9 +28,9 @@ describe("спринт 9: лимиты telegram-bff", () => {
       expect(pol[p.policy], p.policy).toMatchObject({ limit: p.limit, window_s: p.window_s, fail: p.fail });
     }
     expect(Object.keys(pol).sort()).toEqual(RATE_LIMIT_POLICIES.filter((x) => x.service === "telegram-bff").map((x) => x.policy).sort());
-    expect(telegramPolicies(testConfig({ RATE_LIMIT_OFFERS_PER_MIN: "3", AI_RATE_PER_MINUTE: "2" }))).toMatchObject({
-      "tg.offers": { limit: 3 },
-      "tg.ai": { limit: 2 },
+    expect(telegramPolicies(testConfig({ RATE_LIMIT_USER_PER_MIN: "3", RATE_LIMIT_PIN_PER_MIN: "2" }))).toMatchObject({
+      "tg.user": { limit: 3 },
+      "tg.pin": { limit: 2 },
     });
     expect(cfg.rateLimiting).toEqual({ enabled: true, overrideRefreshSeconds: 30, keyPrefix: cfg.redisKeyPrefix });
     expect(testConfig({ RATE_LIMITS_ENABLED: "false" }).rateLimiting.enabled).toBe(false);
@@ -51,7 +51,7 @@ describe("спринт 9: лимиты telegram-bff", () => {
   it("tg.support_create (новая): 10 обращений в час, 11-е → 429, обращение не создаётся", async () => {
     h = await makeHarness();
     const a = await login(h);
-    const body = { category: "TICKET_SOURCE", subject: "Тема обращения", message: "Текст обращения" };
+    const body = { category: "BUG", subject: "Тема обращения", message: "Текст обращения" };
     const send = () =>
       h!.app.inject({ method: "POST", url: "/v1/support/tickets", payload: body, headers: { ...bearer(a.access), "idempotency-key": randomUUID() } });
     for (let i = 0; i < 10; i++) expect((await send()).statusCode, String(i)).toBe(201);
@@ -65,7 +65,7 @@ describe("спринт 9: лимиты telegram-bff", () => {
   it("ревью спринта 9: повтор того же Idempotency-Key лимит tg.support_create не тратит (после ответа support)", async () => {
     h = await makeHarness();
     const a = await login(h);
-    const body = { category: "TICKET_SOURCE", subject: "Тема обращения", message: "Текст обращения" };
+    const body = { category: "BUG", subject: "Тема обращения", message: "Текст обращения" };
     const send = (key: string) =>
       h!.app.inject({ method: "POST", url: "/v1/support/tickets", payload: body, headers: { ...bearer(a.access), "idempotency-key": key } });
     const same = randomUUID();

@@ -1,5 +1,5 @@
 /**
- * Регрессия по код-ревью спринта 1 (docs/qa/sprint1-review-ts.md, решения T1–T5).
+ * Регрессия по код-ревью BFF aievent (решения T1–T5), перенесённая на маршруты TilHero.
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -31,7 +31,7 @@ describe("T1: перевыпуск сессии атомарен — отозв�
       const { sid } = await store.create(uid, false);
       const [reissued] = await Promise.all([store.reissue(sid, true), store.revokeAllForUser(uid)]);
       expect(await store.isAlive(sid), `iteration ${i}`).toBe(false);
-      if (reissued) expect((await store.lookup(reissued)).status).toBe("missing");
+      if (reissued) expect((await store.lookup(reissued.refreshToken)).status).toBe("missing");
     }
     expect(await store.reissue(randomUUID(), true)).toBeNull();
   });
@@ -73,6 +73,10 @@ describe("T2: ответы сериализуются по схеме — слу
 
   it("все клиентские маршруты: ни одно служебное поле не доходит до клиента", async () => {
     const s = await login(h);
+    h.fake.setAge(s.userId, "18+");
+    h.fake.onboard(s.userId);
+    const childId = h.fake.addChild(s.userId);
+    h.fake.addInbox(s.userId);
     const created = await h.app.inject({
       method: "POST",
       url: "/v1/support/tickets",
@@ -80,52 +84,66 @@ describe("T2: ответы сериализуются по схеме — слу
       payload: { category: "BUG", subject: "Не грузится", message: "Пустой экран" },
     });
     const ticketId = created.json().ticket_id as string;
+    const invite = await h.app.inject({ method: "POST", url: "/v1/invites", headers: { ...bearer(s.access), "idempotency-key": randomUUID() }, payload: { kind: "family" } });
+    const inviteId = invite.json().invite_id as string;
     await h.app.inject({ method: "PUT", url: "/v1/profile/security/pin", headers: bearer(s.access), payload: { pin: "4826" } });
     h.fake.decorate = leakEverywhere;
-    // домен support «по ошибке» отдаёт staff-представление тикета
     const ticket = h.fake.tickets.get(ticketId)!;
     (ticket as unknown as Record<string, unknown>).user_id = s.userId;
 
     const auth = bearer(s.access);
     const probes = [
       { url: "/v1/profile" },
-      { url: "/v1/home" },
+      { url: "/v1/learners" },
       { url: "/v1/legal/policy" },
-      { url: "/v1/directory/airports?q=tash" },
-      { url: "/v1/directory/interests" },
-      { url: "/v1/directory/geographies" },
+      { url: "/v1/plan" },
+      { url: "/v1/plan/today" },
+      { url: "/v1/directory/goals" },
+      { url: "/v1/directory/topics" },
+      { url: "/v1/notifications" },
+      { url: "/v1/notifications/unread-count" },
+      { url: "/v1/whats-new" },
+      { url: "/v1/news" },
+      { url: "/v1/invites" },
       { url: "/v1/support/categories" },
       { url: "/v1/support/tickets" },
       { url: `/v1/support/tickets/${ticketId}` },
       { url: `/v1/support/tickets/${ticketId}/messages`, method: "POST" as const, payload: { text: "ещё" } },
-      { url: "/v1/profile/preferences", method: "PATCH" as const, payload: { strong_events_outside_geo: true } },
-      { url: "/v1/profile/departures", method: "PUT" as const, payload: { airports: ["TAS"] } },
-      { url: "/v1/profile/settings", method: "PATCH" as const, payload: { locale: "ru" } },
+      { url: "/v1/plan", method: "PATCH" as const, payload: { goal: "travel" } },
+      { url: "/v1/plan/activity", method: "POST" as const, payload: { kind: "practice", minutes: 5 }, idem: true },
+      { url: "/v1/learners", method: "POST" as const, payload: { display_name: "Тимур", age_band: "10-13" } },
+      { url: "/v1/profile/settings", method: "PATCH" as const, payload: { locale: "uz" } },
       { url: "/v1/profile/security/biometric", method: "PUT" as const },
-      { url: "/v1/profile/consent", method: "POST" as const, payload: { policy_version: "2026-10-01", purposes: ["core"], age_confirmed_18_plus: true } },
+      { url: "/v1/profile/consent", method: "POST" as const, payload: { policy_version: "2026-11-18", purposes: ["terms", "privacy", "learning"] } },
       { url: "/v1/profile/security/pin/reset-request", method: "POST" as const },
+      { url: "/v1/invites", method: "POST" as const, payload: { kind: "friend" }, idem: true },
+      { url: `/v1/invites/${inviteId}`, method: "DELETE" as const },
+      { url: "/v1/notifications/read", method: "POST" as const, payload: { all: true } },
       { url: "/v1/session/refresh", method: "POST" as const, payload: { refresh_token: s.refresh }, noAuth: true },
     ];
     for (const p of probes) {
       const res = await h.app.inject({
         method: p.method ?? "GET",
         url: p.url,
-        ...(p.noAuth ? {} : { headers: auth }),
+        ...(p.noAuth ? {} : { headers: { ...auth, ...(p.idem ? { "idempotency-key": randomUUID() } : {}) } }),
         ...(p.payload ? { payload: p.payload } : {}),
       });
       expect(res.statusCode, p.url).toBeLessThan(300);
       expect(res.body, p.url).not.toMatch(/LEAK|internal_note|assignee_id|telegram_user_id|visibility|777000/);
     }
-    // Remote Config: flags — открытая карта по контракту; фиксированные объекты и tokens (только --css-var) — без лишнего
     const cfg = (await h.app.inject({ url: "/v1/experience/config" })).json();
-    expect(Object.keys(cfg).sort()).toEqual(["app", "flags", "home", "hotel_rating_min", "theme", "version"]);
+    expect(Object.keys(cfg).sort()).toEqual(["app", "flags", "home", "theme", "version"]);
     expect(Object.keys(cfg.theme).sort()).toEqual(["id", "tokens", "version"]);
     expect(Object.keys(cfg.theme.tokens).every((k: string) => k.startsWith("--"))).toBe(true);
-    expect(Object.keys(cfg.home).sort()).toEqual(["sections", "welcome_mode"]);
+    expect(Object.keys(cfg.home).sort()).toEqual(["sections"]);
     expect(Object.keys(cfg.home.sections[0]).sort()).toEqual(["enabled", "key", "type", "variant"]);
     const t = (await h.app.inject({ url: `/v1/support/tickets/${ticketId}`, headers: auth })).json();
     expect(t.user_id).toBeUndefined();
     expect(Object.keys(t.messages[0]).sort()).toEqual(["author_name", "created_at", "message_id", "sender_type", "text"]);
+    // переключение на ребёнка — последним (прежний access-токен после него не действует)
+    const sw = await h.app.inject({ method: "POST", url: "/v1/session/learner", headers: auth, payload: { learner_id: childId } });
+    expect(sw.statusCode).toBe(200);
+    expect(sw.body).not.toMatch(/LEAK|internal_note|assignee_id|telegram_user_id|guardian_user_id|visibility|777000/);
   });
 });
 
@@ -134,28 +152,27 @@ describe("T3/T5: формат денег, PIN и кода сброса", () => {
     h = await makeHarness();
   });
 
-  it("price_snapshot.amount — строка-десятичное ≤ 2 знаков; число → 422", async () => {
+  it("контекст обращения: deeplink только https, без лишних полей (offer_id/price_snapshot туризма → 422)", async () => {
     const s = await login(h);
-    const post = (amount: unknown) =>
+    const post = (context: object) =>
       h.app.inject({
         method: "POST",
         url: "/v1/support/tickets",
         headers: { ...bearer(s.access), "idempotency-key": randomUUID() },
-        payload: {
-          category: "PRICE",
-          subject: "Цена изменилась",
-          message: "Была другая",
-          context: { client_version: "telegram-miniapp-2.0", price_snapshot: { amount, currency: "USD", fetched_at: "2026-10-08T09:00:00Z" } },
-        },
+        payload: { category: "SCHEDULE_REMINDERS", subject: "Напоминание", message: "Не пришло", context },
       });
-    for (const ok of ["850.00", "850.5", "0", "1200"]) expect((await post(ok)).statusCode, ok).toBe(201);
-    for (const bad of [850, 850.25, "850.123", "-1.00", "1e3", "08.00", ""]) {
-      const res = await post(bad);
-      expect(res.statusCode, String(bad)).toBe(422);
-      expect(res.json().details.field).toBe("context.price_snapshot.amount");
+    expect((await post({ client_version: "telegram-miniapp-1.0", deeplink: "https://t.me/tilhero_bot/app?startapp=route_schedule" })).statusCode).toBe(201);
+    for (const bad of [
+      { client_version: "x", deeplink: "http://example.com" },
+      { client_version: "x", deeplink: "javascript:alert(1)" },
+      { client_version: "x", deeplink: "https://a b" },
+      { client_version: "x", offer_id: randomUUID() },
+      { client_version: "x", price_snapshot: { amount: "1.00", currency: "USD", fetched_at: "2026-11-18T00:00:00Z" } },
+      { deeplink: "https://t.me/x" },
+    ]) {
+      expect((await post(bad)).statusCode, JSON.stringify(bad)).toBe(422);
     }
-    const sent = h.fake.callsTo("support", "POST", "/internal/v1/me/tickets")[0]!.body as { context: { price_snapshot: { amount: unknown } } };
-    expect(sent.context.price_snapshot.amount).toBe("850.00");
+    expect(h.fake.callsTo("support", "POST", "/internal/v1/me/tickets")).toHaveLength(1);
   });
 
   it("PIN не 4/6 цифр → 422 PIN_FORMAT, до identity не доходит (попытка не тратится); код сброса — 6 цифр", async () => {
@@ -206,9 +223,16 @@ describe("T4/T5: внутренний JWT v2, повторы, trace id, IPv6", (
     const res = await h.app.inject({ method: "PUT", url: "/v1/profile/security/pin", headers: bearer(s.access), payload: { pin: "4826" } });
     expect(res.statusCode).toBe(503);
     expect(h.fake.callsTo("identity", "PUT", "/internal/v1/me/pin")).toHaveLength(1);
-    h.fake.override("preferences", "GET", "/internal/v1/directory/interests", () => new Response("", { status: 503 }));
-    await h.app.inject({ url: "/v1/directory/interests", headers: bearer(s.access) });
-    expect(h.fake.callsTo("preferences", "GET", "/internal/v1/directory/interests")).toHaveLength(3);
+    h.fake.override("learningPlan", "GET", "/internal/v1/directory/goals", () => new Response("", { status: 503 }));
+    await h.app.inject({ url: "/v1/directory/goals", headers: bearer(s.access) });
+    expect(h.fake.callsTo("learningPlan", "GET", "/internal/v1/directory/goals")).toHaveLength(3);
+    // создающие команды с Idempotency-Key повторяются с тем же ключом
+    h.fake.override("learningPlan", "POST", "/internal/v1/me/activities", () => new Response("", { status: 503 }));
+    const key = randomUUID();
+    await h.app.inject({ method: "POST", url: "/v1/plan/activity", headers: { ...bearer(s.access), "idempotency-key": key }, payload: { kind: "practice", minutes: 5 } });
+    const tries = h.fake.callsTo("learningPlan", "POST", "/internal/v1/me/activities");
+    expect(tries).toHaveLength(3);
+    expect(new Set(tries.map((c) => c.headers["idempotency-key"]))).toEqual(new Set([key]));
   }, 20_000);
 
   it("x-trace-id клиента принимается только ^[A-Za-z0-9_-]{1,64}$ и пробрасывается в домены", async () => {

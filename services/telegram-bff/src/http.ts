@@ -26,7 +26,7 @@ declare module "fastify" {
   interface FastifyContextConfig {
     /** public — без Bearer (лимит по IP); user — Bearer access JWT. Нет значения — служебный маршрут. */
     access?: "public" | "user";
-    /** Разрешён сессии с pin=false (INTERNAL_API «pin_required сессия»). */
+    /** Разрешён сессии с pin=false (код родителя задан, но ещё не подтверждён). */
     pinExempt?: boolean;
     /** Лимит по IP для публичного маршрута: session — 10/мин на /v1/session/telegram, public — общий. */
     ipLimit?: "session" | "public";
@@ -41,7 +41,7 @@ declare module "fastify" {
   }
 }
 
-/** Сессия текущего запроса (маршрут с access: "user"). */
+/** Сессия текущего запроса (маршрут с access: "user"): accountId — sub, learnerId — lrn. */
 export function authOf(req: { auth?: AccessClaims }): AccessClaims {
   if (!req.auth) throw new AppError(401, "UNAUTHORIZED", "Требуется авторизация");
   return req.auth;
@@ -59,8 +59,12 @@ export interface ValidationOverride {
   status?: number;
   code: string;
   message: string;
-  /** Добавлять details.field (контракт: PREFERENCES_INVALID {field}). */
+  /** Только эти правила Ajv (pattern, maxLength…); не задано — любое. */
+  keywords?: string[];
+  /** Добавлять details.field (контракт: PIN_FORMAT {field}). */
   withField?: boolean;
+  /** Добавлять details.reason — правило схемы (контракт: PLAN_INVALID {field, reason}). */
+  withReason?: boolean;
 }
 
 function fieldOf(e: FastifySchemaValidationError | undefined): string {
@@ -94,10 +98,15 @@ function sanitize(errors: FastifySchemaValidationError[], dataVar: string) {
 export function schemaErrors(overrides: ValidationOverride[] = []) {
   return (errors: FastifySchemaValidationError[], dataVar: string): Error => {
     const field = queryField(fieldOf(errors[0]), dataVar);
+    const keyword = errors[0]?.keyword ?? "";
     for (const o of overrides) {
       if (o.context && o.context !== dataVar) continue;
       if (o.field && !(field === o.field || field.startsWith(`${o.field}.`))) continue;
-      return new AppError(o.status ?? 422, o.code, o.message, o.withField ? { field } : {});
+      if (o.keywords && !o.keywords.includes(keyword)) continue;
+      return new AppError(o.status ?? 422, o.code, o.message, {
+        ...(o.withField ? { field } : {}),
+        ...(o.withReason ? { reason: keyword } : {}),
+      });
     }
     return new AppError(422, "VALIDATION_ERROR", "Некорректные данные запроса", {
       in: dataVar,
@@ -143,3 +152,27 @@ export const PIN_FORMAT = schemaErrors(
     withField: true,
   })),
 );
+
+// ---------- Idempotency-Key ----------
+
+const IDEMPOTENCY_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/** Заголовок Idempotency-Key (UUID): обязателен для создающих команд (422 IDEMPOTENCY_KEY_REQUIRED), пробрасывается
+ *  в домен как есть (в нижнем регистре) — повтор с тем же ключом возвращает тот же результат. */
+export function idempotencyKey(req: { headers: Record<string, string | string[] | undefined> }, required: boolean): string | undefined {
+  const raw = req.headers["idempotency-key"];
+  const key = Array.isArray(raw) ? undefined : raw?.trim();
+  if (key && IDEMPOTENCY_RE.test(key)) return key.toLowerCase();
+  if (!key && !required && raw === undefined) return undefined;
+  throw new AppError(422, "IDEMPOTENCY_KEY_REQUIRED", "Нужен заголовок Idempotency-Key (UUID)");
+}
+
+// ---------- детский профиль ----------
+
+/** Детский профиль 6–13 (lrn ≠ sub): действие доступно только в профиле самого аккаунта. */
+export function forbidInChildProfile(auth: AccessClaims, code: "ADULT_REQUIRED" | "INVITES_NOT_ALLOWED"): void {
+  if (auth.learnerId === auth.accountId) return;
+  throw code === "INVITES_NOT_ALLOWED"
+    ? new AppError(403, code, "В детском профиле приглашения недоступны — их отправляет и принимает родитель")
+    : new AppError(403, code, "Действие доступно только взрослому — перейдите в профиль родителя");
+}

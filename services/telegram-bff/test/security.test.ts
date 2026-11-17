@@ -67,11 +67,11 @@ describe("rate limits (Redis)", () => {
   it("per-user limit applies to all authenticated endpoints and is isolated per user", async () => {
     const a = await login(h);
     const b = await login(h, { id: 900321, first_name: "Анна", username: "test_user_4" });
-    for (let i = 0; i < 8; i++) expect((await h.app.inject({ url: "/v1/home", headers: bearer(a.access) })).statusCode).toBe(200);
+    for (let i = 0; i < 8; i++) expect((await h.app.inject({ url: "/v1/plan", headers: bearer(a.access) })).statusCode).toBe(200);
     const limited = await h.app.inject({ url: "/v1/profile", headers: bearer(a.access) });
     expect(limited.statusCode).toBe(429);
     expect(limited.headers["retry-after"]).toBeDefined();
-    expect((await h.app.inject({ url: "/v1/home", headers: bearer(b.access) })).statusCode).toBe(200);
+    expect((await h.app.inject({ url: "/v1/plan", headers: bearer(b.access) })).statusCode).toBe(200);
   });
 
   it("5/min on PIN verification (even with the right PIN after that)", async () => {
@@ -202,6 +202,36 @@ describe("logs contain no PII or secrets", () => {
     expect(lines.some((l) => l.msg === "initData rejected" && l.reason === "hash_mismatch")).toBe(true);
   });
 
+  it("TilHero: имя ребёнка, токены приглашений и согласия родителя, start_param, ссылки не попадают в лог", async () => {
+    const startParam = "inv_SECRETinviteTOKEN0123456789ab";
+    const s = await login(h, TG_USER, "203.0.113.10", startParam);
+    h.fake.setAge(s.userId, "18+");
+    const auth = bearer(s.access);
+    const created = await h.app.inject({ method: "POST", url: "/v1/learners", headers: auth, payload: { display_name: "Мадинахон", age_band: "6-9" } });
+    expect(created.statusCode).toBe(201);
+    const inv = (await h.app.inject({ method: "POST", url: "/v1/invites", headers: { ...auth, "idempotency-key": randomUUID() }, payload: { kind: "friend" } })).json();
+    const inviteToken = new URL(inv.link).searchParams.get("startapp")!.slice(4);
+    // подросток просит согласие родителя
+    const teen = await login(h, { id: 900999, first_name: "Подросток", username: "teen_user" }, "203.0.113.20");
+    h.fake.setAge(teen.userId, "14-17");
+    const gc = (await h.app.inject({ method: "POST", url: "/v1/profile/guardian-consent", headers: bearer(teen.access) })).json();
+    const gcToken = new URL(gc.link).searchParams.get("startapp")!.slice(3);
+    await h.app.inject({ url: `/v1/guardian-consents/${gcToken}` });
+    await h.app.inject({ method: "POST", url: `/v1/guardian-consents/${gcToken}/accept`, headers: auth });
+    await h.app.inject({ method: "POST", url: "/v1/invites/open", headers: bearer(teen.access), payload: { token: inviteToken } });
+    // ошибки по токенам тоже логируются — без токенов
+    await h.app.inject({ url: `/v1/guardian-consents/${"Z".repeat(40)}` });
+    await h.app.inject({ url: `/v1/guardian-consents/${"Y".repeat(300)}` });
+    await h.app.inject({ method: "POST", url: "/v1/session/learner", headers: auth, payload: { learner_id: created.json().learner_id } });
+
+    const raw = h.logs.text;
+    for (const secret of [startParam, "SECRETinviteTOKEN", inviteToken, gcToken, "Z".repeat(40), "Y".repeat(40), inv.link, gc.link, "Мадинахон", "Подросток", "teen_user"]) {
+      expect(raw.includes(secret), `leaked: ${secret.slice(0, 16)}…`).toBe(false);
+    }
+    expect(raw).not.toContain(created.json().learner_id);
+    expect(h.logs.parsed().some((l) => l.route === "/v1/guardian-consents/:token")).toBe(true);
+  });
+
   it("scrub() redacts sensitive keys at any depth but keeps Error objects intact", () => {
     const err = new Error("boom");
     const out = scrub({ a: { init_data: "x", nested: [{ pin: "1", ok: 2 }] }, refresh_token: "r", err, code: "PIN_INVALID" }) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -219,7 +249,8 @@ describe("session store outage", () => {
     const fake = new FakeDomains();
     const app = await buildApp(testConfig(), { redis: dead, fetchImpl: fake.fetch, logStream: new LogCapture() });
     try {
-      const token = await new AccessTokens(SESSION_SECRET, 900).issue({ userId: randomUUID(), sid: randomUUID(), pin: true });
+      const id = randomUUID();
+      const token = await new AccessTokens(SESSION_SECRET, 900).issue({ accountId: id, learnerId: id, sid: randomUUID(), pin: true });
       const res = await app.inject({ url: "/v1/profile", headers: bearer(token) });
       expect(res.statusCode).toBe(503);
       expect(res.json()).toMatchObject({ code: "UPSTREAM_UNAVAILABLE", details: { service: "session-store" } });

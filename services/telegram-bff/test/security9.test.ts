@@ -5,8 +5,8 @@
  *    без `auth_date`, из будущего, лишнее неподписанное поле, дубль ключа, без user → 401, identity не вызывается;
  *  - SEC-02: access JWT — `alg: none`, путаница алгоритмов (HS512 тем же секретом), чужой aud/iss, просроченный,
  *    подпись другим ключом, без sid → 401;
- *  - SEC-04: IDOR на уровне BFF — каждый клиентский маршрут с `{id}`: в домен уходит только `sub` сессии, `user_id` из
- *    клиента не принимается (422), «чужое» из домена → 404 (не 403); поддержка — сквозь подделку домена с владельцем;
+ *  - SEC-04: IDOR на уровне BFF — каждый клиентский маршрут с `{id}`/токеном: в домен уходит только `sub` сессии,
+ *    `user_id` из клиента не принимается (422), «чужое» из домена → 404 (не 403); поддержка — сквозь подделку домена;
  *  - SEC-12: CORS — только origin Mini App; ответы с данными пользователя — Cache-Control: no-store;
  *  - Q2/SEC-15: ключи лимитера входа без IP в открытом виде; 429 с Retry-After.
  */
@@ -23,12 +23,9 @@ import {
   testConfig,
   ORIGIN,
   SESSION_SECRET,
-  SPRINT6_ENV,
-  SPRINT7_ENV,
   TG_USER,
   bearer,
   closeRedis,
-  domainError,
   login,
   makeHarness,
   testRedis,
@@ -185,7 +182,7 @@ describe("SEC-02: access JWT сессии", () => {
   const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
   async function forge(o: { alg?: "HS256" | "HS512"; secret?: string; aud?: string; iss?: string; exp?: number; sid?: string | null; sub: string }) {
     const t = now();
-    const jwt = new SignJWT({ ...(o.sid === null ? {} : { sid: o.sid ?? randomUUID() }), pin: true })
+    const jwt = new SignJWT({ ...(o.sid === null ? {} : { sid: o.sid ?? randomUUID() }), lrn: o.sub, pin: true })
       .setProtectedHeader({ alg: o.alg ?? "HS256", typ: "JWT" })
       .setIssuer(o.iss ?? "telegram-bff")
       .setAudience(o.aud ?? "telegram-miniapp")
@@ -218,7 +215,7 @@ describe("SEC-02: access JWT сессии", () => {
 
 describe("SEC-04: IDOR через BFF", () => {
   beforeEach(async () => {
-    h = await makeHarness({ ...SPRINT6_ENV, ...SPRINT7_ENV });
+    h = await makeHarness();
   });
 
   it("обращение (подделка домена знает владельца): чужое → 404 на всех маршрутах с {ticket_id}", async () => {
@@ -228,7 +225,7 @@ describe("SEC-04: IDOR через BFF", () => {
       method: "POST",
       url: "/v1/support/tickets",
       headers: { ...bearer(owner.access), "idempotency-key": randomUUID() },
-      payload: { category: "TICKET_SOURCE", subject: "Не открывается ссылка", message: "Ошибка" },
+      payload: { category: "ACCOUNT", subject: "Не открывается", message: "Ошибка" },
     });
     expect(created.statusCode).toBe(201);
     const t = created.json();
@@ -243,40 +240,48 @@ describe("SEC-04: IDOR через BFF", () => {
     expect((await h.app.inject({ url: `/v1/support/tickets/${t.ticket_id}`, headers: bearer(owner.access) })).statusCode).toBe(200);
   });
 
-  const ID = "8b0e1c3a-5d2f-4a6b-9c7d-1e2f3a4b5c6d";
-  // code — код 404 домена (null — подделка домена по умолчанию); expect — ответ BFF. Реакция — своя по построению:
-  // домен читает её по sub, «нет реакции» → 204, чужой реакции адресовать нельзя
-  type Probe = { name: string; method: "GET" | "PATCH" | "DELETE" | "POST"; url: string; payload?: object; domain: ["watch" | "aiConcierge" | "recommendations", string, string]; code?: string | null; expect?: number };
-  const routes: Probe[] = [
-    { name: "слежение", method: "GET", url: `/v1/watches/${ID}`, domain: ["watch", "GET", `/internal/v1/watches/${ID}`] },
-    { name: "изменения слежения", method: "GET", url: `/v1/watches/${ID}/changes`, domain: ["watch", "GET", `/internal/v1/watches/${ID}/changes`] },
-    { name: "изменить слежение", method: "PATCH", url: `/v1/watches/${ID}`, payload: { threshold_pct: 5, expected_version: 1 }, domain: ["watch", "PATCH", `/internal/v1/watches/${ID}`] },
-    { name: "удалить слежение", method: "DELETE", url: `/v1/watches/${ID}`, domain: ["watch", "DELETE", `/internal/v1/watches/${ID}`] },
-    { name: "переписка консьержа", method: "GET", url: `/v1/ai/conversations/${ID}`, domain: ["aiConcierge", "GET", `/internal/v1/conversations/${ID}`], code: "AI_CONVERSATION_NOT_FOUND" },
-    { name: "удалить переписку", method: "DELETE", url: `/v1/ai/conversations/${ID}`, domain: ["aiConcierge", "DELETE", `/internal/v1/conversations/${ID}`], code: "AI_CONVERSATION_NOT_FOUND" },
-    { name: "снять реакцию", method: "DELETE", url: `/v1/recommendations/reactions/${ID}`, domain: ["recommendations", "GET", `/internal/v1/reactions/${ID}`], code: null, expect: 204 },
-  ];
+  it("приглашение: чужое нельзя отозвать; preview/accept/decline без :open → 404; домен получает только sub сессии", async () => {
+    const owner = await login(h);
+    h.fake.setAge(owner.userId, "18+");
+    const intruder = await login(h, { id: 900556, first_name: "Чужой", username: "intruder_q6" }, "203.0.113.12");
+    const inv = (await h.app.inject({ method: "POST", url: "/v1/invites", headers: { ...bearer(owner.access), "idempotency-key": randomUUID() }, payload: { kind: "friend" } })).json();
+    const id = inv.invite_id as string;
+    const probes: Array<["GET" | "POST" | "DELETE", string]> = [
+      ["DELETE", `/v1/invites/${id}`],
+      ["GET", `/v1/invites/${id}/preview`],
+      ["POST", `/v1/invites/${id}/accept`],
+      ["POST", `/v1/invites/${id}/decline`],
+    ];
+    for (const [method, url] of probes) {
+      const res = await h.app.inject({ method, url, headers: bearer(intruder.access) });
+      expect(res.statusCode, url).toBe(404);
+      expect(res.json().code, url).toBe("INVITE_NOT_FOUND");
+    }
+    expect(h.fake.callsTo("social").filter((c) => c.path.includes(id)).every((c) => c.subject === intruder.userId)).toBe(true);
+    expect(h.fake.invites.get(id)!.invite.status).toBe("active");
+  });
 
-  for (const r of routes) {
-    it(`${r.name}: в домен — только sub сессии, «чужое» из домена → ${r.expect ?? 404}`, async () => {
-      const s = await login(h);
-      const [service, method, path] = r.domain;
-      if (r.code !== null) h.fake.override(service, method, path, () => domainError(404, r.code ?? "NOT_FOUND"));
-      const res = await h.app.inject({ method: r.method, url: r.url, headers: bearer(s.access), ...(r.payload ? { payload: r.payload } : {}) });
-      expect(res.statusCode, res.body).toBe(r.expect ?? 404);
-      const calls = h.fake.calls.filter((c) => c.service === service && c.path === path);
-      expect(calls.length, `${r.name}: домен не вызван`).toBeGreaterThan(0);
-      for (const c of calls) expect(c.subject).toBe(s.userId);
-    });
-  }
+  it("детский профиль чужого аккаунта: переключение, настройки — 404 LEARNER_NOT_FOUND (неотличимо)", async () => {
+    const owner = await login(h);
+    h.fake.setAge(owner.userId, "18+");
+    const child = h.fake.addChild(owner.userId);
+    const intruder = await login(h, { id: 900557, first_name: "Чужой", username: "intruder_q7" }, "203.0.113.13");
+    const res = await h.app.inject({ method: "POST", url: "/v1/session/learner", headers: bearer(intruder.access), payload: { learner_id: child } });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe("LEARNER_NOT_FOUND");
+    // подделанный access-токен с чужим lrn и правильным sid не проходит: lrn сверяется с учениками аккаунта
+    expect(h.fake.callsTo("learningPlan").some((c) => c.subject === child)).toBe(false);
+  });
 
   it("user_id из клиента не принимается: 422 в query и теле, в домен не уходит", async () => {
     const s = await login(h);
     const other = randomUUID();
-    const q = await h.app.inject({ url: `/v1/watches?user_id=${other}`, headers: bearer(s.access) });
+    const q = await h.app.inject({ url: `/v1/notifications?user_id=${other}`, headers: bearer(s.access) });
     expect(q.statusCode).toBe(422);
-    const b = await h.app.inject({ method: "PATCH", url: `/v1/watches/${ID}`, headers: bearer(s.access), payload: { user_id: other, threshold_pct: 5, expected_version: 1 } });
+    const b = await h.app.inject({ method: "PATCH", url: "/v1/plan", headers: bearer(s.access), payload: { user_id: other, goal: "work" } });
     expect(b.statusCode).toBe(422);
+    const l = await h.app.inject({ method: "POST", url: "/v1/learners", headers: bearer(s.access), payload: { display_name: "X", age_band: "6-9", guardian_user_id: other } });
+    expect(l.statusCode).toBe(422);
     expect(h.fake.calls.some((c) => JSON.stringify(c.body ?? {}).includes(other) || JSON.stringify(c.query).includes(other))).toBe(false);
   });
 });

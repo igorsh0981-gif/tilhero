@@ -5,34 +5,25 @@ import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import type { TypeBoxTypeProvider } from "@fastify/type-provider-typebox";
 import { Ajv } from "ajv";
-import { LogController } from "fastify";
+import { LogController, type FastifyReply } from "fastify";
 import { Redis } from "ioredis";
-import { AppError, KeyRing, buildBase } from "@tilhero/ts-common";
+import { AppError, KeyRing, buildBase, errorBody } from "@tilhero/ts-common";
 import { registerAuth } from "./auth.js";
 import type { Config } from "./config.js";
 import { makeStoreGuard, type BffContext } from "./context.js";
-import { EventsCatalog } from "./events.js";
 import { ExperienceCache } from "./experience.js";
-import { FacetsService } from "./facets.js";
-import { HomeService } from "./home.js";
-import { OffersService } from "./offers.js";
-import { LastTripStore, NewsService, RecommendationsService, WatchService } from "./personal.js";
-import { personalRoutes } from "./routes/personal.js";
-import { aiRoutes } from "./routes/ai.js";
-import { ConciergeService } from "./ai.js";
 import { schemaErrors, type App } from "./http.js";
 import { EXTRA_REDACT_PATHS, scrub, type LogSink } from "./logging.js";
 import { createLimiter } from "./rateLimit.js";
-import { eventsRoutes } from "./routes/events.js";
-import { offersRoutes } from "./routes/offers.js";
+import { familyRoutes } from "./routes/family.js";
+import { notificationsRoutes } from "./routes/notifications.js";
+import { planRoutes } from "./routes/plan.js";
 import { profileRoutes } from "./routes/profile.js";
-import { referenceRoutes } from "./routes/reference.js";
 import { sessionRoutes } from "./routes/session.js";
 import { supportRoutes } from "./routes/support.js";
+import { whatsNewRoutes } from "./routes/whatsNew.js";
 import { SessionStore } from "./sessions.js";
 import { AccessTokens } from "./tokens.js";
-import { whatsNewRoutes } from "./routes/whatsNew.js";
-import { ReleaseNotesFeed } from "./whatsNew.js";
 import { SERVICE_NAME, createDomains } from "./upstream.js";
 
 export interface AppDeps {
@@ -95,13 +86,21 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
       // свои access-логи (onResponse) с route-шаблоном, duration_ms и outcome вместо стандартных
       logController: new LogController({ disableRequestLogging: true }),
       schemaErrorFormatter: schemaErrors(),
+      // Ошибки роутера (битый URL, слишком длинный параметр) — в формате ErrorBody и без эха пути: в пути бывают
+      // токены (согласие родителя). Слишком длинный id/токен не может существовать → 404.
+      frameworkErrors: (err, _req, reply) => {
+        const tooLong = (err as { code?: string }).code === "FST_ERR_MAX_PARAM_LENGTH";
+        const r = reply as unknown as FastifyReply;
+        void r
+          .code(tooLong ? 404 : 400)
+          .header("cache-control", "no-store")
+          .send(tooLong ? errorBody("NOT_FOUND", "Не найдено") : errorBody("BAD_REQUEST", "Некорректный адрес запроса"));
+      },
     },
   });
   const app = base.withTypeProvider<TypeBoxTypeProvider>();
-  // Тело запроса — JSON с настоящими типами, приведение типов к нему не применяется. С общим coerceTypes Ajv
-  // превращал null в 0 в nullable-полях (anyOf [integer, null]): budget {preset:"1000_2000", custom_amount:null}
-  // от Mini App уходил в preferences как custom_amount:0 → 422, а "1500" молча становилось 1500 (e2e, дефект BFF-1).
-  // Приведение остаётся только для querystring/params/headers — там все значения строки.
+  // Тело запроса — JSON с настоящими типами, приведение типов к нему не применяется (null в nullable-полях не
+  // становится 0, "30" не становится 30 — урок aievent BFF-1). Приведение — только для querystring/params/headers.
   app.setValidatorCompiler(bodyAwareValidatorCompiler());
   const log = app.log;
   const onRedisError = (err: Error) => log.warn({ err_name: err.name, err_message: err.message }, "redis connection error");
@@ -133,7 +132,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   await app.register(cors, {
     origin: config.miniappOrigins,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allowedHeaders: ["authorization", "content-type", "idempotency-key", "x-trace-id", "x-correlation-id"],
+    allowedHeaders: ["authorization", "content-type", "idempotency-key", "if-match", "x-trace-id", "x-correlation-id"],
     exposedHeaders: ["x-trace-id", "x-correlation-id", "retry-after"],
     credentials: false,
     maxAge: 600,
@@ -153,21 +152,18 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
         tags: [
           { name: "session" },
           { name: "profile" },
-          { name: "preferences" },
+          { name: "learners" },
+          { name: "guardian" },
           { name: "security" },
           { name: "consent" },
           { name: "account" },
+          { name: "plan" },
           { name: "directory" },
-          { name: "experience" },
-          { name: "home" },
-          { name: "events" },
-          { name: "offers" },
-          { name: "support" },
-          { name: "recommendations" },
-          { name: "watch" },
-          { name: "news" },
-          { name: "ai" },
+          { name: "notifications" },
+          { name: "invites" },
           { name: "whats-new" },
+          { name: "experience" },
+          { name: "support" },
         ],
       },
       hideUntagged: true,
@@ -179,34 +175,18 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
     key: keyRing,
     urls: {
       identity: config.identityUrl,
-      preferences: config.preferencesUrl,
+      learningPlan: config.learningPlanUrl,
       support: config.supportUrl,
+      notifications: config.notificationsUrl,
       experience: config.experienceUrl,
-      events: config.eventsUrl,
-      offers: config.offersUrl,
-      recommendations: config.recommendationsUrl,
-      watch: config.watchUrl,
-      news: config.newsUrl,
-      aiConcierge: config.aiConciergeUrl,
+      social: config.socialUrl,
     },
-    personalMaxResponseBytes: config.personalMaxResponseBytes,
-    conciergeTimeoutMs: config.conciergeTimeoutMs,
     timeoutMs: config.upstreamTimeoutMs,
-    offersTimeoutMs: config.offersTimeoutMs,
-    offersMaxResponseBytes: config.offersMaxResponseBytes,
     retries: config.upstreamRetries,
     ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
     onFailure: (info) =>
       log.warn({ upstream: info.service, upstream_status: info.status, upstream_code: info.code }, "domain unavailable"),
   });
-  const experience = new ExperienceCache(domains.experience, config.experienceCacheSeconds * 1000, () =>
-    log.warn({ upstream: "experience-config" }, "experience-config unavailable, serving stale config"),
-  );
-  const catalog = new EventsCatalog(domains.events, log);
-  const recommendations = new RecommendationsService(domains.recommendations, log);
-  const watch = new WatchService(domains.watch, domains.watchCreate, log);
-  const news = new NewsService(domains.news, log);
-  const lastTrip = new LastTripStore(redis, config.redisKeyPrefix, config.lastTripTtlDays * 86_400, log);
   const ctx: BffContext = {
     config,
     redis,
@@ -214,46 +194,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
     limiter: createLimiter(redis, config, log),
     tokens: new AccessTokens(config.sessionJwtSecret, config.accessTtlSeconds),
     domains,
-    experience,
-    whatsNew: new ReleaseNotesFeed(domains.experience, config.experienceCacheSeconds * 1000, () =>
-      log.warn({ upstream: "experience-config" }, "experience-config unavailable, serving stale release notes"),
+    experience: new ExperienceCache(domains.experience, config.experienceCacheSeconds * 1000, () =>
+      log.warn({ upstream: "experience-config" }, "experience-config unavailable, serving stale config"),
     ),
-    catalog,
-    facets: new FacetsService({ redis, catalog, keyPrefix: config.redisKeyPrefix, ttlSeconds: config.facetsCacheSeconds, log }),
-    home: new HomeService({
-      config,
-      redis,
-      catalog,
-      preferences: domains.preferences,
-      identity: domains.identity,
-      experience,
-      recommendations,
-      watch,
-      news,
-      lastTrip,
-      log,
-    }),
-    offers: new OffersService({
-      offers: domains.offers,
-      offersRead: domains.offersRead,
-      preferences: domains.preferences,
-      identity: domains.identity,
-      lastTrip,
-      log,
-    }),
-    recommendations,
-    watch,
-    news,
-    lastTrip,
-    concierge: new ConciergeService({
-      ai: domains.ai,
-      aiLong: domains.aiLong,
-      baseUrl: config.aiConciergeUrl,
-      key: keyRing,
-      timeoutMs: config.conciergeTimeoutMs,
-      ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
-      log,
-    }),
     log,
     store: makeStoreGuard(log),
   };
@@ -263,15 +206,6 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   app.addHook("onSend", async (_req, reply, payload) => {
     void reply.header("x-content-type-options", "nosniff");
     if (!reply.hasHeader("cache-control")) void reply.header("cache-control", "no-store");
-    // 503 с details.retry_after (AI_BUSY, спринт 7) — Retry-After, как у 429 (общий обработчик ставит его только для 429/423)
-    if (reply.statusCode === 503 && !reply.hasHeader("retry-after") && typeof payload === "string" && payload.includes('"retry_after"')) {
-      try {
-        const ra = (JSON.parse(payload) as { details?: { retry_after?: unknown } }).details?.retry_after;
-        if (typeof ra === "number" && Number.isInteger(ra) && ra > 0 && ra <= 86_400) void reply.header("retry-after", String(ra));
-      } catch {
-        /* не JSON */
-      }
-    }
     return payload;
   });
 
@@ -292,13 +226,11 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
 
   sessionRoutes(app, ctx);
   profileRoutes(app, ctx);
-  referenceRoutes(app, ctx);
-  eventsRoutes(app, ctx);
-  offersRoutes(app, ctx);
-  supportRoutes(app, ctx);
-  personalRoutes(app, ctx);
-  aiRoutes(app, ctx);
+  familyRoutes(app, ctx);
+  planRoutes(app, ctx);
+  notificationsRoutes(app, ctx);
   whatsNewRoutes(app, ctx);
+  supportRoutes(app, ctx);
 
   if (!config.isSecure) {
     app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
