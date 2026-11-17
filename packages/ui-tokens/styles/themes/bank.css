@@ -1,0 +1,29 @@
+/* ==========================================================================
+   Theme «bank» — заготовка партнёрской темы для банковского этапа
+   (как партнёрские темы FinAdvisor). Включается html[data-theme="bank"]
+   или Remote Experience Config (theme.id = "bank"). Значения — плейсхолдеры:
+   финальную палитру банка утверждает заказчик. Переопределяем только
+   семантические токены — компоненты и бизнес-код не меняются.
+   ========================================================================== */
+@layer themes {
+  :root[data-theme="bank"] {
+    --theme-id: "bank";
+    --accent: #3D8BFF;
+    --accent-ink: #FFFFFF;
+    --accent-tx: #7FB2FF;
+    --accent-soft: rgba(61, 139, 255, .14);
+    --accent-line: rgba(61, 139, 255, .4);
+    --focus: #7FB2FF;
+    --btn-bg: var(--accent);
+    --btn-tx: var(--accent-ink);
+    --knob-on: #FFFFFF;
+    --r-card: 16px;
+    --r-btn: 12px;
+    --r-chip-grid: 10px;
+  }
+  :root[data-theme="bank"][data-scheme="light"] {
+    --accent-tx: #1F5FC4;
+    --accent-line: rgba(31, 95, 196, .4);
+    --focus: #1F5FC4;
+  }
+}

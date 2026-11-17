@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "user.status.changed.v1.schema.json",
+  "title": "user.status.changed.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "status",
+    "previous_status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "DISABLED",
+        "DELETION_REQUESTED",
+        "DELETED"
+      ]
+    },
+    "previous_status": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "reason_code": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

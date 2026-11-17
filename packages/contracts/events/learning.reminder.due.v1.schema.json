@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "learning.reminder.due.v1.schema.json",
+  "title": "learning.reminder.due.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "local_date",
+    "slot_time",
+    "timezone",
+    "duration_min"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "local_date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "slot_time": {
+      "type": "string",
+      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+    },
+    "timezone": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "duration_min": {
+      "type": "integer",
+      "enum": [
+        10,
+        15,
+        20,
+        30
+      ]
+    },
+    "streak_days": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

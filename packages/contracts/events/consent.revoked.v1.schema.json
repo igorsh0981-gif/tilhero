@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "consent.revoked.v1.schema.json",
+  "title": "consent.revoked.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "consent_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "consent_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "policy_version": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

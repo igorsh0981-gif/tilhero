@@ -1,0 +1,11 @@
+{
+  "name": "@tilhero/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TilHero: контракты API и событий (TS-типы BFF, JSON Schema событий)",
+  "exports": {
+    "./bff": "./src/bff.ts",
+    "./events/*": "./events/*"
+  }
+}

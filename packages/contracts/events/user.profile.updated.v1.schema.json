@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "user.profile.updated.v1.schema.json",
+  "title": "user.profile.updated.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "changed_fields"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "changed_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "maxItems": 50
+    },
+    "age_band": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "6-9",
+            "10-13",
+            "14-17",
+            "18+"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "is_minor": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "locale": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "guardian_consent": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "not_required",
+            "pending",
+            "granted",
+            "declined"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

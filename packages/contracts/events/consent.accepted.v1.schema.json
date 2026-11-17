@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "consent.accepted.v1.schema.json",
+  "title": "consent.accepted.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "consent_id",
+    "policy_version",
+    "purposes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "consent_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "policy_version": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "purposes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "maxItems": 50
+    },
+    "age_band": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "6-9",
+            "10-13",
+            "14-17",
+            "18+"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,31 @@
+# deps / builds
+node_modules/
+dist/
+build/
+.vite/
+coverage/
+*.tsbuildinfo
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+
+# local stack & secrets
+.dev/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Railway: файлы переменных из infra/railway/setup.py (секреты)
+railway-vars/

@@ -1,0 +1,84 @@
+{
+  "id": "TilHeroNotifDisp",
+  "name": "notifications-dispatch",
+  "active": true,
+  "nodes": [
+    {
+      "id": "7f1e0000-0000-4000-8000-000000001001",
+      "name": "Расписание",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7f1e0000-0000-4000-8000-000000001002",
+      "name": "POST /internal/v1/notifications:dispatch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTIFICATIONS_URL }}/internal/v1/notifications:dispatch",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SCHEDULER_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Источник — infra/n8n/workflows/notifications-dispatch.json (импортируется при каждом старте, правки в UI перезаписываются). Спринт 1: каждые 5 минут notifications отправляет отложенные сообщения (scheduled_for ≤ now: тихие часы взрослого, окно 08:00–20:00 для детских профилей). Повтор безопасен: отправка по статусу записи. Ответ — {sent, scheduled, in_app_only, failed}. Секрет — переменная окружения SCHEDULER_TOKEN, не credential n8n. Без NOTIFICATIONS_URL workflow не включается (entrypoint.sh).",
+      "notesInFlow": false
+    }
+  ],
+  "connections": {
+    "Расписание": {
+      "main": [
+        [
+          {
+            "node": "POST /internal/v1/notifications:dispatch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

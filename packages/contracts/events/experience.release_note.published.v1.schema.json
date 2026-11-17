@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "experience.release_note.published.v1.schema.json",
+  "title": "experience.release_note.published.v1",
+  "type": "object",
+  "required": [
+    "release_note_id",
+    "slug",
+    "audience",
+    "published_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "release_note_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "slug": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "audience": {
+      "type": "string",
+      "enum": [
+        "new",
+        "existing",
+        "all"
+      ]
+    },
+    "segments": {
+      "anyOf": [
+        {
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

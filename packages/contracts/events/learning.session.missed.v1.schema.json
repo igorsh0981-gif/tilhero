@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "learning.session.missed.v1.schema.json",
+  "title": "learning.session.missed.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "local_date",
+    "slot_time",
+    "timezone",
+    "consecutive_missed"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "local_date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "slot_time": {
+      "type": "string",
+      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+    },
+    "timezone": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "consecutive_missed": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "next_slot_date": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

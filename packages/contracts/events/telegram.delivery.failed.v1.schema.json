@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "telegram.delivery.failed.v1.schema.json",
+  "title": "telegram.delivery.failed.v1",
+  "type": "object",
+  "required": [
+    "notification_id",
+    "user_id",
+    "reason"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "notification_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "blocked",
+        "invalid_chat",
+        "rate_limited",
+        "error"
+      ]
+    }
+  }
+}

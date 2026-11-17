@@ -1,0 +1,661 @@
+{
+ "$comment": "Спринт 9: общий тест-вектор GCRA (packages/contracts/rate-limit-gcra.lua) для py-common и ts-common. Время задаётся явно: now = (t0_ms + at_ms) * 1000 мкс; ключ у каждого случая свой и пустой в начале. expect — ответ скрипта {allowed, retry_after_ms, remaining}. emission_us = window_s * 1e6 // limit; burst null = limit.",
+ "t0_ms": 1800000000000,
+ "cases": [
+  {
+   "name": "burst = limit, затем по одному в интервал",
+   "limit": 3,
+   "window_s": 60,
+   "burst": null,
+   "emission_us": 20000000,
+   "steps": [
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 2
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 1
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 20000,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 19999,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 1,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 20000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 20000,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 20000,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 40000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 100000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 2
+     }
+    },
+    {
+     "at_ms": 100000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 1
+     }
+    },
+    {
+     "at_ms": 100000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 100000,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 20000,
+      "remaining": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "граница окна: 5 в конце минуты не дают ещё 5 в начале следующей",
+   "limit": 5,
+   "window_s": 60,
+   "burst": null,
+   "emission_us": 12000000,
+   "steps": [
+    {
+     "at_ms": 59000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 4
+     }
+    },
+    {
+     "at_ms": 59000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 3
+     }
+    },
+    {
+     "at_ms": 59000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 2
+     }
+    },
+    {
+     "at_ms": 59000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 1
+     }
+    },
+    {
+     "at_ms": 59000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 61000,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 10000,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 71000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 71000,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 12000,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 83000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "burst 1: строго один запрос в интервал",
+   "limit": 2,
+   "window_s": 1,
+   "burst": 1,
+   "emission_us": 500000,
+   "steps": [
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 100,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 400,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 499,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 1,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 500,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 500,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 500,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 1000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 1499,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 1,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 1500,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "burst больше limit",
+   "limit": 2,
+   "window_s": 60,
+   "burst": 4,
+   "emission_us": 30000000,
+   "steps": [
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 3
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 2
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 1
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 30000,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 29999,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 1,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 30000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "дробный интервал (7 в минуту)",
+   "limit": 7,
+   "window_s": 60,
+   "burst": null,
+   "emission_us": 8571428,
+   "steps": [
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 6
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 5
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 4
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 3
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 2
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 1
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 8572,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 8571,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 1,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 8572,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 8572,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 8571,
+      "remaining": 0
+     }
+    }
+   ]
+  },
+  {
+   "name": "простой восстанавливает burst полностью",
+   "limit": 10,
+   "window_s": 60,
+   "burst": null,
+   "emission_us": 6000000,
+   "steps": [
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 9
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 8
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 7
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 6
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 5
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 4
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 3
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 2
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 1
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 6000,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 3600000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 9
+     }
+    },
+    {
+     "at_ms": 3600000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 8
+     }
+    }
+   ]
+  },
+  {
+   "name": "часовое окно (tg.support_create 10/ч)",
+   "limit": 10,
+   "window_s": 3600,
+   "burst": null,
+   "emission_us": 360000000,
+   "steps": [
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 9
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 8
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 7
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 6
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 5
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 4
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 3
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 2
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 1
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 0,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 360000,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 359999,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 1,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 360000,
+     "expect": {
+      "allowed": true,
+      "retry_after_ms": 0,
+      "remaining": 0
+     }
+    },
+    {
+     "at_ms": 360000,
+     "expect": {
+      "allowed": false,
+      "retry_after_ms": 360000,
+      "remaining": 0
+     }
+    }
+   ]
+  }
+ ]
+}

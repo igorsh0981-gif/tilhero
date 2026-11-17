@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "support.ticket.status.changed.v1.schema.json",
+  "title": "support.ticket.status.changed.v1",
+  "type": "object",
+  "required": [
+    "ticket_id",
+    "number",
+    "from_status",
+    "to_status",
+    "changed_by"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "ticket_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "number": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "user_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "from_status": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "to_status": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "changed_by": {
+      "type": "string",
+      "enum": [
+        "user",
+        "operator",
+        "system"
+      ]
+    }
+  }
+}

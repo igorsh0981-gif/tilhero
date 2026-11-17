@@ -1,0 +1,62 @@
+{
+  "$comment": "«Что нового» TilHero: общий каталог для experience-config (проверка заметки), telegram-bff, Mini App (переход по ссылке пункта, иконка) и admin-web (редактор, предпросмотр). Сверка — контрактные тесты.",
+  "locales": [
+    "ru",
+    "uz"
+  ],
+  "audiences": [
+    "new",
+    "existing",
+    "all"
+  ],
+  "segments": {
+    "age": [
+      "kids",
+      "teens",
+      "adults"
+    ],
+    "ui_lang": [
+      "ru",
+      "uz"
+    ]
+  },
+  "routes": [
+    "home",
+    "lessons",
+    "review",
+    "progress",
+    "profile",
+    "schedule",
+    "notifications",
+    "family",
+    "support",
+    "news"
+  ],
+  "icons": [
+    "spark",
+    "hero",
+    "calendar",
+    "clock",
+    "bell",
+    "book",
+    "chat",
+    "mic",
+    "star",
+    "flame",
+    "users",
+    "gift",
+    "shield",
+    "globe",
+    "trophy",
+    "news"
+  ],
+  "limits": {
+    "slug_pattern": "^[0-9A-Za-z][0-9A-Za-z.-]{0,31}$",
+    "title_max": 80,
+    "item_title_max": 80,
+    "item_text_max": 200,
+    "items_min": 1,
+    "items_max": 6,
+    "client_max_notes": 5
+  }
+}

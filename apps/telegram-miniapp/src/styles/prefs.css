@@ -1,0 +1,57 @@
+/* ==========================================================================
+   Fix 5.1 — «Города вылета» (prefControls DeparturesControl).
+   Profile sheet: a fixed-height sheet; the chosen cities (one row, scrolls sideways) and the search are pinned
+   on top, the airport list takes all the height that is left and scrolls inside; «Сохранить» is the
+   MainButton below. With the on-screen keyboard (Sheet → visualViewport → .layer.kb) the sheet takes the
+   whole visible height and drops the label row, so the list keeps several rows above the keyboard.
+   Onboarding step 5 on short screens: the chosen cities take one row, the flight toggles lose their subtitles
+   (below 600 px), the list gains rows.
+   Cascade layers of @tilhero/ui-tokens (layout beats .ob-body / .dir-sheet of the design system).
+   ========================================================================== */
+@layer layout {
+  .sheet.sheet-fill { height: 92%; }
+  .sheet-fill .sheet-b { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 12px; }
+  .sheet-fill .pref-ed { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .sheet-fill .ob-body.edit-dep { flex: 1 1 auto; min-height: 0; margin: 2px 0 0; padding-bottom: 0; gap: 10px; }
+  .sheet-fill .ob-body.edit-dep > .dir { flex: 1 1 0; min-height: 136px; max-height: none; }
+
+  .tags.tags-row {
+    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; margin: 0 -16px; padding: 4px 16px 2px; min-height: 38px;
+    scrollbar-width: none; overscroll-behavior-x: contain; scroll-padding-inline: 16px;
+  }
+  .tags.tags-row::-webkit-scrollbar { display: none; }
+  .tags.tags-row .tag { flex: 0 0 auto; max-width: none; }
+
+  .layer.kb .sheet.sheet-fill { height: calc(100% - 8px); max-height: none; }
+  .layer.kb .sheet-fill .edit-dep .ob-lbl { display: none; }
+  .layer.kb .sheet-fill .sheet-h { padding-top: 6px; padding-bottom: 6px; }
+
+  .app[data-h="s"] .ob-dep .ob-tg .trow-t small { display: none; }
+  /* onboarding step 5 below 700 px of height: the chosen cities in one row that scrolls sideways (as in the profile
+     sheet) — the airport list keeps the row of height that the second row of tags took */
+  .app:is([data-h="m"], [data-h="s"], [data-h="xs"]) .ob-dep .tags {
+    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; max-height: none; margin: 0 -18px; padding: 0 18px;
+    scrollbar-width: none; overscroll-behavior-x: contain; scroll-padding-inline: 18px;
+  }
+  .app:is([data-h="m"], [data-h="s"], [data-h="xs"]) .ob-dep .tags::-webkit-scrollbar { display: none; }
+  .app:is([data-h="m"], [data-h="s"], [data-h="xs"]) .ob-dep .tags .tags-empty { flex: 1 1 auto; min-width: 0; }
+}
+
+/* ==========================================================================
+   Fix 6.3 — hotel settings (prefControls HotelPicker): profile «Поездки → Отель» and the trip «Настроить расчёт».
+   Guest rating — a segmented control of six values; distance — five chips; stars — four chips. Tokens only.
+   ========================================================================== */
+@layer layout {
+  .ob-grid.c5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .hotel-pick .ob-grid .chip { border-radius: var(--r-chip-grid); min-height: 40px; padding: 0 4px; font-variant-numeric: tabular-nums; }
+  .hotel-seg button { padding: 0 2px; font-variant-numeric: tabular-nums; }
+  .hotel-pick .hint { line-height: 1.4; }
+  .hotel-pick .note { font-size: var(--fs-sm); line-height: 1.4; }
+
+  /* the trip settings: the hotel block under «Дополнительные ночи», a header with «Как в профиле» */
+  .trip-hotel { padding: 12px 0 4px; }
+  .trip-hotel-h { display: flex; align-items: center; gap: 12px; min-height: 36px; margin-bottom: 10px; }
+  .trip-hotel-h b { font-size: var(--fs-base); font-weight: 600; color: var(--ink); }
+  .trip-hotel-h .lnk { flex: 0 0 auto; font-size: var(--fs-sm); }
+  .hotel-pick .ob-lbl small[data-changed="true"] { color: var(--accent-tx); font-weight: 600; }
+}

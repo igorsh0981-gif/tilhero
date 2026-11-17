@@ -1,0 +1,55 @@
+/* ==========================================================================
+   Light scheme — applied when Telegram reports colorScheme = "light"
+   (html[data-scheme="light"]). Contrast-checked values from prototype v9.2 (m-16).
+   ========================================================================== */
+@layer themes {
+  :root[data-scheme="light"] {
+    color-scheme: light;
+    --bg: #F2F3F7;
+    --bg-2: #E9EBF1;
+    --surface: #FFFFFF;
+    --surface-2: #EEF0F5;
+    --surface-3: #E1E5EE;
+    --line: rgba(11, 16, 32, .08);
+    --line-2: rgba(11, 16, 32, .15);
+    --ink: #0B1020;
+    --ink-2: #2C3550;
+    --muted: #59627C;
+
+    --accent-tx: #4D6A00;
+    --accent-soft: rgba(140, 180, 0, .14);
+    --accent-line: rgba(77, 106, 0, .4);
+    --focus: #2E55D4;
+
+    --good: #08703F;
+    --good-soft: rgba(13, 132, 82, .10);
+    --warn: #8A4D00;
+    --warn-soft: rgba(214, 130, 0, .12);
+    --bad: #AE2C2C;
+    --bad-soft: rgba(194, 59, 59, .09);
+    --info: #2A4FC4;
+    --info-soft: rgba(46, 85, 212, .09);
+
+    --chrome: #FFFFFF;
+    --chrome-link: #1C5FCC;
+    --tabbar: rgba(255, 255, 255, .95);
+    --scrim: rgba(11, 16, 32, .42);
+    --glass: rgba(10, 14, 28, .46);
+    --sheet-bg: var(--bg);
+    --pop-bg: #FFFFFF;
+    --pop-link: #1C5FCC;
+    --toast-bg: #0B1020;
+    --toast-ink: #EEF1F8;
+    --toast-icon: #DFFF56;
+    --tab-badge-bg: #C62828;
+    --tab-badge-ink: #FFFFFF;
+
+    --card-border: transparent;
+    --card-shadow: 0 1px 2px rgba(11, 16, 32, .04);
+    --seg-on-shadow: 0 1px 3px rgba(11, 16, 32, .12);
+    --knob-on: #FFFFFF;
+
+    --sh-2: 0 14px 32px -18px rgba(11, 16, 32, .28);
+    --sh-3: 0 30px 70px -24px rgba(11, 16, 32, .38);
+  }
+}

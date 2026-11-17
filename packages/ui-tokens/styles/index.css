@@ -1,0 +1,14 @@
+/* TilHero UI — entry point. Cascade layers in the order of ТЗ UI/CSS §2:
+   tokens → themes → base → components → layout (screen compositions refine
+   components) → telegram (shell chrome, reduced motion). Remote Experience
+   Config writes token overrides inline on <html>, above every layer. */
+@layer tokens, themes, base, components, layout, telegram;
+
+@import "./tokens.css";
+@import "./themes/default.css";
+@import "./themes/light.css";
+@import "./themes/bank.css";
+@import "./base.css";
+@import "./components.css";
+@import "./layout.css";
+@import "./telegram.css";

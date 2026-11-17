@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "support.ticket.replied.v1.schema.json",
+  "title": "support.ticket.replied.v1",
+  "type": "object",
+  "required": [
+    "ticket_id",
+    "number",
+    "user_id",
+    "message_id",
+    "sender_type"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "ticket_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "number": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "message_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sender_type": {
+      "type": "string",
+      "enum": [
+        "operator",
+        "system"
+      ]
+    },
+    "replied_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

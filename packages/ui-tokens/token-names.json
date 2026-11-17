@@ -1,0 +1,37 @@
+{
+  "$comment": "Allowlist CSS-переменных визуального языка «Тетрадь» (прототип TilHero), которые Remote Experience Config (ExperienceConfig.theme.tokens) может переопределить без релиза Mini App. Виды: color = #hex / rgb[a](); length = px/rem; font = одно семейство из fonts. Используют санитайзер Mini App (apps/telegram-miniapp/src/config/experience.ts) и experience-config (MINIAPP_TOKENS, строже по диапазонам; контрактный тест).",
+  "version": 1,
+  "fonts": [
+    "Onest",
+    "Unbounded",
+    "Caveat"
+  ],
+  "tokens": {
+    "--paper": "color",
+    "--grid": "color",
+    "--ink": "color",
+    "--ink2": "color",
+    "--line": "color",
+    "--card": "color",
+    "--pen": "color",
+    "--pen-ink": "color",
+    "--pen-soft": "color",
+    "--mark": "color",
+    "--margin": "color",
+    "--err": "color",
+    "--err-soft": "color",
+    "--ok": "color",
+    "--ok-soft": "color",
+    "--warn": "color",
+    "--warn-soft": "color",
+    "--scrim": "color",
+    "--r-card": "length",
+    "--r-btn": "length",
+    "--r-field": "length",
+    "--r-sheet": "length",
+    "--gutter": "length",
+    "--font-display": "font",
+    "--font-body": "font",
+    "--font-hand": "font"
+  }
+}

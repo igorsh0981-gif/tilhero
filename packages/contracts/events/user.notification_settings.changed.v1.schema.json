@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "user.notification_settings.changed.v1.schema.json",
+  "title": "user.notification_settings.changed.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "enabled",
+    "categories"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "categories": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "maxItems": 10
+    }
+  }
+}

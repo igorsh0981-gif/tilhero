@@ -1,0 +1,23 @@
+{
+  "name": "tilhero",
+  "private": true,
+  "description": "TilHero monorepo — Node/TS часть (BFF, Mini App, общие пакеты)",
+  "workspaces": [
+    "packages/ts-common",
+    "packages/contracts",
+    "packages/ui-tokens",
+    "services/telegram-bff",
+    "apps/telegram-miniapp"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "stack:up": "bash infra/dev/stack.sh up",
+    "stack:down": "bash infra/dev/stack.sh down",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  }
+}

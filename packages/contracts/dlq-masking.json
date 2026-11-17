@@ -1,0 +1,451 @@
+{
+  "$comment": "Перепроверка спринта 8: одни правила маскирования payload DLQ в ops-monitor (queues/masking.py, settings.py) и во втором слое admin-bff (routes/opsCodecs.ts). Обе стороны сверяют свои списки и результаты с этим файлом (tests: ops-monitor test_om_masking_parity.py, admin-bff sprint8.test.ts). Меняете правило — меняйте обе стороны и этот файл.",
+  "rules": {
+    "pii_keys": [
+      "telegram_user_id",
+      "telegram_id",
+      "chat_id",
+      "username",
+      "display_name",
+      "first_name",
+      "last_name",
+      "phone",
+      "email",
+      "text",
+      "message",
+      "body",
+      "comment",
+      "reason_text",
+      "initdata",
+      "pin",
+      "code",
+      "token"
+    ],
+    "pii_key_parts": [
+      "phone",
+      "email",
+      "text",
+      "note",
+      "subject",
+      "query",
+      "title",
+      "comment",
+      "message",
+      "address",
+      "username",
+      "token",
+      "secret",
+      "password",
+      "api_key",
+      "apikey",
+      "authorization",
+      "cookie"
+    ],
+    "safe_keys": [
+      "causation_id",
+      "correlation_id",
+      "dedup_key",
+      "event_id",
+      "event_type",
+      "idempotency_key",
+      "occurred_at",
+      "producer",
+      "request_id",
+      "schema_version",
+      "template",
+      "trace_id"
+    ],
+    "safe_suffixes": [
+      "at",
+      "count",
+      "enabled",
+      "format",
+      "id",
+      "ids",
+      "kind",
+      "lang",
+      "language",
+      "len",
+      "length",
+      "ms",
+      "status",
+      "tokens",
+      "total",
+      "type",
+      "verified",
+      "version"
+    ],
+    "non_person_name": [
+      "agent",
+      "airline",
+      "airport",
+      "app",
+      "artist",
+      "attr",
+      "attribute",
+      "bot",
+      "brand",
+      "category",
+      "city",
+      "class",
+      "column",
+      "company",
+      "consumer",
+      "country",
+      "currency",
+      "district",
+      "domain",
+      "durable",
+      "event",
+      "feed",
+      "field",
+      "file",
+      "genre",
+      "host",
+      "hotel",
+      "index",
+      "interest",
+      "job",
+      "key",
+      "league",
+      "level",
+      "location",
+      "metric",
+      "model",
+      "op",
+      "operation",
+      "org",
+      "organization",
+      "param",
+      "parameter",
+      "path",
+      "performer",
+      "place",
+      "plan",
+      "product",
+      "property",
+      "provider",
+      "queue",
+      "region",
+      "route",
+      "schema",
+      "service",
+      "skill",
+      "source",
+      "sport",
+      "station",
+      "step",
+      "stream",
+      "table",
+      "tag",
+      "task",
+      "team",
+      "template",
+      "tier",
+      "venue"
+    ],
+    "id_owner_parts": [
+      "user",
+      "chat",
+      "recipient",
+      "telegram"
+    ],
+    "id_owner_tokens": [
+      "from",
+      "tg"
+    ]
+  },
+  "keys": {
+    "masked_keys": [
+      "token",
+      "access_token",
+      "refreshToken",
+      "botToken",
+      "secret",
+      "client_secret",
+      "clientSecret",
+      "password",
+      "newPassword",
+      "password_hash",
+      "api_key",
+      "apiKey",
+      "API-KEY",
+      "x-api-key",
+      "apikey",
+      "authorization",
+      "Authorization",
+      "proxy-authorization",
+      "cookie",
+      "set-cookie",
+      "sessionCookie",
+      "name",
+      "Name",
+      "names",
+      "nickname",
+      "surname",
+      "fullname",
+      "first_name",
+      "middleName",
+      "contactName",
+      "customer_name",
+      "user_name",
+      "displayName",
+      "name_ru",
+      "title",
+      "event_title",
+      "query",
+      "phone",
+      "contactPhone",
+      "user_email",
+      "e-mail",
+      "text",
+      "note",
+      "subject",
+      "comment",
+      "message",
+      "address",
+      "username",
+      "reason_text",
+      "initData",
+      "pin",
+      "code",
+      "chat_id",
+      "telegram_user_id",
+      "recipientName"
+    ],
+    "unmasked_keys": [
+      "provider_name",
+      "providerName",
+      "city_name",
+      "venue_name",
+      "event_name",
+      "file_name",
+      "filename",
+      "hostname",
+      "airport_name",
+      "category_name",
+      "message_id",
+      "messageId",
+      "subject_type",
+      "input_tokens",
+      "outputTokens",
+      "token_type",
+      "comment_count",
+      "address_type",
+      "event_id",
+      "event_type",
+      "occurred_at",
+      "producer",
+      "correlation_id",
+      "causation_id",
+      "schema_version",
+      "trace_id",
+      "request_id",
+      "dedup_key",
+      "idempotency_key",
+      "template",
+      "airport_code",
+      "status",
+      "price",
+      "user_id",
+      "phone_verified",
+      "kind",
+      "type",
+      "lang",
+      "from_date"
+    ],
+    "id_owners": [
+      "user",
+      "users",
+      "tg_user_id",
+      "tgUserId",
+      "chatId",
+      "chat",
+      "from",
+      "from_id",
+      "fromId",
+      "recipient",
+      "recipientUserId",
+      "tg",
+      "tg_id",
+      "telegramId",
+      "telegram"
+    ],
+    "not_id_owners": [
+      "fromage",
+      "provider",
+      "event",
+      "price",
+      "status",
+      "tags",
+      "ticket"
+    ]
+  },
+  "payloads": [
+    {
+      "payload": {
+        "from": {
+          "id": 9,
+          "is_bot": false,
+          "first_name": "Игорь",
+          "username": "igor"
+        },
+        "chat": {
+          "id": -1001,
+          "type": "group",
+          "title": "Ops"
+        }
+      },
+      "masked": {
+        "from": {
+          "id": "***",
+          "is_bot": false,
+          "first_name": "***",
+          "username": "***"
+        },
+        "chat": {
+          "id": "***",
+          "type": "group",
+          "title": "***"
+        }
+      },
+      "masked_fields": [
+        "from.id",
+        "from.first_name",
+        "from.username",
+        "chat.id",
+        "chat.title"
+      ]
+    },
+    {
+      "payload": {
+        "recipient": {
+          "id": 4512,
+          "kind": "user"
+        },
+        "tg": {
+          "id": 77
+        },
+        "telegramId": 31337,
+        "user_ids": [
+          11,
+          12
+        ]
+      },
+      "masked": {
+        "recipient": {
+          "id": "***",
+          "kind": "user"
+        },
+        "tg": {
+          "id": "***"
+        },
+        "telegramId": "***",
+        "user_ids": [
+          "***",
+          "***"
+        ]
+      },
+      "masked_fields": [
+        "recipient.id",
+        "tg.id",
+        "telegramId",
+        "user_ids[0]",
+        "user_ids[1]"
+      ]
+    },
+    {
+      "payload": {
+        "user_id": "3f1c2e4a-9b8d-4c7e-a1f2-0d9e8c7b6a50",
+        "ticket_id": 77,
+        "count": 3,
+        "price": 1470,
+        "from_date": "2026-10-12",
+        "user": {
+          "lang": "ru",
+          "is_premium": true
+        },
+        "status": "open",
+        "kind": "rss",
+        "airport_code": "TAS"
+      },
+      "masked": {
+        "user_id": "3f1c2e4a-9b8d-4c7e-a1f2-0d9e8c7b6a50",
+        "ticket_id": 77,
+        "count": 3,
+        "price": 1470,
+        "from_date": "2026-10-12",
+        "user": {
+          "lang": "ru",
+          "is_premium": true
+        },
+        "status": "open",
+        "kind": "rss",
+        "airport_code": "TAS"
+      },
+      "masked_fields": []
+    },
+    {
+      "payload": {
+        "provider_name": "Aviasales",
+        "city_name": "Ташкент",
+        "contactName": "Иван",
+        "displayName": "Ivan P.",
+        "notes": "позвоните +998 90 123-45-67",
+        "info": "ivan@mail.ru",
+        "raw": "id 123456789",
+        "big": 9876543210,
+        "key": "sk-ant-abc_DEF-1",
+        "jwt": "eyJhbGciOi.eyJzdWIiOi.sig",
+        "trace_id": "ivan@mail.ru",
+        "phone_verified": true,
+        "password": true,
+        "secret": null,
+        "nested": [
+          {
+            "apiKey": "x"
+          },
+          {
+            "input_tokens": 1200
+          }
+        ]
+      },
+      "masked": {
+        "provider_name": "Aviasales",
+        "city_name": "Ташкент",
+        "contactName": "***",
+        "displayName": "***",
+        "notes": "***",
+        "info": "***",
+        "raw": "***",
+        "big": "***",
+        "key": "***",
+        "jwt": "***",
+        "trace_id": "***",
+        "phone_verified": true,
+        "password": true,
+        "secret": null,
+        "nested": [
+          {
+            "apiKey": "***"
+          },
+          {
+            "input_tokens": 1200
+          }
+        ]
+      },
+      "masked_fields": [
+        "contactName",
+        "displayName",
+        "notes",
+        "info",
+        "raw",
+        "big",
+        "key",
+        "jwt",
+        "trace_id",
+        "nested[0].apiKey"
+      ]
+    }
+  ]
+}

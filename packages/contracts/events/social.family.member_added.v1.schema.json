@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "social.family.member_added.v1.schema.json",
+  "title": "social.family.member_added.v1",
+  "type": "object",
+  "required": [
+    "family_id",
+    "user_id",
+    "role",
+    "added_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "family_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "owner",
+        "adult",
+        "teen",
+        "child"
+      ]
+    },
+    "added_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

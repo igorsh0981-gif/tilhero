@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "user.deletion.stuck.v1.schema.json",
+  "title": "user.deletion.stuck.v1",
+  "type": "object",
+  "required": [
+    "request_id",
+    "user_id",
+    "requested_at",
+    "stuck_at",
+    "pending_domains",
+    "attempts"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "requested_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "stuck_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "pending_domains": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      }
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

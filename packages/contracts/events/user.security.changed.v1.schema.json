@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "user.security.changed.v1.schema.json",
+  "title": "user.security.changed.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "change"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "change": {
+      "type": "string",
+      "enum": [
+        "pin_set",
+        "pin_changed",
+        "pin_removed",
+        "pin_reset",
+        "pin_locked",
+        "biometric_enabled",
+        "biometric_disabled"
+      ]
+    }
+  }
+}

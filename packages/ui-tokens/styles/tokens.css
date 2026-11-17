@@ -1,0 +1,158 @@
+/* ==========================================================================
+   TilHero UI tokens (ТЗ UI/CSS §2 · tokens.css)
+   Brand palette primitives, typography, spacing, radii, shadows, z-index, motion.
+   Semantic colours (--bg, --ink, --accent …) live in themes/*.css and are the
+   only names Remote Experience Config may override (see token-names.json).
+   Colour literals are allowed ONLY in this file and in themes/*.css.
+   ========================================================================== */
+@layer tokens {
+  :root {
+    /* ---- brand palette (primitives) ---- */
+    --c-lime: #DFFF56;
+    --c-lime-ink: #1A2200;
+    --c-navy-1000: #04060C;
+    --c-navy-950: #05070E;
+    --c-navy-900: #090C16;
+    --c-navy-850: #0A0E1A;
+    --c-navy-800: #0C1120;
+    --c-navy-750: #11172A;
+    --c-navy-700: #18203A;
+    --c-navy-600: #232D4E;
+    --c-mist-50: #EEF1F8;
+    --c-mist-100: #E9EDF7;
+    --c-mist-200: #DDE3F1;
+    --c-mist-300: #B3BACB;
+    --c-mist-500: #8891A9;
+    --c-white: #FFFFFF;
+    --c-ink-900: #0B1020;
+    --c-mint: #59E3A0;
+    --c-amber: #FFC061;
+    --c-coral: #FF7B7B;
+    --c-periwinkle: #8EAAFF;
+    --c-telegram-link: #3E8BFF;
+
+    /* ---- typography (Unbounded · Manrope · JetBrains Mono, all with Cyrillic) ---- */
+    /* "<Brand> Fallback" faces (base.css) are metric-matched local fonts: the first frame renders with them
+       while the brand fonts load (font-display: swap), without layout shift on the no-scroll screens. */
+    --font-display: "Unbounded", "Unbounded Fallback", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-body: "Manrope", "Manrope Fallback", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", "JetBrains Mono Fallback", ui-monospace, Menlo, monospace;
+    --f-d: var(--font-display);
+    --f-b: var(--font-body);
+    --f-m: var(--font-mono);
+    --fs-micro: 10.5px;
+    --fs-xs: 11.5px;
+    --fs-sm: 12.5px;
+    --fs-md: 13.5px;
+    --fs-base: 14px;
+    --fs-lg: 15px;
+    --fs-xl: 17px;
+    --fs-2xl: 20px;
+    --fs-3xl: 22px;
+    --lh-tight: 1.15;
+    --lh-base: 1.45;
+    --label-tracking: .11em;
+
+    /* ---- spacing ---- */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 20px;
+    --sp-6: 24px;
+    --sp-8: 32px;
+    --gutter: 16px;
+    --tap: 44px;
+
+    /* ---- card & rail geometry (remote-configurable: ТЗ UI/CSS §4) ---- */
+    --rail-w: .86;
+    --rail-w-compact: .72;
+    --ec-media-h: 188px;
+
+    /* ---- radii ---- */
+    --r-xs: 7px;
+    --r-sm: 10px;
+    --r-md: 14px;
+    --r-lg: 18px;
+    --r-card: 22px;
+    --r-sheet: 26px;
+    --r-btn: 14px;
+    --r-field: 14px;
+    --r-chip: 999px;
+    --r-chip-grid: 13px;
+    --r-pill: 999px;
+
+    /* ---- z-index ---- */
+    --z-base: 1;
+    --z-chrome: 5;
+    --z-banner: 20;
+    --z-sheet: 40;
+    --z-popup: 60;
+    --z-toast: 70;
+
+    /* ---- motion ---- */
+    --ease: cubic-bezier(.2, .7, .2, 1);
+    --dur-fast: .15s;
+    --dur: .18s;
+    --dur-sheet: .24s;
+    --dur-toast: .2s;
+
+    /* ---- media scrims (constant in every theme: they sit on top of imagery) ---- */
+    --media-bg: #0A0E1C;
+    --media-scrim: linear-gradient(180deg, rgba(5, 7, 14, 0) 40%, rgba(5, 7, 14, .55) 78%, rgba(5, 7, 14, .85));
+    --media-scrim-flat: linear-gradient(180deg, rgba(5, 7, 14, 0) 55%, rgba(5, 7, 14, .45));
+    --on-media: #FFFFFF;
+    --on-media-muted: rgba(238, 241, 248, .82);
+    --prov-bg: rgba(5, 8, 18, .58);
+    --prov-ink: rgba(255, 255, 255, .86);
+    --prov-line: rgba(255, 255, 255, .1);
+    --prov-fb-ink: #FFD9A0;
+    --fb-bg: #1B2140;
+    --fb-ink: rgba(255, 255, 255, .55);
+    --fb-dot: rgba(255, 255, 255, .08);
+    --glass-chip-bg: rgba(255, 255, 255, .12);
+    --glass-chip-line: rgba(255, 255, 255, .18);
+
+    /* ---- departure board (signature) — dark in every theme ---- */
+    --board: #05070E;
+    --board-ink: #E8ECF6;
+    --board-muted: #6E7894;
+    --board-line: rgba(154, 170, 230, .09);
+    --board-edge: rgba(154, 170, 230, .10);
+    --board-glint: rgba(255, 255, 255, .03);
+    --board-ic-bg: #121933;
+    --board-ic-ink: #8D97B5;
+    --board-hover: rgba(255, 255, 255, .025);
+    --flap-top: #141A2C;
+    --flap-bottom: #0B1020;
+    --flap-ink: #E8ECF6;
+    --flap-edge: rgba(255, 255, 255, .06);
+    --flap-seam: rgba(0, 0, 0, .65);
+    --flap-good: #59E3A0;
+    --flap-bad: #FF7B7B;
+    --flap-warn: #FFC061;
+    --flap-lime: #DFFF56;
+    --flap-info: #A9BEFF;
+    --board-ok-bg: rgba(89, 227, 160, .16);
+    --board-lime-bg: rgba(223, 255, 86, .14);
+
+    /* ---- fixed brand surfaces ---- */
+    --match-bg: var(--c-lime);
+    --match-ink: var(--c-lime-ink);
+    --ava-bg: linear-gradient(135deg, #2B3666, #18203A);
+    --ava-ink: #EEF1F8;
+    --welcome-bg: radial-gradient(120% 90% at 85% 0%, rgba(61, 79, 184, .42), transparent 60%), #070B1A;
+    --welcome-edge: rgba(154, 170, 230, .12);
+    --welcome-fade: linear-gradient(180deg, rgba(7, 11, 26, 0) 22%, rgba(7, 11, 26, .88) 56%, #070B1A 80%);
+    --art-bg: #070A16;
+    --art-tile-edge: rgba(255, 255, 255, .08);
+    --art-tile-shadow: 0 20px 40px -12px rgba(0, 0, 0, .7);
+    --route-bg: rgba(233, 237, 247, .94);
+    --route-ink: #0B1020;
+    --route-muted: #566080;
+    --route-line: rgba(11, 16, 32, .35);
+    --knob: #FFFFFF;
+    --knob-shadow: 0 2px 4px rgba(0, 0, 0, .3);
+    --pend-hatch: repeating-linear-gradient(135deg, rgba(154, 170, 230, .07) 0 2px, transparent 2px 9px);
+  }
+}

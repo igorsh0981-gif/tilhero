@@ -1,0 +1,7 @@
+/* ==========================================================================
+   Sprint 9 — 429 RATE_LIMITED: an action that would only hit the limit again waits
+   (inactive) until Retry-After passes. Layers of @tilhero/ui-tokens only.
+   ========================================================================== */
+@layer components {
+  .note .lnk:disabled, .fresh-bar button:disabled { opacity: .45; cursor: default; }
+}

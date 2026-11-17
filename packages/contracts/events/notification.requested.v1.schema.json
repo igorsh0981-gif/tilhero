@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "notification.requested.v1.schema.json",
+  "title": "notification.requested.v1",
+  "type": "object",
+  "required": [
+    "notification_id",
+    "user_id",
+    "kind",
+    "category",
+    "template",
+    "dedup_key"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "notification_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "critical",
+        "transactional",
+        "standard"
+      ]
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "reminders",
+        "missed",
+        "social",
+        "support",
+        "product",
+        "service"
+      ]
+    },
+    "template": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.]*$",
+      "not": {
+        "pattern": "^pin\\."
+      }
+    },
+    "params": {
+      "anyOf": [
+        {
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "dedup_key": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "startapp": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

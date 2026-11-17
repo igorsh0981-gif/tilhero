@@ -1,0 +1,84 @@
+{
+  "id": "TilHeroPlanTick1",
+  "name": "plan-tick",
+  "active": true,
+  "nodes": [
+    {
+      "id": "7f1e0000-0000-4000-8000-000000000001",
+      "name": "Расписание",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7f1e0000-0000-4000-8000-000000000002",
+      "name": "POST /internal/v1/plan:tick",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LEARNING_PLAN_URL }}/internal/v1/plan:tick",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SCHEDULER_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Источник — infra/n8n/workflows/plan-tick.json (импортируется при каждом старте, правки в UI перезаписываются). Спринт 1: каждые 5 минут learning-plan проходит окно (last_tick_at, now] и выпускает learning.reminder.due.v1 (за 15 минут до занятия) и learning.session.missed.v1 (слот прошёл без занятия). Повтор безопасен: slot_marks (user_id, local_date, kind) — одно событие на слот. Ответ — {plans_checked, reminders, missed}. Секрет — переменная окружения SCHEDULER_TOKEN, не credential n8n. Без LEARNING_PLAN_URL workflow не включается (entrypoint.sh).",
+      "notesInFlow": false
+    }
+  ],
+  "connections": {
+    "Расписание": {
+      "main": [
+        [
+          {
+            "node": "POST /internal/v1/plan:tick",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

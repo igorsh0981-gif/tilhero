@@ -1,0 +1,70 @@
+[project]
+name = "tilhero-workspace"
+version = "0.0.0"
+requires-python = ">=3.12"
+description = "TilHero — рабочее пространство Python-сервисов (не деплоится)"
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+  "packages/py-common",
+  "services/*",
+  "apps/telegram-bot-gateway",
+]
+exclude = [
+  "services/telegram-bff",
+  "services/admin-bff",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.25",
+  "pytest-cov>=6.0",
+  "ruff>=0.9",
+  "mypy>=1.14",
+  "jsonschema>=4.23",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "RUF"]
+ignore = ["S101", "RUF001", "RUF002", "RUF003", "B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tilhero_common", "tilhero_audit", "tilhero_identity", "tilhero_learning_plan", "tilhero_support", "tilhero_notifications", "tilhero_experience", "tilhero_botgw", "tilhero_social", "tilhero_admin_identity", "tilhero_user_admin"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S105", "S106", "S311"]
+"**/migrations/**" = ["E501"]
+"infra/**" = ["E501", "S603", "S607", "S311"]
+
+[tool.mypy]
+# CI (спринт 9, INTERNAL_API §10, job mypy): `uv run --offline mypy <каталог>/src` для каждой Python-цели матрицы CI
+# (у infra/railway и infra/n8n нет src — проверяется каталог).
+# Цель — 0 ошибок; исключения — только `# type: ignore[код]` с комментарием-причиной, общий ignore_errors запрещён.
+python_version = "3.12"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+strict_equality = true
+
+# Сторонние библиотеки без аннотаций (py.typed) и без пакетов stubs в зависимостях: их типы — Any.
+[[tool.mypy.overrides]]
+module = ["asyncpg", "asyncpg.*", "jsonschema", "jsonschema.*"]
+ignore_missing_imports = true
+
+# psycopg — не зависимость workspace: только infra/railway, ставится в CI через `uv run --with psycopg[binary]`.
+[[tool.mypy.overrides]]
+module = ["psycopg", "psycopg.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"

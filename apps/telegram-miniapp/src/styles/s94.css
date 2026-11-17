@@ -1,0 +1,42 @@
+/* ==========================================================================
+   9.4 — «Добавить на главный экран» (строка Профиля, карточка Главной) и шторка «Что нового».
+   Только токены @tilhero/ui-tokens (тёмная и светлая темы — через них), паттерны строк и шторок прототипа v9.
+   ========================================================================== */
+@layer components {
+  /* статус «Уже на главном экране» — строка-информация, не кнопка */
+  .lrow.static { cursor: default; }
+  .lrow .hs-ok { color: var(--accent-tx); }
+  /* подпись строки целиком (обещание действия не обрезается многоточием) */
+  .lrow.wrap .lrow-t small { white-space: normal; overflow: visible; text-overflow: clip; }
+
+  /* карточка на Главной: тише, чем строка консьержа (поверхность, а не лаймовая заливка) */
+  .hs-card {
+    display: flex; gap: 12px; align-items: flex-start; margin: 10px var(--gutter) 0; padding: 12px;
+    border-radius: 16px; background: var(--surface); border: 1px solid var(--card-border); box-shadow: var(--card-shadow);
+  }
+  .hs-ic {
+    width: 38px; height: 38px; flex: 0 0 38px; border-radius: 12px; display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent-tx); border: 1px solid var(--accent-line);
+  }
+  .hs-b { flex: 1; min-width: 0; }
+  .hs-b h2 { font-size: 14px; font-weight: 700; line-height: 1.25; color: var(--ink); }
+  .hs-b p { font-size: 12.5px; line-height: 1.38; color: var(--ink-2); margin-top: 3px; }
+  .hs-a { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .hs-a .btn { min-width: 96px; }
+
+  /* шторка «Что нового» */
+  .wn-note + .wn-note { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .wn-note-h { font: 600 15px/1.3 var(--font-display); letter-spacing: -.015em; color: var(--ink); margin-bottom: 10px; }
+  .wn-note-h small { display: block; font: 500 var(--fs-sm)/1.35 var(--font-body); color: var(--muted); letter-spacing: 0; margin-top: 2px; }
+  .wn-list { display: grid; gap: 14px; }
+  .wn-list li { display: flex; gap: 12px; align-items: flex-start; }
+  .wn-ic {
+    width: 34px; height: 34px; flex: 0 0 34px; border-radius: 11px; display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent-tx);
+  }
+  .wn-t { flex: 1; min-width: 0; }
+  .wn-t b { display: block; font-size: 14.5px; font-weight: 600; line-height: 1.3; color: var(--ink); overflow-wrap: anywhere; }
+  .wn-t p { font-size: 13px; line-height: 1.45; color: var(--ink-2); margin-top: 2px; overflow-wrap: anywhere; }
+  .wn-t .lnk { margin-top: 4px; }
+  .app[data-w="s"] .hs-a .btn { flex: 1; }
+}

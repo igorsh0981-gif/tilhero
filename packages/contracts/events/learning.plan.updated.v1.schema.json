@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "learning.plan.updated.v1.schema.json",
+  "title": "learning.plan.updated.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "changed_fields"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "changed_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "maxItems": 50
+    },
+    "goal": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ui_lang": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "ru",
+            "uz"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "course_pair": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "timezone": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "days": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7
+          },
+          "maxItems": 7
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "preferred_time": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "duration_min": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "enum": [
+            10,
+            15,
+            20,
+            30
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reminders_enabled": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "onboarding_completed": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

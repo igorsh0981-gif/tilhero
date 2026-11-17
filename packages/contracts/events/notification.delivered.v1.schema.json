@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "notification.delivered.v1.schema.json",
+  "title": "notification.delivered.v1",
+  "type": "object",
+  "required": [
+    "notification_id",
+    "user_id",
+    "channel",
+    "delivered_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "notification_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "telegram"
+      ]
+    },
+    "delivered_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

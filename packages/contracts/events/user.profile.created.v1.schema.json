@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "user.profile.created.v1.schema.json",
+  "title": "user.profile.created.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "kind",
+    "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "account",
+        "child"
+      ]
+    },
+    "locale": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "age_band": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "6-9",
+            "10-13",
+            "14-17",
+            "18+"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "guardian_user_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

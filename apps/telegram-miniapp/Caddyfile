@@ -1,0 +1,48 @@
+# TilHero Telegram Mini App — статика Vite за Caddy.
+# TLS терминирует платформа (Railway edge), поэтому здесь только HTTP на {$PORT}.
+# Env: PORT (по умолчанию 8080), BFF_ORIGIN (origin BFF для CSP connect-src; в образе = VITE_BFF_URL),
+#      MEDIA_IMG_SRC (CSP img-src для медиа событий из источников; по умолчанию — media-allowlist verification для
+#      Ticketmaster: s1.ticketm.net, *.ticketm.net, *.tmol.io; новый провайдер с медиа = добавить его домены сюда).
+{
+	admin off
+	persist_config off
+	auto_https off
+}
+
+:{$PORT:8080} {
+	root * /srv
+	encode zstd gzip
+
+	# Заголовки безопасности. X-Frame-Options НЕ ставим: Telegram Web встраивает Mini App в iframe,
+	# разрешённые родители задаёт frame-ancestors. Скрипты — только свои и telegram-web-app.js,
+	# никаких inline/eval; стили — свои + Google Fonts ('unsafe-inline' для style нужен CSSOM-мосту
+	# themeParams/safe-area и скрипту Telegram); сеть — только свой origin и BFF; картинки — свои и медиа событий
+	# с доменов провайдеров (не загрузилась/запрещена → нейтральный fallback «Нет баннера у источника»).
+	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: {$MEDIA_IMG_SRC:https://s1.ticketm.net https://*.ticketm.net https://*.tmol.io}; connect-src 'self' {$BFF_ORIGIN}; frame-ancestors https://web.telegram.org https://*.telegram.org; base-uri 'none'; form-action 'none'; object-src 'none'; manifest-src 'self'; worker-src 'none'"
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "accelerometer=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+		-Server
+	}
+
+	handle /healthz {
+		header Cache-Control "no-store"
+		respond "ok" 200
+	}
+
+	# Хэшированные бандлы Vite — навсегда; отсутствующий файл → честный 404, а не index.html.
+	handle /assets/* {
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	# Всё остальное (index.html, favicon, маршруты SPA) — всегда перепроверять, чтобы новый релиз
+	# подхватывался сразу (тема и секции Home приходят из Remote Experience Config отдельно).
+	handle {
+		header Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

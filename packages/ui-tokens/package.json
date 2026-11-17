@@ -1,0 +1,18 @@
+{
+  "name": "@tilhero/ui-tokens",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TilHero: CSS-слои дизайн-системы (tokens, base, layout, components, telegram, themes) — ТЗ UI/CSS §2",
+  "exports": {
+    ".": "./styles/index.css",
+    "./index.css": "./styles/index.css",
+    "./styles/*": "./styles/*",
+    "./token-names.json": "./token-names.json"
+  },
+  "files": ["styles", "token-names.json"],
+  "sideEffects": ["**/*.css"],
+  "scripts": {
+    "test": "vitest run"
+  }
+}

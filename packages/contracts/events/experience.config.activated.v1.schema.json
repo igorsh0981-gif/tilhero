@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "experience.config.activated.v1.schema.json",
+  "title": "experience.config.activated.v1",
+  "type": "object",
+  "required": [
+    "app",
+    "version",
+    "activation_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "app": {
+      "type": "string",
+      "enum": [
+        "miniapp",
+        "admin"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "previous_version": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "activation_id": {
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "social.invite.created.v1.schema.json",
+  "title": "social.invite.created.v1",
+  "type": "object",
+  "required": [
+    "invite_id",
+    "inviter_user_id",
+    "kind"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "invite_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "inviter_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "family",
+        "friend",
+        "referral"
+      ]
+    },
+    "expires_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

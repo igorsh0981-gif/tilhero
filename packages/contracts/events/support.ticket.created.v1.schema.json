@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "support.ticket.created.v1.schema.json",
+  "title": "support.ticket.created.v1",
+  "type": "object",
+  "required": [
+    "ticket_id",
+    "number",
+    "user_id",
+    "category",
+    "priority"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "ticket_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "number": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "category": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "priority": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "sla_first_response_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

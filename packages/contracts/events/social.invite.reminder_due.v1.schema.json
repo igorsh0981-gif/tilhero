@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "social.invite.reminder_due.v1.schema.json",
+  "title": "social.invite.reminder_due.v1",
+  "type": "object",
+  "required": [
+    "invite_id",
+    "inviter_user_id",
+    "invitee_user_id",
+    "kind"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "invite_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "inviter_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "invitee_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "family",
+        "friend",
+        "referral"
+      ]
+    }
+  }
+}

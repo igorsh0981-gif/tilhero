@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Цели матриц — сервисы, которые есть в репозитории (docs/ARCHITECTURE.md §«Каталог сервисов»).
+# Новый сервис добавляется сразу в python, mypy и docker (его Dockerfile — infra/docker/python.Dockerfile как образец).
+
+jobs:
+  python:
+    name: py · ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - packages/py-common
+          - services/audit
+          - services/identity-consent
+          - services/learning-plan
+          - services/social
+          - services/support
+          - services/notifications
+          - services/experience-config
+          - apps/telegram-bot-gateway
+          - infra/n8n
+          - infra/scripts
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: tilhero_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_ADMIN_URL: postgresql://postgres@127.0.0.1:5432/tilhero_test
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
+      TEST_NATS_URL: nats://127.0.0.1:4222
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: NATS JetStream
+        run: |
+          pip install --quiet nats-server-bin
+          nohup nats-server -js -sd /tmp/nats -m 8222 >/tmp/nats.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8222/healthz && break; sleep 1; done
+      - run: uv sync --frozen --all-packages
+      - name: Lint
+        run: uv run ruff check ${{ matrix.target }}
+      - name: Contracts are up to date
+        run: |
+          uv run python infra/scripts/gen_event_schemas.py
+          git diff --exit-code packages/contracts/events
+      - name: Tests (unit + integration on real PostgreSQL/Redis/NATS)
+        run: |
+          set +e
+          uv run pytest ${{ matrix.target }} -q -p no:cacheprovider -rfE 2>&1 | tee /tmp/pytest.log
+          status=${PIPESTATUS[0]}
+          grep -E '^(FAILED|ERROR) ' /tmp/pytest.log | head -20 | cut -c1-900 | while IFS= read -r line; do echo "::error title=pytest::${line}"; done
+          exit $status
+
+  mypy:
+    name: mypy · ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - packages/py-common
+          - services/audit
+          - services/identity-consent
+          - services/learning-plan
+          - services/social
+          - services/support
+          - services/notifications
+          - services/experience-config
+          - apps/telegram-bot-gateway
+          - infra/n8n
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --frozen --all-packages
+      - name: mypy
+        run: |
+          path="${{ matrix.target }}"
+          if [ -d "$path/src" ]; then path="$path/src"; fi
+          uv run --offline mypy "$path"
+
+  node:
+    name: node · ${{ matrix.workspace }}
+    # ubuntu-24.04: Playwright 1.56 не ставит chromium на ubuntu 26.04
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [packages/ts-common, services/telegram-bff, apps/telegram-miniapp]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - run: npm ci
+      - run: uv sync --frozen --package tilhero-common
+        # ts-common проверяет совместимость внутреннего JWT с Python-реализацией
+      - name: Typecheck
+        working-directory: ${{ matrix.workspace }}
+        run: npx tsc -p tsconfig.json --noEmit
+      - name: Unit tests
+        working-directory: ${{ matrix.workspace }}
+        run: npx vitest run
+      - name: Build
+        if: matrix.workspace != 'packages/ts-common'
+        working-directory: ${{ matrix.workspace }}
+        run: npm run build -w @tilhero/ts-common --prefix ../.. && npm run build
+      - name: E2E (Playwright, mocked BFF)
+        if: matrix.workspace == 'apps/telegram-miniapp'
+        working-directory: ${{ matrix.workspace }}
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test
+
+  docker:
+    name: docker · ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: [python, node]
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - services/audit
+          - services/identity-consent
+          - services/learning-plan
+          - services/social
+          - services/support
+          - services/notifications
+          - services/experience-config
+          - apps/telegram-bot-gateway
+          - services/telegram-bff
+          - apps/telegram-miniapp
+          - infra/n8n
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (context = repo root, as on Railway)
+        run: docker buildx build -f ${{ matrix.service }}/Dockerfile --build-arg VITE_BFF_URL=https://bff.example.com -t ci/${{ strategy.job-index }} --load .
+      - name: Smoke-run Python image (entrypoints, alembic heads)
+        run: |
+          img=ci/${{ strategy.job-index }}
+          if docker run --rm --entrypoint sh "$img" -c 'test -d /app/.venv'; then
+            docker run --rm --entrypoint sh "$img" -c 'uvicorn --version && python -c "import tilhero_common.serve, sys; print(sys.version)"'
+            if docker run --rm --entrypoint sh "$img" -c 'test -f /app/service/alembic.ini'; then
+              docker run --rm --entrypoint sh "$img" -c 'alembic -c /app/service/alembic.ini heads'
+            fi
+          fi
+      - name: Smoke n8n image (pinned version, workflows and entrypoint baked in)
+        if: matrix.service == 'infra/n8n'
+        run: |
+          img=ci/${{ strategy.job-index }}
+          want="$(sed -n 's/^FROM n8nio\/n8n:\(.*\)$/\1/p' infra/n8n/Dockerfile)"
+          got="$(docker run --rm --entrypoint n8n "$img" --version | tail -n 1)"
+          echo "n8n $got (Dockerfile: $want)"
+          test "$got" = "$want"
+          docker run --rm --entrypoint sh "$img" -c 'test -x /tilhero-entrypoint.sh && ls /workflows/plan-tick.json /workflows/notifications-dispatch.json /workflows/invites-tick.json && test "$N8N_BLOCK_ENV_ACCESS_IN_NODE" = false'
