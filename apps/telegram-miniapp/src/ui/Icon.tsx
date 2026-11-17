@@ -1,107 +1,64 @@
-import type { ReactElement } from "react";
+import type { ReleaseNoteIcon } from "@tilhero/contracts/bff";
 
-/** Line icons from prototype v9 (stroke 1.75, round caps) — no emoji (Bento Volt rule). */
-const PATHS = {
-  spark: ["M12 3.5l1.8 4.9 4.9 1.8-4.9 1.8L12 16.9l-1.8-4.9-4.9-1.8 4.9-1.8z", "M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"],
-  search: ["c:11,11,6.5", "M20 20l-4.2-4.2"],
-  ticket: ["M2.5 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h15a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2h-15a2 2 0 0 0-2 2z", "M14 5v2M14 11v2M14 17v2"],
-  radar: ["c:12,12,8.5", "c:12,12,4.5", "M12 12l5.6-5.6", "f:12,12,.9"],
-  news: ["M4 5.5h12.5v13a1.5 1.5 0 0 1-1.5 1.5H6a2 2 0 0 1-2-2z", "M16.5 8.5H20v9.5a2 2 0 0 1-2 2h-3", "M7.5 9h5.5M7.5 12.5h5.5M7.5 16h3.5"],
-  user: ["c:12,8,3.8", "M4.5 20.5c1.4-3.7 4.3-5.6 7.5-5.6s6.1 1.9 7.5 5.6"],
-  heart: ["M12 19.5s-7.2-4.3-9-9a4.7 4.7 0 0 1 9-2.6 4.7 4.7 0 0 1 9 2.6c-1.8 4.7-9 9-9 9z"],
-  cal: ["r:3.5,5,17,15.5,3", "M3.5 9.5h17M8 3v4M16 3v4"],
-  chevL: ["M14.5 5.5L8 12l6.5 6.5"],
-  chevR: ["M9.5 5.5L16 12l-6.5 6.5"],
-  chevD: ["M6 9.5l6 6 6-6"],
-  x: ["M6.5 6.5l11 11M17.5 6.5l-11 11"],
-  plus: ["M12 5v14M5 12h14"],
-  minus: ["M5 12h14"],
-  bed: ["M3 18.5V6.5", "M3 14.5h18v4", "M21 14.5v-2.5a3 3 0 0 0-3-3h-7.5v5.5", "c:6.8,11.2,1.9"],
-  down: ["M3.5 7.5l6.5 6.5 4-4 6.5 6.5", "M20.5 12v4.5H16"],
-  check: ["M5 12.5l4.5 4.5L19 7.5"],
-  ext: ["M8 16L16.5 7.5M9.5 7.5h7v7"],
-  plane: ["M21 12c0-.8-.7-1.5-1.5-1.5H15L10 4H8l2.5 6.5H6L4.5 8.5H3l1 3.5-1 3.5h1.5L6 13.5h4.5L8 20h2l5-6.5h4.5c.8 0 1.5-.7 1.5-1.5z"],
-  refresh: ["M19.5 11A7.5 7.5 0 0 0 6 6.6L4.5 8.5", "M4.5 4.5v4h4", "M4.5 13A7.5 7.5 0 0 0 18 17.4l1.5-1.9", "M19.5 19.5v-4h-4"],
-  lock: ["r:5,10.5,14,10,3", "M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"],
-  face: ["M4 8.5V6.5a2.5 2.5 0 0 1 2.5-2.5h2M15.5 4h2A2.5 2.5 0 0 1 20 6.5v2M20 15.5v2a2.5 2.5 0 0 1-2.5 2.5h-2M8.5 20h-2A2.5 2.5 0 0 1 4 17.5v-2", "M9 9.5v1M15 9.5v1M12.3 9.5v3.8h-1M9.3 16c1.6 1.2 3.8 1.2 5.4 0"],
-  shield: ["M12 3.5l7.5 3v5.6c0 4.2-3.2 7.6-7.5 8.6-4.3-1-7.5-4.4-7.5-8.6V6.5z", "M9 12l2.2 2.2L15.5 10"],
-  trash: ["M4.5 7h15M10 11v6M14 11v6M6.5 7l.8 11.5a2 2 0 0 0 2 1.9h5.4a2 2 0 0 0 2-1.9L17.5 7M9.5 7V5.2c0-.7.5-1.2 1.2-1.2h2.6c.7 0 1.2.5 1.2 1.2V7"],
-  help: ["c:12,12,8.5", "c:12,12,3.6", "M6 6l3.4 3.4M14.6 14.6L18 18M18 6l-3.4 3.4M9.4 14.6L6 18"],
-  chat: ["M20.5 12a8.5 8.5 0 0 1-12.4 7.5L3.5 20.5l1-4.4A8.5 8.5 0 1 1 20.5 12z"],
-  info: ["c:12,12,8.5", "M12 11v5.5M12 7.8v.2"],
-  alert: ["M10.3 4.6L2.9 17.5a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0z", "M12 9.5v4M12 16.8v.2"],
-  clock: ["c:12,12,8.5", "M12 7.5V12l3 2"],
-  up: ["M12 19V5.5M6.5 11L12 5.5l5.5 5.5"],
-  globe: ["c:12,12,8.5", "M3.5 12h17M12 3.5c2.4 2.5 3.6 5.3 3.6 8.5s-1.2 6-3.6 8.5c-2.4-2.5-3.6-5.3-3.6-8.5s1.2-6 3.6-8.5z"],
-  wallet: ["r:3.5,6,17,13.5,3", "M3.5 10h17M15.5 15h2"],
-  bell: ["M6.5 16v-5a5.5 5.5 0 0 1 11 0v5l1.5 2h-14z", "M10 20.5a2 2 0 0 0 4 0"],
-  moon: ["M19.5 14.5A7.5 7.5 0 1 1 9.5 4.5a6 6 0 0 0 10 10z"],
-  bksp: ["M20.5 6.5H9.5L4 12l5.5 5.5h11z", "M12.5 10l4 4M16.5 10l-4 4"],
-  flag: ["M5.5 21V4M5.5 4.5h12l-2.3 4 2.3 4h-12"],
-  monitor: ["r:3,4,18,12.5,2.5", "M8.5 20.5h7M12 16.5v4"],
-  tgp: ["M20.5 4.5L3.5 11.2l5.6 2 2 5.8 3-3.6 4.6 3.6z", "M9.1 13.2L20.5 4.5"],
-  doc: ["M7 3.5h7l5 5v12H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z", "M14 3.5v5h5M9.5 13h6M9.5 16.5h6"],
-  key: ["c:8,15,3.8", "M10.8 12.3l8.7-8.8M16.5 6.5l2.8 2.8M14.2 8.8l2 2"],
-  power: ["M12 3.5v8", "M6.6 7.4a7.5 7.5 0 1 0 10.8 0"],
-  route: ["c:6,18,2.2", "c:18,6,2.2", "M8.2 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.8"],
-  db: ["e:12,6,7.5,2.8", "M4.5 6v12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V6M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8"],
-  star: ["M12 3.8l2.5 5.1 5.6.8-4 3.9.9 5.6-5-2.6-5 2.6.9-5.6-4-3.9 5.6-.8z"],
-  link: ["M10 14a3.8 3.8 0 0 0 5.4 0l3-3a3.8 3.8 0 0 0-5.4-5.4l-1 1", "M14 10a3.8 3.8 0 0 0-5.4 0l-3 3a3.8 3.8 0 0 0 5.4 5.4l1-1"],
-  music: ["M9 18V6l10-2v12", "c:6.5,18,2.5", "c:16.5,16,2.5"],
-  cpu: ["r:6,6,12,12,2", "r:9.5,9.5,5,5,1", "M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"],
-  palette: ["M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.8-.8 1.8-1.7 0-1.1-.9-1.5-.9-2.5 0-.9.7-1.6 1.6-1.6h2.1a3.9 3.9 0 0 0 3.9-3.9c0-4.2-3.8-7.3-8.5-7.3z", "f:7.8,11.5,1", "f:10,7.8,1", "f:14.5,7.8,1"],
-  list: ["M9 6.5h11M9 12h11M9 17.5h11", "f:4.5,6.5,1", "f:4.5,12,1", "f:4.5,17.5,1"],
-  grid: ["r:4,4,7,7,2", "r:13,4,7,7,2", "r:4,13,7,7,2", "r:13,13,7,7,2"],
-  sliders: ["M4 7h9M17 7h3M4 17h3M11 17h9", "c:15,7,2", "c:9,17,2"],
-  share: ["M12 15V4M8 7.5L12 3.5l4 4", "M5 11v7.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V11"],
-  pin: ["M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z", "c:12,10,2.4"],
-  pause: ["M9 6v12M15 6v12"],
-  play: ["M8.5 5.8v12.4a.8.8 0 0 0 1.2.7l9.6-6.2a.8.8 0 0 0 0-1.4L9.7 5.1a.8.8 0 0 0-1.2.7z"],
-  plusc: ["c:12,12,8.5", "M12 8.5v7M8.5 12h7"],
-  slash: ["c:12,12,8.5", "M6 6l12 12"],
-  filter: ["M4 5.5h16l-6.2 7.6v5.4l-3.6 1.6v-7z"],
-  phone: ["r:6.5,2.5,11,19,2.6", "M10.5 18.2h3", "M9.5 6.5h5"],
-  wifiOff: ["M3.5 3.5l17 17", "M8.5 16.2a5 5 0 0 1 7 0", "M5.2 12.9a9.6 9.6 0 0 1 4.2-2.4M14.6 10.5a9.6 9.6 0 0 1 4.2 2.4", "M2.5 9.4a14 14 0 0 1 4-2.7M11 5.6a14 14 0 0 1 10.5 3.8", "f:12,19.4,1"],
-} as const;
+/** Stroke icons of the prototype (24×24, currentColor). Decorative: always aria-hidden — the label is on the control. */
+const P: Record<string, string> = {
+  back: "M15 5l-7 7 7 7",
+  chevron: "M9 6l6 6-6 6",
+  bell: "M6 9a6 6 0 0 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9zM10 20a2 2 0 0 0 4 0",
+  home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
+  lessons: "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM9 9h6M9 13h4",
+  review: "M4 12a8 8 0 0 1 13.7-5.7L20 8M20 3v5h-5M20 12a8 8 0 0 1-13.7 5.7L4 16M4 21v-5h5",
+  progress: "M5 20V11M12 20V5M19 20v-6",
+  profile: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
+  check: "M5 12l5 5 9-10",
+  close: "M6 6l12 12M18 6 6 18",
+  plus: "M12 5v14M5 12h14",
+  share: "M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M7 8l5-5 5 5",
+  copy: "M9 9h10v11H9zM5 15V4h10",
+  trash: "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
+  lock: "M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3",
+  info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5v.01",
+  alert: "M12 3 2 20h20zM12 10v4M12 17v.01",
+  spark: "M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6",
+  hero: "M8 4h8v5H8zM6 9h12v8H6zM9 17v3M15 17v3M10 12h.01M14 12h.01M12 2v2",
+  calendar: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4",
+  clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2",
+  book: "M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z",
+  chat: "M4 5h16v11H9l-5 4z",
+  mic: "M9 3h6v12H9zM5 11a7 7 0 0 0 14 0M12 18v3",
+  star: "M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z",
+  flame: "M12 21c-3.9 0-7-2.8-7-6.6 0-3.1 2.1-5.3 3.9-7.4.4 1.9 1.4 3.2 2.6 3.7C11.8 7.6 12.6 4.7 15 3c.3 3.4 4 6 4 10.9C19 18.2 15.9 21 12 21z",
+  users: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M18 14a6 6 0 0 1 4 7",
+  gift: "M4 9h16v4H4zM6 13h12v8H6zM12 9v12M12 9c-1-3-5-4-5-1.5S12 9 12 9zM12 9c1-3 5-4 5-1.5S12 9 12 9z",
+  shield: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",
+  globe: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18",
+  trophy: "M8 4h8v5a4 4 0 0 1-8 0zM8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8 21h8M10 17h4",
+  news: "M4 5h13v14H6a2 2 0 0 1-2-2zM17 9h3v8a2 2 0 0 1-2 2M8 9h5M8 13h5",
+  send: "M4 12 20 4l-6 16-3-7z",
+  logout: "M10 4H5v16h5M14 8l4 4-4 4M18 12H9",
+  wave: "M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2",
+};
 
-export type IconName = keyof typeof PATHS;
+export type IconName = keyof typeof P | ReleaseNoteIcon;
 
-function shape(d: string, i: number): ReactElement {
-  if (d.startsWith("c:")) {
-    const [cx, cy, r] = d.slice(2).split(",");
-    return <circle key={i} cx={cx} cy={cy} r={r} />;
-  }
-  if (d.startsWith("f:")) {
-    const [cx, cy, r] = d.slice(2).split(",");
-    return <circle key={i} cx={cx} cy={cy} r={r} fill="currentColor" stroke="none" />;
-  }
-  if (d.startsWith("r:")) {
-    const [x, y, w, h, rx] = d.slice(2).split(",");
-    return <rect key={i} x={x} y={y} width={w} height={h} rx={rx} />;
-  }
-  if (d.startsWith("e:")) {
-    const [cx, cy, rx, ry] = d.slice(2).split(",");
-    return <ellipse key={i} cx={cx} cy={cy} rx={rx} ry={ry} />;
-  }
-  return <path key={i} d={d} />;
-}
-
-export function Icon({ name, size = 20, className }: { name: IconName; size?: number; className?: string }) {
+export function Icon({ name, size = 22, stroke = 1.9, className }: { name: IconName; size?: number; stroke?: number; className?: string }) {
+  const d = P[name] ?? P.spark!;
+  const filled = name === "flame" || name === "star";
   return (
     <svg
-      className={className ? `ic ${className}` : "ic"}
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
+      fill={filled ? "currentColor" : "none"}
+      stroke={filled ? "none" : "currentColor"}
+      strokeWidth={stroke}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
       focusable="false"
+      className={className}
     >
-      {PATHS[name].map((d, i) => shape(d, i))}
+      <path d={d} />
     </svg>
   );
 }

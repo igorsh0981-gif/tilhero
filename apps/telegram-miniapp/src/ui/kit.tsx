@@ -1,74 +1,60 @@
-import { useEffect, useRef, type ReactNode } from "react";
-import { haptic } from "../tg";
+import { useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
 
-export function Wordmark({ large }: { large?: boolean }) {
-  return (
-    <span className={large ? "wordmark lg" : "wordmark"} aria-label="TilHero">
-      Ai<b>Event</b>
-    </span>
-  );
+/* Notebook components (prototype Main.dc.html). Every control has a visible label, a focus ring (ui-tokens) and a
+ * tap target ≥ 44 px; a choice is never shown by colour alone (aria-pressed + a check mark). */
+
+export function cx(...parts: Array<string | false | null | undefined>): string {
+  return parts.filter(Boolean).join(" ");
 }
 
-export function Spinner({ small }: { small?: boolean }) {
-  return <span className={small ? "spin sm" : "spin"} aria-hidden="true" />;
-}
+type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & { busy?: boolean; variant?: "primary" | "secondary" | "danger" | "dangerOutline" | "link" };
 
-export function Chip(props: {
-  pressed: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-  disabled?: boolean;
-  title?: string;
-  role?: "radio";
-  id?: string;
-  className?: string;
-  testId?: string;
-  ariaLabel?: string;
-}) {
-  const { pressed, onToggle, children, disabled, title, role, id, className, testId, ariaLabel } = props;
+export function Btn({ busy, variant = "primary", className, children, disabled, type = "button", ...rest }: BtnProps) {
+  const cls = variant === "primary" ? "btn" : variant === "danger" ? "btn danger" : variant === "secondary" ? "btn2" : variant === "dangerOutline" ? "btn2 danger" : "lnk";
   return (
-    <button
-      id={id}
-      aria-label={ariaLabel}
-      className={className ? `chip ${className}` : "chip"}
-      data-testid={testId}
-      type="button"
-      aria-pressed={role ? undefined : pressed}
-      aria-checked={role ? pressed : undefined}
-      role={role}
-      disabled={disabled}
-      title={title}
-      onClick={() => {
-        haptic.selection();
-        onToggle();
-      }}
-    >
+    <button type={type} className={cx(cls, className)} disabled={disabled || busy} aria-busy={busy || undefined} {...rest}>
+      {busy ? <span className="spin" aria-hidden="true" /> : null}
       {children}
     </button>
   );
 }
 
-export function Seg<T extends string | number>(props: {
-  value: T;
-  options: ReadonlyArray<{ value: T; label: string }>;
-  onChange: (v: T) => void;
-  label: string;
-  className?: string;
-}) {
+/** Single choice card (opt). */
+export function Opt(props: { on: boolean; title: string; note?: string; onClick: () => void; disabled?: boolean; aside?: ReactNode; testId?: string }) {
   return (
-    <div className={props.className ? `seg ${props.className}` : "seg"} role="group" aria-label={props.label}>
+    <button type="button" className={cx("opt", props.on && "on")} aria-pressed={props.on} onClick={props.onClick} disabled={props.disabled} data-testid={props.testId}>
+      <span className="t">
+        <b>{props.title}</b>
+        {props.note ? <span>{props.note}</span> : null}
+      </span>
+      {props.aside}
+      <span className="mark" aria-hidden="true">{props.on ? <Icon name="check" size={14} stroke={3} /> : null}</span>
+    </button>
+  );
+}
+
+export function Chip(props: { on: boolean; label: string; onClick: () => void; disabled?: boolean; ariaLabel?: string }) {
+  return (
+    <button type="button" className={cx("chip", props.on && "on")} aria-pressed={props.on} onClick={props.onClick} disabled={props.disabled} aria-label={props.ariaLabel}>
+      {props.on ? <Icon name="check" size={14} stroke={3} /> : null}
+      {props.label}
+    </button>
+  );
+}
+
+export interface SegOption<T extends string | number> {
+  value: T;
+  label: ReactNode;
+  aria?: string;
+}
+
+/** Segmented control: a group of toggle buttons, exactly one pressed. */
+export function Seg<T extends string | number>(props: { label: string; value: T; options: ReadonlyArray<SegOption<T>>; onChange: (v: T) => void; labelledBy?: string; tall?: boolean; testId?: string }) {
+  return (
+    <div className={cx("seg", props.tall && "tall")} role="group" data-testid={props.testId} aria-label={props.labelledBy ? undefined : props.label} aria-labelledby={props.labelledBy}>
       {props.options.map((o) => (
-        <button
-          key={String(o.value)}
-          type="button"
-          aria-pressed={props.value === o.value}
-          onClick={() => {
-            if (props.value === o.value) return;
-            haptic.selection();
-            props.onChange(o.value);
-          }}
-        >
+        <button key={String(o.value)} type="button" className={cx("sg", o.value === props.value && "on")} aria-pressed={o.value === props.value} aria-label={o.aria} onClick={() => props.onChange(o.value)}>
           {o.label}
         </button>
       ))}
@@ -76,200 +62,131 @@ export function Seg<T extends string | number>(props: {
   );
 }
 
-export function Switch(props: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean; busy?: boolean; id?: string }) {
+export function Pill({ tone, children }: { tone?: "ok" | "err" | "warn" | "mute"; children: ReactNode }) {
+  return <span className={cx("pill", tone)}>{children}</span>;
+}
+
+/** Checkbox with its label (label.chk). */
+export function Check(props: { checked: boolean; onChange: (v: boolean) => void; children: ReactNode; disabled?: boolean; note?: ReactNode; testId?: string; id?: string }) {
   return (
-    <button
-      id={props.id}
-      className="sw"
-      type="button"
-      role="switch"
-      aria-checked={props.on}
-      aria-label={props.label}
-      aria-busy={props.busy || undefined}
-      disabled={props.disabled}
-      onClick={() => {
-        if (props.busy) return;
-        haptic.selection();
-        props.onChange(!props.on);
-      }}
-    />
+    <label className={cx("chk", props.disabled && "dis")}>
+      <input id={props.id} type="checkbox" checked={props.checked} disabled={props.disabled} onChange={(e) => props.onChange(e.target.checked)} data-testid={props.testId} />
+      <span>
+        {props.children}
+        {props.note ? <span className="note">{props.note}</span> : null}
+      </span>
+    </label>
   );
 }
 
-export function ToggleRow(props: {
-  title: string;
-  sub?: string | null;
-  on: boolean;
-  onChange: (v: boolean) => void;
-  disabled?: boolean;
-  busy?: boolean;
-  icon?: IconName;
-  id?: string;
-}) {
+/** List row with a checkbox on the right (settings). */
+export function ToggleRow(props: { title: string; note?: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; testId?: string }) {
   return (
-    <div className="trow">
-      {props.icon && (
-        <span className="lrow-i">
-          <Icon name={props.icon} size={18} />
-        </span>
-      )}
-      <div className="trow-t">
+    <label className="row">
+      <span className="t">
         <b>{props.title}</b>
-        {props.sub && <small>{props.sub}</small>}
-      </div>
-      <Switch id={props.id} on={props.on} onChange={props.onChange} label={props.title} disabled={props.disabled} busy={props.busy} />
-    </div>
-  );
-}
-
-export function Note(props: { tone?: "lime" | "warn" | "bad"; icon: IconName; children: ReactNode; action?: { label: string; onClick: () => void; disabled?: boolean }; className?: string }) {
-  const cls = ["note", props.tone, props.className].filter(Boolean).join(" ");
-  return (
-    <div className={cls}>
-      <Icon name={props.icon} size={16} />
-      <span>{props.children}</span>
-      {props.action && (
-        <button className="lnk" type="button" onClick={props.action.onClick} disabled={props.action.disabled}>
-          {props.action.label}
-        </button>
-      )}
-    </div>
-  );
-}
-
-export function Badge({ tone, children, live }: { tone?: "good" | "info" | "warn" | "bad" | "lime"; children: ReactNode; live?: boolean }) {
-  return <span className={["badge", tone ? `b-${tone}` : "", live ? "live" : ""].filter(Boolean).join(" ")}>{children}</span>;
-}
-
-export function Flap({ tone, children, className }: { tone?: "good" | "bad" | "warn" | "lime" | "info"; children: ReactNode; className?: string }) {
-  return <span className={["flap", tone, className].filter(Boolean).join(" ")}>{children}</span>;
-}
-
-export function GroupH({ children }: { children: ReactNode }) {
-  return <h2 className="lbl group-h">{children}</h2>;
-}
-
-export function LRow(props: { icon: IconName; title: string; sub?: string | null; value?: ReactNode; onClick: () => void; danger?: boolean; disabled?: boolean; testId?: string; wrap?: boolean }) {
-  return (
-    <button className={["lrow", props.danger && "danger", props.wrap && "wrap"].filter(Boolean).join(" ")} type="button" onClick={props.onClick} disabled={props.disabled} data-testid={props.testId}>
-      <span className="lrow-i">
-        <Icon name={props.icon} size={18} />
+        {props.note ? <span>{props.note}</span> : null}
       </span>
-      <span className="lrow-t">
+      <input type="checkbox" checked={props.checked} disabled={props.disabled} onChange={(e) => props.onChange(e.target.checked)} data-testid={props.testId} />
+    </label>
+  );
+}
+
+/** Navigation row (list): title, optional value, chevron. */
+export function NavRow(props: { title: string; note?: string; value?: string; onClick: () => void; icon?: IconName; testId?: string; badge?: ReactNode }) {
+  return (
+    <button type="button" className="row" onClick={props.onClick} data-testid={props.testId}>
+      {props.icon ? <span className="nic"><Icon name={props.icon} size={20} /></span> : null}
+      <span className="t">
         <b>{props.title}</b>
-        {props.sub && <small>{props.sub}</small>}
+        {props.note ? <span>{props.note}</span> : null}
       </span>
-      <span className="lrow-v">
-        {props.value}
-        <Icon name="chevR" size={16} />
-      </span>
+      {props.badge}
+      {props.value ? <span className="v">{props.value}</span> : null}
+      <Icon name="chevron" size={18} stroke={2} />
     </button>
   );
 }
 
-export function Empty(props: { icon: IconName; title: string; text: string; children?: ReactNode; soon?: string }) {
+export function Field(props: { label: string; error?: string | null; hint?: string; children: (id: string, describedBy: string | undefined) => ReactNode }) {
+  const id = useId();
+  const errId = `${id}-err`;
+  const hintId = `${id}-hint`;
+  const describedBy = [props.error ? errId : null, props.hint ? hintId : null].filter(Boolean).join(" ") || undefined;
   return (
-    <div className="empty">
-      <div className="empty-art">
-        <Icon name={props.icon} size={46} />
-      </div>
-      <h3>{props.title}</h3>
-      <p>{props.text}</p>
-      {props.children && <div className="btns">{props.children}</div>}
-      {props.soon && (
-        <p className="empty-soon">
-          <Icon name="clock" size={16} />
-          <span>{props.soon}</span>
+    <div>
+      <label className="lb" htmlFor={id}>{props.label}</label>
+      {props.children(id, describedBy)}
+      {props.hint ? <p id={hintId} className="sub small field-hint">{props.hint}</p> : null}
+      {props.error ? (
+        <p id={errId} className="field-err" role="alert">
+          <Icon name="alert" size={16} />
+          {props.error}
         </p>
-      )}
+      ) : null}
     </div>
   );
 }
 
-export function PinDots({ filled, total, error }: { filled: number; total: number; error?: boolean }) {
+export function TextInput(props: InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) {
+  const { invalid, className, ...rest } = props;
+  return <input className={cx("inp", className)} aria-invalid={invalid || undefined} {...rest} />;
+}
+
+/** Margin of the notebook with an optional handwritten note (Caveat) on the left. */
+export function Margin(props: { note?: string; tone?: "b" | "g" | "r"; tilt?: boolean; children: ReactNode; noteLabel?: string }) {
   return (
-    <div className={["pdots", total > 4 ? "six" : "", error ? "shake err" : ""].filter(Boolean).join(" ")} aria-hidden="true">
-      {Array.from({ length: total }, (_, i) => (
-        <i key={i} className={i < filled ? "on" : undefined} />
+    <div className="mg">
+      {props.note ? (
+        <div className={cx("mn", props.tone === "b" && "b", props.tone === "g" && "g", props.tilt && "tilt", props.note.length > 4 && "s")} aria-hidden={props.noteLabel ? undefined : true}>
+          {props.note}
+        </div>
+      ) : null}
+      {props.children}
+    </div>
+  );
+}
+
+export function Steps({ n, m, label }: { n: number; m: number; label: string }) {
+  return (
+    <div className="steps" role="progressbar" aria-label={label} aria-valuemin={1} aria-valuemax={m} aria-valuenow={n}>
+      {Array.from({ length: m }, (_, i) => (
+        <div key={i} className={cx("stp", i < n - 1 && "done", i === n - 1 && "on")} />
       ))}
     </div>
   );
 }
 
-export function Keypad(props: {
-  onDigit: (d: string) => void;
-  onErase: () => void;
-  disabled?: boolean;
-  bio?: { label: string; onClick: () => void } | null;
-  eraseLabel: string;
-}) {
-  const press = (d: string) => {
-    haptic.impact("light");
-    props.onDigit(d);
-  };
+export function ErrorLine({ text }: { text: string | null }) {
+  if (!text) return null;
   return (
-    <div className="kp" role="group">
-      {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
-        <button key={d} type="button" disabled={props.disabled} onClick={() => press(d)} aria-label={d}>
-          {d}
-        </button>
+    <p className="field-err" role="alert">
+      <Icon name="alert" size={16} />
+      {text}
+    </p>
+  );
+}
+
+export function Skeleton({ lines = 2 }: { lines?: number }) {
+  return (
+    <div className="stack" aria-hidden="true">
+      {Array.from({ length: lines }, (_, i) => (
+        <div key={i} className="skeleton" />
       ))}
-      {props.bio ? (
-        <button type="button" className="fn" disabled={props.disabled} onClick={props.bio.onClick} aria-label={props.bio.label}>
-          <Icon name="face" size={28} />
-        </button>
-      ) : (
-        <span />
-      )}
-      <button type="button" disabled={props.disabled} onClick={() => press("0")} aria-label="0">
-        0
-      </button>
-      <button type="button" className="fn" disabled={props.disabled} onClick={props.onErase} aria-label={props.eraseLabel}>
-        <Icon name="bksp" size={26} />
-      </button>
     </div>
   );
 }
 
-export function CheckRow(props: { checked: boolean; onChange: (v: boolean) => void; children: ReactNode; id?: string }) {
-  return (
-    <button
-      id={props.id}
-      className="chk"
-      type="button"
-      role="checkbox"
-      aria-checked={props.checked}
-      onClick={() => {
-        haptic.selection();
-        props.onChange(!props.checked);
-      }}
-    >
-      <span className="chk-box">
-        <Icon name="check" size={15} />
-      </span>
-      <span className="chk-t">{props.children}</span>
-    </button>
-  );
-}
+/** Hero art from /heroes (prototype heroes: robots, dragons, students). */
+export const HERO = {
+  volt: "/heroes/robot_0_1.webp",
+  voltUp: "/heroes/robot_0_2.webp",
+  nilu: "/heroes/human_0_2.webp",
+  myatik: "/heroes/pet_0_3.webp",
+  myatikEgg: "/heroes/pet_0_1.webp",
+  iskra: "/heroes/robot_1_2.webp",
+} as const;
 
-/** Physical keyboard support for the PIN keypad (desktop Telegram, accessibility). */
-export function useKeypadKeys(onDigit: (d: string) => void, onErase: () => void, enabled = true): void {
-  const ref = useRef({ onDigit, onErase });
-  ref.current = { onDigit, onErase };
-  useEffect(() => {
-    if (!enabled) return;
-    const onKey = (e: KeyboardEvent) => {
-      const tgt = e.target as HTMLElement | null;
-      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) return;
-      if (/^[0-9]$/.test(e.key)) {
-        e.preventDefault();
-        ref.current.onDigit(e.key);
-      } else if (e.key === "Backspace") {
-        e.preventDefault();
-        ref.current.onErase();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [enabled]);
+export function Hero({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  return <img className={cx("hero", className)} src={src} alt={alt} draggable={false} decoding="async" />;
 }

@@ -43,26 +43,30 @@ export function codeForStatus(status: number): string {
   return "UNKNOWN";
 }
 
-/** 401 codes that are business answers (wrong PIN/code) — they must NOT trigger a token refresh. */
-export const BUSINESS_401 = new Set(["PIN_INVALID", "RESET_CODE_INVALID", "BIOMETRIC_INVALID", "INIT_DATA_INVALID", "INIT_DATA_EXPIRED", "INIT_DATA_REPLAYED", "REFRESH_INVALID"]);
+/** 401 codes that are business answers (wrong PIN, bad initData) — they must NOT trigger a token refresh. */
+export const BUSINESS_401 = new Set(["PIN_INVALID", "INIT_DATA_INVALID", "INIT_DATA_EXPIRED", "INIT_DATA_REPLAYED", "REFRESH_INVALID"]);
 
-const KNOWN: ReadonlySet<string> = new Set([
-  "INIT_DATA_INVALID", "INIT_DATA_EXPIRED", "INIT_DATA_REPLAYED", "USER_DELETED", "REFRESH_INVALID", "TOKEN_EXPIRED", "SESSION_REVOKED",
-  "PIN_INVALID", "PIN_LOCKED", "PIN_REQUIRED", "PIN_FORMAT", "PIN_RESET_TOO_OFTEN", "RESET_CODE_INVALID", "RESET_CODE_EXPIRED",
-  "BIOMETRIC_INVALID", "PREFERENCES_INVALID", "PREFERENCES_VERSION_CONFLICT", "AIRPORT_UNKNOWN", "AGE_CONFIRMATION_REQUIRED",
-  "POLICY_VERSION_OUTDATED", "SUPPORT_CATEGORY_INVALID", "SUPPORT_TICKET_NOT_FOUND", "SUPPORT_TICKET_CLOSED", "RATE_LIMITED",
-  "PAYLOAD_TOO_LARGE", "VALIDATION_ERROR", "SERVICE_UNAVAILABLE", "NETWORK", "EVENTS_UNAVAILABLE", "EVENT_NOT_FOUND",
-  "OFFERS_UNAVAILABLE", "OFFER_DEPARTURE_INVALID",
-  "WATCH_LIMIT", "EVENT_PAST", "VERSION_CONFLICT", "WATCH_NOT_FOUND", "EVENT_CANCELLED", "WATCH_ENDED", "WATCH_CONFLICT",
-  "IDEMPOTENCY_KEY_REQUIRED",
-  "RATE_LIMIT_UNAVAILABLE",
-]);
+/** Codes with their own text in the dictionaries (err.<CODE>). The server's Russian `message` is never shown. */
+export const KNOWN_CODES = [
+  "INIT_DATA_INVALID", "INIT_DATA_EXPIRED", "INIT_DATA_REPLAYED", "USER_DELETED", "REFRESH_INVALID", "TOKEN_EXPIRED",
+  "SESSION_REVOKED", "PIN_REQUIRED", "PIN_INVALID", "PIN_LOCKED", "VALIDATION_ERROR", "NOT_FOUND", "RATE_LIMITED",
+  "SERVICE_UNAVAILABLE", "NETWORK", "PAYLOAD_TOO_LARGE", "UNKNOWN",
+  "LEARNER_NOT_FOUND", "QUIET_HOURS_INVALID", "AGE_ALREADY_SET", "CHILDREN_LIMIT", "ADULT_REQUIRED",
+  "GUARDIAN_CONSENT_NOT_REQUIRED", "GUARDIAN_CONSENT_NOT_FOUND", "GUARDIAN_CONSENT_EXPIRED", "GUARDIAN_CONSENT_SELF",
+  "GUARDIAN_CONSENT_REQUIRED", "POLICY_VERSION_OUTDATED", "CONSENT_REQUIRED_PURPOSES",
+  "PLAN_VERSION_CONFLICT", "PLAN_INVALID", "PLAN_INCOMPLETE", "IDEMPOTENCY_KEY_REQUIRED",
+  "INVITES_NOT_ALLOWED", "INVITES_LIMIT", "INVITE_NOT_FOUND", "INVITE_SELF", "INVITE_ALREADY_USED", "INVITE_EXPIRED",
+  "INVITE_REVOKED", "FAMILY_ALREADY_MEMBER", "FAMILY_NOT_FOUND",
+  "SUPPORT_CATEGORY_INVALID", "SUPPORT_TICKET_NOT_FOUND", "SUPPORT_TICKET_CLOSED",
+] as const;
+export type KnownCode = (typeof KNOWN_CODES)[number];
+const KNOWN: ReadonlySet<string> = new Set(KNOWN_CODES);
 
 /**
- * Codes shown with the text of another code. Server-side faults (upstream down, internal auth between
- * services, actor checks) all read as «Сервис временно недоступен» — the client cannot fix them.
+ * Codes shown with the text of another code. Server-side faults (upstream down, internal auth between services)
+ * all read as «Сервис временно недоступен» — the client cannot fix them.
  */
-const ALIAS: Readonly<Record<string, string>> = {
+const ALIAS: Readonly<Record<string, KnownCode>> = {
   UPSTREAM_UNAVAILABLE: "SERVICE_UNAVAILABLE",
   INTERNAL_ERROR: "SERVICE_UNAVAILABLE",
   TOKEN_INVALID: "SESSION_REVOKED",
@@ -72,28 +76,17 @@ const ALIAS: Readonly<Record<string, string>> = {
 const SERVER_FAULT = /^(INTERNAL_|ACTOR_|CALLER_)/;
 
 /** The dictionary code an error is shown with (see ALIAS / SERVER_FAULT). */
-export function displayCode(err: ApiError): string {
+export function displayCode(err: ApiError): KnownCode {
   if (SERVER_FAULT.test(err.code)) return "SERVICE_UNAVAILABLE";
   const code = ALIAS[err.code] ?? err.code;
-  if (KNOWN.has(code)) return code;
-  return err.status >= 500 ? "SERVICE_UNAVAILABLE" : err.status === 413 ? "PAYLOAD_TOO_LARGE" : "UNKNOWN";
+  if (KNOWN.has(code)) return code as KnownCode;
+  return err.status >= 500 ? "SERVICE_UNAVAILABLE" : err.status === 413 ? "PAYLOAD_TOO_LARGE" : err.status === 404 ? "NOT_FOUND" : "UNKNOWN";
 }
 
-/**
- * Localised message for an error, by business code (the server's Russian `message` is never shown —
- * clients translate by `code`, ARCHITECTURE «Ошибки»).
- */
+/** Localised message for an error, by business code (clients translate by `code`). */
 export function errorText(err: unknown, t: (key: MessageKey, vars?: Vars) => string, mmss: (s: number) => string): string {
   if (!(err instanceof ApiError)) return t("err.UNKNOWN");
-  // 409 PIN_REQUIRED (biometrics without a PIN) differs from the 423 session gate
-  if (err.code === "PIN_REQUIRED" && err.status === 409) return t("err.PIN_NOT_SET");
-  // sprint 9: one 429 everywhere — «повторите через ⌈N⌉ с» (no automatic repeat); no retry_after — «чуть позже»
   if (err.code === "RATE_LIMITED") return err.retryAfter != null ? t("err.RATE_LIMITED.wait", { n: Math.ceil(err.retryAfter) }) : t("err.RATE_LIMITED");
   const code = displayCode(err);
-  const vars: Vars = {
-    remaining: err.remaining ?? 0,
-    time: mmss(err.retryAfter ?? 300),
-    iata: typeof err.details.iata === "string" ? err.details.iata.slice(0, 8) : "",
-  };
-  return t(`err.${code}` as MessageKey, vars);
+  return t(`err.${code}` as MessageKey, { remaining: err.remaining ?? 0, time: mmss(err.retryAfter ?? 300) });
 }

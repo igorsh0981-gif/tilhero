@@ -1,0 +1,38 @@
+/* ==========================================================================
+   Theme «notebook» (light) — paper in squares, ink, pen, marker, margin line.
+   Values from the approved prototype (Main.dc.html, .app). Every name in token-names.json is defined here and may be
+   overridden by Remote Experience Config (theme.tokens) without a release. Contrast: text tokens ≥ 4.5:1 on --paper
+   and --card (WCAG AA).
+   ========================================================================== */
+@layer themes {
+  :root {
+    color-scheme: light;
+    --theme-id: "notebook";
+
+    --paper: #FBFCFE;
+    --grid: #E8ECF5;
+    --ink: #1C2340;
+    --ink2: #4A5272;
+    --line: #E1E6F2;
+    --card: #FFFFFF;
+    --pen: #2F4BE0;
+    --pen-ink: #FFFFFF;
+    --pen-soft: #E9EDFF;
+    --mark: #FFE45C;
+    --margin: #F2A7B0;
+    --err: #C8323C;
+    --err-soft: #FDECEE;
+    --ok: #1E7A4F;
+    --ok-soft: #E3F3EA;
+    --warn: #8F5300;
+    --warn-soft: #FFF1D6;
+    --scrim: rgba(18, 22, 44, .45);
+
+    /* derived (not remotely configurable) */
+    --on-err: #FFFFFF;
+    --flame: #E8630A;
+    --seg-shadow: 0 1px 3px rgba(0, 0, 0, .14);
+    --lift-shadow: 0 1px 0 var(--line), 0 8px 24px rgba(28, 35, 64, .08);
+    --sheet-shadow: 0 -12px 40px rgba(18, 22, 44, .18);
+  }
+}

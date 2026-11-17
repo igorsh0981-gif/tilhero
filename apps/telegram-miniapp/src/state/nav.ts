@@ -1,86 +1,65 @@
-/** Navigation stack ↔ Telegram BackButton. Pure reducer (tested in test/nav.test.ts). */
-import type { TicketCategory } from "@tilhero/contracts/bff";
+import type { ReleaseNoteRoute } from "@tilhero/contracts/bff";
+import { useCallback, useMemo, useState } from "react";
 
-export type Tab = "home" | "catalog" | "watch" | "news" | "profile";
-export const TABS: readonly Tab[] = ["home", "catalog", "watch", "news", "profile"];
+/** Main shell navigation: five tabs (prototype) and a stack of pushed screens above the current tab. */
+export type Tab = "home" | "lessons" | "review" | "progress" | "profile";
+export const TABS: readonly Tab[] = ["home", "lessons", "review", "progress", "profile"];
 
-/** Context a support request is created with from an event (TG-FR-041); client_version is added on send. */
-export interface EventSupportContext {
-  event_id: string;
-  provider_id?: string;
-  deeplink?: string;
-  event_title?: string;
-  /** sprint 5: «Проблема с предложением?» — the offer snapshot and the package price at its time */
-  offer_id?: string;
-  price_snapshot?: { amount: string; currency: "USD"; fetched_at: string };
-  /** form presets (not sent as context): category and subject */
-  category?: TicketCategory;
-  subject?: string;
-}
-
-export type Route =
-  | { name: Tab }
-  | { name: "event"; id: string }
-  | { name: "supportNew"; ctx?: EventSupportContext }
-  | { name: "supportList" }
-  | { name: "supportThread"; id: string }
-  | { name: "supportDone"; id: string; number: string };
+export type Pushed =
+  | { name: "inbox" }
+  | { name: "news" }
+  | { name: "schedule" }
+  | { name: "notifSettings" }
+  | { name: "language" }
+  | { name: "family" }
+  | { name: "guardian" }
+  | { name: "privacy" }
+  | { name: "delete" }
+  | { name: "support"; number?: string }
+  | { name: "ticket"; id: string };
 
 export interface NavState {
-  stack: Route[];
-  anim: "push" | "pop" | "fade" | null;
-  /** increments on every transition (screen key / scroll reset) */
-  seq: number;
+  tab: Tab;
+  stack: Pushed[];
 }
 
-export type NavAction =
-  | { type: "tab"; tab: Tab }
-  | { type: "push"; route: Route }
-  | { type: "pop" }
-  | { type: "replace"; route: Route }
-  | { type: "reset"; stack: Route[] };
-
-export const initialNav = (tab: Tab = "home"): NavState => ({ stack: [{ name: tab }], anim: null, seq: 0 });
-
-export function sameRoute(a: Route, b: Route): boolean {
-  if (a.name !== b.name) return false;
-  return ("id" in a ? a.id : null) === ("id" in b ? b.id : null);
+export interface Nav extends NavState {
+  push(p: Pushed): void;
+  back(): void;
+  goTab(t: Tab): void;
+  /** a route from «Что нового», a notification or a deep link */
+  route(r: ReleaseNoteRoute): void;
+  reset(): void;
+  top: Pushed | null;
 }
 
-export function isTab(name: string): name is Tab {
-  return (TABS as readonly string[]).includes(name);
-}
-
-export function navReducer(s: NavState, a: NavAction): NavState {
-  switch (a.type) {
-    case "tab": {
-      if (s.stack.length === 1 && s.stack[0]!.name === a.tab) return s;
-      return { stack: [{ name: a.tab }], anim: "fade", seq: s.seq + 1 };
-    }
-    case "push": {
-      const top = s.stack[s.stack.length - 1]!;
-      if (sameRoute(top, a.route)) return s; // double tap
-      return { stack: [...s.stack, a.route], anim: "push", seq: s.seq + 1 };
-    }
-    case "pop": {
-      if (s.stack.length <= 1) return s;
-      return { stack: s.stack.slice(0, -1), anim: "pop", seq: s.seq + 1 };
-    }
-    case "replace": {
-      return { stack: [...s.stack.slice(0, -1), a.route], anim: "fade", seq: s.seq + 1 };
-    }
-    case "reset": {
-      if (!a.stack.length) return s;
-      return { stack: a.stack, anim: "fade", seq: s.seq + 1 };
-    }
-    default:
-      return s;
-  }
-}
-
-export const topRoute = (s: NavState): Route => s.stack[s.stack.length - 1]!;
-export const rootTab = (s: NavState): Tab => {
-  const r = s.stack[0]!.name;
-  return isTab(r) ? r : "home";
+const ROUTE_SCREEN: Partial<Record<ReleaseNoteRoute, Pushed["name"]>> = {
+  schedule: "schedule",
+  family: "family",
+  support: "support",
+  notifications: "inbox",
+  news: "news",
 };
-export const canGoBack = (s: NavState): boolean => s.stack.length > 1;
+
+/**
+ * Where a ReleaseNoteRoute leads: a tab root, or a screen pushed on top of the current stack (so «Назад» returns to
+ * where the link was opened — the notification center, «Что нового», Home).
+ */
+export function routeTarget(r: ReleaseNoteRoute, cur: NavState): NavState {
+  if ((TABS as readonly string[]).includes(r)) return { tab: r as Tab, stack: [] };
+  const name = ROUTE_SCREEN[r];
+  if (!name) return { tab: "home", stack: [] };
+  const top = cur.stack[cur.stack.length - 1];
+  if (top?.name === name) return cur;
+  return { tab: cur.tab, stack: [...cur.stack.filter((p) => p.name !== name), { name } as Pushed] };
+}
+
+export function useNav(initial: NavState = { tab: "home", stack: [] }): Nav {
+  const [state, setState] = useState<NavState>(initial);
+  const push = useCallback((p: Pushed) => setState((s) => ({ ...s, stack: [...s.stack, p] })), []);
+  const back = useCallback(() => setState((s) => (s.stack.length ? { ...s, stack: s.stack.slice(0, -1) } : s.tab !== "home" ? { tab: "home", stack: [] } : s)), []);
+  const goTab = useCallback((t: Tab) => setState({ tab: t, stack: [] }), []);
+  const route = useCallback((r: ReleaseNoteRoute) => setState((s) => routeTarget(r, s)), []);
+  const reset = useCallback(() => setState({ tab: "home", stack: [] }), []);
+  return useMemo(() => ({ ...state, push, back, goTab, route, reset, top: state.stack.length ? state.stack[state.stack.length - 1]! : null }), [state, push, back, goTab, route, reset]);
+}

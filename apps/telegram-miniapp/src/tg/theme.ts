@@ -2,13 +2,18 @@ import type { TgInsets, TgThemeParams } from "./types";
 import { getWebApp, isInsideTelegram, supports } from "./webapp";
 
 const HEX = /^#[0-9a-f]{6}$/i;
+export type Scheme = "light" | "dark";
 
-/** themeParams → --tg-theme-* CSS variables (bridge); colorScheme → html[data-scheme]. */
-export function applyThemeParams(params: TgThemeParams, scheme: "light" | "dark", root: HTMLElement = document.documentElement): void {
+/** themeParams → --tg-theme-* CSS variables (bridge); colorScheme → html[data-scheme] (light / dark notebook). */
+export function applyThemeParams(params: TgThemeParams, scheme: Scheme, root: HTMLElement = document.documentElement): void {
   for (const [key, value] of Object.entries(params)) {
     if (typeof value === "string" && HEX.test(value)) root.style.setProperty(`--tg-theme-${key.replace(/_/g, "-")}`, value);
   }
-  root.dataset.scheme = scheme === "light" ? "light" : "dark";
+  applyScheme(scheme, root);
+}
+
+export function applyScheme(scheme: Scheme, root: HTMLElement = document.documentElement): void {
+  root.dataset.scheme = scheme === "dark" ? "dark" : "light";
 }
 
 function px(n: unknown): string {
@@ -33,27 +38,35 @@ function readToken(name: string): string | null {
   return HEX.test(v) ? v : null;
 }
 
-/** Paint the native Telegram header / background / bottom bar with our theme colours. */
+/** Paint the native Telegram header / background / bottom bar with the notebook paper. */
 export function syncNativeChrome(): void {
   const wa = getWebApp();
   if (!wa || !isInsideTelegram()) return;
-  const chrome = readToken("--chrome");
-  const bg = readToken("--bg");
+  const paper = readToken("--paper");
+  const card = readToken("--card");
   try {
-    if (chrome && supports("6.1")) wa.setHeaderColor?.(chrome);
-    if (bg && supports("6.1")) wa.setBackgroundColor?.(bg);
-    if (chrome && supports("7.10")) wa.setBottomBarColor?.(chrome);
+    if (paper && supports("6.1")) {
+      wa.setHeaderColor?.(paper);
+      wa.setBackgroundColor?.(paper);
+    }
+    if (card && supports("7.10")) wa.setBottomBarColor?.(card);
   } catch {
     /* ignore unsupported clients */
   }
 }
 
-/** Subscribes to theme / viewport / safe-area events. Returns a cleanup function. */
+/** Subscribes to theme / viewport / safe-area events. Outside Telegram the device colour scheme is followed. */
 export function bindTelegramEnvironment(onChange?: () => void): () => void {
   const wa = getWebApp();
   if (!wa || !isInsideTelegram()) {
-    document.documentElement.dataset.scheme = "dark";
-    return () => undefined;
+    const mq = typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    const sync = () => {
+      applyScheme(mq?.matches ? "dark" : "light");
+      onChange?.();
+    };
+    sync();
+    mq?.addEventListener?.("change", sync);
+    return () => mq?.removeEventListener?.("change", sync);
   }
   const theme = () => {
     applyThemeParams(wa.themeParams ?? {}, wa.colorScheme);
@@ -66,18 +79,12 @@ export function bindTelegramEnvironment(onChange?: () => void): () => void {
     applyViewport(wa.viewportStableHeight);
     onChange?.();
   };
-  const safe = () => {
-    applyInsets("safe", wa.safeAreaInset);
-    onChange?.();
-  };
-  const contentSafe = () => {
-    applyInsets("content-safe", wa.contentSafeAreaInset);
-    onChange?.();
-  };
+  const safe = () => applyInsets("safe", wa.safeAreaInset);
+  const contentSafe = () => applyInsets("content-safe", wa.contentSafeAreaInset);
   theme();
   applyViewport(wa.viewportStableHeight);
-  applyInsets("safe", wa.safeAreaInset);
-  applyInsets("content-safe", wa.contentSafeAreaInset);
+  safe();
+  contentSafe();
   wa.onEvent("themeChanged", theme);
   wa.onEvent("viewportChanged", viewport);
   wa.onEvent("safeAreaChanged", safe);

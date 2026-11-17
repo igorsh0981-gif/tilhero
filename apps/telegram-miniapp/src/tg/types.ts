@@ -83,27 +83,7 @@ export interface TgPopupParams {
   buttons?: TgPopupButton[];
 }
 
-export interface TgBiometricManager {
-  isInited: boolean;
-  isBiometricAvailable: boolean;
-  biometricType: "finger" | "face" | "unknown";
-  isAccessRequested: boolean;
-  isAccessGranted: boolean;
-  isBiometricTokenSaved: boolean;
-  deviceId: string;
-  init(cb?: () => void): TgBiometricManager;
-  requestAccess(params: { reason?: string }, cb?: (granted: boolean) => void): TgBiometricManager;
-  authenticate(params: { reason?: string }, cb?: (success: boolean, token?: string) => void): TgBiometricManager;
-  updateBiometricToken(token: string, cb?: (updated: boolean) => void): TgBiometricManager;
-  openSettings(): TgBiometricManager;
-}
 
-/** Telegram CloudStorage (Bot API 6.9+): per user and bot, keys 1–128 chars [A-Za-z0-9_-], values ≤ 4096 chars. */
-export interface TgCloudStorage {
-  setItem(key: string, value: string, cb?: (err: string | null, stored?: boolean) => void): TgCloudStorage;
-  getItem(key: string, cb: (err: string | null, value?: string) => void): TgCloudStorage;
-  removeItem(key: string, cb?: (err: string | null, removed?: boolean) => void): TgCloudStorage;
-}
 
 export type TgEvent =
   | "themeChanged"
@@ -115,12 +95,8 @@ export type TgEvent =
   | "secondaryButtonClicked"
   | "popupClosed"
   | "activated"
-  | "deactivated"
-  | "homeScreenAdded"
-  | "homeScreenChecked";
+  | "deactivated";
 
-/** Bot API 8.0: checkHomeScreenStatus / homeScreenChecked {status}. */
-export type TgHomeScreenStatus = "unsupported" | "unknown" | "added" | "missed";
 
 export interface TgWebApp {
   initData: string;
@@ -149,16 +125,10 @@ export interface TgWebApp {
   showPopup(params: TgPopupParams, cb?: (buttonId: string) => void): void;
   showConfirm(message: string, cb?: (ok: boolean) => void): void;
   requestWriteAccess?(cb?: (granted: boolean) => void): void;
-  /** Bot API 8.0+: prompt to add the Mini App to the home screen (homeScreenAdded on success, if the device can tell). */
-  addToHomeScreen?(): void;
-  /** Bot API 8.0+: status via callback (and the homeScreenChecked event). */
-  checkHomeScreenStatus?(cb?: (status: TgHomeScreenStatus) => void): void;
   BackButton: TgBackButton;
   MainButton: TgBottomButton;
   SecondaryButton?: TgBottomButton;
   HapticFeedback?: TgHaptic;
-  BiometricManager?: TgBiometricManager;
-  CloudStorage?: TgCloudStorage;
 }
 
 declare global {

@@ -1,100 +1,57 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { en } from "../src/i18n/en";
-import { DICTS, normLang, pluralForm, resolveLang, translate } from "../src/i18n";
-import { ru, type MessageKey } from "../src/i18n/ru";
+import { KNOWN_CODES } from "../src/api/errors";
+import { makeFormatters, normLang, pluralForm, resolveLang, translate } from "../src/i18n";
+import { ru } from "../src/i18n/ru";
+import { uz } from "../src/i18n/uz";
 
+const CYRILLIC = /[Ѐ-ӿ]/;
 const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
-const CYR = /[Ѐ-ӿ]/;
 
-function files(dir: string): string[] {
-  return readdirSync(dir).flatMap((f) => {
-    const p = join(dir, f);
-    return statSync(p).isDirectory() ? files(p) : /\.(ts|tsx)$/.test(f) ? [p] : [];
+describe("dictionaries RU / UZ", () => {
+  it("have exactly the same keys", () => {
+    expect(Object.keys(uz).sort()).toEqual(Object.keys(ru).sort());
   });
-}
-const SRC = join(__dirname, "..", "src");
-const stripComments = (code: string) => code.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
-
-describe("i18n dictionaries", () => {
-  it("EN defines exactly the RU keys", () => {
-    expect(Object.keys(en).sort()).toEqual(Object.keys(ru).sort());
-  });
-
-  it("has no empty strings and the same placeholders in both languages", () => {
-    for (const k of Object.keys(ru) as MessageKey[]) {
-      expect(ru[k].trim(), `ru ${k}`).not.toBe("");
-      expect(en[k].trim(), `en ${k}`).not.toBe("");
-      expect(placeholders(en[k]), `placeholders ${k}`).toEqual(placeholders(ru[k]));
+  it("Uzbek is Latin only (no mixing of scripts) and never empty", () => {
+    for (const [k, v] of Object.entries(uz)) {
+      expect(CYRILLIC.test(v), `${k}: ${v}`).toBe(false);
+      expect(v.trim().length, k).toBeGreaterThan(0);
     }
   });
-
-  it("EN has no Cyrillic (switching to EN leaves no Russian in the UI)", () => {
-    const bad = (Object.keys(en) as MessageKey[]).filter((k) => CYR.test(en[k]));
-    expect(bad).toEqual([]);
+  it("Uzbek uses the modifier letter ʻ for oʻ / gʻ, not ASCII quotes", () => {
+    for (const [k, v] of Object.entries(uz)) expect(/[oOgG]['‘’`]/.test(v), `${k}: ${v}`).toBe(false);
   });
-
-  it("plural entries have 3 RU forms and 2 EN forms", () => {
-    for (const k of Object.keys(ru) as MessageKey[]) {
-      if (!ru[k].includes("|")) continue;
-      expect(ru[k].split("|"), k).toHaveLength(3);
-      expect(en[k].split("|"), k).toHaveLength(2);
-    }
+  it("the same placeholders in both languages", () => {
+    for (const k of Object.keys(ru) as Array<keyof typeof ru>) expect(placeholders(uz[k]), k).toEqual(placeholders(ru[k]));
   });
-
-  it("every literal t('…') key used in the code exists", () => {
-    const missing: string[] = [];
-    for (const f of files(SRC)) {
-      const code = stripComments(readFileSync(f, "utf8"));
-      for (const m of code.matchAll(/\bt\("([a-zA-Z0-9_.]+)"/g)) if (!(m[1]! in ru)) missing.push(`${f}: ${m[1]}`);
-    }
-    expect(missing).toEqual([]);
+  it("every known error code has a text", () => {
+    for (const c of KNOWN_CODES) expect(ru[`err.${c}` as keyof typeof ru], c).toBeTruthy();
   });
-
-  it("no interface text is hard-coded outside the dictionaries (Cyrillic only in src/i18n)", () => {
-    const hits: string[] = [];
-    for (const f of files(SRC)) {
-      if (f.includes(`${join("src", "i18n")}`)) continue;
-      stripComments(readFileSync(f, "utf8"))
-        .split("\n")
-        .forEach((line, i) => {
-          if (CYR.test(line)) hits.push(`${f}:${i + 1} ${line.trim()}`);
-        });
-    }
-    expect(hits).toEqual([]);
+  it("the deletion confirmation words of the contract", () => {
+    expect(translate("ru", "del.word")).toBe("УДАЛИТЬ");
+    expect(translate("uz", "del.word")).toBe("OʻCHIRISH");
   });
 });
 
-describe("language resolution and formatting", () => {
-  it("profile locale → initData language_code → ru", () => {
-    expect(resolveLang("en", "ru")).toBe("en");
-    expect(resolveLang(null, "en-US")).toBe("en");
-    expect(resolveLang(null, "uz")).toBe("ru");
+describe("language helpers", () => {
+  it("Telegram language_code → ru | uz, Russian by default", () => {
+    expect(normLang("uz-UZ")).toBe("uz");
+    expect(normLang("ru")).toBe("ru");
+    expect(normLang("en")).toBeNull();
+    expect(resolveLang(null, "uz")).toBe("uz");
+    expect(resolveLang("ru", "uz")).toBe("ru");
     expect(resolveLang(null, "de")).toBe("ru");
-    expect(resolveLang(undefined, undefined)).toBe("ru");
-    expect(normLang("kk")).toBe("ru");
   });
-
-  it("interpolates variables and keeps unknown ones visible", () => {
-    expect(translate("ru", "ob.step", { n: 3 })).toBe("Шаг 3 из 6");
-    expect(translate("en", "err.PIN_INVALID", { remaining: 2 })).toBe("Wrong PIN. Attempts left: 2");
-    expect(translate("en", "sp.done.h")).toBe("Request {id} created");
+  it("Russian plurals; Uzbek nouns do not change after numerals", () => {
+    expect(pluralForm("ru", 1, "день|дня|дней")).toBe("день");
+    expect(pluralForm("ru", 3, "день|дня|дней")).toBe("дня");
+    expect(pluralForm("ru", 11, "день|дня|дней")).toBe("дней");
+    expect(pluralForm("ru", 21, "день|дня|дней")).toBe("день");
+    expect(pluralForm("uz", 5, "kun")).toBe("kun");
   });
-
-  it("chooses Russian plural forms", () => {
-    const f = DICTS.ru["home.sum.new"];
-    expect([1, 2, 5, 11, 21, 22, 25, 111].map((n) => pluralForm("ru", n, f))).toEqual([
-      "новое событие",
-      "новых события",
-      "новых событий",
-      "новых событий",
-      "новое событие",
-      "новых события",
-      "новых событий",
-      "новых событий",
-    ]);
-    expect(pluralForm("en", 1, DICTS.en["home.sum.new"])).toBe("new event");
-    expect(pluralForm("en", 4, DICTS.en["home.sum.new"])).toBe("new events");
+  it("dates: «18 ноября» / «18-noyabr»", () => {
+    expect(makeFormatters("ru").localDate("2026-11-18")).toBe("18 ноября");
+    expect(makeFormatters("uz").localDate("2026-11-18")).toBe("18-noyabr");
+    expect(makeFormatters("ru").localDate("bad")).toBe("");
+    expect(makeFormatters("ru").mmss(65)).toBe("01:05");
   });
 });

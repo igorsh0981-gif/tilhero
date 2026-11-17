@@ -70,10 +70,10 @@ export async function confirmPopup(p: { title: string; message: string; ok: stri
 }
 
 /**
- * WebApp.requestWriteAccess (6.9+) — permission for the bot to message the user
- * (onboarding consent step, notifications toggle). Outside Telegram an in-app twin asks.
+ * WebApp.requestWriteAccess (6.9+) — permission for the bot to message the user (reminders opt-in). Outside Telegram
+ * there is no bot chat to allow: resolves true without asking (the in-app notification center works anyway).
  */
-export function requestWriteAccess(copy: { title: string; message: string; allow: string; deny: string }): Promise<boolean> {
+export function requestWriteAccess(): Promise<boolean> {
   const wa = getWebApp();
   if (wa && isInsideTelegram() && supports("6.9") && wa.requestWriteAccess) {
     return new Promise((resolve) => {
@@ -84,12 +84,5 @@ export function requestWriteAccess(copy: { title: string; message: string; allow
       }
     });
   }
-  return showPopup({
-    title: copy.title,
-    message: copy.message,
-    buttons: [
-      { id: "deny", text: copy.deny },
-      { id: "allow", text: copy.allow, primary: true },
-    ],
-  }).then((id) => id === "allow");
+  return Promise.resolve(true);
 }
