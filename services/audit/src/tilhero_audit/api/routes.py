@@ -16,48 +16,14 @@ from tilhero_common.internal_auth import InternalAuth, Principal
 
 router = APIRouter()
 
-# Писать в журнал по HTTP могут только перечисленные сервисы (ревью P4); читать — только admin-bff с audit.read.
-# HTTP-писатели. Из спринта 4 — только provider-gateway (нет БД и outbox); events и source-registry пишут аудит
-# событием admin.audit.recorded.v1 через outbox (consumers.AUDIT_EVENT_PRODUCERS) — по HTTP им писать не нужно
-# (принцип минимальных прав).
-# Спринт 7 (INTERNAL_API §4): ai-control (команды сотрудников и system-действия AI-контура) и ai-concierge (раскрытие
-# содержимого переписки) — синхронный аудит ДО изменения/выдачи; событием admin.audit.recorded.v1 они не пишут.
-# Спринт 8 (INTERNAL_API §2.4, §3.3): ops-monitor — команды DLQ и подтверждение оповещения (синхронно, от имени
-# сотрудника) и system-записи об открытии/закрытии оповещений (отложенная отправка из audit_pending).
-WRITERS = frozenset({"admin-bff", "support", "experience-config", "identity-consent", "admin-identity", "user-admin",
-                     "provider-gateway", "ai-control", "ai-concierge", "ops-monitor"})
+# Спринт 1 (INTERNAL_API §7): HTTP-писателей нет — доменные сервисы TilHero пишут аудит событием
+# admin.audit.recorded.v1 через outbox (consumers.AUDIT_EVENT_PRODUCERS). Эндпоинт остаётся для синхронного аудита
+# админ-контура (спринт 2): писатель добавляется сюда явно, по принципу минимальных прав. Пустой список → любой
+# вызывающий получает 403 CALLER_NOT_ALLOWED.
+WRITERS: frozenset[str] = frozenset()
 # Делегирование (сотрудник в теле, on_behalf_of) — узкое исключение: издатель + перечисленные действия, которые он
-# пишет синхронно от имени сотрудника (claim actor ему передал admin-bff). Остальные домены пишут команды сотрудников
-# событием admin.audit.recorded.v1 либо от своего имени; admin-bff передаёт сотрудника claim'ом actor (ревью S2).
-DELEGATION: dict[str, frozenset[str]] = {
-    # + спринт 9 (Q1): ручной повтор зависшего удаления профиля сотрудником (ops.queues.manage, причина)
-    "identity-consent": frozenset({"sensitive.view", "sensitive.view_rate_limited", "user.deletion.retry"}),
-    # kill switch AI-поиска (спринт 4) и лимиты AI из админки (исправление 6.1): решение сотрудника, переданное
-    # admin-bff в provider-gateway
-    # + спринт 7 (A47): kill switch агентов и провайдера Anthropic. ai.budget.auto_pause — от system (без сотрудника),
-    # делегирование ему не нужно
-    "provider-gateway": frozenset({"ai.kill_switch.on", "ai.kill_switch.off", "ai.limits.update", "ai.limits.reset",
-                                   "ai.agent.pause", "ai.agent.resume", "ai.provider.pause", "ai.provider.resume"}),
-    # спринт 7: команды сотрудников в ai-control (INTERNAL_API §2). ai.budget.threshold — от system, не делегируется
-    "ai-control": frozenset({
-        "ai.agent.config.update",
-        "skill.version.created", "skill.version.updated", "skill.tested", "skill.review.requested",
-        "skill.review.decided", "skill.published", "skill.rolled_back", "skill.deprecated",
-        "skill.case.created", "skill.case.updated", "skill.case.deleted",
-        "ai.pricing.create", "ai.pricing.update", "ai.pricing.activate",
-        "ai.budget.alert.ack",
-        "ai.access_level.update", "ai.access_level.delete",
-        "user.access_level.assign", "user.access_level.reset",
-    }),
-    # спринт 7 (A43): раскрытие содержимого AI-переписки сотрудником с ai.content.read и причиной
-    "ai-concierge": frozenset({"ai.content.view"}),
-    # спринт 8: повтор/удаление DLQ и подтверждение оповещения — команды сотрудника; ops.alert.raised/resolved —
-    # от system (без сотрудника), делегирование им не нужно
-    # + спринт 9 (Q3, интеграция волны 2): переопределение и сброс лимита запросов из админки (ops.kill_switch,
-    # step-up, причина) — синхронный аудит до действия
-    "ops-monitor": frozenset({"ops.dlq.replay", "ops.dlq.delete", "ops.alert.ack",
-                              "ratelimit.override.set", "ratelimit.override.reset"}),
-}
+# пишет синхронно от имени сотрудника (claim actor принимается только от admin-bff). В спринте 1 таких нет.
+DELEGATION: dict[str, frozenset[str]] = {}
 writer = InternalAuth(set(WRITERS))
 admin_only = InternalAuth({"admin-bff"})
 

@@ -1,6 +1,6 @@
 """Staff API support (через admin-bff): очередь, SLA, ответы, заметки, статусы, эскалации, политика SLA.
 
-AT-32 (ответ оператора виден клиенту), A-AT-41, A-AT-42 (заметка не видна клиенту), A-AT-44 (аудит).
+AT-15 (ответ оператора виден клиенту в приложении), внутренние заметки не видны клиенту, аудит команд.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ async def test_full_ticket_cycle_client_and_operator(env) -> None:
     user = uuid.uuid4()
     t = await env.create(
         user,
-        category="TICKET_SOURCE",
+        category="SCHEDULE_REMINDERS",
         subject="Не открывается ссылка на билет",
         message="При переходе получаю ошибку",
     )
@@ -112,7 +112,7 @@ async def test_full_ticket_cycle_client_and_operator(env) -> None:
 
 
 async def test_internal_note_never_visible_to_client(env) -> None:
-    """A-AT-42 / TG-FR-044: заметка не видна клиенту, не меняет его метаданные и не порождает события."""
+    """Заметка не видна клиенту, не меняет его метаданные и не порождает события."""
     user = uuid.uuid4()
     t = await env.create(user)
     before = (
@@ -280,7 +280,7 @@ async def test_staff_not_found_and_validation(env) -> None:
 
 async def test_queue_filters_and_pagination(env) -> None:
     users = [uuid.uuid4() for _ in range(3)]
-    a = await env.create(users[0], category="PRICE")
+    a = await env.create(users[0], category="LESSON")
     b = await env.create(users[1], category="ACCOUNT")
     c = await env.create(users[2], category="BUG")
     await env.client.patch(
@@ -408,7 +408,7 @@ async def test_priority_change_recomputes_sla_and_audits(env) -> None:
 
 
 async def test_escalation_only_creates_related_request(env) -> None:
-    """BR-TG-011: support не меняет оплату/подписку — только эскалация в другую команду."""
+    """Support не меняет оплату, подписку и оценки — только эскалация в другую команду."""
     user = uuid.uuid4()
     t = await env.create(user, category="ACCOUNT")
     key = "esc-" + uuid.uuid4().hex
@@ -427,7 +427,7 @@ async def test_escalation_only_creates_related_request(env) -> None:
     assert r1.json()["status"] == "OPEN" and r1.json()["created_by"] == OPERATOR.id
     reused = await env.client.post(
         f"/admin/v1/support/tickets/{t['ticket_id']}/escalations",
-        json={**body, "type": "provider_issue"},
+        json={**body, "type": "tech_issue"},
         headers=env.staff(idem=key),
     )
     assert reused.status_code == 422
@@ -459,7 +459,8 @@ async def test_sla_policies(env) -> None:
     }
     assert (
         current["category_defaults"]["ACCOUNT"] == "high"
-        and current["category_defaults"]["PRICE"] == "normal"
+        and current["category_defaults"]["LESSON"] == "normal"
+        and current["category_defaults"]["CHILD_PROFILE"] == "high"
     )
     put = await env.client.put(
         "/admin/v1/support/sla-policies",
@@ -467,7 +468,7 @@ async def test_sla_policies(env) -> None:
         json={
             "items": [
                 {
-                    "category": "PRICE",
+                    "category": "LESSON",
                     "priority": "normal",
                     "first_response_minutes": 30,
                     "resolution_minutes": 600,
@@ -479,20 +480,20 @@ async def test_sla_policies(env) -> None:
                     "resolution_minutes": 2880,
                 },
             ],
-            "reason": "Цены — чувствительная тема",
+            "reason": "Уроки — ядро продукта",
         },
     )
     assert put.status_code == 200, put.text
     assert len(put.json()["items"]) == 5
-    price = await env.create(uuid.uuid4(), category="PRICE")
-    assert ts(price["sla_first_response_at"]) - ts(price["created_at"]) == timedelta(minutes=30)
-    other = await env.create(uuid.uuid4(), category="HOTEL")
+    lesson = await env.create(uuid.uuid4(), category="LESSON")
+    assert ts(lesson["sla_first_response_at"]) - ts(lesson["created_at"]) == timedelta(minutes=30)
+    other = await env.create(uuid.uuid4(), category="BUG")
     assert ts(other["sla_first_response_at"]) - ts(other["created_at"]) == timedelta(minutes=120)
     for bad in (
         {
             "items": [
                 {
-                    "category": "PRICE",
+                    "category": "LESSON",
                     "priority": "normal",
                     "first_response_minutes": 60,
                     "resolution_minutes": 60,
@@ -514,7 +515,7 @@ async def test_sla_policies(env) -> None:
         {
             "items": [
                 {
-                    "category": "PRICE",
+                    "category": "LESSON",
                     "priority": "normal",
                     "first_response_minutes": 1,
                     "resolution_minutes": 2,
@@ -528,7 +529,7 @@ async def test_sla_policies(env) -> None:
             await env.client.put("/admin/v1/support/sla-policies", json=bad, headers=env.staff(MANAGER))
         ).status_code == 422
     audit = [a for a in await env.events("admin.audit.recorded.v1") if a.payload["action"] == "sla.change"]
-    assert len(audit) == 1 and audit[0].payload["reason"] == "Цены — чувствительная тема"
+    assert len(audit) == 1 and audit[0].payload["reason"] == "Уроки — ядро продукта"
     assert audit[0].payload["before"] == {"*/low": [480, 4320]}
     assert_event_conforms(audit[0])
 

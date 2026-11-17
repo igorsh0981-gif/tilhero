@@ -41,14 +41,13 @@ class DelegatedActor(BaseModel):
 
 
 class RecordWriteIn(BaseModel):
-    """HTTP-запись в журнал. Кто действовал (actor_*), сервис берёт ТОЛЬКО из внутреннего токена
-    (ревью P4): сотрудник — из claim actor (его выпускает только admin-bff), иначе — пользователь из sub
-    или сам сервис-издатель. Поля actor_* в теле → 422.
+    """HTTP-запись в журнал (спринт 1: писателей нет, см. api/routes.py WRITERS). Кто действовал (actor_*), сервис
+    берёт ТОЛЬКО из внутреннего токена (ревью P4): сотрудник — из claim actor (его выпускает только admin-bff),
+    иначе — пользователь из sub или сам сервис-издатель. Поля actor_* в теле → 422.
 
-    Исключение — синхронная запись доменного сервиса о команде сотрудника (reveal в identity-consent, спринт 2):
-    claim actor принимается только от admin-bff, поэтому домен передаёт сотрудника в `on_behalf_of`. Разрешено только
-    по списку издатель → действия (api/routes.py DELEGATION): identity-consent (sensitive.view*), provider-gateway
-    (лимиты и kill switch AI), ai-control (команды AI-контура), ai-concierge (ai.content.view)."""
+    Исключение — синхронная запись доменного сервиса о команде сотрудника: claim actor принимается только от
+    admin-bff, поэтому домен передаёт сотрудника в `on_behalf_of`. Разрешено только по списку издатель → действия
+    (api/routes.py DELEGATION; в спринте 1 пуст)."""
 
     model_config = ConfigDict(extra="forbid")
 

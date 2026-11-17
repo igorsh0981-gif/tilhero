@@ -40,7 +40,6 @@ async def ticket_created(session: AsyncSession, ticket: Ticket, *, producer: str
             "user_id": str(ticket.user_id),
             "category": ticket.category,
             "priority": ticket.priority,
-            "has_event_context": ticket.context is not None,
             "sla_first_response_at": iso(ticket.sla_first_response_at),
         },
         producer=producer,

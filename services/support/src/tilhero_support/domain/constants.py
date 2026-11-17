@@ -9,29 +9,24 @@ from typing import Final
 
 CHANNEL_TELEGRAM: Final = "telegram"
 
-# Категории (bff.ts TicketCategory). available=False — категория видна, но обращение по ней пока не создать
-# (подписка и оплата — тех. долг, решение заказчика 07.10.2026).
+# Категории (bff.ts TicketCategory), подписи RU/UZ (латиница) — для экрана поддержки Mini App. available=False —
+# категория видна, но обращение по ней пока не создать: оплата появится в спринте 8 (тарифы и минуты).
 CATEGORIES: Final[dict[str, dict[str, object]]] = {
-    "EVENT_RECOMMENDATION": {
-        "ru": "Событие или рекомендация",
-        "en": "Event or recommendation",
-        "available": True,
-    },
-    "TICKET_SOURCE": {"ru": "Билет или источник", "en": "Ticket or source", "available": True},
-    "FLIGHT": {"ru": "Перелёт", "en": "Flight", "available": True},
-    "HOTEL": {"ru": "Отель", "en": "Hotel", "available": True},
-    "PRICE": {"ru": "Цена", "en": "Price", "available": True},
-    "SUBSCRIPTION_PAYMENT": {"ru": "Подписка и оплата", "en": "Subscription and payment", "available": False},
-    "ACCOUNT": {"ru": "Аккаунт", "en": "Account", "available": True},
-    "PERSONAL_DATA": {"ru": "Персональные данные", "en": "Personal data", "available": True},
-    "BUG": {"ru": "Ошибка", "en": "Bug", "available": True},
-    "OTHER": {"ru": "Другое", "en": "Other", "available": True},
+    "LESSON": {"ru": "Урок", "uz": "Dars", "available": True},
+    "ASSESSMENT": {"ru": "Оценка урока", "uz": "Dars bahosi", "available": True},
+    "SCHEDULE_REMINDERS": {"ru": "График и напоминания", "uz": "Jadval va eslatmalar", "available": True},
+    "CHILD_PROFILE": {"ru": "Детский профиль", "uz": "Bola profili", "available": True},
+    "ACCOUNT": {"ru": "Аккаунт и вход", "uz": "Akkaunt va kirish", "available": True},
+    "SUBSCRIPTION_PAYMENT": {"ru": "Подписка и оплата", "uz": "Obuna va toʻlov", "available": False},
+    "PERSONAL_DATA": {"ru": "Персональные данные", "uz": "Shaxsiy maʼlumotlar", "available": True},
+    "BUG": {"ru": "Ошибка в приложении", "uz": "Ilovadagi xatolik", "available": True},
+    "OTHER": {"ru": "Другое", "uz": "Boshqa", "available": True},
 }
 ANY_CATEGORY: Final = "*"
 
 PRIORITIES: Final = ("low", "normal", "high", "urgent")
-# Приоритет по умолчанию: аккаунт и персональные данные — high, остальное — normal.
-DEFAULT_PRIORITY: Final[dict[str, str]] = {"PERSONAL_DATA": "high", "ACCOUNT": "high"}
+# Приоритет по умолчанию: аккаунт, персональные данные и детский профиль (CONVENTIONS §8) — high, остальное — normal.
+DEFAULT_PRIORITY: Final[dict[str, str]] = {"PERSONAL_DATA": "high", "ACCOUNT": "high", "CHILD_PROFILE": "high"}
 
 
 def default_priority(category: str) -> str:
@@ -60,21 +55,14 @@ STAFF_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
     CLOSED: frozenset(),
 }
 
-# Эскалации: support не делает refund/override (BR-TG-011, ТЗ Admin «Support Operations» §6),
-# только related request в другую команду.
+# Эскалации: support не делает возвраты, смену тарифа и правку оценок — только related request в другую команду.
+# Подписи — для админки (русский интерфейс сотрудников).
 ESCALATION_TYPES: Final[dict[str, dict[str, str]]] = {
-    "billing_review": {"ru": "Проверка оплаты", "en": "Billing review", "team": "billing"},
-    "provider_issue": {"ru": "Проблема провайдера", "en": "Provider issue", "team": "operations"},
-    "content_review": {
-        "ru": "Проверка события/контента",
-        "en": "Event/content review",
-        "team": "agent_manager",
-    },
-    "security_privacy": {
-        "ru": "Безопасность и персональные данные",
-        "en": "Security/privacy request",
-        "team": "security",
-    },
+    "billing_review": {"ru": "Проверка оплаты", "team": "billing"},
+    "assessment_review": {"ru": "Проверка оценки урока", "team": "methodology"},
+    "content_review": {"ru": "Проверка урока или материалов", "team": "methodology"},
+    "tech_issue": {"ru": "Технический сбой", "team": "engineering"},
+    "security_privacy": {"ru": "Безопасность и персональные данные", "team": "security"},
 }
 
 ANONYMIZED_TEXT: Final = "[удалено по запросу пользователя]"

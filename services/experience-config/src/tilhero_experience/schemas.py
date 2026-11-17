@@ -92,3 +92,40 @@ class MiniAppExperienceConfig(MiniAppPayload):
 class AdminExperienceConfig(AdminPayload):
     app: Literal["admin"]
     version: str
+
+
+# ---------------------------------------------------------------- «Что нового» (формы bff.ts)
+
+
+class ReleaseNoteItemOut(BaseModel):
+    title: str
+    text: str
+    link: str | None
+    icon: str | None
+
+
+class WhatsNewNoteOut(BaseModel):
+    release_note_id: uuid.UUID
+    slug: str
+    title: str
+    items: list[ReleaseNoteItemOut]
+    audience: Literal["new", "existing", "all"]
+    published_at: str
+
+
+class WhatsNewOut(BaseModel):
+    mode: Literal["welcome", "updates", "none"]
+    notes: list[WhatsNewNoteOut]
+
+
+class WhatsNewPage(BaseModel):
+    items: list[WhatsNewNoteOut]
+    next_cursor: str | None
+
+
+class SeenIn(BaseModel):
+    """WhatsNewSeenRequest (bff.ts): 1…20 id заметок."""
+
+    model_config = _IN
+
+    release_note_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)

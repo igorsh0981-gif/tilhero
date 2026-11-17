@@ -1,26 +1,24 @@
 """Pydantic-модели API support-service.
 
-Вход — строгий (extra="forbid"): лишнее поле контекста обращения → 422 (TG-FR-041, TG-FR-044: в контекст
-не попадают лишние персональные данные). Формы клиентских ответов совпадают с packages/contracts/src/bff.ts.
+Вход — строгий (extra="forbid"): лишнее поле контекста обращения → 422 (в контекст не попадают лишние персональные
+данные: только deeplink экрана и версия клиента, INTERNAL_API §6). Формы клиентских ответов совпадают с
+packages/contracts/src/bff.ts.
 """
 
 from __future__ import annotations
 
 import re
 import uuid
-from datetime import UTC, datetime
-from decimal import Decimal
+from datetime import datetime
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
     AfterValidator,
     BaseModel,
-    BeforeValidator,
     ConfigDict,
     Field,
     SerializerFunctionWrapHandler,
-    field_serializer,
     field_validator,
     model_serializer,
     model_validator,
@@ -52,49 +50,13 @@ def _single_line(value: str) -> str:
 
 
 Text4000 = Annotated[str, Field(min_length=1, max_length=4000), AfterValidator(_no_control)]
-Identifier = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:\-]*$")]
 
 
 class StrictIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
-# ---------------------------------------------------------------- context (TG-FR-041)
-
-
-_AMOUNT_RE = re.compile(r"^(0|[1-9][0-9]{0,9})(\.[0-9]{1,2})?$")
-_CENTS = Decimal("0.01")
-
-
-def _decimal_string(value: object) -> Decimal:
-    """Деньги в контракте — строка-десятичное с ≤ 2 знаками («850.00»). JSON-число (float) отклоняется:
-    двоичная плавающая точка искажает суммы (CONVENTIONS §2, ревью T3)."""
-    if isinstance(value, Decimal):
-        return value.quantize(_CENTS)
-    if not isinstance(value, str) or not _AMOUNT_RE.match(value):
-        raise ValueError('сумма — строка-десятичное с не более чем 2 знаками, например "850.00"')
-    return Decimal(value).quantize(_CENTS)
-
-
-MoneyString = Annotated[Decimal, BeforeValidator(_decimal_string)]
-
-
-class PriceSnapshot(StrictIn):
-    amount: MoneyString
-    currency: Literal["USD"]
-    fetched_at: datetime
-
-    @field_validator("fetched_at")
-    @classmethod
-    def _aware(cls, v: datetime) -> datetime:
-        if v.tzinfo is None:
-            raise ValueError("нужен часовой пояс (ISO-8601 с Z)")
-        return v.astimezone(UTC)
-
-    @field_serializer("amount")
-    def _amount(self, v: Decimal) -> str:
-        # bff.ts: amount — строка «850.00»; хранится Decimal-строкой в JSONB (без потери точности)
-        return f"{v.quantize(_CENTS):f}"
+# ---------------------------------------------------------------- context (INTERNAL_API §6)
 
 
 def _https_url(value: str) -> str:
@@ -109,16 +71,10 @@ def _https_url(value: str) -> str:
 
 
 class TicketContextIn(StrictIn):
-    """Технический контекст из event detail. Никаких персональных данных и переписки с AI (ТЗ Admin §3)."""
+    """Технический контекст обращения (bff.ts TicketContext): ссылка на экран Mini App и версия клиента.
+    Никаких персональных данных, текстов уроков и переписки с ИИ."""
 
-    event_id: Identifier | None = None
-    offer_id: Identifier | None = None
-    provider_id: Identifier | None = None
     deeplink: Annotated[str, Field(min_length=9, max_length=2048), AfterValidator(_https_url)] | None = None
-    price_snapshot: PriceSnapshot | None = None
-    event_title: Annotated[str, Field(min_length=1, max_length=200), AfterValidator(_single_line)] | None = (
-        None
-    )
     client_version: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._\-]+$")]
 
 
@@ -140,12 +96,7 @@ TicketStatus = Literal["NEW", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CL
 
 
 class TicketContextOut(BaseModel):
-    event_id: str | None = None
-    offer_id: str | None = None
-    provider_id: str | None = None
     deeplink: str | None = None
-    price_snapshot: PriceSnapshot | None = None
-    event_title: str | None = None
     client_version: str
 
     @model_serializer(mode="wrap")
@@ -193,7 +144,7 @@ class TicketPage(BaseModel):
 
 class CategoryLabel(BaseModel):
     ru: str
-    en: str
+    uz: str
 
 
 class CategoryOut(BaseModel):
@@ -211,7 +162,7 @@ class CategoryList(BaseModel):
 
 Visibility = Literal["public", "internal"]
 Priority = Literal["low", "normal", "high", "urgent"]
-EscalationType = Literal["billing_review", "provider_issue", "content_review", "security_privacy"]
+EscalationType = Literal["billing_review", "assessment_review", "content_review", "tech_issue", "security_privacy"]
 StaffId = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._@:\-]*$")]
 
 assert set(Priority.__args__) == set(PRIORITIES)  # type: ignore[attr-defined]
@@ -288,7 +239,7 @@ class StaffTicketSummaryOut(BaseModel):
     status: str
     priority: str
     assignee_id: str | None
-    has_event_context: bool
+    has_context: bool
     anonymized: bool
     created_at: datetime
     updated_at: datetime

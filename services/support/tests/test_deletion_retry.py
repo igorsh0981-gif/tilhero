@@ -1,4 +1,4 @@
-"""Контракт саги удаления (спринт 9, ADR-009, INTERNAL_API §1.3): повтор `user.deletion.requested.v1` — тот же
+"""Контракт саги удаления (AT-14, сага identity-consent): повтор `user.deletion.requested.v1` — тот же
 `request_id`, новый `event_id`, `attempt` — снова подтверждается `user.domain.deleted.v1` без ошибок; данные удалены."""
 
 from __future__ import annotations

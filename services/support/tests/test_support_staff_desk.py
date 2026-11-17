@@ -1,4 +1,4 @@
-"""Спринт 2: «Как видит клиент» (A42), «Взять в работу», статистика для Dashboard, фильтр по пользователю."""
+"""Рабочее место оператора: «Как видит клиент», «Взять в работу», статистика для Dashboard, фильтр по ученику."""
 
 from __future__ import annotations
 
@@ -30,15 +30,15 @@ def _keys(obj) -> set[str]:
     return found
 
 
-# ---------------------------------------------------------------- client-view (A42)
+# ---------------------------------------------------------------- client-view
 
 async def test_client_view_equals_client_api_without_internal_notes(env) -> None:
     user = uuid.uuid4()
-    t = await env.create(user, category="PRICE", context=CONTEXT)
+    t = await env.create(user, category="LESSON", context=CONTEXT)
     ref = t["ticket_id"]
     marker = "ВНУТРЕННЯЯ-ЗАМЕТКА-" + uuid.uuid4().hex
     assert (await env.reply(ref, marker, visibility="internal")).status_code == 200
-    assert (await env.reply(ref, "Цена обновлена, проверьте")).status_code == 200
+    assert (await env.reply(ref, "Напоминание перенастроили, проверьте")).status_code == 200
 
     client = await env.client.get(f"/internal/v1/me/tickets/{ref}", headers=env.user(user))
     view = await env.client.get(f"/admin/v1/support/tickets/{ref}/client-view", headers=env.staff(READER))

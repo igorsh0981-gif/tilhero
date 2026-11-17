@@ -1,4 +1,4 @@
-"""Клиентский API support (через telegram-bff): AT-30, AT-31, TG-FR-040…043."""
+"""Клиентский API support (через telegram-bff): AT-15 — обращение из профиля, контекст, категории TilHero."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from support_testkit import CONTEXT, READER
 
 from tilhero_common.testing import assert_event_conforms, internal_headers
+from tilhero_support.domain.constants import CATEGORIES
 
 
 def ts(value: str) -> datetime:
@@ -16,7 +17,7 @@ def ts(value: str) -> datetime:
 
 
 async def test_create_from_profile(env) -> None:
-    """AT-30: обращение из профиля; номер TCK с 3000, SLA по политике normal (2 ч / 24 ч)."""
+    """AT-15: обращение из профиля; номер TCK с 3000, SLA по политике normal (2 ч / 24 ч)."""
     user = uuid.uuid4()
     t = await env.create(user)
     assert t["number"] == "TCK-3000" and t["status"] == "NEW" and t["category"] == "OTHER"
@@ -38,7 +39,6 @@ async def test_create_from_profile(env) -> None:
         "user_id": str(user),
         "category": "OTHER",
         "priority": "normal",
-        "has_event_context": False,
         "sla_first_response_at": p["sla_first_response_at"],
     }
     assert created[0].producer == "support"
@@ -46,64 +46,52 @@ async def test_create_from_profile(env) -> None:
         assert_event_conforms(e)
 
 
-async def test_create_from_event_with_context(env) -> None:
-    """AT-31 / TG-FR-041: event_id/offer_id/provider/deeplink/price snapshot сохраняются и видны клиенту."""
+async def test_create_with_context(env) -> None:
+    """Контекст обращения — только deeplink экрана и версия клиента (INTERNAL_API §6); видят клиент и оператор."""
     user = uuid.uuid4()
     t = await env.create(
         user,
-        category="TICKET_SOURCE",
-        subject="Не открывается ссылка на билет",
-        message="При переходе получаю ошибку",
+        category="SCHEDULE_REMINDERS",
+        subject="Не пришло напоминание",
+        message="Занятие в 19:00, напоминания включены",
         context=CONTEXT,
     )
-    ctx = t["context"]
-    assert ctx["event_id"] == "evt_f1_auh_2026" and ctx["offer_id"] == "off_987"
-    assert ctx["provider_id"] == "ticket_provider_x" and ctx["deeplink"] == CONTEXT["deeplink"]
-    # Деньги — строка-десятичное с 2 знаками (ревью T3): хранится Decimal, отдаётся строкой
-    assert ctx["price_snapshot"] == {"amount": "850.00", "currency": "USD", "fetched_at": "2026-10-07T13:42:00Z"}
-    whole = await env.create(
-        user, context={**CONTEXT, "price_snapshot": {**CONTEXT["price_snapshot"], "amount": "1290.5"}}
-    )
-    assert whole["context"]["price_snapshot"]["amount"] == "1290.50"
-    assert ctx["client_version"] == "telegram-miniapp-2.0"
-    partial = await env.create(user, context={"event_id": "evt_1", "client_version": "telegram-miniapp-2.0"})
-    assert partial["context"] == {
-        "event_id": "evt_1",
-        "client_version": "telegram-miniapp-2.0",
-    }  # без null-полей
-    created = (await env.events("support.ticket.created.v1"))[0]
-    assert created.payload["has_event_context"] is True
-    # Персональные данные (ACCOUNT/PERSONAL_DATA) — high: первый ответ за 60 минут
-    acc = await env.create(user, category="PERSONAL_DATA")
-    assert ts(acc["sla_first_response_at"]) - ts(acc["created_at"]) == timedelta(minutes=60)
+    assert t["context"] == CONTEXT and t["category"] == "SCHEDULE_REMINDERS"
+    partial = await env.create(user, context={"client_version": "telegram-miniapp-1.0"})
+    assert partial["context"] == {"client_version": "telegram-miniapp-1.0"}  # без null-полей
+    # Персональные данные, аккаунт и детский профиль — high: первый ответ за 60 минут
+    for category in ("PERSONAL_DATA", "ACCOUNT", "CHILD_PROFILE"):
+        acc = await env.create(user, category=category)
+        assert ts(acc["sla_first_response_at"]) - ts(acc["created_at"]) == timedelta(minutes=60), category
+    for category in ("LESSON", "ASSESSMENT", "BUG"):
+        normal = await env.create(user, category=category)
+        assert ts(normal["sla_first_response_at"]) - ts(normal["created_at"]) == timedelta(minutes=120), category
+    created = await env.events("support.ticket.created.v1")
+    assert [e.payload["priority"] for e in created[2:5]] == ["high"] * 3
+    for e in created:
+        assert_event_conforms(e)
     # Сотрудник видит контекст и correlation_id запроса BFF
     staff = (await env.client.get(f"/admin/v1/support/tickets/{t['ticket_id']}", headers=env.staff())).json()
-    assert staff["context"]["offer_id"] == "off_987" and staff["correlation_id"]
+    assert staff["context"] == CONTEXT and staff["correlation_id"] and staff["has_context"] is True
     assert staff["channel"] == "telegram" and staff["priority"] == "normal"
+    plain = (await env.client.get(f"/admin/v1/support/tickets/{partial['ticket_id']}", headers=env.staff())).json()
+    assert plain["has_context"] is True
 
 
 async def test_context_is_strict(env) -> None:
     user = uuid.uuid4()
     bad_contexts = [
-        {**CONTEXT, "user_name": "Игорь"},  # лишнее поле (TG-FR-044)
-        {**CONTEXT, "deeplink": "http://example.com/t"},
+        {**CONTEXT, "user_name": "Игорь"},  # лишнее поле: персональные данные в контекст не попадают
+        {**CONTEXT, "event_id": "evt_1"},  # поля контекста «Бот турист» не принимаются
+        {**CONTEXT, "lesson_text": "I want pasta"},
+        {**CONTEXT, "deeplink": "http://t.me/tilhero_bot/app"},
         {**CONTEXT, "deeplink": "https://user:pw@example.com/t"},
         {**CONTEXT, "deeplink": "javascript:alert(1)"},
+        {**CONTEXT, "deeplink": "https://t.me/ x"},
         {**CONTEXT, "deeplink": "https://example.com/" + "a" * 2048},
-        {**CONTEXT, "provider_id": "p" * 65},
-        {**CONTEXT, "event_id": "evt<script>"},
-        {**CONTEXT, "event_title": "x" * 201},
-        *(
-            {**CONTEXT, "price_snapshot": {"amount": amount, "currency": "USD", "fetched_at": "2026-10-07T13:42:00Z"}}
-            # float/число (T3), отрицательное, > 2 знаков, экспонента, пробелы, ведущие нули, пусто, слишком большое
-            for amount in (850.0, 850, 10.5, "-1", "10.555", "1e3", " 10", "010", "", "12345678901.00", "NaN")
-        ),
-        {
-            **CONTEXT,
-            "price_snapshot": {"amount": "10.00", "currency": "EUR", "fetched_at": "2026-10-07T13:42:00Z"},
-        },
-        {**CONTEXT, "price_snapshot": {"amount": "10", "currency": "USD", "fetched_at": "2026-10-07T13:42:00"}},
-        {**CONTEXT, "price_snapshot": {"amount": "10", "currency": "USD", "fetched_at": "x", "extra": 1}},
+        {**CONTEXT, "client_version": "1.0 <script>"},
+        {**CONTEXT, "client_version": "v" * 65},
+        {**CONTEXT, "client_version": ""},
         {k: v for k, v in CONTEXT.items() if k != "client_version"},
     ]
     for ctx in bad_contexts:
@@ -130,14 +118,22 @@ async def test_context_is_strict(env) -> None:
 
 async def test_category_validation_and_catalog(env) -> None:
     user = uuid.uuid4()
-    for cat in ("WATCH", "SUBSCRIPTION_PAYMENT"):
+    for cat in ("WATCH", "TICKET_SOURCE", "HOTEL", "lesson", "SUBSCRIPTION_PAYMENT"):
         body = await env.create(user, expect=422, category=cat)
         assert body["code"] == "SUPPORT_CATEGORY_INVALID"
     r = await env.client.get("/internal/v1/support/categories", headers=env.user(user))
     items = {i["code"]: i for i in r.json()["items"]}
-    assert len(items) == 10 and items["SUBSCRIPTION_PAYMENT"]["available"] is False
-    assert items["TICKET_SOURCE"]["label"] == {"ru": "Билет или источник", "en": "Ticket or source"}
+    # ровно TicketCategory из bff.ts, в порядке экрана поддержки
+    assert list(items) == ["LESSON", "ASSESSMENT", "SCHEDULE_REMINDERS", "CHILD_PROFILE", "ACCOUNT",
+                           "SUBSCRIPTION_PAYMENT", "PERSONAL_DATA", "BUG", "OTHER"]
+    assert items["SUBSCRIPTION_PAYMENT"]["available"] is False
+    assert all(i["available"] for code, i in items.items() if code != "SUBSCRIPTION_PAYMENT")
+    assert items["SCHEDULE_REMINDERS"]["label"] == {"ru": "График и напоминания", "uz": "Jadval va eslatmalar"}
+    assert all(set(i["label"]) == {"ru", "uz"} and i["label"]["ru"] and i["label"]["uz"] for i in items.values())
     assert items["PERSONAL_DATA"]["default_priority"] == "high"
+    assert items["CHILD_PROFILE"]["default_priority"] == "high"
+    for code in CATEGORIES:
+        await env.create(user, category=code, expect=201 if code != "SUBSCRIPTION_PAYMENT" else 422)
     admin = await env.client.get("/internal/v1/support/categories", headers=env.staff(READER))
     assert admin.status_code == 200
     assert (await env.client.get("/internal/v1/support/categories")).status_code == 401

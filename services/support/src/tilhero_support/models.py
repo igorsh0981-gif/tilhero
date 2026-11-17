@@ -36,8 +36,8 @@ class Base(DeclarativeBase):
 STATUSES_SQL = "('NEW','IN_PROGRESS','WAITING_CUSTOMER','RESOLVED','CLOSED')"
 PRIORITIES_SQL = "('low','normal','high','urgent')"
 CATEGORIES_SQL = (
-    "('EVENT_RECOMMENDATION','TICKET_SOURCE','FLIGHT','HOTEL','PRICE','SUBSCRIPTION_PAYMENT',"
-    "'ACCOUNT','PERSONAL_DATA','BUG','OTHER')"
+    "('LESSON','ASSESSMENT','SCHEDULE_REMINDERS','CHILD_PROFILE','ACCOUNT','SUBSCRIPTION_PAYMENT',"
+    "'PERSONAL_DATA','BUG','OTHER')"
 )
 
 
@@ -145,7 +145,7 @@ class Escalation(Base):
     __table_args__ = (
         UniqueConstraint("ticket_id", "idempotency_key", name="uq_escalations_idempotency"),
         CheckConstraint(
-            "type IN ('billing_review','provider_issue','content_review','security_privacy')",
+            "type IN ('billing_review','assessment_review','content_review','tech_issue','security_privacy')",
             name="ck_escalations_type",
         ),
         CheckConstraint("status IN ('OPEN','DONE')", name="ck_escalations_status"),
