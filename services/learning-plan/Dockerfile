@@ -15,8 +15,8 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PATH="/app/.venv/bin:$PATH"
 RUN useradd --system --uid 10001 --no-create-home app
 WORKDIR /app/service
 COPY --from=build /app/.venv /app/.venv
-COPY services/preferences/alembic.ini ./alembic.ini
-COPY services/preferences/migrations ./migrations
+COPY services/learning-plan/alembic.ini ./alembic.ini
+COPY services/learning-plan/migrations ./migrations
 USER app
 EXPOSE 8000
 # Слушает :: в режиме dual-stack (IPv4 + IPv6): healthcheck Railway — IPv4, приватная сеть — оба. PORT — от платформы.

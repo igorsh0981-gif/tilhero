@@ -1,89 +1,120 @@
 # learning-plan-service
 
-**Владелец:** команда Telegram-контура. **Bounded context:** предпочтения пользователя для подбора событий и поездок — интересы, география, формат, бюджет, горизонт, точки напоминаний, города вылета, рейсы (ТЗ Telegram §5, TG-FR-010…018, BR-TG-002…005) и справочники онбординга (аэропорты, таксономия интересов, география).
+**Владелец:** команда учебного контура. **Bounded context:** учебный план ученика — цель, уровень уверенности, темы,
+языки интерфейса и объяснений, учебная пара; **график занятий** (дни, время, длительность, напоминания, часовой пояс),
+учёт занятий, слоты графика → события «напомнить» и «пропуск» (INTERNAL_API §2, PLAN.md «Правила напоминаний»,
+AT-04…08).
 
-Порт 8102, схема PostgreSQL `preferences`, внутренний JWT с `aud = preferences`. Redis не нужен.
+Порт 8102, схема PostgreSQL `learning_plan`, внутренний JWT с `aud = learning-plan`. Redis не нужен.
+Пакет `tilhero_learning_plan`.
 
 ## API
-Вызывает только `telegram-bff` (`iss`), пользователь — только из `sub` токена. Формы ответов = `packages/contracts/src/bff.ts` (BFF проксирует без перекладывания). admin-bff (спринт 2) получит отдельный staff-роутер с правами, а не доступ к `/me`.
+Клиентский API вызывает только `telegram-bff` (`iss`); ученик — только из `sub` токена (BFF кладёт туда активного
+ученика `lrn`). Формы ответов = `packages/contracts/src/bff.ts`.
 
 | Метод | Путь | Тело → ответ |
 |---|---|---|
-| GET | `/internal/v1/me/preferences` | → `Preferences`; при первом обращении создаёт профиль по умолчанию |
-| PATCH | `/internal/v1/me/preferences` | `PreferencesPatch` → `Preferences`; 409 `PREFERENCES_VERSION_CONFLICT {current_version}`; 422 `PREFERENCES_INVALID {field, reason}` |
-| PUT | `/internal/v1/me/departures` | `{airports: ["TAS", …]}` → `Preferences`; 422 `AIRPORT_UNKNOWN {iata}`; максимум 10 |
-| POST | `/internal/v1/me/onboarding/complete` | → `Preferences` (идемпотентно, время первой отметки сохраняется) |
-| GET | `/internal/v1/me/release-notes/seen` | → `{release_note_id, published_at, onboarding_completed_at}` — 9.4 «Что нового»: последняя просмотренная заметка о релизе (null — ещё не было); при первом обращении создаёт профиль по умолчанию |
-| PUT | `/internal/v1/me/release-notes/seen` | `{release_note_id, published_at (с поясом)}` → то же; отметка только вперёд (старее или та же — no-op), **не** меняет `version`/`updated_at` предпочтений и не публикует событий; 410 `USER_DELETED` |
-| GET | `/internal/v1/directory/airports?q=&limit=` | → `{items: Airport[]}`, `limit` 1…50 (по умолчанию 20), `q` ≤ 60 |
-| GET | `/internal/v1/directory/interests` | → `{items: InterestCategory[]}` |
-| GET | `/internal/v1/directory/geographies` | → `{items: GeoOption[]}` |
+| GET | `/internal/v1/me/plan?tz=` | → `LearningPlan` + `ETag: "<version>"`; при первом обращении создаёт план по умолчанию (зона — `?tz=`, если это известная IANA-зона, иначе `DEFAULT_TIMEZONE` = Asia/Tashkent) |
+| PATCH | `/internal/v1/me/plan` | `PlanPatch` (+ необязательный `If-Match: <version>` / `"<version>"` / `W/"<version>"`) → `LearningPlan`; 409 `PLAN_VERSION_CONFLICT {current_version}`; 422 `PLAN_INVALID {field, reason}`; `learning.plan.updated.v1 {changed_fields}` |
+| POST | `/internal/v1/me/plan/onboarding/complete` | → `LearningPlan`; 409 `PLAN_INCOMPLETE {missing: [goal, level_self, schedule]}`; повтор — 200 без изменений |
+| GET | `/internal/v1/me/plan/today` | → `TodayPlan` |
+| POST | `/internal/v1/me/activities` | `{kind: lesson\|review\|practice\|diagnostic, minutes 1..240, occurred_at?}` + `Idempotency-Key` (обязателен) → `TodayPlan`; `learning.activity.recorded.v1` |
+| GET | `/internal/v1/directory/goals`, `/internal/v1/directory/topics` | → `{items: DirectoryItem[]}` (6 целей, 12 тем, RU/UZ) |
+| POST | `/internal/v1/plan:tick` | n8n, `Authorization: Bearer <SCHEDULER_TOKEN>` → `{plans_checked, reminders, missed}` |
 
-Профиль по умолчанию: интересы и география пустые, `strong_events_outside_geo=false`, `event_formats=["offline"]`, бюджет не задан (все поля `null`), горизонт 12, точки `[3, 6]`, `departures=[]` (BR-TG-004: город вылета без действия пользователя не выбирается), все `flight_prefs=true`, `version=1`.
+План по умолчанию: `goal`/`level_self` null, тем нет, `ui_lang`/`explain_lang` = ru, `course_pair` = ru-en,
+`daily` (1..7), 19:00, 20 минут, напоминания выключены, `version` = 1. Создание по умолчанию — не правка: события нет.
 
-Удалённый пользователь (после саги удаления) → 410 `USER_DELETED` на любой `/me`-запрос: запоздавшие команды не воскрешают профиль.
-
-### Правила валидации (`422 PREFERENCES_INVALID {field, reason}`)
-Вход строгий: лишние поля (`user_id`, `departures`, `onboarding_completed_at` в PATCH) → `unknown_field`; явный `null` для поля → `null_not_allowed`; `"1500"`/`1500.5`/`true` вместо целого → `integer_required`/`invalid_type`.
+### Валидация PATCH (`422 PLAN_INVALID {field, reason}`)
+Ошибки формы тела тоже отдаются как `PLAN_INVALID` (а не общий `VALIDATION_ERROR`): лишнее поле → `unknown_field`,
+явный `null` → `null_not_allowed`, неверный тип → тип ошибки pydantic (`int_type`, `list_type`, …).
 
 | Поле | Правило | reason |
 |---|---|---|
-| `interests.categories` | коды таксономии, без повторов | `unknown_category`, `duplicate` |
-| `interests.entities` | ≤ 20; 1…60 символов после trim (пробелы схлопываются); без повторов без учёта регистра; без управляющих символов | `too_many`, `length`, `duplicate`, `invalid_chars` |
-| `geographies` | ≤ 30; `world` без кода и только один; `region` — из справочника; `country` — ISO 3166-1 alpha-2 (регистр нормализуется); `city` — English name 1…60 (латиница, в т.ч. с диакритикой) | `too_many`, `world_exclusive`, `not_allowed`, `unknown_region`, `unknown_country`, `length`, `english_name_required`, `duplicate` |
-| `event_formats` | ⊂ {offline, online}, не пусто, без повторов | `empty`, `duplicate`, `not_allowed` |
-| `budget` | `preset` → min/max вычисляет сервис (under_500 0–500, 500_1000, 1000_2000, 2000_5000); `custom` → `custom_amount` целое 50…100 000 USD (BR-TG-003); `preset=null` + `min/max` на границах пресетов (0/500/1000/2000/5000) — объединение диапазонов, как мультивыбор чипов прототипа; всё `null` — не задан | `required`, `out_of_range`, `integer_required`, `not_allowed`, `not_preset_boundary`, `invalid_range` |
-| `search_horizon_months` | 3 / 6 / 12 / 24 | `not_allowed` |
-| `notification_points_months` | ⊂ {1, 3, 6, 12}, без повторов, ≤ горизонта; при уменьшении горизонта без явных точек лишние точки снимаются (как в прототипе) | `not_allowed`, `duplicate`, `exceeds_horizon` |
-| `flight_prefs` | все три поля; хотя бы один из `direct`/`connecting` = true | `required`, `at_least_one` |
-| `departures` (PUT) | ≤ 10 IATA из справочника, без повторов | `too_many`, `duplicate`; неизвестный код → `AIRPORT_UNKNOWN {iata}` |
+| `goal` | `work\|career\|travel\|daily\|study\|exam` | `unknown_value` |
+| `level_self` | `zero\|beginner\|some\|confident` | `unknown_value` |
+| `topics` | коды справочника, ≤ 5, без повторов | `unknown_topic`, `too_many`, `duplicate` |
+| `ui_lang`, `explain_lang` | `ru\|uz` (смена языка интерфейса не меняет `course_pair`, AT-05) | `unknown_value` |
+| `schedule.preset` | `daily\|weekdays\|three_per_week\|custom` | `unknown_value` |
+| `schedule.days` | ISO 1..7, 1–7 дней, без повторов (порядок нормализуется) | `empty`, `out_of_range`, `duplicate` |
+| preset ↔ days | пресет без дней → канонические дни (custom — текущие); пресет + дни → для не-custom дни обязаны совпасть (`daily` 1..7, `weekdays` 1..5, `three_per_week` 1,3,5); дни без пресета → текущий пресет, если дни канонические для него, иначе `custom` | `preset_mismatch` |
+| `schedule.preferred_time` | `HH:MM` 00:00…23:59 | `format` |
+| `schedule.duration_min` | 10 / 15 / 20 / 30 | `not_allowed` |
+| `schedule.timezone` | известная IANA-зона (`available_timezones()`, без `localtime`/`Factory`) | `unknown_timezone` |
+| `If-Match` | целое, можно в кавычках и с `W/` | `format` (field `If-Match`) |
 
-Повтор того же PATCH/PUT — no-op: версия, `updated_at` и события не меняются.
+Повтор того же PATCH — no-op (версия и события не меняются). Шаг графика онбординга считается пройденным, когда ученик
+сам прислал хоть одно поле графика, кроме `timezone` (зона приходит из `Intl` клиента) — даже со значениями по
+умолчанию (`schedule_set_at`).
 
-### Справочники
-- **Аэропорты** — `src/tilhero_learning_plan/directory/airports.json`: 428 аэропортов, 126 стран, English naming (`iata, city, country, country_code, name`) + `aliases_ru` для популярных городов. Все аэропорты Узбекистана (TAS SKD BHK NMA FEG UGC NCU TMJ KSQ NVI AZN), Центральная Азия и СНГ, Ближний Восток, Европа, Азия, Америка, Африка, Океания. `city` — обслуживаемый город (как в бронировании: EWR → New York, BGY → Milan). Поиск без учёта регистра, диакритики и «ё»: точный IATA → префикс города (англ. или русский алиас) → начало слова → вхождение; внутри ранга — порядок файла (Узбекистан первым). Пустой `q` — начало списка.
-- **Интересы** — `directory/taxonomy.py`: 6 категорий верхнего уровня (music, sport, business, culture, education, festivals) и подкатегории `<parent>.<slug>`; `icon` — имя иконки Mini App. Чипы прототипа: concerts→music.concerts, motorsport→sport.motorsport, football→sport.football, tennis→sport.tennis, ai→business.ai, fintech→business.fintech, forums→business.conferences, theatre→culture.theatre, exhibitions→culture.exhibitions, festivals→festivals, education→education, othersport→sport.other.
-- **География** — `directory/geo.py`: world, 9 регионов (central_asia, cis, middle_east, europe, asia, north_america, latin_america, africa, oceania), 69 популярных стран RU/EN. Чипы прототипа: uz→UZ, kz→KZ, uae→AE, turkey→TR, europe/asia → регионы, na → north_america.
+### TodayPlan
+- `local_date`, `is_scheduled_today`, `slot_time` — по зоне плана; `done_today`/`minutes_today` — занятия за местную дату.
+- `next_slot` — сегодня, если сегодня день графика и занятия ещё не было, иначе ближайшая следующая дата графика.
+- `streak_days` — дни с занятием после последнего выпущенного пропуска без занятия (дни вне графика серию не рвут:
+  по ним пропуск не выпускается; несделанный сегодняшний слот — тоже, день не закончился).
+- `week` (пн…вс): `scheduled` — по текущему графику, `done` — было занятие, `missed` — пропуск выпущен (slot_marks)
+  и занятия так и нет.
 
-### Спрос для discovery (спринт 3)
-`GET /internal/v1/demand` — вызывает только `discovery` (иначе 403 `CALLER_NOT_ALLOWED`). Агрегат по профилям с
-завершённым онбордингом, без `user_id`:
-`{generated_at, users, countries: [{code, users}], cities: [{name, country_code|null, users}],
-categories: [{code, users}], online_users, regions: [{code, users}], world_users}`.
-`regions` и `world_users` — сверх контракта (аддитивно): регионы и «весь мир» discovery разворачивает в страны сам.
-Город — English name из профиля (группировка без учёта регистра), страна — по справочнику аэропортов (неизвестный или
-неоднозначный город → `null`). Группы меньше `DEMAND_MIN_GROUP` (1) скрываются, общие счётчики ниже порога обнуляются;
-в каждом списке не больше `DEMAND_TOP_N` (50), по убыванию числа пользователей. Подсчёт — SQL по JSONB, профили в
-память не загружаются.
+### Занятия
+`local_date` — дата `occurred_at` (по умолчанию — сейчас) в зоне плана на момент записи. `occurred_at` — с поясом, не
+раньше `ACTIVITY_MAX_AGE_DAYS` (7) и не позже допуска часов (`ACTIVITY_FUTURE_SKEW_SECONDS` = 300) → иначе 422
+`ACTIVITY_INVALID {field: occurred_at, reason: out_of_range}`. `Idempotency-Key` (8–128 `[A-Za-z0-9._:-]`):
+нет → 400 `IDEMPOTENCY_KEY_REQUIRED`, неверный → 422 `IDEMPOTENCY_KEY_INVALID`; повтор с тем же телом → тот же
+результат + `Idempotent-Replayed: true` без новой записи и события; с другим телом → 422 `IDEMPOTENCY_KEY_REUSED`.
+Занятие задним числом за день пропуска снимает пропуск в `week` и не рвёт серию.
 
-**Какие пользователи учитываются (решение спринта 3, зафиксировано в `docs/sprint3/INTERNAL_API.md`):**
-- профили с завершённым онбордингом (`onboarding_completed_at IS NOT NULL`);
-- удалённые пользователи в спрос не попадают: их профили физически стираются сагой удаления
-  (`user.deletion.requested.v1`, TG-FR-006);
-- **DISABLED не фильтруется**: статус пользователя (ACTIVE/DISABLED) живёт в identity-consent, в preferences его нет,
-  и проекции статуса здесь не ведётся. Отключённый пользователь продолжает учитываться в спросе. Это влияет только на
-  приоритет scope поиска discovery (агрегат без `user_id`, порог `DEMAND_MIN_GROUP`), не на выдачу пользователям.
-  Если понадобится исключать DISABLED — проекция `user.status.changed.v1` в preferences (отдельная задача).
+## plan:tick (n8n `plan-tick`, каждые 5 мин)
+Вход: `Authorization: Bearer <SCHEDULER_TOKEN>` (сравнение за постоянное время). Пустой `SCHEDULER_TOKEN` выключает
+вход (401 `SCHEDULER_TOKEN_INVALID`); внутренний JWT любого сервиса → 403 `CALLER_NOT_ALLOWED`.
+
+- Окно `(last_tick_at, now]`, не длиннее `TICK_MAX_LOOKBACK_HOURS` (24): после простоя старые слоты не догоняются.
+  `tick_state` (одна строка, создаётся миграцией с `now()`) блокируется FOR UPDATE — параллельные запуски идут по
+  очереди; часы позади `last_tick_at` — пустое окно, `last_tick_at` назад не двигается.
+- Проверяются только планы с `onboarding_completed_at`.
+- **Слот** = дата графика + `preferred_time` в зоне плана → UTC через zoneinfo. DST: несуществующее время (перевод
+  вперёд) сдвигается на величину перехода (02:30 → 03:30 летнего), неоднозначное — первое из двух; каждой дате — ровно
+  один момент слота и один «конец дня», окна не пересекаются → каждое событие ровно в одном окне.
+- **reminder** (`learning.reminder.due.v1`): момент слота в окне, `reminders_enabled`, за местную дату слота занятий нет.
+  `streak_days` — как в TodayPlan на дату слота. Устаревшие (после простоя) отсекает notifications (> 3 ч → центр).
+- **missed** (`learning.session.missed.v1`): в окне закончился местный день слота (00:00 следующей даты), занятий за
+  дату нет; выпускается и без `reminders_enabled`. `consecutive_missed` = 1 + выпущенные пропуски после последнего дня
+  с занятием; `next_slot_date` — следующая дата графика. Занятие в тот же местный день (до 00:00) отменяет пропуск.
+- Идемпотентность: `slot_marks (user_id, local_date, kind)` вставляется ON CONFLICT DO NOTHING, событие — только если
+  отметка вставлена, в той же транзакции. Повтор окна (n8n retry) событий не дублирует.
+- Смена графика действует со следующего слота: слоты раньше `effective_from` = max(`onboarding_completed_at`,
+  `schedule_set_at`) не напоминаются и не считаются пропущенными (`schedule_set_at` двигается при смене времени, дней
+  или зоны). Слот, по которому напоминание уже было, не повторяется (отметка по дате) — даже при переезде в другую зону.
+  Онбординг после времени слота — сегодня слота нет.
+- Удаление (сага) и tick: tick держит план FOR KEY SHARE, удаление сначала удаляет план (ждёт tick), потом отметки —
+  сирот не остаётся; PATCH/занятия берут FOR NO KEY UPDATE и tick не ждут.
 
 ## События
-Публикует (outbox): `user.preferences.updated.v1 {user_id, changed_fields, onboarding_completed}` — только при фактическом изменении; значения полей в событие не попадают.
+Публикует (outbox): `learning.plan.updated.v1` (`changed_fields` — имена колонок: goal, level_self, topics, ui_lang,
+explain_lang, preset, days, preferred_time, duration_min, reminders_enabled, timezone, onboarding_completed_at; плюс
+снимок goal/ui_lang/course_pair/timezone/days/preferred_time/duration_min/reminders_enabled/onboarding_completed),
+`learning.reminder.due.v1`, `learning.session.missed.v1`, `learning.activity.recorded.v1`, `user.domain.deleted.v1`
+(`domain = learning-plan`, `mode = deleted`).
 
-Потребляет: `user.deletion.requested.v1` (durable `preferences.user_deletion`) → физическое удаление профиля + отметка в `deleted_users` → `user.domain.deleted.v1 {user_id, request_id, domain: "preferences", mode: "deleted"}` (causation = событие запроса). Повторная доставка отсекается inbox; новый запрос для уже удалённого пользователя снова подтверждается.
+Потребляет: `user.deletion.requested.v1` (durable `learning-plan.user_deletion`). `user.profile.created/updated.v1` не
+потребляются: `is_minor`/`age_band` нет ни в одном payload learning-plan, правила для детей применяет notifications по
+`DeliveryInfo`.
 
 ## Данные
-- `preference_profiles` — `user_id` PK UUID, JSONB `interests/geographies/event_formats/budget/notification_points_months/departures/flight_prefs`, `strong_events_outside_geo`, `search_horizon_months`, `onboarding_completed_at`, `version` (оптимистическая блокировка), `created_at`, `updated_at`; CHECK-ограничения формы JSON.
-- 9.4 (миграция 0003): `preference_profiles.last_seen_release_note_id` + `last_seen_release_note_at` (оба null или оба заданы) — отметка «Что нового». Живёт в строке профиля, поэтому удаляется сагой удаления вместе с профилем (тест `test_pref_release_seen.py`).
-- `deleted_users` — `user_id`, `request_id`, `deleted_at` (без персональных данных).
-- `outbox`, `inbox`.
+Схема `learning_plan`: `plans` (+ `schedule_set_at`), `activities` (`UNIQUE(user_id, idempotency_key)`),
+`slot_marks` (PK user_id, local_date, kind), `tick_state` (одна строка), `deleted_users` (отметка исполненного удаления:
+псевдонимный `user_id` + `request_id`, без PII), `outbox`/`inbox`. Миграция 0001.
 
-Изменения одного пользователя сериализуются `pg_advisory_xact_lock` + `SELECT … FOR UPDATE`.
+Сага удаления: план, занятия и отметки удаляются физически, затем ACK; повтор саги (тот же `request_id`, новый
+`event_id`) снова подтверждается; после удаления `/me/*` → 410 `USER_DELETED`.
+
+## Настройки
+`DATABASE_URL`, `MIGRATION_DATABASE_URL`, `DB_SCHEMA=learning_plan`, `NATS_URL`, `SCHEDULER_TOKEN`,
+`DEFAULT_TIMEZONE` (Asia/Tashkent), `TICK_MAX_LOOKBACK_HOURS` (24), `TICK_BATCH_SIZE` (500),
+`ACTIVITY_MAX_AGE_DAYS` (7), `ACTIVITY_FUTURE_SKEW_SECONDS` (300), внутренний JWT (`INTERNAL_JWT_*`).
 
 ## Runbook
-
-> Эксплуатация через браузер (Railway, админка, оповещения ops-monitor): [docs/runbooks/preferences.md](../../docs/runbooks/preferences.md). Ниже — технические детали для разработчика.
-- Миграции: `alembic -c alembic.ini upgrade head` (Railway preDeploy).
-- Локально: `infra/dev/stack.sh up`, `DATABASE_URL=postgresql://preferences:dev@127.0.0.1:5432/tilhero NATS_URL=nats://127.0.0.1:4222 uv run uvicorn tilhero_learning_plan.main:app --port 8102`.
-- Тесты: `uv run pytest services/preferences -q`.
-- Переменные спроса: `DEMAND_MIN_GROUP` (по умолчанию 1), `DEMAND_TOP_N` (50).
-- Обновление справочника аэропортов: правка `airports.json` (IATA проверять по сайту аэропорта), новые коды добавлять в конец региона; переименование кода у пользователей не мигрирует — существующие `departures` хранят снимок `{airport_iata, city, country_code}`.
-- 409 `PREFERENCES_VERSION_CONFLICT` в логах BFF — нормальная ситуация двух открытых окон; клиент перечитывает профиль.
+- Напоминаний нет: проверить `tick_state.last_tick_at` (двигается каждые 5 мин), ответ n8n `plan-tick`, что у ученика
+  `onboarding_completed_at` и `reminders_enabled`, нет ли занятия за дату; отметки — `slot_marks`.
+- Простой планировщика > 24 ч: пропущенные слоты не догоняются (так задумано); после восстановления окно — последние 24 ч.
+- Ротация `SCHEDULER_TOKEN`: сменить в n8n и сервисе одновременно (до смены n8n получает 401, события не теряются —
+  следующий tick покроет окно до 24 ч).

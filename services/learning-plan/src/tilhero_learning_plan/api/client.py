@@ -1,37 +1,50 @@
-"""Клиентские команды (Mini App → telegram-bff → preferences).
+"""Клиентские команды learning-plan (Mini App → telegram-bff → learning-plan), INTERNAL_API §2.
 
-user_id — только из внутреннего токена (sub), никогда из пути или тела (IDOR).
+user_id — только из внутреннего токена (sub = активный ученик), никогда из пути или тела (IDOR).
 """
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Coroutine
+from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 
 from tilhero_common.app import Runtime, get_runtime
-from tilhero_common.errors import ApiError, unauthorized, unprocessable
-from tilhero_common.internal_auth import InternalAuth, Principal
-from tilhero_learning_plan.domain import profiles
-from tilhero_learning_plan.domain.validation import PreferencesInvalid, UnknownAirport, from_pydantic
-from tilhero_learning_plan.schemas import DeparturesIn, PreferencesOut, PreferencesPatchIn
+from tilhero_common.errors import unprocessable
+from tilhero_common.internal_auth import Principal
+from tilhero_learning_plan.api.common import client_auth, clock_of, current_user, idempotency_key, settings_of
+from tilhero_learning_plan.directory import GOALS, TOPICS
+from tilhero_learning_plan.domain import plans
+from tilhero_learning_plan.domain.schedule import PlanInvalid
+from tilhero_learning_plan.models import Plan
+from tilhero_learning_plan.schemas import (
+    ActivityIn,
+    DirectoryOut,
+    LearningPlanOut,
+    PlanPatchIn,
+    TodayPlanOut,
+)
 
-# Вызывающие клиентского API. admin-bff (спринт 2) получит отдельный staff-роутер с правами,
-# а не доступ к /me.
-CLIENT_CALLERS = {"telegram-bff"}
+_REASONS = {"extra_forbidden": "unknown_field", "missing": "required"}
 
 
-def invalid(exc: PreferencesInvalid) -> ApiError:
-    return unprocessable("PREFERENCES_INVALID", "Некорректные предпочтения",
-                         {"field": exc.field, "reason": exc.reason, **exc.extra})
+def _from_pydantic(errors: list[dict[str, Any]]) -> PlanInvalid:
+    err = errors[0] if errors else {}
+    loc = [str(p) for p in err.get("loc", ()) if not isinstance(p, int)]
+    if loc and loc[0] == "body":
+        loc = loc[1:]
+    field = ".".join(loc) or "body"
+    kind = str(err.get("type", "invalid"))
+    return PlanInvalid(field[:80], _REASONS.get(kind, kind)[:40])
 
 
-class PreferencesRoute(APIRoute):
-    """Ошибки формы тела — тоже 422 PREFERENCES_INVALID {field, reason}, а не общий VALIDATION_ERROR."""
+class PlanRoute(APIRoute):
+    """Ошибки формы тела правки плана — тоже 422 PLAN_INVALID {field, reason}, а не общий VALIDATION_ERROR."""
 
     def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
         original = super().get_route_handler()
@@ -40,57 +53,122 @@ class PreferencesRoute(APIRoute):
             try:
                 return await original(request)
             except RequestValidationError as exc:
-                raise invalid(from_pydantic(list(exc.errors()))) from None
+                raise plans.plan_invalid(_from_pydantic(list(exc.errors()))) from None
 
         return handler
 
 
-router = APIRouter(prefix="/internal/v1/me", tags=["client"], route_class=PreferencesRoute)
-auth = InternalAuth(CLIENT_CALLERS)
+router = APIRouter(prefix="/internal/v1/me", tags=["client"])
+plan_router = APIRouter(prefix="/internal/v1/me", tags=["client"], route_class=PlanRoute)
+directory_router = APIRouter(prefix="/internal/v1/directory", tags=["client"])
 
 
-def current_user(principal: Principal = Depends(auth)) -> uuid.UUID:
-    try:
-        return uuid.UUID(principal.user_id)
-    except ValueError:
-        raise unauthorized("USER_CONTEXT_INVALID", "Некорректный контекст пользователя") from None
+def _with_etag(response: Response, p: Plan) -> LearningPlanOut:
+    response.headers["ETag"] = f'"{p.version}"'
+    return plans.to_public(p)
 
 
-@router.get("/preferences", response_model=PreferencesOut)
-async def get_preferences(user_id: uuid.UUID = Depends(current_user),
-                          rt: Runtime = Depends(get_runtime)) -> PreferencesOut:
+@router.get("/plan", response_model=LearningPlanOut)
+async def get_plan(
+    request: Request,
+    response: Response,
+    tz: str | None = Query(default=None, max_length=64),
+    user_id: uuid.UUID = Depends(current_user),
+    rt: Runtime = Depends(get_runtime),
+) -> LearningPlanOut:
+    timezone = plans.resolve_timezone(tz, settings_of(request).default_timezone)
     async with rt.transaction() as session:
-        return profiles.to_public(await profiles.get_or_create(session, user_id))
+        return _with_etag(response, await plans.get_or_create(session, user_id, timezone))
 
 
-@router.patch("/preferences", response_model=PreferencesOut,
-              responses={409: {"description": "PREFERENCES_VERSION_CONFLICT"},
-                         422: {"description": "PREFERENCES_INVALID {field, reason}"}})
-async def patch_preferences(body: PreferencesPatchIn, user_id: uuid.UUID = Depends(current_user),
-                            rt: Runtime = Depends(get_runtime)) -> PreferencesOut:
+@plan_router.patch("/plan", response_model=LearningPlanOut,
+                   responses={409: {"description": "PLAN_VERSION_CONFLICT {current_version}"},
+                              422: {"description": "PLAN_INVALID {field, reason}"}})
+async def patch_plan(
+    body: PlanPatchIn,
+    request: Request,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match", max_length=32),
+    user_id: uuid.UUID = Depends(current_user),
+    rt: Runtime = Depends(get_runtime),
+) -> LearningPlanOut:
+    settings = settings_of(request)
+    version = plans.parse_if_match(if_match)
     try:
         async with rt.transaction() as session:
-            return profiles.to_public(await profiles.apply_patch(session, user_id, body))
-    except PreferencesInvalid as exc:
-        raise invalid(exc) from None
+            p = await plans.apply_patch(session, user_id, body, if_match=version,
+                                        default_tz=plans.resolve_timezone(None, settings.default_timezone),
+                                        now=clock_of(request)(), producer=settings.service_name)
+            return _with_etag(response, p)
+    except PlanInvalid as exc:
+        raise plans.plan_invalid(exc) from None
 
 
-@router.put("/departures", response_model=PreferencesOut,
-            responses={422: {"description": "AIRPORT_UNKNOWN {iata} | PREFERENCES_INVALID {field, reason}"}})
-async def put_departures(body: DeparturesIn, user_id: uuid.UUID = Depends(current_user),
-                         rt: Runtime = Depends(get_runtime)) -> PreferencesOut:
+@router.post("/plan/onboarding/complete", response_model=LearningPlanOut,
+             responses={409: {"description": "PLAN_INCOMPLETE {missing}"}})
+async def complete_onboarding(
+    request: Request,
+    response: Response,
+    user_id: uuid.UUID = Depends(current_user),
+    rt: Runtime = Depends(get_runtime),
+) -> LearningPlanOut:
+    settings = settings_of(request)
+    async with rt.transaction() as session:
+        p = await plans.complete_onboarding(session, user_id,
+                                            default_tz=plans.resolve_timezone(None, settings.default_timezone),
+                                            now=clock_of(request)(), producer=settings.service_name)
+        return _with_etag(response, p)
+
+
+@router.get("/plan/today", response_model=TodayPlanOut)
+async def get_today(
+    request: Request,
+    user_id: uuid.UUID = Depends(current_user),
+    rt: Runtime = Depends(get_runtime),
+) -> TodayPlanOut:
+    timezone = plans.resolve_timezone(None, settings_of(request).default_timezone)
+    async with rt.transaction() as session:
+        p = await plans.get_or_create(session, user_id, timezone)
+        return TodayPlanOut.model_validate(await plans.today_for(session, p, clock_of(request)()))
+
+
+@router.post("/activities", response_model=TodayPlanOut,
+             responses={400: {"description": "IDEMPOTENCY_KEY_REQUIRED"},
+                        422: {"description": "ACTIVITY_INVALID | IDEMPOTENCY_KEY_INVALID | IDEMPOTENCY_KEY_REUSED"}})
+async def record_activity(
+    body: ActivityIn,
+    request: Request,
+    response: Response,
+    idem: str | None = Header(default=None, alias="Idempotency-Key"),
+    user_id: uuid.UUID = Depends(current_user),
+    rt: Runtime = Depends(get_runtime),
+) -> TodayPlanOut:
+    key = idempotency_key(idem)
+    settings = settings_of(request)
+    now: datetime = clock_of(request)()
     try:
         async with rt.transaction() as session:
-            return profiles.to_public(await profiles.set_departures(session, user_id, body.airports))
-    except UnknownAirport as exc:
-        raise unprocessable("AIRPORT_UNKNOWN", "Аэропорт не найден в справочнике",
-                            {"iata": exc.iata}) from None
-    except PreferencesInvalid as exc:
-        raise invalid(exc) from None
+            p, replayed = await plans.record_activity(
+                session, user_id, body, key=key,
+                default_tz=plans.resolve_timezone(None, settings.default_timezone), now=now,
+                max_age=timedelta(days=settings.activity_max_age_days),
+                future_skew=timedelta(seconds=settings.activity_future_skew_seconds),
+                producer=settings.service_name,
+            )
+            today = await plans.today_for(session, p, now)
+    except plans.IdempotencyReused:
+        raise unprocessable("IDEMPOTENCY_KEY_REUSED",
+                            "Ключ идемпотентности уже использован с другими данными") from None
+    if replayed:
+        response.headers["Idempotent-Replayed"] = "true"
+    return TodayPlanOut.model_validate(today)
 
 
-@router.post("/onboarding/complete", response_model=PreferencesOut)
-async def complete_onboarding(user_id: uuid.UUID = Depends(current_user),
-                              rt: Runtime = Depends(get_runtime)) -> PreferencesOut:
-    async with rt.transaction() as session:
-        return profiles.to_public(await profiles.complete_onboarding(session, user_id))
+@directory_router.get("/goals", response_model=DirectoryOut)
+async def goals(_: Principal = Depends(client_auth)) -> DirectoryOut:
+    return DirectoryOut.model_validate({"items": list(GOALS)})
+
+
+@directory_router.get("/topics", response_model=DirectoryOut)
+async def topics(_: Principal = Depends(client_auth)) -> DirectoryOut:
+    return DirectoryOut.model_validate({"items": list(TOPICS)})
