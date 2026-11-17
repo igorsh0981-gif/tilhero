@@ -1,4 +1,5 @@
-"""Помощники тестов notifications: фейковые identity-consent и telegram-bot-gateway (httpx.MockTransport)."""
+"""Помощники тестов notifications: фейковые identity-consent (/delivery, /public) и telegram-bot-gateway
+(httpx.MockTransport), публикация событий спринта 1 (с проверкой по контрактам), чтение центра."""
 
 from __future__ import annotations
 
@@ -6,48 +7,67 @@ import itertools
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from sqlalchemy import select
 
 from tilhero_common.app import Runtime
 from tilhero_common.messaging import Envelope, InMemoryBus, make_envelope
-from tilhero_common.testing import internal_headers
+from tilhero_common.testing import assert_event_conforms, internal_headers
 from tilhero_notifications.dispatcher import Dispatcher
 from tilhero_notifications.models import Notification
 from tilhero_notifications.settings import Settings
 
 SERVICE_DIR = str(Path(__file__).resolve().parents[1])
 SCHEDULER_TOKEN = "sched-" + "n" * 40
-# Обычное «немедленное» уведомление для сценариев доставки (код PIN через шину не принимается — ревью P2)
-CRIT = "watch.critical"
-EVENT_ID = "3f2b8c1e-6a4d-4e0b-9c71-2d5e8f1a7b90"  # события — UUID (deep link event_<uuid>)
-CRIT_PARAMS = {"event_id": EVENT_ID, "event_title": "Desert Sounds Festival", "change": "postponed"}
+TZ = "Asia/Tashkent"
+ALL_CATEGORIES = ("reminders", "missed", "social", "support", "product")
 
 
 def api_error(status: int, code: str, details: dict | None = None) -> httpx.Response:
-    return httpx.Response(
-        status, json={"code": code, "message": "x", "trace_id": "t", "details": details or {}}
-    )
+    return httpx.Response(status, json={"code": code, "message": "x", "trace_id": "t", "details": details or {}})
+
+
+def local_day(offset: int = 1, tz: str = TZ) -> date:
+    """Местная дата через `offset` дней (по умолчанию завтра — «сейчас» тестов всегда в будущем: записи журнала
+    создаются с реальным временем и захватываются только при scheduled_for ≤ now)."""
+    return datetime.now(UTC).astimezone(ZoneInfo(tz)).date() + timedelta(days=offset)
+
+
+def quiet_around_now(tz: str = TZ) -> dict[str, str]:
+    """Тихие часы, внутри которых сейчас реальное местное время (за час до и два часа после)."""
+    local = datetime.now(UTC).astimezone(ZoneInfo(tz))
+    return {
+        "start": (local - timedelta(hours=1)).strftime("%H:%M"),
+        "end": (local + timedelta(hours=2)).strftime("%H:%M"),
+    }
+
+
+def at(day: date, hhmm: str, tz: str = TZ) -> datetime:
+    h, m = (int(x) for x in hhmm.split(":"))
+    return datetime.combine(day, time(h, m), tzinfo=ZoneInfo(tz)).astimezone(UTC)
 
 
 @dataclass
 class FakeIdentity:
-    users: dict[str, dict[str, Any]] = field(default_factory=dict)
+    delivery: dict[str, dict[str, Any]] = field(default_factory=dict)
+    public: dict[str, dict[str, Any]] = field(default_factory=dict)
     calls: list[str] = field(default_factory=list)
     fail: list[int] = field(default_factory=list)
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.calls.append(request.url.path)
-        user_id = request.url.path.split("/")[4]
+        _, _, _, _, user_id, kind = request.url.path.split("/")
         if self.fail:
             return api_error(self.fail.pop(0), "UPSTREAM")
-        if user_id not in self.users:
+        table = self.delivery if kind == "delivery" else self.public
+        if user_id not in table:
             return api_error(404, "USER_NOT_FOUND")
-        return httpx.Response(200, json=self.users[user_id])
+        return httpx.Response(200, json=table[user_id])
 
 
 @dataclass
@@ -57,20 +77,7 @@ class FakeGateway:
     queue: list[Any] = field(default_factory=list)
     _ids: Any = field(default_factory=lambda: itertools.count(9001))
 
-    # спринт 8: POST /internal/v1/ops-messages (оповещения операторам) — свои вызовы и очередь ответов
-    ops_calls: list[dict[str, Any]] = field(default_factory=list)
-    ops_queue: list[Any] = field(default_factory=list)
-
     def handler(self, request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/internal/v1/ops-messages":
-            self.ops_calls.append(json.loads(request.content))
-            self.headers.append(dict(request.headers))
-            if self.ops_queue:
-                item = self.ops_queue.pop(0)
-                if isinstance(item, Exception):
-                    raise item
-                return item
-            return httpx.Response(200, json={"message_id": next(self._ids)})
         assert request.url.path == "/internal/v1/messages"
         self.calls.append(json.loads(request.content))
         self.headers.append(dict(request.headers))
@@ -80,6 +87,9 @@ class FakeGateway:
                 raise item
             return item
         return httpx.Response(200, json={"message_id": next(self._ids)})
+
+    def to(self, telegram_user_id: int) -> list[dict[str, Any]]:
+        return [c for c in self.calls if c["telegram_user_id"] == telegram_user_id]
 
 
 @dataclass
@@ -91,40 +101,198 @@ class NotifEnv:
     identity: FakeIdentity
     gateway: FakeGateway
     dispatcher: Dispatcher
-    digest: Any = None  # DigestRunner (app.state.digest)
+    accept: Any = None  # app.state.accept — общий приём записи журнала
     _tg: Any = field(default_factory=lambda: itertools.count(918273645))
+
+    # ---------------------------------------------------------------- пользователи (identity-consent)
 
     def add_user(
         self,
         *,
         locale: str = "ru",
         enabled: bool = True,
+        categories: tuple[str, ...] = ALL_CATEGORIES,
         quiet: dict[str, str] | None = None,
-        tz: str | None = "Asia/Tashkent",
+        tz: str = TZ,
         status: str = "ACTIVE",
-        digest_time: str | None = "09:00",
+        name: str = "Алишер",
+        age_band: str | None = "18+",
     ) -> uuid.UUID:
         user_id = uuid.uuid4()
-        self.identity.users[str(user_id)] = {
-            "telegram_user_id": next(self._tg),
+        self.identity.delivery[str(user_id)] = {
+            "user_id": str(user_id),
+            "kind": "account",
+            "recipient_telegram_user_id": next(self._tg),
+            "recipient_is_guardian": False,
+            "learner_display_name": name,
             "locale": locale,
+            "age_band": age_band,
+            "is_minor": age_band in ("6-9", "10-13", "14-17"),
             "notifications_enabled": enabled,
+            "categories": list(categories),
             "quiet_hours": quiet,
-            "digest_time": digest_time,
             "timezone": tz,
+            "status": status,
+        }
+        self.identity.public[str(user_id)] = {
+            "user_id": str(user_id),
+            "display_name": name,
+            "kind": "account",
+            "age_band": age_band,
             "status": status,
         }
         return user_id
 
-    def telegram_id(self, user_id: uuid.UUID) -> int:
-        return int(self.identity.users[str(user_id)]["telegram_user_id"])
+    def add_child(
+        self, guardian: uuid.UUID, *, name: str = "Мадина", age_band: str = "6-9", **kw: Any
+    ) -> uuid.UUID:
+        g = self.identity.delivery[str(guardian)]
+        child = self.add_user(name=name, age_band=age_band, locale=kw.pop("locale", g["locale"]), **kw)
+        self.identity.delivery[str(child)].update(
+            kind="child",
+            recipient_telegram_user_id=g["recipient_telegram_user_id"],
+            recipient_is_guardian=True,
+            is_minor=True,
+        )
+        self.identity.public[str(child)]["kind"] = "child"
+        return child
 
-    async def publish(
-        self, event_type: str, payload: dict[str, Any], producer: str = "identity-consent"
-    ) -> Envelope:
+    def telegram_id(self, user_id: uuid.UUID) -> int:
+        return int(self.identity.delivery[str(user_id)]["recipient_telegram_user_id"])
+
+    def set(self, user_id: uuid.UUID, **values: Any) -> None:
+        self.identity.delivery[str(user_id)].update(values)
+
+    # ---------------------------------------------------------------- события
+
+    async def publish(self, event_type: str, payload: dict[str, Any], producer: str = "identity-consent") -> Envelope:
         env = make_envelope(event_type, payload, producer=producer)
+        assert_event_conforms(env)
         await self.bus.publish(env)
         return env
+
+    async def reminder(
+        self,
+        user: uuid.UUID,
+        day: date,
+        slot: str = "10:00",
+        *,
+        duration: int = 15,
+        streak: int | None = None,
+        tz: str = TZ,
+    ) -> Envelope:
+        return await self.publish(
+            "learning.reminder.due.v1",
+            {
+                "user_id": str(user),
+                "local_date": day.isoformat(),
+                "slot_time": slot,
+                "timezone": tz,
+                "duration_min": duration,
+                "streak_days": streak,
+            },
+            producer="learning-plan",
+        )
+
+    async def missed(
+        self,
+        user: uuid.UUID,
+        day: date,
+        slot: str = "10:00",
+        *,
+        consecutive: int = 1,
+        next_slot: date | None = None,
+        tz: str = TZ,
+    ) -> Envelope:
+        return await self.publish(
+            "learning.session.missed.v1",
+            {
+                "user_id": str(user),
+                "local_date": day.isoformat(),
+                "slot_time": slot,
+                "timezone": tz,
+                "consecutive_missed": consecutive,
+                "next_slot_date": next_slot.isoformat() if next_slot else None,
+            },
+            producer="learning-plan",
+        )
+
+    async def invite(
+        self,
+        action: str,
+        inviter: uuid.UUID,
+        invitee: uuid.UUID,
+        *,
+        kind: str = "friend",
+        invite_id: uuid.UUID | None = None,
+    ) -> uuid.UUID:
+        invite_id = invite_id or uuid.uuid4()
+        payload: dict[str, Any] = {
+            "invite_id": str(invite_id),
+            "inviter_user_id": str(inviter),
+            "invitee_user_id": str(invitee),
+            "kind": kind,
+        }
+        if action in ("accepted", "declined"):
+            payload[f"{action}_at"] = "2026-11-18T10:00:00Z"
+        await self.publish(f"social.invite.{action}.v1", payload, producer="social")
+        return invite_id
+
+    async def member_added(self, family: uuid.UUID, user: uuid.UUID, role: str,
+                           owner: uuid.UUID | None = None) -> Envelope:
+        owner = owner or (user if role == "owner" else None)
+        assert owner is not None, "owner_user_id обязателен в social.family.member_added.v1"
+        return await self.publish(
+            "social.family.member_added.v1",
+            {"family_id": str(family), "owner_user_id": str(owner), "user_id": str(user), "role": role,
+             "added_at": "2026-11-18T10:00:00Z"},
+            producer="social",
+        )
+
+    async def reply_event(
+        self, user: uuid.UUID, number: str = "TCK-3081", message_id: uuid.UUID | None = None
+    ) -> Envelope:
+        return await self.publish(
+            "support.ticket.replied.v1",
+            {
+                "ticket_id": str(uuid.uuid4()),
+                "number": number,
+                "user_id": str(user),
+                "message_id": str(message_id or uuid.uuid4()),
+                "sender_type": "operator",
+                "replied_at": "2026-11-18T10:00:00Z",
+            },
+            producer="support",
+        )
+
+    async def release_note(
+        self, *, audience: str = "existing", segments: dict[str, Any] | None = None
+    ) -> uuid.UUID:
+        note = uuid.uuid4()
+        await self.publish(
+            "experience.release_note.published.v1",
+            {
+                "release_note_id": str(note),
+                "slug": "2026.11",
+                "audience": audience,
+                "segments": segments,
+                "published_at": "2026-11-18T10:00:00Z",
+            },
+            producer="experience-config",
+        )
+        return note
+
+    async def delete(self, user: uuid.UUID, request_id: uuid.UUID | None = None) -> Envelope:
+        return await self.publish(
+            "user.deletion.requested.v1",
+            {
+                "user_id": str(user),
+                "request_id": str(request_id or uuid.uuid4()),
+                "requested_at": "2026-11-18T10:00:00Z",
+            },
+        )
+
+    # ---------------------------------------------------------------- HTTP
 
     async def transactional(
         self,
@@ -150,52 +318,26 @@ class NotifEnv:
             headers=internal_headers(self.settings, issuer=issuer),
         )
 
-    async def critical(self, user_id: uuid.UUID, **kw: Any) -> uuid.UUID:
-        return await self.request(user_id, CRIT, dict(CRIT_PARAMS), kind="critical", **kw)
+    def bff(self, user: uuid.UUID | str | None, issuer: str = "telegram-bff") -> dict[str, str]:
+        return internal_headers(self.settings, issuer=issuer, subject=str(user) if user else None)
 
-    async def request(
-        self,
-        user_id: uuid.UUID,
-        template: str,
-        params: dict[str, Any] | None,
-        *,
-        kind: str = "transactional",
-        dedup_key: str | None = None,
-        startapp: str | None = None,
-        notification_id: uuid.UUID | None = None,
-    ) -> uuid.UUID:
-        nid = notification_id or uuid.uuid4()
-        payload: dict[str, Any] = {
-            "notification_id": str(nid),
-            "user_id": str(user_id),
-            "kind": kind,
-            "template": template,
-            "params": params,
-            "dedup_key": dedup_key or f"t:{nid}",
-        }
-        if startapp:
-            payload["startapp"] = startapp
-        await self.publish("notification.requested.v1", payload)
-        return nid
+    async def inbox(self, user: uuid.UUID, **params: Any) -> dict[str, Any]:
+        r = await self.client.get("/internal/v1/me/inbox", params=params, headers=self.bff(user))
+        assert r.status_code == 200, r.text
+        return r.json()
 
-    async def reply_event(
-        self, user_id: uuid.UUID, number: str = "TCK-3081", message_id: uuid.UUID | None = None
-    ) -> Envelope:
-        return await self.publish(
-            "support.ticket.replied.v1",
-            {
-                "ticket_id": str(uuid.uuid4()),
-                "number": number,
-                "user_id": str(user_id),
-                "message_id": str(message_id or uuid.uuid4()),
-                "sender_type": "operator",
-                "replied_at": "2026-10-08T10:00:00Z",
-            },
-            producer="support",
-        )
+    async def unread(self, user: uuid.UUID) -> int:
+        r = await self.client.get("/internal/v1/me/inbox/unread-count", headers=self.bff(user))
+        assert r.status_code == 200, r.text
+        return int(r.json()["unread"])
+
+    async def read(self, user: uuid.UUID, body: dict[str, Any]) -> httpx.Response:
+        return await self.client.post("/internal/v1/me/inbox:read", json=body, headers=self.bff(user))
+
+    # ---------------------------------------------------------------- журнал
 
     async def dispatch(self, now: datetime | None = None) -> int:
-        return await self.dispatcher.run_once(now)
+        return sum((await self.dispatcher.run_once(now)).values())
 
     async def rows(self, user_id: uuid.UUID | None = None) -> list[Notification]:
         async with self.runtime.transaction() as s:
@@ -209,6 +351,10 @@ class NotifEnv:
             return (
                 await s.execute(select(Notification).where(Notification.notification_id == notification_id))
             ).scalar_one()
+
+    async def one(self, user_id: uuid.UUID) -> Notification:
+        [row] = await self.rows(user_id)
+        return row
 
     async def events(self, event_type: str) -> list[Envelope]:
         assert self.runtime.relay is not None

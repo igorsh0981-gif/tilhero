@@ -16,6 +16,7 @@ from tilhero_common.testing import TEST_REDIS_URL
 TOKEN = "123456789:AAH" + "x" * 32
 SECRET = "s" * 40
 MINIAPP = "https://app.tilhero.test/miniapp"
+APP_LINK = "https://t.me/TilHeroBot/app"
 
 
 @dataclass

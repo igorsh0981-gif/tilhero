@@ -1,7 +1,7 @@
 [project]
 name = "tilhero-botgw"
 version = "0.1.0"
-description = "TilHero telegram-bot-gateway: webhook, команды, доставка сообщений в Telegram"
+description = "TilHero telegram-bot-gateway: webhook, /start с кнопкой Mini App, доставка сообщений в Telegram"
 requires-python = ">=3.12"
 dependencies = ["tilhero-common"]
 

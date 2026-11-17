@@ -1,9 +1,14 @@
-"""POST /internal/v1/notifications/transactional — синхронная доставка секретных транзакционных сообщений
-(код сброса PIN) в обход шины (ревью спринта 1, P2): код не попадает ни в outbox identity-consent, ни в JetStream.
+"""Внутренние команды notifications.
 
-Вызывает только identity-consent. Уведомление записывается в журнал и сразу отправляется; временная ошибка
-доставки оставляет его в очереди с повтором (status=queued), конечный статус очищает params (CHECK в БД).
-Повтор с тем же notification_id/dedup_key не отправляет второй раз — возвращает текущий статус.
+- `POST /internal/v1/notifications/transactional` — синхронная доставка секретных транзакционных сообщений (код
+  сброса PIN) мимо шины: код не попадает ни в outbox identity-consent, ни в JetStream. Вызывает только
+  identity-consent. Запись в журнал (в центре не показывается) и немедленная отправка; временная ошибка → queued
+  с повтором; конечный статус очищает params (CHECK в БД). Повтор с тем же notification_id/dedup_key не отправляет
+  второй раз — возвращает текущий статус.
+- `POST /internal/v1/notifications:dispatch` — n8n каждые 5 мин (`Authorization: Bearer <SCHEDULER_TOKEN>`):
+  обработка записей с scheduled_for ≤ now (отложенные тихими часами, окном детей, слотом пропуска; повторы).
+  Повтор вызова безопасен: захват SKIP LOCKED + аренда, bot-gateway идемпотентен по notification_id.
+  Попутно — срок хранения журнала (90 дней).
 """
 
 from __future__ import annotations
@@ -11,18 +16,19 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
-import uuid
-from typing import Annotated, Any, Literal, cast
+from collections import Counter
+from datetime import UTC, datetime, timedelta
+from typing import cast
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, ConfigDict, Field
 
 from tilhero_common.app import Runtime, get_runtime
 from tilhero_common.errors import unauthorized, unprocessable
 from tilhero_common.internal_auth import HEADER, InternalAuth, Principal
 from tilhero_notifications import store
+from tilhero_notifications.schemas import DispatchOut, TransactionalIn, TransactionalOut
 from tilhero_notifications.settings import Settings
-from tilhero_notifications.templates import DIRECT_TEMPLATES, TEMPLATES, TemplateError
+from tilhero_notifications.templates import TEMPLATES, TemplateError
 
 log = logging.getLogger("tilhero.notifications.api")
 router = APIRouter(prefix="/internal/v1/notifications", tags=["internal"])
@@ -30,25 +36,8 @@ scheduler_router = APIRouter(tags=["internal"])
 identity_only = InternalAuth({"identity-consent"})
 no_service = InternalAuth(set())  # внутренний JWT любого сервиса → 403 CALLER_NOT_ALLOWED
 
-
-class TransactionalIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    notification_id: uuid.UUID
-    user_id: uuid.UUID
-    template: Literal["pin.reset_code"]
-    params: dict[str, Any]
-    dedup_key: Annotated[str, Field(min_length=1, max_length=200)]
-
-
-class TransactionalOut(BaseModel):
-    notification_id: uuid.UUID
-    status: Literal["queued", "sent", "failed", "skipped"]
-    reason: str | None = None
-
-
-if set(TransactionalIn.model_fields["template"].annotation.__args__) != set(DIRECT_TEMPLATES):  # type: ignore[union-attr]
-    raise RuntimeError("TransactionalIn.template must list exactly the direct-only templates")
+# Статус журнала → ответ транзакционной отправки (контракт identity-consent: sent | queued | failed | skipped)
+TX_STATUS = {"scheduled": "queued", "sent": "sent", "failed": "failed", "skipped": "skipped", "in_app_only": "failed"}
 
 
 @router.post("/transactional", response_model=TransactionalOut)
@@ -63,9 +52,9 @@ async def transactional(
         TEMPLATES[body.template].validate(body.params)
     except TemplateError:
         raise unprocessable("NOTIFICATION_PARAMS_INVALID", "Некорректные параметры шаблона") from None
-    enqueue = request.app.state.enqueue
+    accept = request.app.state.accept
     async with rt.transaction() as session:
-        outcome = await enqueue(
+        outcome = await accept(
             session,
             None,
             notification_id=body.notification_id,
@@ -74,12 +63,11 @@ async def transactional(
             template=body.template,
             params=body.params,
             dedup_key=body.dedup_key,
-            startapp=None,
             direct=True,
         )
     if outcome == "skipped":
         return TransactionalOut(notification_id=body.notification_id, status="skipped", reason="user_deleted")
-    if outcome == "queued":
+    if outcome == "scheduled":
         dispatcher = request.app.state.dispatcher
         try:
             await asyncio.wait_for(
@@ -92,19 +80,7 @@ async def transactional(
     if found is None:  # удалено параллельной обработкой удаления пользователя
         return TransactionalOut(notification_id=body.notification_id, status="skipped", reason="user_deleted")
     nid, _user, status, reason = found
-    status = "queued" if status == "scheduled" else status
-    return TransactionalOut(notification_id=nid, status=status, reason=reason)  # type: ignore[arg-type]
-
-
-# ---------------------------------------------------------------- дайджест (спринт 6, §5)
-
-
-class DigestRunOut(BaseModel):
-    users: int
-    digests: int
-    items: int
-    postponed: int
-    errors: int
+    return TransactionalOut(notification_id=nid, status=TX_STATUS[status], reason=reason)  # type: ignore[arg-type]
 
 
 async def scheduler_only(request: Request) -> str:
@@ -130,9 +106,23 @@ async def scheduler_only(request: Request) -> str:
     raise unauthorized("SCHEDULER_TOKEN_INVALID", "Неверный токен планировщика")
 
 
-@scheduler_router.post("/internal/v1/notifications:digest", response_model=DigestRunOut)
-async def run_digest(request: Request, _: str = Depends(scheduler_only)) -> DigestRunOut:
-    """Собрать дайджесты пользователей, у которых наступило digest_time (n8n каждые 15 мин). Идемпотентно:
-    повтор в тот же локальный день не создаёт второго дайджеста."""
-    result = await request.app.state.digest.run()
-    return DigestRunOut(**vars(result))
+@scheduler_router.post("/internal/v1/notifications:dispatch", response_model=DispatchOut)
+async def dispatch(
+    request: Request, _: str = Depends(scheduler_only), rt: Runtime = Depends(get_runtime)
+) -> DispatchOut:
+    settings = cast(Settings, rt.settings)
+    dispatcher = request.app.state.dispatcher
+    totals: Counter[str] = Counter()
+    for _batch in range(settings.dispatch_max_batches_per_call):
+        outcomes = await dispatcher.run_once()
+        totals.update(outcomes)
+        if sum(outcomes.values()) < settings.dispatch_batch_size:
+            break
+    now = datetime.now(UTC)
+    async with rt.transaction() as session:
+        purged = await store.purge_expired(session, before=now - timedelta(days=settings.retention_days))
+    if purged:
+        log.info("notifications retention purge", extra={"purged": purged})
+    return DispatchOut(
+        sent=totals["sent"], scheduled=totals["scheduled"], in_app_only=totals["in_app_only"], failed=totals["failed"]
+    )

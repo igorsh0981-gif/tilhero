@@ -1,4 +1,4 @@
-"""python -m tilhero_botgw.setup: webhook, команды RU/EN, кнопка меню, описания; валидация настроек."""
+"""python -m tilhero_botgw.setup: webhook, команда /start RU/UZ, кнопка меню, описания RU/UZ; валидация настроек."""
 
 from __future__ import annotations
 
@@ -22,14 +22,14 @@ async def test_setup_configures_bot() -> None:
         "setWebhook",
         "setMyCommands",
         "setMyCommands[ru]",
-        "setMyCommands[en]",
+        "setMyCommands[uz]",
         "setChatMenuButton",
         "setMyDescription",
         "setMyShortDescription",
         "setMyDescription[ru]",
         "setMyShortDescription[ru]",
-        "setMyDescription[en]",
-        "setMyShortDescription[en]",
+        "setMyDescription[uz]",
+        "setMyShortDescription[uz]",
     ]
     calls = dict(tg.calls[:1])
     assert calls["setWebhook"] == {
@@ -39,14 +39,20 @@ async def test_setup_configures_bot() -> None:
         "allowed_updates": ["message", "callback_query", "my_chat_member"],
         "max_connections": 40,
     }
-    ru_commands = tg.calls[2][1]
-    assert ru_commands["language_code"] == "ru"
-    assert [c["command"] for c in ru_commands["commands"]] == ["start", "events", "watch", "support", "help"]
-    assert ru_commands["commands"][1]["description"] == "Каталог событий"
+    assert tg.calls[1][1] == {"commands": [{"command": "start", "description": "Открыть TilHero"}]}  # по умолчанию RU
+    ru_commands, uz_commands = tg.calls[2][1], tg.calls[3][1]
+    assert ru_commands == {"commands": [{"command": "start", "description": "Открыть TilHero"}], "language_code": "ru"}
+    assert uz_commands == {
+        "commands": [{"command": "start", "description": "TilHeroʼni ochish"}],
+        "language_code": "uz",
+    }
     menu = tg.calls[4][1]["menu_button"]
     assert menu == {"type": "web_app", "text": "TilHero", "web_app": {"url": MINIAPP}}
-    ru_desc = tg.calls[7][1]
+    ru_desc, uz_desc = tg.calls[7][1], tg.calls[9][1]
     assert ru_desc["language_code"] == "ru" and "мини-приложении" in ru_desc["description"]
+    assert uz_desc["language_code"] == "uz" and "mini-ilovada" in uz_desc["description"]
+    for _, body in tg.calls:  # ничего туристического
+        assert not any(w in str(body).lower() for w in ("событи", "поездк", "билет", "отель", "event", "trip"))
     assert all(len(body.get("short_description", "")) <= 120 for _, body in tg.calls)
     assert all(len(body.get("description", "")) <= 512 for _, body in tg.calls)
     assert tg.tokens_seen == {TOKEN}

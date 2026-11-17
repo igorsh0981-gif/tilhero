@@ -5,13 +5,10 @@ from contextlib import asynccontextmanager
 
 import httpx
 import pytest
-from botgw_testkit import FakeIdentity, FakeTelegram, GatewayEnv, make_settings
+from botgw_testkit import APP_LINK, FakeIdentity, FakeTelegram, GatewayEnv, make_settings
 
 from tilhero_botgw.main import build_apps
 from tilhero_common.app import Runtime
-
-OPS_CHAT_ID = -1001234567890
-ADMIN_WEB = "https://admin.tilhero.test"
 
 
 @pytest.fixture
@@ -21,9 +18,9 @@ async def gw():
 
 
 @pytest.fixture
-async def ops_gw():
-    """Чат операторов настроен (спринт 8, §6); лимит 3 сообщения в минуту — чтобы проверить 429."""
-    async with _gateway(ops_alert_chat_id=str(OPS_CHAT_ID), admin_web_url=ADMIN_WEB, ops_messages_per_minute=3) as env:
+async def link_gw():
+    """Прямая ссылка Mini App настроена (TELEGRAM_APP_LINK): payload /start — в startapp ссылки t.me."""
+    async with _gateway(telegram_app_link=APP_LINK) as env:
         yield env
 
 

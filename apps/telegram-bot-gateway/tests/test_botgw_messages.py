@@ -21,7 +21,7 @@ def body(**kw) -> dict:
         "text": "Поддержка ответила на обращение <b>TCK-3081</b>. Откройте, чтобы прочитать.",
         "buttons": [
             [{"text": "Открыть обращение", "startapp": "ticket_TCK-3081"}],
-            [{"text": "Источник", "url": "https://www.abudhabigp.com/en/tickets"}],
+            [{"text": "Справка", "url": "https://tilhero.uz/help/notifications"}],
         ],
         "disable_notification": True,
         "idempotency_key": str(uuid.uuid4()),
@@ -45,7 +45,7 @@ async def test_send_message_with_buttons(gw) -> None:
     assert sent["reply_markup"] == {
         "inline_keyboard": [
             [{"text": "Открыть обращение", "web_app": {"url": f"{MINIAPP}?startapp=ticket_TCK-3081"}}],
-            [{"text": "Источник", "url": "https://www.abudhabigp.com/en/tickets"}],
+            [{"text": "Справка", "url": "https://tilhero.uz/help/notifications"}],
         ]
     }
     assert gw.telegram.tokens_seen == {TOKEN}
