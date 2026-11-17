@@ -124,14 +124,6 @@ POLICIES: dict[str, Policy] = {p.policy: p for p in (
        "Проверка и сброс PIN / биометрии — на пользователя (сброс — отдельный счётчик reset:<user_id>)"),
     _p("tg.public_ip", "telegram-bff", "ip", 120, 60, "open", "RATE_LIMIT_PUBLIC_IP_PER_MIN",
        "Публичные эндпоинты Mini App (refresh, config, policy) — с одного IP"),
-    _p("tg.offers", "telegram-bff", "user", 20, 60, "open", "RATE_LIMIT_OFFERS_PER_MIN",
-       "Расчёт предложений поездки — на пользователя"),
-    _p("tg.reactions", "telegram-bff", "user", 60, 60, "open", "RATE_LIMIT_REACTIONS_PER_MIN",
-       "Реакции «Больше такого» / «Не интересно» — на пользователя"),
-    _p("tg.watch", "telegram-bff", "user", 30, 60, "open", "RATE_LIMIT_WATCH_PER_MIN",
-       "Команды слежений — на пользователя"),
-    _p("tg.ai", "telegram-bff", "user", 6, 60, "open", "AI_RATE_PER_MINUTE",
-       "Ходы AI-консьержа — на пользователя (сверх суточной квоты)"),
     _p("tg.support_create", "telegram-bff", "user", 10, 3600, "open", None,
        "Создание обращения в поддержку — на пользователя в час (новая)"),
     _p("adm.login_ip", "admin-bff", "ip", 10, 60, "closed", "RATE_LIMIT_LOGIN_IP_PER_MIN",
@@ -150,8 +142,8 @@ POLICIES: dict[str, Policy] = {p.policy: p for p in (
        "Команды DLQ и повтор удаления профиля (новая)"),
     _p("int.caller", "*", "caller", 10_000, 60, "open", None,
        "Внутренние вызовы Python-сервисов — на пару (вызывающий, сервис): защита от зацикливания (новая)"),
-    _p("gw.llm.user", "provider-gateway", "user", 40, 60, "open", None,
-       "Потоковый Claude (llm/messages:stream) — на пользователя (новая)"),
+    _p("gw.llm.user", "ai-gateway", "user", 40, 60, "open", None,
+       "Потоковый LLM (ai-gateway, спринт 4) — на пользователя"),
 )}
 
 # Защитный минимум для политик fail: closed (вход, PIN, команды): не реже 1 запроса в минуту
@@ -521,7 +513,7 @@ def runtime_limiter(request: Request) -> RateLimiter | None:
 
 
 async def enforce(request: Request, policy: str, subject: str) -> None:
-    """Проверка политики в обработчике Python-сервиса (например, `gw.llm.user` в provider-gateway).
+    """Проверка политики в обработчике Python-сервиса (например, `gw.llm.user` в ai-gateway).
     У сервиса без Redis лимитера нет — проверка пропускается."""
     limiter = runtime_limiter(request)
     if limiter is not None:

@@ -283,7 +283,7 @@ export interface InboxItem {
   category: NotificationCategory;
   title: string; // на языке ученика
   body: string;
-  /** куда ведёт: inv_<id> | ticket_TCK-NNNN | route_<route>; null — никуда */
+  /** куда ведёт: invite_<invite_id> | ticket_TCK-NNNN | route_<route>; null — никуда */
   startapp: string | null;
   created_at: string;
   read_at: string | null;

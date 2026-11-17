@@ -96,8 +96,9 @@ CATALOG = {
     "social.invite.reminder_due.v1": ({"invite_id": UUID, "inviter_user_id": UUID, "invitee_user_id": UUID,
                                        "kind": enum("family", "friend", "referral")},
                                       ["invite_id", "inviter_user_id", "invitee_user_id", "kind"]),
-    "social.family.member_added.v1": ({"family_id": UUID, "user_id": UUID, "role": enum("owner", "adult", "teen", "child"),
-                                       "added_at": TS}, ["family_id", "user_id", "role", "added_at"]),
+    "social.family.member_added.v1": ({"family_id": UUID, "owner_user_id": UUID, "user_id": UUID,
+                                       "role": enum("owner", "adult", "teen", "child"), "added_at": TS},
+                                      ["family_id", "owner_user_id", "user_id", "role", "added_at"]),
     # ------------------------------------------------------------ notifications
     "notification.requested.v1": ({
         "notification_id": UUID, "user_id": UUID,
@@ -128,7 +129,12 @@ CATALOG = {
                                         "activation_id": UUID}, ["app", "version", "activation_id"]),
     "experience.release_note.published.v1": ({"release_note_id": UUID, "slug": STR,
                                               "audience": enum("new", "existing", "all"),
-                                              "segments": {"type": "object"}, "published_at": TS},
+                                              "segments": {"type": "object", "additionalProperties": False, "properties": {
+                                                  "age": {"type": "array", "uniqueItems": True,
+                                                          "items": enum("kids", "teens", "adults")},
+                                                  "ui_lang": {"type": "array", "uniqueItems": True,
+                                                              "items": enum("ru", "uz")}}},
+                                              "published_at": TS},
                                              ["release_note_id", "slug", "audience", "published_at"]),
     # ------------------------------------------------------------ audit (payload = запись журнала)
     "admin.audit.recorded.v1": ({"record_id": UUID, "occurred_at": TS, "actor_type": enum("staff", "user", "system", "service"),

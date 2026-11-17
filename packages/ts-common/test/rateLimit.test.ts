@@ -222,7 +222,7 @@ describe("лимитер", () => {
     const d = policyDefaults("telegram-bff", { "tg.user": 77 });
     expect(Object.keys(d)).toEqual(RATE_LIMIT_POLICIES.filter((p) => p.service === "telegram-bff").map((p) => p.policy));
     expect(d["tg.user"]!.limit).toBe(77);
-    expect(d["tg.offers"]!.limit).toBe(20);
+    expect(d["tg.support_create"]!.limit).toBe(10);
     expect(() => policyDefaults("telegram-bff", { "adm.staff": 1 })).toThrow();
   });
 });

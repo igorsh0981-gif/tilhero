@@ -5,6 +5,7 @@
   "type": "object",
   "required": [
     "family_id",
+    "owner_user_id",
     "user_id",
     "role",
     "added_at"
@@ -12,6 +13,10 @@
   "additionalProperties": false,
   "properties": {
     "family_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "owner_user_id": {
       "type": "string",
       "format": "uuid"
     },
