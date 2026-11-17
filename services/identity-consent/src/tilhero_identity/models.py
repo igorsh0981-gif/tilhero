@@ -1,8 +1,12 @@
 """Модели identity-consent. Таблицы без схемы — попадают в схему сервиса через search_path.
 
-PII (Telegram ID, username, имя) хранит только этот сервис; после завершения удаления строка users
-обезличивается,
-consents остаются как юридическое доказательство (без PII), секреты (PIN, биометрия) удаляются физически.
+PII (Telegram ID, username, имя аккаунта, имя ребёнка) хранит только этот сервис; после завершения удаления строка
+users обезличивается, consents остаются как юридическое доказательство (без PII), секреты (PIN, биометрия)
+удаляются физически.
+
+Ученик (learner) = строка users: `kind=account` — аккаунт Telegram (сам ученик 14+ или родитель), `kind=child` —
+детский профиль 6–13 на аккаунте родителя (без своего Telegram, связь — guardian_links). У каждого ученика свои
+настройки уведомлений (категории, тихие часы, часовой пояс); адресат сообщений ребёнка — опекун.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     Time,
+    UniqueConstraint,
     func,
     text,
 )
@@ -32,38 +37,58 @@ from tilhero_identity.base import USER_FK, Base
 USER_STATUSES = ("ACTIVE", "DISABLED", "DELETION_REQUESTED", "DELETED")
 TS = DateTime(timezone=True)
 
+# SQL-фрагменты CHECK — общие для моделей и миграции 0001 (сверка schema_drift сравнивает имена ограничений)
+AGE_BANDS_SQL = "('6-9','10-13','14-17','18+')"
+CATEGORIES_SQL = "ARRAY['reminders','missed','social','support','product']::text[]"
+
 
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        CheckConstraint("locale IN ('ru','en')", name="ck_users_locale"),
+        CheckConstraint("kind IN ('account','child')", name="ck_users_kind"),
+        CheckConstraint("locale IN ('ru','uz')", name="ck_users_locale"),
         CheckConstraint(
             "status IN ('ACTIVE','DISABLED','DELETION_REQUESTED','DELETED')", name="ck_users_status"
         ),
+        CheckConstraint(f"age_band IS NULL OR age_band IN {AGE_BANDS_SQL}", name="ck_users_age_band"),
+        CheckConstraint(
+            "guardian_consent IN ('not_required','pending','granted','declined')", name="ck_users_guardian_consent"
+        ),
+        # аккаунт Telegram — только 14-17 или 18+ (ребёнок 6–13 — детский профиль у родителя)
+        CheckConstraint("kind <> 'account' OR age_band IS NULL OR age_band IN ('14-17','18+')",
+                        name="ck_users_account_age"),
+        # детский профиль: без своего Telegram, возраст 6–13 (после обезличивания возраст стирается)
+        CheckConstraint("kind <> 'child' OR (telegram_user_id IS NULL AND username IS NULL)",
+                        name="ck_users_child_no_telegram"),
+        CheckConstraint("kind <> 'child' OR status = 'DELETED' OR age_band IN ('6-9','10-13')",
+                        name="ck_users_child_age"),
+        CheckConstraint(f"notify_categories <@ {CATEGORIES_SQL}", name="ck_users_notify_categories"),
         CheckConstraint(
             "(quiet_hours_start IS NULL) = (quiet_hours_end IS NULL)", name="ck_users_quiet_hours_pair"
         ),
-        # Инвариант обезличивания: у удалённого пользователя не остаётся Telegram-идентичности.
+        # Инвариант обезличивания: у удалённого ученика не остаётся Telegram-идентичности и имени.
         CheckConstraint(
             "status <> 'DELETED' OR (telegram_user_id IS NULL AND username IS NULL AND display_name IS NULL)",
             name="ck_users_deleted_anonymized",
         ),
-        # Курсорная сверка user-admin: GET /admin/v1/users?updated_after= (миграция 0002)
-        Index("ix_users_updated_at", "updated_at", "user_id"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8), nullable=False, server_default="account")
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)
     username: Mapped[str | None] = mapped_column(String(64))
     display_name: Mapped[str | None] = mapped_column(String(160))
     locale: Mapped[str] = mapped_column(String(2), nullable=False, server_default="ru")
     status: Mapped[str] = mapped_column(String(24), nullable=False, server_default="ACTIVE")
-    age_confirmed_18_plus: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
-    age_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    age_band: Mapped[str | None] = mapped_column(String(5))
+    age_set_at: Mapped[datetime | None] = mapped_column(TS)
+    guardian_consent: Mapped[str] = mapped_column(String(16), nullable=False, server_default="not_required")
     notifications_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
-    quiet_hours_start: Mapped[time | None] = mapped_column(Time)
-    quiet_hours_end: Mapped[time | None] = mapped_column(Time)
-    digest_time: Mapped[time] = mapped_column(Time, nullable=False, server_default=text("'09:00'"))
+    notify_categories: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{support}'::text[]")
+    )
+    quiet_hours_start: Mapped[time | None] = mapped_column(Time, server_default=text("'22:00'"))
+    quiet_hours_end: Mapped[time | None] = mapped_column(Time, server_default=text("'08:00'"))
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, server_default="Asia/Tashkent")
     bot_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
@@ -71,6 +96,57 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         TS, nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class GuardianLink(Base):
+    """Опекунство: у ребёнка один опекун (PK child_user_id); ≤ MAX_CHILDREN детей на аккаунт (проверка в домене под
+    блокировкой строки родителя). Idempotency-Key создания детского профиля — UNIQUE (guardian_user_id, key)."""
+
+    __tablename__ = "guardian_links"
+    __table_args__ = (
+        CheckConstraint("child_user_id <> guardian_user_id", name="ck_guardian_links_not_self"),
+        Index("ix_guardian_links_guardian", "guardian_user_id"),
+        UniqueConstraint("guardian_user_id", "idempotency_key", name="uq_guardian_links_idempotency"),
+    )
+
+    child_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey(USER_FK, ondelete="CASCADE"), primary_key=True
+    )
+    guardian_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey(USER_FK), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
+    idempotency_key: Mapped[str | None] = mapped_column(String(128))
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64))
+
+
+class GuardianConsentRequest(Base):
+    """Ссылка согласия родителя для подростка 14–17. Хранится только sha256 токена; у подростка не больше одной
+    действующей (pending) ссылки — новая отзывает прежнюю (revoked). Истечение — по expires_at (в строке остаётся
+    pending, наружу — expired)."""
+
+    __tablename__ = "guardian_consent_requests"
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','granted','declined','expired','revoked')",
+                        name="ck_guardian_consent_requests_status"),
+        CheckConstraint("(status IN ('granted','declined')) = (guardian_user_id IS NOT NULL)",
+                        name="ck_guardian_consent_requests_guardian"),
+        CheckConstraint("(status IN ('granted','declined')) = (decided_at IS NOT NULL)",
+                        name="ck_guardian_consent_requests_decided"),
+        CheckConstraint("expires_at > created_at", name="ck_guardian_consent_requests_expiry"),
+        Index("ix_guardian_consent_requests_teen", "teen_user_id"),
+        Index("uq_guardian_consent_requests_pending", "teen_user_id", unique=True,
+              postgresql_where=text("status = 'pending'")),
+        UniqueConstraint("teen_user_id", "idempotency_key", name="uq_guardian_consent_requests_idempotency"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    teen_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey(USER_FK), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    guardian_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey(USER_FK))
+    idempotency_key: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    decided_at: Mapped[datetime | None] = mapped_column(TS)
+    expires_at: Mapped[datetime] = mapped_column(TS, nullable=False)
 
 
 class Consent(Base):
@@ -81,8 +157,13 @@ class Consent(Base):
         CheckConstraint("revoke_reason IS NULL OR revoke_reason IN ('user','superseded','deletion')",
                         name="ck_consents_revoke_reason"),
         CheckConstraint("(revoked_at IS NULL) = (revoke_reason IS NULL)", name="ck_consents_revoke_pair"),
+        CheckConstraint("locale IN ('ru','uz')", name="ck_consents_locale"),
+        CheckConstraint(f"age_band IS NULL OR age_band IN {AGE_BANDS_SQL}", name="ck_consents_age_band"),
+        # основание: сам пользователь или родитель за детский профиль (granted_by — аккаунт родителя)
+        CheckConstraint("basis IN ('self','guardian')", name="ck_consents_basis"),
+        CheckConstraint("(basis = 'guardian') = (granted_by_user_id IS NOT NULL)", name="ck_consents_granted_by"),
         Index("ix_consents_user_accepted", "user_id", "accepted_at"),
-        # Не больше одного действующего согласия на пользователя.
+        # Не больше одного действующего согласия на ученика.
         Index("uq_consents_active", "user_id", unique=True, postgresql_where=text("revoked_at IS NULL")),
     )
 
@@ -95,12 +176,16 @@ class Consent(Base):
     revoke_reason: Mapped[str | None] = mapped_column(String(16))
     channel: Mapped[str] = mapped_column(String(16), nullable=False, server_default="telegram")
     locale: Mapped[str] = mapped_column(String(2), nullable=False)
-    age_confirmed_18_plus: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    age_band: Mapped[str | None] = mapped_column(String(5))
+    basis: Mapped[str] = mapped_column(String(16), nullable=False, server_default="self")
+    granted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey(USER_FK))
     policy_text_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     evidence_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
 
 
 class PinCredential(Base):
+    """Код родителя (PIN 4/6 цифр) аккаунта."""
+
     __tablename__ = "pin_credentials"
     __table_args__ = (CheckConstraint("pin_length IN (4, 6)", name="ck_pin_length"),)
 
@@ -123,16 +208,15 @@ class BiometricCredential(Base):
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
 
 
-# Сага удаления (ADR-009): таблицы deletion_* живут в модуле deletion/ — импорт регистрирует их в Base.metadata
+# Сага удаления: таблицы deletion_* живут в модуле deletion/ — импорт регистрирует их в Base.metadata
 # (Alembic env и сверка моделей с миграциями видят все таблицы сервиса).
 from tilhero_identity.deletion.models import (  # noqa: E402
     DeletionAttempt,
     DeletionDomainAck,
-    DeletionIdempotencyKey,
     DeletionRequest,
 )
 
 __all__ = [
     "USER_FK", "USER_STATUSES", "Base", "BiometricCredential", "Consent", "DeletionAttempt", "DeletionDomainAck",
-    "DeletionIdempotencyKey", "DeletionRequest", "PinCredential", "User",
+    "DeletionRequest", "GuardianConsentRequest", "GuardianLink", "PinCredential", "User",
 ]

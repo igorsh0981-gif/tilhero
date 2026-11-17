@@ -1,5 +1,5 @@
-"""Безопасность: PIN (Argon2id, смена/снятие с текущим PIN), блокировка 5→5 мин, общий счётчик с биометрией
-и PIN при удалении, сброс PIN кодом из бота, биометрия; события user.security.changed.v1 по схеме."""
+"""Безопасность: код родителя (PIN, Argon2id, смена/снятие с текущим кодом), блокировка 5→5 мин, общий счётчик
+с биометрией и кодом при удалении, сброс кода из бота, биометрия; события user.security.changed.v1 по схеме."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ async def test_set_change_remove_pin(env) -> None:
     row = await _pin_row(env, uid)
     assert row and row.pin_hash.startswith("$argon2id$") and PIN not in row.pin_hash
 
-    # Дефект FinAdvisor S6: повторная установка без текущего PIN не перезаписывает его.
+    # Повторная установка без текущего кода не перезаписывает его.
     again = await env.call("PUT", "/internal/v1/me/pin", uid, {"pin": PIN6})
     assert again.status_code == 409 and again.json()["code"] == "PIN_ALREADY_SET"
     wrong = await env.call("PUT", "/internal/v1/me/pin", uid, {"pin": PIN6, "current_pin": WRONG})
@@ -245,7 +245,7 @@ async def test_pin_reset_flow(env) -> None:
     await env.call("PUT", "/internal/v1/me/biometric", uid)
 
     code = await _request_code(env, uid)
-    # Ревью P2: код уходит синхронно в notifications (iss=identity-consent), в событиях и outbox его нет
+    # Код уходит синхронно в notifications (iss=identity-consent), в событиях и outbox его нет
     p = env.notifications.calls[-1]
     assert p["template"] == "pin.reset_code" and p["params"] == {"code": code, "ttl_minutes": 10}
     assert set(p) == {"notification_id", "user_id", "template", "params", "dedup_key"}
@@ -407,7 +407,7 @@ async def test_secrets_never_leak_to_logs_responses_or_events(env) -> None:
     outbox = await env.outbox_dump()
     for secret in (secret_pin, secret_pin2, token):
         assert secret not in outbox
-    # код не попадает ни в одно событие и ни в outbox (ревью P2) — только в синхронный вызов notifications
+    # код не попадает ни в одно событие и ни в outbox — только в синхронный вызов notifications
     assert [e.event_type for e in env.bus.published if code in e.model_dump_json()] == []
     assert code not in outbox
 
@@ -423,7 +423,7 @@ async def test_concurrent_wrong_pins_cannot_exceed_attempt_limit(env) -> None:
 
 
 async def test_pin_reset_when_notifications_unavailable_does_not_consume_limit(env) -> None:
-    """Ревью P2: notifications недоступен → 503 UPSTREAM_UNAVAILABLE, код не действует, лимит не расходуется."""
+    """notifications недоступен → 503 UPSTREAM_UNAVAILABLE, код не действует, лимит не расходуется."""
     uid = await env.new_user()
     await env.set_pin(uid)
     import httpx
@@ -459,7 +459,7 @@ async def test_pin_reset_when_notifications_unavailable_does_not_consume_limit(e
 
 
 async def test_lockouts_do_not_need_second_connection_under_row_lock() -> None:
-    """Ревью #13: событие pin_locked пишется после отката основной транзакции, а не во втором соединении,
+    """Событие pin_locked пишется после отката основной транзакции, а не во втором соединении,
     пока первое держит FOR UPDATE: параллельные блокировки не исчерпывают пул (pool 1 + overflow 1)."""
     import random
 

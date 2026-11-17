@@ -1,9 +1,9 @@
-"""Таймер саги удаления (ADR-009, INTERNAL_API §1.3): раз в `DELETION_SWEEP_SECONDS` повторяет запрос неответившим
+"""Таймер саги удаления: раз в `DELETION_SWEEP_SECONDS` повторяет запрос неответившим
 доменам по расписанию и переводит запросы без полного ACK дольше `DELETION_STUCK_HOURS` в STUCK.
 
 Тик выполняет одна реплика: транзакционный `pg_try_advisory_xact_lock(SWEEP_LOCK)`; остальные пропускают тик. Строки
-выбираются `FOR UPDATE SKIP LOCKED` и проверяются под блокировкой, поэтому даже без лидера (две реплики, ручной повтор,
-ACK домена в ту же секунду) повтор не уходит дважды за одну точку расписания.
+выбираются `FOR UPDATE SKIP LOCKED` и проверяются под блокировкой, поэтому даже без лидера (две реплики, ACK домена в
+ту же секунду) повтор не уходит дважды за одну точку расписания.
 """
 
 from __future__ import annotations
@@ -46,9 +46,7 @@ async def sweep_once(rt: Runtime, now: datetime | None = None) -> SweepResult:
             # своё correlation_id на запрос: повторы одного удаления связаны между собой в логах и событиях
             token = context.correlation_id_var.set(f"deletion-{req.request_id}")
             try:
-                if req.next_retry_at is None:
-                    # запрос создан кодом спринта 8 (во время раскатки или после отката кода): достраиваем расписание
-                    # от первичной рассылки, как миграция 0003 — существующим запросам
+                if req.next_retry_at is None:  # защитно: расписание есть у каждого открытого запроса
                     req.last_sent_at = req.last_sent_at or req.requested_at
                     req.next_retry_at = saga.next_retry_at(req.requested_at, req.last_sent_at, schedule)
                 if saga.stuck_due(req.status, req.requested_at, now, settings.deletion_stuck_hours):

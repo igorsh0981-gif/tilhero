@@ -1,7 +1,9 @@
-"""Доказательство согласия (ТЗ TG-FR-005): evidence_hash = sha256(канонический JSON фактов согласия).
+"""Доказательство согласия: evidence_hash = sha256(канонический JSON фактов согласия).
 
 Канонический JSON: ключи по алфавиту, без пробелов, UTF-8; accepted_at — ISO-8601 UTC с миллисекундами и «Z».
-policy_text_sha256 фиксирует, какой именно текст политики видел пользователь (на его языке).
+policy_text_sha256 фиксирует, какой именно текст политики видел пользователь (на его языке); basis — основание
+(`self` — сам пользователь, `guardian` — родитель за ребёнка 6–13, granted_by — аккаунт родителя); age_band —
+возрастная группа на момент согласия.
 """
 
 from __future__ import annotations
@@ -36,6 +38,9 @@ def evidence_document(
     channel: str,
     locale: str,
     policy_text_sha256: str,
+    age_band: str | None,
+    basis: str,
+    granted_by: uuid.UUID | str | None,
 ) -> dict[str, Any]:
     return {
         "user_id": str(user_id),
@@ -45,6 +50,9 @@ def evidence_document(
         "channel": channel,
         "locale": locale,
         "policy_text_sha256": policy_text_sha256,
+        "age_band": age_band,
+        "basis": basis,
+        "granted_by": str(granted_by) if granted_by is not None else None,
     }
 
 

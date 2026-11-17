@@ -1,7 +1,7 @@
 [project]
 name = "tilhero-identity"
 version = "0.1.0"
-description = "TilHero identity-consent: профиль Telegram, 18+, согласия, PIN, биометрия, статус, запрос удаления"
+description = "TilHero identity-consent: аккаунт Telegram, ученики и опекунство, возраст, согласия, согласие родителя 14–17, код родителя, настройки уведомлений, сага удаления"
 requires-python = ">=3.12"
 dependencies = ["tilhero-common", "argon2-cffi>=23.1"]
 

@@ -1,16 +1,14 @@
-"""Язык интерфейса из Telegram language_code (IETF-тег): ru/uz/kk/be/uk → ru, иначе en."""
+"""Язык интерфейса из Telegram language_code (IETF-тег): uz → uz, иначе ru (MVP: интерфейс RU и UZ)."""
 
 from __future__ import annotations
 
 from typing import Literal
 
-Locale = Literal["ru", "en"]
-
-RU_LANGUAGES = frozenset({"ru", "uz", "kk", "be", "uk"})
+Locale = Literal["ru", "uz"]
 
 
 def locale_from_language_code(code: str | None) -> Locale:
     if not code:
-        return "en"
+        return "ru"
     primary = code.strip().lower().replace("_", "-").split("-", 1)[0]
-    return "ru" if primary in RU_LANGUAGES else "en"
+    return "uz" if primary == "uz" else "ru"

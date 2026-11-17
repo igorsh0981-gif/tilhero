@@ -1,5 +1,5 @@
-"""Сага удаления (спринт 9, ADR-009, INTERNAL_API §1.2–1.3) на реальном PG: первичная рассылка, повторы по расписанию,
-STUCK, ACK по доменам со временем, гонки (два повтора, ACK во время повтора, дубли), идемпотентность, PII."""
+"""Сага удаления на реальном PG: первичная рассылка, повторы по расписанию, STUCK, ACK по доменам со временем, гонки
+(два повтора, ACK во время повтора, дубли), идемпотентность, PII."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from datetime import timedelta
 
 from deletion_kit import (
     ACK_CONSUMER,
+    CONFIRM,
     DOMAINS,
     ack,
     ack_all,
@@ -51,14 +52,14 @@ async def test_initial_request_is_attempt_one_with_schedule(env) -> None:
     [hist] = await attempts(env, rid)
     assert (hist.attempt, hist.sent_by, str(hist.event_id)) == (1, "user", first.event_id)
     # повторный запрос пользователя — тот же request_id, без новой рассылки
-    again = await env.call("POST", "/internal/v1/me/deletion-request", uid, {"confirm_word": "DELETE"})
+    again = await env.call("POST", "/internal/v1/me/deletion-request", uid, CONFIRM)
     assert again.json()["request_id"] == rid
     assert len(await requested_events(env, rid)) == 1 and len(await attempts(env, rid)) == 1
 
 
 async def test_retries_follow_schedule_with_new_event_id(env) -> None:
     uid, rid = await request_deletion(env)
-    await ack_all(env, uid, rid, ["preferences", "support"])
+    await ack_all(env, uid, rid, ["learning-plan", "support"])
     assert (await sweep_at(env, rid, minutes=14)).retried == 0  # рано
     assert len(await requested_events(env, rid)) == 1
 
@@ -85,13 +86,13 @@ async def test_retries_follow_schedule_with_new_event_id(env) -> None:
     assert [str(a.event_id) for a in history] == [e.event_id for e in await requested_events(env, rid)]
     # ACK уже ответивших доменов при повторе не меняют их время
     before = {d: a.acked_at for d, a in (await acks(env, rid)).items()}
-    await ack_all(env, uid, rid, ["preferences"])
+    await ack_all(env, uid, rid, ["learning-plan"])
     assert {d: a.acked_at for d, a in (await acks(env, rid)).items()} == before
 
 
 async def test_retry_acks_complete_deletion_and_stop_timer(env) -> None:
     uid, rid = await request_deletion(env, telegram_user_id=7_100_200_300)
-    await ack_all(env, uid, rid, DOMAINS[:5])
+    await ack_all(env, uid, rid, DOMAINS[:3])
     await sweep_at(env, rid, minutes=15)
     # домены отвечают на повтор: ответившие ранее — повторно (отбрасывается), остальные — впервые
     await ack_all(env, uid, rid)
@@ -112,7 +113,7 @@ async def test_retry_acks_complete_deletion_and_stop_timer(env) -> None:
 
 async def test_stuck_after_24h_then_completes_on_late_acks(env) -> None:
     uid, rid = await request_deletion(env)
-    await ack_all(env, uid, rid, [d for d in DOMAINS if d not in ("watch", "news")])
+    await ack_all(env, uid, rid, [d for d in DOMAINS if d not in ("social", "experience-config")])
     for minutes in (15, 60, 240, 720):
         assert (await sweep_at(env, rid, minutes=minutes)).retried == 1
     assert (await load(env, rid)).status == "REQUESTED"
@@ -127,7 +128,7 @@ async def test_stuck_after_24h_then_completes_on_late_acks(env) -> None:
     assert stuck.producer == "identity-consent"
     assert stuck.payload == {
         "request_id": rid, "user_id": uid, "requested_at": stuck.payload["requested_at"],
-        "stuck_at": stuck.payload["stuck_at"], "pending_domains": ["watch", "news"], "attempts": 5,
+        "stuck_at": stuck.payload["stuck_at"], "pending_domains": ["social", "experience-config"], "attempts": 5,
     }
     assert stuck.payload["stuck_at"].endswith("Z")
     # повторы продолжаются раз в сутки, второго события STUCK нет
@@ -135,12 +136,12 @@ async def test_stuck_after_24h_then_completes_on_late_acks(env) -> None:
     assert (await sweep_at(env, rid, hours=48)).retried == 1
     assert len(await env.events("user.deletion.stuck.v1")) == 1
     # запрос пользователя повторно — тот же request_id (STUCK — тоже открытый запрос)
-    again = await env.call("POST", "/internal/v1/me/deletion-request", uid, {"confirm_word": "DELETE"})
+    again = await env.call("POST", "/internal/v1/me/deletion-request", uid, CONFIRM)
     assert again.status_code == 202 and again.json()["request_id"] == rid
-    # «Повторить запрос» никого не обезличивает — только ACK
-    await ack_all(env, uid, rid, ["watch"])
+    # повтор запроса никого не обезличивает — только ACK
+    await ack_all(env, uid, rid, ["social"])
     assert (await load(env, rid)).status == "STUCK" and (await user(env, uid)).status == "DELETION_REQUESTED"
-    await ack_all(env, uid, rid, ["news"])
+    await ack_all(env, uid, rid, ["experience-config"])
     req = await load(env, rid)
     assert req.status == "COMPLETED" and req.stuck_at is not None and req.next_retry_at is None
     assert (await user(env, uid)).status == "DELETED"
@@ -215,10 +216,10 @@ async def test_duplicate_acks_keep_first_time(env) -> None:
     assert req.acked_domains == ["support"]
     # чужие и лишние ACK не попадают в таблицу ACK
     forged = make_envelope("user.domain.deleted.v1",
-                           {"user_id": uid, "request_id": rid, "domain": "watch", "mode": "deleted"},
-                           producer="news")
-    for env_ in (forged, ack(uid, rid, "discovery"), ack(uid, str(uuid.uuid4()), "watch"),
-                 ack(str(uuid.uuid4()), rid, "watch")):
+                           {"user_id": uid, "request_id": rid, "domain": "social", "mode": "deleted"},
+                           producer="notifications")
+    for env_ in (forged, ack(uid, rid, "discovery"), ack(uid, str(uuid.uuid4()), "social"),
+                 ack(str(uuid.uuid4()), rid, "social")):
         await _spec(env).handler(env_)
     assert list(await acks(env, rid)) == ["support"]
     async with env.runtime.transaction() as s:
@@ -227,10 +228,10 @@ async def test_duplicate_acks_keep_first_time(env) -> None:
 
 async def test_ack_with_unknown_mode_is_stored_without_mode(env) -> None:
     uid, rid = await request_deletion(env)
-    weird = make_envelope("user.domain.deleted.v1", {"user_id": uid, "request_id": rid, "domain": "news",
-                                                     "mode": "purged"}, producer="news")
+    weird = make_envelope("user.domain.deleted.v1", {"user_id": uid, "request_id": rid, "domain": "social",
+                                                     "mode": "purged"}, producer="social")
     await _spec(env).handler(weird)
-    row = (await acks(env, rid))["news"]
+    row = (await acks(env, rid))["social"]
     assert row.mode is None and row.acked_at is not None
 
 
@@ -273,7 +274,7 @@ async def test_sweeper_loop_runs_in_app() -> None:
                                      json={"telegram_user_id": 5_123_456_789, "first_name": "Тест"},
                                      headers=internal_headers(settings))
                 uid = login.json()["user"]["user_id"]
-                r = await c.post("/internal/v1/me/deletion-request", json={"confirm_word": "DELETE"},
+                r = await c.post("/internal/v1/me/deletion-request", json=CONFIRM,
                                  headers=internal_headers(settings, subject=uid))
                 rid = r.json()["request_id"]
             async with runtime.transaction() as s:  # первая точка расписания уже прошла
@@ -326,7 +327,7 @@ async def test_no_pii_in_saga_events_and_logs(env) -> None:
     try:
         uid = await env.new_user(telegram_user_id=tg, username="pii_canary_user", first_name="Канарейка",
                                  last_name="Секретная")
-        r = await env.call("POST", "/internal/v1/me/deletion-request", uid, {"confirm_word": "DELETE"})
+        r = await env.call("POST", "/internal/v1/me/deletion-request", uid, CONFIRM)
         rid = r.json()["request_id"]
         await ack_all(env, uid, rid, DOMAINS[:3])
         await sweep_at(env, rid, minutes=15)
