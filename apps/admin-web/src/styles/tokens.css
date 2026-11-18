@@ -1,24 +1,25 @@
 /* =====================================================================
-   tokens.css — non-colour design tokens of TilHero Admin (prototype v2) and
-   the few colours that do not depend on the light/dark theme (environment chip
-   on the always-dark navigation). Colour roles of the theme: theme.default.css.
-   Names in the experience-config whitelist (--r-*, --nav-w, --top-h, --font-*)
-   may be overridden at runtime by the active admin config version.
+   tokens.css — non-colour design tokens of TilHero Admin (prototype Admin.dc.html, `.ad`; seed experience-config
+   `admin` 1.0.0) and the few colours that do not depend on the light/dark theme. Colour roles: theme.default.css.
+   Names of the experience-config whitelist (--r-card, --r-btn, --r-field, --nav-w, --font-*) may be overridden at
+   runtime by the active admin config version (src/theme/config.ts).
    ===================================================================== */
 :root{
-  --r-xs:4px; --r-sm:6px; --r:8px; --r-lg:12px;
-  --nav-w:248px;
-  --nav-w-collapsed:64px;
-  --top-h:56px;
-  --drawer-w:520px;
-  --drawer-w-wide:720px;
-  --font-ui:"Manrope",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
-  --font-display:"Unbounded","Manrope",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
-  --font-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
-  /* environment chip (sidebar footer, always on the navy navigation) */
+  --r-card:14px; --r-btn:10px; --r-field:10px;
+  --nav-w:236px;
+  --font-ui:"Onest",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-display:"Unbounded","Onest",system-ui,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  /* derived radii (components) */
+  --r-xs:6px; --r-sm:8px; --r:var(--r-btn); --r-lg:var(--r-card);
+  --nav-w-collapsed:68px;
+  --top-h:64px;
+  --drawer-w:540px;
+  --drawer-w-wide:760px;
+  /* environment chip (sidebar footer, always on the dark sidebar) */
   --env-prod-bg:rgba(242,104,93,.16); --env-prod-ink:#FFB3AC; --env-prod-line:rgba(242,104,93,.32); --env-prod-dot:#F2685D;
-  --env-stage-bg:rgba(240,166,58,.16); --env-stage-ink:#F7C47E; --env-stage-line:rgba(240,166,58,.32); --env-stage-dot:#F0A63A;
-  --env-dev-bg:rgba(113,147,255,.16); --env-dev-ink:#A8BBFF; --env-dev-line:rgba(113,147,255,.32); --env-dev-dot:#7193FF;
-  --login-glow:rgba(223,255,86,.38);
+  --env-stage-bg:rgba(255,196,102,.14); --env-stage-ink:#FFD28A; --env-stage-line:rgba(255,196,102,.32); --env-stage-dot:#FFC466;
+  --env-dev-bg:rgba(157,174,255,.16); --env-dev-ink:#C9D3FF; --env-dev-line:rgba(157,174,255,.32); --env-dev-dot:#9DAEFF;
+  --brand-hero:#9DAEFF;
   --z-nav:40; --z-topbar:30; --z-drawer:70; --z-menu:80; --z-modal:90; --z-toast:100;
 }

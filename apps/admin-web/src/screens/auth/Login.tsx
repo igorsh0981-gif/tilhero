@@ -13,6 +13,7 @@ import { ThemeMenu } from "../../shell/ThemeMenu";
 import { PasswordFields } from "./PasswordFields";
 import { LOGIN_SCOPE, RateScope, useRateWait } from "../../lib/rateLimit";
 import { RateWaitNotice } from "../../ui/RateWait";
+import { Wordmark } from "../../ui/Wordmark";
 
 export interface LoginNotice {
   kind: "info" | "warn" | "good";
@@ -26,31 +27,13 @@ type Step =
   | { s: "enroll"; challenge: string; data: MfaEnrollStart | null }
   | { s: "password"; challenge: string };
 
-function Wordmark() {
-  return (
-    <span className="wordmark on-card" aria-label="TilHero Admin">
-      Ai<span className="wm-event">Event</span>
-      <span className="wm-suffix">Admin</span>
-    </span>
-  );
-}
-
+/** Notebook page behind the card: squared paper and the red margin line of the TilHero notebook theme. */
 function LoginArt() {
-  return (
-    <div className="login-bg" aria-hidden="true">
-      <svg className="login-art" viewBox="0 0 1200 260" preserveAspectRatio="none">
-        {[52, 104, 156, 208].map((y) => (
-          <line key={y} className="ln" x1="0" x2="1200" y1={y} y2={y} />
-        ))}
-        <path className="pulse" d="M0 214 L90 206 L150 212 L210 188 L262 196 L320 140 L356 176 L410 152 L470 164 L530 98 L570 132 L640 116 L700 124 L770 70 L830 92 L900 84 L960 96 L1030 44 L1100 58 L1200 40" />
-        <circle className="dot" cx="1030" cy="44" r="6" />
-      </svg>
-    </div>
-  );
+  return <div className="login-bg" aria-hidden="true" />;
 }
 
 /**
- * Staff sign-in (FinAdvisor pattern + MFA, ТЗ AD-FR-001): email/password → [new password] → [MFA enrolment]
+ * Staff sign-in: email/password → [new password] → [MFA enrolment]
  * → [TOTP] → session cookie. Every step carries the one-time `challenge` of the previous answer; the
  * password and codes live only in this component's state and are cleared after use.
  */
@@ -144,8 +127,6 @@ export function Login({ notice, onDone }: { notice: LoginNotice | null; onDone: 
         const left = e.num("remaining");
         setErr({ text: t("login.err.creds"), sub: left != null ? t("login.attempts", { n: left }) : undefined });
         pwdRef.current?.focus();
-      } else if (e instanceof ApiError && e.code === "AUTH_MODE_UNAVAILABLE") {
-        setErr({ text: t("login.err.ad"), sub: t("login.err.adSub") });
       } else setErr({ text: errText(i, e) });
     } finally {
       setBusy(false);
@@ -349,7 +330,7 @@ export function Login({ notice, onDone }: { notice: LoginNotice | null; onDone: 
     card = (
       <div data-testid="login-creds">
         <div className="lc-head">
-          <Wordmark />
+          <Wordmark className="on-card" />
           <p className="lc-sub">{t("login.title")}</p>
         </div>
         {info && (
@@ -420,7 +401,7 @@ export function Login({ notice, onDone }: { notice: LoginNotice | null; onDone: 
           </div>
         </RateScope.Provider>
         <div className="login-under">
-          <div className="seg-mini on-dark" role="group" aria-label={t("common.language")}>
+          <div className="seg-mini" role="group" aria-label={t("common.language")}>
             <button type="button" aria-pressed={lang === "ru"} onClick={() => setLang("ru")}>
               RU
             </button>
@@ -428,7 +409,7 @@ export function Login({ notice, onDone }: { notice: LoginNotice | null; onDone: 
               EN
             </button>
           </div>
-          <ThemeMenu theme={theme} setTheme={setTheme} onDark />
+          <ThemeMenu theme={theme} setTheme={setTheme} />
         </div>
       </div>
     </section>

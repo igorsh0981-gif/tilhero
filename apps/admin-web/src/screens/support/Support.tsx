@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { EscalationType, ReplyTemplate, StaffTicket, StaffTicketMessage, StaffTicketSummary, TicketPriority, TicketStatus } from "@tilhero/contracts/admin";
+import type { EscalationType, ReplyTemplate, StaffTicket, StaffTicketMessage, StaffTicketSummary, TicketPriority, TicketStatus, UiLang } from "@tilhero/contracts/admin";
 import type { Ticket as ClientTicket } from "@tilhero/contracts/bff";
 import { Support as SupportApi, type SlaPolicy, type SupportStats, type TicketFilters } from "../../api/endpoints";
 import { ApiError } from "../../api/errors";
-import { fmtCountdown, normLang, useI18n, type MessageKey } from "../../i18n";
+import { fmtCountdown, useI18n, type MessageKey } from "../../i18n";
 import { shortId, uuid } from "../../lib/ids";
 import { useNow } from "../../lib/useNow";
-import { OfferSnapshot } from "./OfferSnapshot";
 import { useNav } from "../../shell/navctx";
 import { useSession } from "../../state/session";
 import { Icon, type IconName } from "../../ui/Icon";
@@ -21,8 +20,8 @@ import { CATEGORIES, liveSla, PRIORITIES, sortQueue, STAFF_TRANSITIONS, TICKET_S
 
 export const STATUS_TONE: Record<TicketStatus, Tone> = { NEW: "info", IN_PROGRESS: "warn", WAITING_CUSTOMER: "neutral", RESOLVED: "good", CLOSED: "outline" };
 export const PRIO_TONE: Record<TicketPriority, Tone> = { urgent: "bad", high: "warn", normal: "neutral", low: "outline" };
-const ESCALATIONS: readonly EscalationType[] = ["billing_review", "provider_issue", "content_review", "security_privacy"];
-const ESC_ICON: Record<EscalationType, IconName> = { billing_review: "card", provider_issue: "server", content_review: "audit", security_privacy: "shield" };
+export const ESCALATIONS: readonly EscalationType[] = ["billing_review", "assessment_review", "content_review", "tech_issue", "security_privacy"];
+const ESC_ICON: Record<EscalationType, IconName> = { billing_review: "card", assessment_review: "clipboardCheck", content_review: "book", tech_issue: "wrench", security_privacy: "shield" };
 const MAX_TEXT = 4000;
 
 export function StatusPill({ s }: { s: string }) {
@@ -297,7 +296,7 @@ function Queue({ onChanged }: { onChanged: () => void }) {
                       <div className="cell-main">{tk.subject}</div>
                       <div className="cell-sub">
                         {tk.anonymized ? t("sup.anonymized") : tk.user_id ? <span className="mono">{shortId(tk.user_id, 8, 4)}</span> : "—"}
-                        {tk.has_event_context && (
+                        {tk.has_context && (
                           <>
                             {" · "}
                             <Icon name="link" /> {t("sup.hasContext")}
@@ -653,7 +652,7 @@ function Thread({ refId, onChanged }: { refId: string; onChanged: () => void }) 
 
 function userTag(tk: StaffTicket, t: (k: MessageKey) => string): string {
   if (tk.anonymized) return t("sup.anonymized");
-  if (tk.user?.username) return `@${tk.user.username}`;
+  if (tk.learner?.username) return `@${tk.learner.username}`;
   return tk.user_id ? shortId(tk.user_id, 8, 4) : t("sup.client");
 }
 
@@ -704,16 +703,14 @@ function Message({ m, tk }: { m: StaffTicketMessage; tk: StaffTicket }) {
 
 type Mode = "reply" | "note";
 
-function fillTemplate(text: string, tk: StaffTicket, dt: (iso: string | null) => string): string {
-  return text
-    .replace(/\{deeplink\}/g, tk.context?.deeplink ?? "—")
-    .replace(/\{fetched_at\}/g, tk.context?.fetched_at ? dt(tk.context.fetched_at) : "—")
-    .replace(/\{number\}/g, tk.number);
+/** Reply templates may refer to the ticket: {number}, {deeplink} (support templates catalogue). */
+function fillTemplate(text: string, tk: StaffTicket): string {
+  return text.replace(/\{deeplink\}/g, tk.context?.deeplink ?? "—").replace(/\{number\}/g, tk.number);
 }
 
 function Composer({ tk, onSent }: { tk: StaffTicket; onSent: (x: StaffTicket) => void }) {
   const i = useI18n();
-  const { t, fmt, lang } = i;
+  const { t } = i;
   const { can } = useSession();
   const toast = useToast();
   const [mode, setMode] = useState<Mode>("reply");
@@ -721,8 +718,8 @@ function Composer({ tk, onSent }: { tk: StaffTicket; onSent: (x: StaffTicket) =>
   const keys = useRef<Record<Mode, string | null>>({ reply: null, note: null });
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [ai, setAi] = useState<{ loading: boolean; text?: string; stub?: boolean } | null>(null);
   const [templates, setTemplates] = useState<ReplyTemplate[] | null>(null);
+  const [tplLang, setTplLang] = useState<UiLang | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const canReply = can("support.reply");
   useEffect(() => {
@@ -759,7 +756,7 @@ function Composer({ tk, onSent }: { tk: StaffTicket; onSent: (x: StaffTicket) =>
 
   const note = mode === "note";
   const text = drafts[mode];
-  const clientLang = normLang(tk.user?.locale) ?? lang;
+  const replyLang: UiLang = tplLang ?? tk.learner?.locale ?? "ru";
   const setText = (v: string) => {
     setDrafts((d) => ({ ...d, [mode]: v }));
     keys.current[mode] = null; // edited text = a new command (a retry of the same text keeps its key)
@@ -794,17 +791,6 @@ function Composer({ tk, onSent }: { tk: StaffTicket; onSent: (x: StaffTicket) =>
     }
   };
 
-  const askAi = async () => {
-    setAi({ loading: true });
-    try {
-      const d = await SupportApi.aiDraft(tk.ticket_id);
-      setAi({ loading: false, text: d.text, stub: d.stub });
-    } catch (e) {
-      setAi(null);
-      if (!(e as ApiError).cancelled) toast(errText(i, e), "err", errMeta(e));
-    }
-  };
-
   const tplSorted = [...(templates ?? [])].sort((a, b) => Number(b.categories.includes(tk.category)) - Number(a.categories.includes(tk.category)));
 
   return (
@@ -823,43 +809,6 @@ function Composer({ tk, onSent }: { tk: StaffTicket; onSent: (x: StaffTicket) =>
           { v: "note", label: t("comp.note") },
         ]}
       />
-      {ai && !note && (
-        <div className="ai-draft" role="region" aria-label={t("ai.draft")} data-testid="ai-draft">
-          <div className="h">
-            <Icon name="sparkles" />
-            {t("ai.draftH")}
-            <span className="grow" />
-            {ai.stub && <span className="pill outline no-dot">{t("ai.stub")}</span>}
-          </div>
-          {ai.loading ? (
-            <div className="row small muted">
-              <span className="spinner" aria-hidden="true" />
-              {t("ai.loading")}
-            </div>
-          ) : (
-            <>
-              <div className="txt">{ai.text}</div>
-              <div className="f">
-                <Btn
-                  size="xs"
-                  kind="primary"
-                  icon="check"
-                  label={t("ai.insert")}
-                  testId="ai-insert"
-                  onClick={() => {
-                    setDrafts((d) => ({ ...d, reply: ai.text ?? "" }));
-                    keys.current.reply = null;
-                    setAi(null);
-                    setTimeout(() => taRef.current?.focus(), 0);
-                  }}
-                />
-                <Btn size="xs" label={t("ai.reject")} onClick={() => setAi(null)} />
-                <span>{t("ai.note")}</span>
-              </div>
-            </>
-          )}
-        </div>
-      )}
       <label className="sr-only" htmlFor="composer-text">
         {note ? t("comp.note") : t("comp.reply")}
       </label>
@@ -887,7 +836,16 @@ function Composer({ tk, onSent }: { tk: StaffTicket; onSent: (x: StaffTicket) =>
           </span>
         ) : (
           <>
-            <Btn icon="sparkles" size="sm" label={t("ai.draft")} onClick={() => void askAi()} busy={!!ai?.loading} testId="ai-draft-btn" />
+            <Seg<UiLang>
+              label={t("tpl.lang")}
+              value={replyLang}
+              onChange={setTplLang}
+              testId="tpl-lang"
+              items={[
+                { v: "ru", label: "RU" },
+                { v: "uz", label: "UZ" },
+              ]}
+            />
             <MenuButton
               label={t("tpl.title")}
               className="btn sm"
@@ -906,10 +864,10 @@ function Composer({ tk, onSent }: { tk: StaffTicket; onSent: (x: StaffTicket) =>
                     <MenuItem
                       key={tp.id}
                       icon="note"
-                      sub={tp.categories.includes(tk.category) ? t("tpl.match") : undefined}
+                      sub={[tp.categories.includes(tk.category) ? t("tpl.match") : null, tp.text[replyLang] ? null : t("tpl.noLang", { l: replyLang.toUpperCase() })].filter(Boolean).join(" · ") || undefined}
                       onClick={() => {
                         close();
-                        setDrafts((d) => ({ ...d, reply: fillTemplate(tp.text[clientLang] || tp.text.ru, tk, (x) => fmt.dateTime(x)) }));
+                        setDrafts((d) => ({ ...d, reply: fillTemplate(tp.text[replyLang] || tp.text.ru, tk) }));
                         keys.current.reply = null;
                         setTimeout(() => taRef.current?.focus(), 0);
                       }}
@@ -969,7 +927,6 @@ function Context({ tk, onUpdate, onReload }: { tk: StaffTicket; onUpdate: (x: St
     ...(tk.assignee_id && tk.assignee_id !== myId ? [{ v: tk.assignee_id, label: tk.assignee_name ?? shortId(tk.assignee_id) }] : []),
   ];
   const c = tk.context;
-  const safeLink = c?.deeplink && /^https:\/\//i.test(c.deeplink) ? c.deeplink : null;
 
   return (
     <>
@@ -1042,27 +999,32 @@ function Context({ tk, onUpdate, onReload }: { tk: StaffTicket; onUpdate: (x: St
         </h3>
         {tk.anonymized ? (
           <p className="small muted">{t("sup.anonymizedNote")}</p>
-        ) : tk.user ? (
+        ) : tk.learner ? (
           <dl className="kv">
-            <dt>User ID</dt>
+            <dt>ID</dt>
             <dd>
               {can("users.read") ? (
-                <button type="button" className="link-btn mono" onClick={() => navigate("users", tk.user!.user_id)}>
-                  {shortId(tk.user.user_id, 8, 4)}
+                <button type="button" className="link-btn mono" onClick={() => navigate("users", tk.learner!.user_id)} data-testid="ctx-learner-link">
+                  {shortId(tk.learner.user_id, 8, 4)}
                 </button>
               ) : (
-                <span className="mono">{shortId(tk.user.user_id, 8, 4)}</span>
+                <span className="mono">{shortId(tk.learner.user_id, 8, 4)}</span>
               )}
+            </dd>
+            <dt>{t("lr.kind")}</dt>
+            <dd>
+              {tk.learner.kind === "child" ? t("lk.child") : t("lk.account")}
+              {tk.learner.age_band ? ` · ${tk.learner.age_band}` : ""}
             </dd>
             <dt>Telegram</dt>
             <dd>
-              {tk.user.username ? `@${tk.user.username} · ` : ""}
-              <span className="masked">{tk.user.telegram_id_masked}</span>
+              {tk.learner.username ? `@${tk.learner.username} · ` : ""}
+              <span className="masked">{tk.learner.telegram_id_masked ?? "—"}</span>
             </dd>
-            <dt>{t("common.language")}</dt>
-            <dd className="mono">{tk.user.locale ?? "—"}</dd>
+            <dt>{t("lr.f.lang")}</dt>
+            <dd>{tk.learner.locale ? t(`ulang.${tk.learner.locale}`) : "—"}</dd>
             <dt>{t("col.status")}</dt>
-            <dd>{t(`ustatus.${tk.user.status}`)}</dd>
+            <dd>{t(`lstatus.${tk.learner.status}`)}</dd>
           </dl>
         ) : (
           <p className="small muted">{tk.user_id ? (can("users.read") ? t("ctx.userUnavailable") : t("perm.need", { p: "users.read" })) : "—"}</p>
@@ -1071,79 +1033,27 @@ function Context({ tk, onUpdate, onReload }: { tk: StaffTicket; onUpdate: (x: St
       </div>
 
       {c && (
-        <div className="ctx-sec" data-testid="ctx-event">
+        <div className="ctx-sec" data-testid="ctx-context">
           <h3>
             <Icon name="link" />
-            {t("ctx.event")}
+            {t("ctx.context")}
           </h3>
           <dl className="kv">
-            {c.event_id && (
+            <dt>{t("ctx.screen")}</dt>
+            <dd className="mono xs wrap-any">{c.deeplink ?? "—"}</dd>
+            <dt>{t("ctx.client")}</dt>
+            <dd className="mono">{c.client_version}</dd>
+            {tk.correlation_id && (
               <>
-                <dt>event_id</dt>
-                <dd className="mono">{c.event_id}</dd>
-              </>
-            )}
-            {c.offer_id && (
-              <>
-                <dt>offer_id</dt>
-                <dd className="mono">{c.offer_id}</dd>
-              </>
-            )}
-            {c.provider_id && (
-              <>
-                <dt>provider</dt>
-                <dd className="mono">{c.provider_id}</dd>
-              </>
-            )}
-            {c.deeplink && (
-              <>
-                <dt>deeplink</dt>
-                <dd className="mono xs">{c.deeplink}</dd>
-              </>
-            )}
-            {c.price_snapshot && (
-              <>
-                <dt>price snapshot</dt>
-                <dd>
-                  <b className="mono">
-                    {c.price_snapshot.amount} {c.price_snapshot.currency}
-                  </b>
-                </dd>
-              </>
-            )}
-            {c.fetched_at && (
-              <>
-                <dt>fetched_at</dt>
-                <dd className="mono">{fmt.dateTime(c.fetched_at)}</dd>
-              </>
-            )}
-            {c.trace_id && (
-              <>
-                <dt>trace_id</dt>
+                <dt>trace</dt>
                 <dd className="mono">
-                  {shortId(c.trace_id, 6, 4)} <CopyBtn value={c.trace_id} label="trace_id" />
+                  {shortId(tk.correlation_id, 6, 4)} <CopyBtn value={tk.correlation_id} label="trace" />
                 </dd>
-              </>
-            )}
-            {c.client_version && (
-              <>
-                <dt>client</dt>
-                <dd className="mono">{c.client_version}</dd>
               </>
             )}
           </dl>
-          {safeLink && (
-            <div className="row mt-12">
-              <a className="btn sm" href={safeLink} target="_blank" rel="noopener noreferrer">
-                <Icon name="ext" />
-                <span>{t("ctx.openLink")}</span>
-              </a>
-            </div>
-          )}
         </div>
       )}
-
-      {c?.offer_id && <OfferSnapshot key={c.offer_id} offerId={c.offer_id} ticketUserId={tk.user_id} />}
 
       <div className="ctx-sec" data-testid="ctx-escalate">
         <h3>
@@ -1313,7 +1223,7 @@ function ClientView({ tk, onClose }: { tk: StaffTicket; onClose: () => void }) {
           </Callout>
           <div className="tg-phone" role="log" aria-label={t("cv.btn")} data-testid="client-feed">
             <div className="tg-top">
-              <span className="tg-ava">Ai</span>
+              <span className="tg-ava">TH</span>
               <div>
                 <b>TilHero</b>
                 <div className="xs">{t("cv.bot")}</div>

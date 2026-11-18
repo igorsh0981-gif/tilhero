@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Approval, ApprovalStatus, Permission, Role, RoleCode, Staff, StaffCreated } from "@tilhero/contracts/admin";
-import { PRIVILEGED_ROLES } from "@tilhero/contracts/admin";
+import { PERMISSIONS, PRIVILEGED_ROLES } from "@tilhero/contracts/admin";
 import { StaffApi } from "../../api/endpoints";
 import { ApiError } from "../../api/errors";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -15,33 +15,27 @@ import { ConfirmCommand, Drawer, MenuButton, MenuItem } from "../../ui/overlays"
 import { useToast } from "../../ui/toasts";
 import { errText } from "../../ui/errors";
 
-export const ROLE_CODES: readonly RoleCode[] = ["super_admin", "operations", "support", "billing", "agent_manager", "analyst", "auditor", "read_only"];
+export const ROLE_CODES: readonly RoleCode[] = ["super_admin", "operations", "communications", "support", "methodist", "analyst", "auditor", "read_only"];
 const isPrivileged = (r: string) => (PRIVILEGED_ROLES as readonly string[]).includes(r);
 
 /** Matrix rows: section access first, then commands (admin.ts Permission catalogue). */
 export const PERM_GROUPS: ReadonlyArray<{ id: "sections" | "actions"; perms: readonly Permission[] }> = [
-  { id: "sections", perms: ["dashboard.read", "users.read", "support.read", "events.review", "sources.manage", "discovery.manage", "news.manage", "audit.read", "config.read"] },
+  { id: "sections", perms: ["dashboard.read", "users.read", "support.read", "whatsnew.manage", "notif.templates.manage", "notif.campaigns.manage", "config.read", "audit.read"] },
   {
     id: "actions",
     perms: [
       "users.sensitive.read",
-      "users.access.manage",
-      "ai.content.read",
-      "export.csv",
       "support.reply",
       "support.manage",
-      "subscriptions.override",
-      "billing.refund",
-      "skills.edit",
-      "skills.publish",
+      "whatsnew.publish",
+      "notif.campaigns.send",
       "config.edit",
       "config.publish",
-      "ops.kill_switch",
       "staff.manage",
       "roles.manage",
     ],
   },
-];
+]
 
 const APR_TONE: Record<ApprovalStatus, Tone> = { PENDING: "warn", APPROVED: "info", APPLIED: "good", REJECTED: "bad", EXPIRED: "neutral" };
 const permKey = (p: string) => `perm.${p}` as MessageKey;
@@ -93,7 +87,7 @@ export function Roles() {
   const loadRoles = useCallback(() => {
     setRolesErr(null);
     StaffApi.roles()
-      .then(setRoles)
+      .then((r) => setRoles({ items: r.items, permissions: r.permissions ?? [...PERMISSIONS] }))
       .catch(setRolesErr);
   }, []);
   useEffect(loadRoles, [loadRoles]);
@@ -643,7 +637,7 @@ function StaffTab({ roles, pending, onChanged }: { roles: Role[] | null; pending
                       {pend && <div className="cell-sub">{t("staff.pendingRole", { r: roleName((pend.summary as { to_role?: string }).to_role ?? "") })}</div>}
                     </td>
                     <td className="nowrap">
-                      <span className="tag plain">{s.auth_provider === "ad" ? "AD" : t("staff.pwd")}</span>
+                      <span className="tag plain">{t("staff.pwd")}</span>
                       {s.must_change_password && (
                         <>
                           {" "}
@@ -669,7 +663,7 @@ function StaffTab({ roles, pending, onChanged }: { roles: Role[] | null; pending
                                   <b>{s.display_name}</b> · <span className="mono">{s.email}</span>
                                 </span>
                               </div>
-                              <MenuItem icon="key" sub={s.auth_provider === "ad" ? t("staff.adReset") : t("staff.resetSub")} disabled={s.auth_provider === "ad" || s.status !== "ACTIVE"} onClick={() => { close(); setCmd({ kind: "reset-password", s }); }} testId="staff-reset">
+                              <MenuItem icon="key" sub={t("staff.resetSub")} disabled={s.status !== "ACTIVE"} onClick={() => { close(); setCmd({ kind: "reset-password", s }); }} testId="staff-reset">
                                 {t("staff.resetPwd")}
                               </MenuItem>
                               <MenuItem icon="smartphoneKey" sub={t("staff.resetMfaSub")} disabled={!s.mfa_enabled} onClick={() => { close(); setCmd({ kind: "reset-mfa", s }); }}>

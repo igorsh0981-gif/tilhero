@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RoleCode } from "@tilhero/contracts/admin";
-import { Auth, ReviewApi, Support, type SupportStats } from "../api/endpoints";
-import { useI18n } from "../i18n";
+import { Auth, Support, type SupportStats } from "../api/endpoints";
+import { useI18n, fmtCountdown } from "../i18n";
 import { useUiPrefs } from "../App";
 import { prefs } from "../lib/storage";
 import { activity, confirmIdle, idleState, shareActivity } from "../state/activity";
@@ -13,34 +13,29 @@ import { Btn, cx, IconBtn } from "../ui/kit";
 import { MenuButton, MenuItem, Modal } from "../ui/overlays";
 import { useToast } from "../ui/toasts";
 import { errMeta, errText } from "../ui/errors";
-import { fmtCountdown } from "../i18n";
-import { initials, shortId } from "../lib/ids";
+import { initials } from "../lib/ids";
 import { ThemeMenu } from "./ThemeMenu";
 import { AccountDrawer } from "./AccountDrawer";
 import { NavCtx } from "./navctx";
-import { Dashboard } from "../screens/dashboard/Dashboard";
-import { UsersSection } from "../screens/users/UsersSection";
-import { SupportPage } from "../screens/support/Support";
-import { Roles } from "../screens/roles/Roles";
-import { AuditPage } from "../screens/audit/Audit";
-import { ConfigPage } from "../screens/config/Config";
-import { Soon } from "../screens/soon/Soon";
-import { ReviewPage } from "../screens/review/Review";
-import { SourcesPage } from "../screens/sources/Sources";
-import { DiscoveryPage } from "../screens/discovery/Discovery";
-import { TravelPage } from "../screens/travel/Travel";
-import { FeedsPage } from "../screens/news/Feeds";
-import { NewsPage } from "../screens/news/News";
-import { WatchesPage } from "../screens/news/Watches";
-import { RequestsPage } from "../screens/ai/Requests";
-import { BudgetsPage } from "../screens/ai/Budgets";
-import { AgentsPage } from "../screens/ai/Agents";
-import { AlertsBell } from "./AlertsBell";
-import { MonitoringPage } from "../screens/monitoring/Monitoring";
 import { RateWaitNotice } from "../ui/RateWait";
+import { Wordmark } from "../ui/Wordmark";
+import { Overview } from "../screens/overview/Overview";
+import { LearnersPage } from "../screens/learners/Learners";
+import { SupportPage } from "../screens/support/Support";
+import { NewsPage } from "../screens/news/News";
+import { ConfigPage } from "../screens/config/Config";
+import { Roles, ROLE_CODES } from "../screens/roles/Roles";
+import { AuditPage } from "../screens/audit/Audit";
+import { Soon } from "../screens/soon/Soon";
 
-const ROLES: readonly RoleCode[] = ["super_admin", "operations", "support", "billing", "agent_manager", "analyst", "auditor", "read_only"];
-export const APP_VERSION = "admin-web 0.1.0";
+export const APP_VERSION = "admin-web 0.2.0";
+
+/** Sections whose route id is a tab or an object: «#/news/templates/streak.reminder», «#/support/TCK-1042». */
+function crumbOf(page: PageId | "", id: string | null): string | null {
+  if (!id) return null;
+  if (page === "news") return id.split("/").slice(1).join("/") || null;
+  return id;
+}
 
 export function Shell() {
   const i = useI18n();
@@ -57,19 +52,20 @@ export function Shell() {
   const [idle, setIdle] = useState<{ left: number } | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const perms = useMemo(() => new Set(me.permissions), [me.permissions]);
-  const home = homePage(perms);
+  const menu = session.adminLayout?.menu ?? null;
+  const home = homePage(perms, menu);
 
-  // guard: unknown/forbidden section → the role's start screen
+  // guard: unknown/forbidden/switched-off section → the role's start screen
   useEffect(() => {
     if (!route.page) {
       if (home) go(home, null, true);
       return;
     }
-    if (!pageAllowed(route.page, perms)) {
+    if (!pageAllowed(route.page, perms, menu)) {
       if (navItem(route.page)) toast(t("nav.denied", { page: t(`page.${route.page as PageId}`) }), "err");
       if (home) go(home, null, true);
     }
-  }, [route.page, perms, home, go, toast, t]);
+  }, [route.page, perms, menu, home, go, toast, t]);
 
   const navigate = useCallback(
     (page: string, id?: string | null) => {
@@ -81,11 +77,11 @@ export function Shell() {
     [go],
   );
 
-  // open-ticket counter for the sidebar (support.stats, real numbers only)
+  // open-ticket counter of the sidebar (support stats; background poll — never extends the session)
   const canSupport = perms.has("support.read");
   const loadStats = useCallback(() => {
     if (!canSupport) return;
-    Support.stats("today", true) // sidebar counter: background poll, never extends the session
+    Support.stats("today", true)
       .then(setStats)
       .catch(() => setStats(null));
   }, [canSupport]);
@@ -95,28 +91,12 @@ export function Shell() {
     return () => clearInterval(id);
   }, [loadStats]);
 
-  // OPEN review counter for the sidebar (events.review): first page of the queue, «99+» when there are more
-  const canReview = perms.has("events.review");
-  const [reviewOpen, setReviewOpen] = useState<{ n: number; more: boolean } | null>(null);
-  const loadReviewCount = useCallback(() => {
-    if (!canReview) return;
-    ReviewApi.list({ status: "OPEN", limit: 100 }, true)
-      .then((p) => setReviewOpen({ n: p.items.length, more: !!p.next_cursor }))
-      .catch(() => setReviewOpen(null));
-  }, [canReview]);
-  useEffect(() => {
-    loadReviewCount();
-    const id = setInterval(loadReviewCount, 60_000);
-    return () => clearInterval(id);
-  }, [loadReviewCount]);
-
   // inactivity: warning 2 min before the 30-min idle timeout, heartbeat GET /me while the user is active
   const timeout = me.session.idle_timeout_seconds || 1800;
   const idleRef = useRef(idle);
   idleRef.current = idle;
   const sessionRef = useRef(session);
   sessionRef.current = session;
-  // the session cookie is shared by all tabs → so is the idle timer (BroadcastChannel, timestamps only)
   useEffect(() => shareActivity(), []);
   useEffect(() => activity.touch(), []);
   useEffect(() => {
@@ -130,11 +110,10 @@ export function Shell() {
       if (checking) return;
       const s = idleState(Date.now(), activity.user, activity.server, timeout);
       if (s.expired) {
-        // before POST /auth/logout ask the other tabs: the operator may be typing a reply in one of them
         checking = true;
         void confirmIdle().then((last) => {
           if (idleState(Date.now(), last, activity.server, timeout).expired) void sessionRef.current.signOut("idle");
-          else checking = false; // another tab is in use — the shared timer moved on
+          else checking = false;
         });
         return;
       }
@@ -163,57 +142,31 @@ export function Shell() {
       const fresh = m && typeof m === "object" && "staff" in m ? m : await session.refreshMe();
       if (fresh) session.setMe(fresh);
       toast(role ? t("imp.done", { r: t(`role.${role}`) }) : t("imp.off"), "info", t("imp.devOnly"));
-      go(homePage(new Set(fresh?.permissions ?? [])) ?? "dashboard", null, true);
+      go(homePage(new Set(fresh?.permissions ?? []), menu) ?? "overview", null, true);
     } catch (e) {
       toast(errText(i, e), "err", errMeta(e));
     }
   };
 
-  const page = (pageAllowed(route.page, perms) ? route.page : "") as PageId | "";
+  const page = (pageAllowed(route.page, perms, menu) ? route.page : "") as PageId | "";
   const item = page ? navItem(page) : undefined;
-  // sprint 7: #/requests/user:<uuid> is a filter of the request log, not an object — no crumb for it
-  // sprint 8: #/monitoring/<tab>[/<provider>] — a tab, not an object; no crumb for it
-  // sprint 9: #/users/deletions[/<filter>|/<request_id>] — the «Deletions» tab; a request id is the crumb
-  const deletions = page === "users" && (route.id ?? "").split("/")[0] === "deletions";
-  const delId = deletions ? (route.id ?? "").split("/")[1] ?? "" : "";
-  const crumbId = deletions
-    ? /^[0-9a-f-]{36}$/i.test(delId)
-      ? delId
-      : null
-    : route.id && !(page === "requests" && route.id.startsWith("user:")) && page !== "monitoring"
-      ? route.id
-      : null;
-  const title = (page === "support" || page === "agents") && crumbId ? crumbId : deletions ? t("page.deletions") : page ? t(`page.${page}`) : "";
-  const idLabel = crumbId && crumbId.length > 20 ? shortId(crumbId, 8, 4) : crumbId;
-  const crumbs: Array<{ label: string; page?: string; id?: string }> = page
-    ? deletions
-      ? [{ label: t(`nav.g.${GROUP_OF[page]}`) }, { label: t("page.users"), page }, ...(crumbId ? [{ label: t("page.deletions"), page: "users", id: "deletions" }, { label: idLabel ?? "" }] : [{ label: t("page.deletions") }])]
-      : [{ label: t(`nav.g.${GROUP_OF[page]}`) }, ...(crumbId ? [{ label: t(`page.${page}`), page }, { label: idLabel ?? "" }] : [{ label: t(`page.${page}`) }])]
-    : [];
-
-  const groups = visibleNav(perms);
+  const crumbId = crumbOf(page, route.id);
+  const title = page ? t(`page.${page}`) : "";
+  const groups = visibleNav(perms, menu);
   const openCount = stats ? stats.open : null;
   const hot = !!stats && stats.breached > 0;
+  const roleName = t(`role.${me.impersonating ?? me.staff.role}`);
 
   return (
     <NavCtx.Provider value={{ route, navigate }}>
       <div className={cx("shell", collapsed && "is-collapsed", navOpen && "is-nav-open", session.adminLayout?.density === "comfortable" && "density-comfortable")} data-testid="shell">
         <aside className="sidenav" id="sidenav" aria-label={t("nav.label")}>
           <div className="sn-head">
-            <span className="wordmark" aria-label="TilHero Admin">
-              {collapsed ? (
-                <span className="wm-event">Ai</span>
-              ) : (
-                <>
-                  Ai<span className="wm-event">Event</span>
-                  <span className="wm-suffix">Admin</span>
-                </>
-              )}
-            </span>
+            <Wordmark compact={collapsed} sub={t("nav.brandSub", { env: me.env })} />
           </div>
           <nav className="sn-scroll" data-testid="sidenav">
             {groups.map((g) => (
-              <div className="sn-group" key={g.group}>
+              <div className="sn-group" key={g.group} data-group={g.group}>
                 <div className="sn-group-label">{t(`nav.g.${g.group}`)}</div>
                 {g.items.map((it) => (
                   <button
@@ -228,19 +181,11 @@ export function Shell() {
                     <Icon name={it.icon} />
                     <span className="sn-label">{t(`page.${it.id}`)}</span>
                     {it.id === "support" && openCount ? (
-                      <>
-                        <span className={cx("sn-count", hot && "is-hot")} title={t("nav.openTickets")}>
-                          {openCount}
-                        </span>
-                        {hot && <span className="sn-dot" aria-hidden="true" />}
-                      </>
-                    ) : null}
-                    {it.id === "review" && reviewOpen && reviewOpen.n > 0 ? (
-                      <span className="sn-count" title={t("nav.openReview")} data-testid="review-count">
-                        {reviewOpen.more || reviewOpen.n > 99 ? "99+" : reviewOpen.n}
+                      <span className={cx("sn-count", hot && "is-hot")} title={hot ? t("nav.breached", { n: stats!.breached }) : t("nav.openTickets")} data-testid="support-count">
+                        {openCount}
                       </span>
                     ) : null}
-                    {it.soon && <span className="sn-tag">{t("nav.soon")}</span>}
+                    {it.soon && <span className="sn-tag">{t("nav.soonN", { n: it.soon })}</span>}
                   </button>
                 ))}
               </div>
@@ -250,9 +195,8 @@ export function Shell() {
             <span className={cx("env-chip", `env-${me.env}`)} title={t("nav.env")} data-testid="env-chip">
               <span>{me.env}</span>
             </span>
-            <span className="sn-ver" title={session.themeVersion ? `${APP_VERSION} · theme ${session.themeVersion}` : APP_VERSION}>
-              {APP_VERSION}
-              {session.themeVersion ? ` · theme ${session.themeVersion}` : ""}
+            <span className="sn-ver" title={session.themeVersion ? `${APP_VERSION} · admin ${session.themeVersion}` : APP_VERSION}>
+              {session.themeVersion ? `admin ${session.themeVersion}` : APP_VERSION}
             </span>
             <button
               type="button"
@@ -274,26 +218,23 @@ export function Shell() {
             <IconBtn icon="menu" label={t("nav.open")} className="tb-burger" onClick={() => setNavOpen(true)} expanded={navOpen} testId="burger" />
             <div className="tb-title">
               <div className="crumbs" aria-label={t("nav.crumbs")}>
-                {crumbs.map((c, idx) => (
-                  <span key={idx} className="row" style={{ gap: 6 }}>
-                    {idx > 0 && <span className="sep">/</span>}
-                    {c.page ? (
-                      <button type="button" onClick={() => navigate(c.page!, c.id ?? null)}>
-                        {c.label}
-                      </button>
-                    ) : (
-                      <span>{c.label}</span>
-                    )}
-                  </span>
-                ))}
+                {page && <span>{t(`nav.g.${GROUP_OF[page]}`)}</span>}
+                {page && crumbId && (
+                  <>
+                    <span className="sep">/</span>
+                    <button type="button" onClick={() => navigate(page)}>
+                      {title}
+                    </button>
+                  </>
+                )}
               </div>
-              <h1 className="page-title" title={title} data-testid="page-title">
-                {title}
+              <h1 className="page-title" title={crumbId ?? title} data-testid="page-title">
+                {crumbId && page === "support" ? crumbId : title}
               </h1>
             </div>
             <div className="tb-spacer" />
             <div className="tb-actions">
-              {me.env === "dev" && (
+              {me.env === "dev" ? (
                 <MenuButton
                   label={t("imp.title")}
                   className="role-btn"
@@ -311,7 +252,7 @@ export function Shell() {
                       <MenuItem checked={!me.impersonating} onClick={() => { close(); void impersonate(null); }}>
                         {t("imp.own", { r: t(`role.${me.staff.role}`) })}
                       </MenuItem>
-                      {ROLES.filter((r) => r !== me.staff.role).map((r) => (
+                      {ROLE_CODES.filter((r) => r !== me.staff.role).map((r) => (
                         <MenuItem key={r} checked={me.impersonating === r} onClick={() => { close(); void impersonate(r); }} testId={`imp-${r}`}>
                           {t(`role.${r}`)}
                         </MenuItem>
@@ -321,9 +262,13 @@ export function Shell() {
                 >
                   <Icon name="sliders" />
                   <span className="role-k">{t("imp.short")}:</span>
-                  <span className="role-name">{t(`role.${me.impersonating ?? me.staff.role}`)}</span>
+                  <span className="role-name">{roleName}</span>
                   <Icon name="chevD" />
                 </MenuButton>
+              ) : (
+                <span className="pill no-dot tb-role tb-hide-sm" data-testid="role-pill">
+                  {t("account.rolePill", { r: roleName })}
+                </span>
               )}
               <div className="seg-mini tb-lang" role="group" aria-label={t("common.language")}>
                 <button type="button" aria-pressed={lang === "ru"} onClick={() => setLang("ru")} data-testid="lang-ru">
@@ -333,8 +278,7 @@ export function Shell() {
                   EN
                 </button>
               </div>
-              {(pageAllowed("budgets", perms) || pageAllowed("monitoring", perms)) && <AlertsBell onOpen={(pg, id) => navigate(pg, id)} allowed={(pg) => pageAllowed(pg, perms)} />}
-              <ThemeMenu theme={theme} setTheme={setTheme} className="tb-hide-sm" />
+              <ThemeMenu theme={theme} setTheme={setTheme} />
               <MenuButton
                 label={`${t("account.title")}: ${me.staff.display_name}`}
                 className="avatar"
@@ -379,44 +323,23 @@ export function Shell() {
             </div>
           </header>
           <main className="main" tabIndex={-1} ref={mainRef} id="main" data-testid={page ? `page-${page}` : undefined}>
-            {/* sprint 9 review: the staff member's own limit (adm.staff) — live countdown over every screen */}
             <RateWaitNotice scope={[]} testId="staff-rate-wait" />
             {item?.soon ? (
               <Soon page={item.id} sprint={item.soon} />
-            ) : page === "dashboard" ? (
-              <Dashboard />
+            ) : page === "overview" ? (
+              <Overview />
             ) : page === "users" ? (
-              <UsersSection openId={route.id} />
+              <LearnersPage openId={route.id} />
             ) : page === "support" ? (
               <SupportPage ticketRef={route.id} onStats={loadStats} />
+            ) : page === "news" ? (
+              <NewsPage routeId={route.id} />
+            ) : page === "config" ? (
+              <ConfigPage />
             ) : page === "roles" ? (
               <Roles />
             ) : page === "audit" ? (
               <AuditPage />
-            ) : page === "config" ? (
-              <ConfigPage />
-            ) : page === "review" ? (
-              <ReviewPage openId={route.id} onChanged={loadReviewCount} />
-            ) : page === "sources" ? (
-              <SourcesPage openId={route.id} />
-            ) : page === "discovery" ? (
-              <DiscoveryPage openId={route.id} />
-            ) : page === "travel" ? (
-              <TravelPage />
-            ) : page === "feeds" ? (
-              <FeedsPage openId={route.id} />
-            ) : page === "news" ? (
-              <NewsPage />
-            ) : page === "watches" ? (
-              <WatchesPage />
-            ) : page === "requests" ? (
-              <RequestsPage openId={route.id} />
-            ) : page === "budgets" ? (
-              <BudgetsPage />
-            ) : page === "agents" ? (
-              <AgentsPage openId={route.id} />
-            ) : page === "monitoring" ? (
-              <MonitoringPage openId={route.id} />
             ) : null}
           </main>
         </div>

@@ -2,7 +2,8 @@ import { expect, type Page } from "@playwright/test";
 import { MockBff, type Scenario } from "./fixtures/mock-bff";
 import { PASSWORD, TOTP } from "./fixtures/data";
 
-export const SHOTS = "e2e/shots";
+/** Screenshots of key screens: SHOTS_DIR (default /tmp/admin-shots — not committed). */
+export const SHOTS = process.env.SHOTS_DIR ?? "/tmp/admin-shots";
 export const CYRILLIC = /[Ѐ-ӿ]/;
 
 export async function open(page: Page, scenario: Scenario = {}, hash = ""): Promise<MockBff> {
@@ -37,6 +38,7 @@ export async function settle(page: Page): Promise<void> {
 }
 
 export async function shot(page: Page, name: string, fullPage = false): Promise<void> {
+  if (fullPage) await page.evaluate(() => window.scrollTo(0, 0));
   await settle(page);
   await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage });
 }
@@ -53,13 +55,6 @@ export async function nav(page: Page, id: string): Promise<void> {
   if (await burger.isVisible()) await burger.click();
   await page.locator(`[data-nav="${id}"]`).click();
   await expect(page.getByTestId(`page-${id}`)).toBeVisible();
-}
-
-/** sprint-4 screenshots: apps/admin-web/shots/sprint4/<name>.png */
-export const SHOTS4 = "shots/sprint4";
-export async function shot4(page: Page, name: string, fullPage = false): Promise<void> {
-  await settle(page);
-  await page.screenshot({ path: `${SHOTS4}/${name}.png`, fullPage });
 }
 
 export async function setTheme(page: Page, mode: "light" | "dark"): Promise<void> {

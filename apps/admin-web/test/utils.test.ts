@@ -8,7 +8,6 @@ import { liveSla, sortQueue, STAFF_TRANSITIONS } from "../src/screens/support/sl
 import { passwordRules, passwordScore } from "../src/screens/auth/PasswordFields";
 import { appliedTokenNames, applyConfigTokens, clearConfigTokens, layoutFromPayload, sanitizeTokens, tokensFromPayload, validToken } from "../src/theme/config";
 import { nextVersion, payloadChanges, type AdminPayload, type MiniPayload } from "../src/screens/config/Config";
-import { WIDGETS as WIDGETS_ALL, dashOrder, widgetOrder, widgetRows } from "../src/screens/dashboard/Dashboard";
 import { approvalLabel } from "../src/screens/roles/Roles";
 import { actionSeverity, compact, dayBound } from "../src/screens/audit/Audit";
 
@@ -24,7 +23,7 @@ const tk = (over: Partial<StaffTicketSummary>): StaffTicketSummary => ({
   priority: "normal",
   assignee_id: null,
   assignee_name: null,
-  has_event_context: false,
+  has_context: false,
   anonymized: false,
   created_at: "2026-10-09T10:00:00Z",
   updated_at: "2026-10-09T10:00:00Z",
@@ -121,60 +120,49 @@ describe("ids, idle policy, password rules", () => {
   });
 });
 
-describe("admin theme tokens from experience-config (A46)", () => {
+describe("admin theme tokens from experience-config (TilHero whitelist)", () => {
   afterEach(() => clearConfigTokens());
   it("accepts only whitelisted tokens with safe values", () => {
-    expect(validToken("--accent", "#DFFF56")).toBe(true);
-    expect(validToken("--accent", "url(javascript:alert(1))")).toBe(false);
-    expect(validToken("--accent", "red;}body{display:none")).toBe(false);
+    expect(validToken("--pen", "#2F4BE0")).toBe(true);
+    expect(validToken("--side", "rgba(28,35,64,.9)")).toBe(true);
+    expect(validToken("--pen", "url(javascript:alert(1))")).toBe(false);
+    expect(validToken("--pen", "red;}body{display:none")).toBe(false);
+    expect(validToken("--pen", "rgb(300,0,0)")).toBe(false);
     expect(validToken("--nav-w", "999px")).toBe(false);
-    expect(validToken("--font-ui", '"Manrope",ui-sans-serif,system-ui')).toBe(true);
-    expect(validToken("--unknown", "#fff")).toBe(false);
-    expect(sanitizeTokens({ "--accent": "#7CF0C8", "--evil": "#000", "--r": "var(--x)" })).toEqual({ "--accent": "#7CF0C8" });
+    expect(validToken("--nav-w", "15rem")).toBe(false); // px only
+    expect(validToken("--nav-w", "236px")).toBe(true);
+    expect(validToken("--r-card", "2rem")).toBe(true);
+    expect(validToken("--r-card", "40px")).toBe(false);
+    expect(validToken("--font-ui", "Onest,system-ui,sans-serif")).toBe(true);
+    expect(validToken("--font-ui", '"Comic Sans MS",sans-serif')).toBe(false); // not an allowed family
+    expect(validToken("--accent", "#fff")).toBe(false); // aievent token — not in the TilHero whitelist
+    expect(sanitizeTokens({ "--pen": "#3B5BDB", "--evil": "#000", "--r-btn": "var(--x)" })).toEqual({ "--pen": "#3B5BDB" });
   });
   it("applies colours only in the light scheme; geometry in both", () => {
     const root = document.createElement("div");
-    applyConfigTokens(tokensFromPayload({ theme: { tokens: { "--accent": "#7CF0C8", "--r": "10px" } } }), false, root);
-    expect(root.style.getPropertyValue("--accent")).toBe("#7CF0C8");
+    applyConfigTokens(tokensFromPayload({ theme: { tokens: { "--pen": "#3B5BDB", "--r-btn": "12px" } } }), false, root);
+    expect(root.style.getPropertyValue("--pen")).toBe("#3B5BDB");
     applyConfigTokens(null, true, root);
-    expect(root.style.getPropertyValue("--accent")).toBe("");
-    expect(root.style.getPropertyValue("--r")).toBe("10px");
-    expect(appliedTokenNames()).toEqual(["--r"]);
+    expect(root.style.getPropertyValue("--pen")).toBe("");
+    expect(root.style.getPropertyValue("--r-btn")).toBe("12px");
+    expect(appliedTokenNames()).toEqual(["--r-btn"]);
   });
-  it("reads layout (density, dashboard widgets) and orders the dashboard without gaps", () => {
-    const lay = layoutFromPayload({ layout: { density: "comfortable", dashboard_widgets: [{ id: "kpi_ai", enabled: true }, { id: "kpi_support", enabled: true }, { id: "kpi_users", enabled: false }, { id: "hourly", enabled: true }] } });
-    expect(lay!.density).toBe("comfortable");
-    const order = widgetOrder(lay!.widgets);
-    expect(order).toEqual(["kpi_ai", "kpi_support", "kpi_system", "kpi_commerce"]);
-    // sprint 8: the fixed groups (trips, no flight, watch, news) take their default place after their predecessor
-    const full = dashOrder(order);
-    expect(full).toEqual(["kpi_ai", "kpi_trips", "kpi_no_flight", "kpi_watch", "kpi_news", "kpi_support", "kpi_system", "kpi_commerce"]);
-    // rows of twelfths; a short row stretches (fr) — no gaps
-    expect(widgetRows(full).map((r) => r.map((x) => `${x.id}:${x.span}`))).toEqual([
-      ["kpi_ai:6", "kpi_trips:6"],
-      ["kpi_no_flight:6", "kpi_watch:4"],
-      ["kpi_news:4", "kpi_support:4"],
-      ["kpi_system:8", "kpi_commerce:4"],
-    ]);
-    expect(widgetRows(dashOrder([...WIDGETS_ALL])).map((r) => r.map((x) => x.id))).toEqual([
-      ["kpi_users", "kpi_ai"],
-      ["kpi_trips", "kpi_no_flight"],
-      ["kpi_watch", "kpi_news", "kpi_support"],
-      ["kpi_system", "kpi_commerce"],
-    ]);
-    expect(widgetOrder(null)).toEqual(["kpi_users", "kpi_ai", "kpi_support", "kpi_system", "kpi_commerce"]);
+  it("reads the admin layout: density and the menu", () => {
+    const lay = layoutFromPayload({ layout: { density: "comfortable", menu: [{ id: "support", enabled: true }, { id: "content", enabled: false }, { bogus: 1 }] } });
+    expect(lay).toEqual({ density: "comfortable", menu: [{ id: "support", enabled: true }, { id: "content", enabled: false }] });
+    expect(layoutFromPayload({ layout: { density: "weird" } })).toEqual({ density: "compact", menu: [] });
+    expect(layoutFromPayload(null)).toBeNull();
   });
 });
 
 describe("config versions", () => {
   const mini = (): MiniPayload => ({
-    theme: { id: "default", version: "2.0.3", tokens: {} },
-    home: { welcome_mode: "first_visit_only", sections: [{ type: "event_carousel", key: "best_for_you", variant: "large", enabled: true }, { type: "news_carousel", key: "news", variant: "compact", enabled: true }] },
-    flags: { ai_concierge: true },
-    hotel_rating_min: 8.5,
+    theme: { id: "notebook", version: "1.0.0", tokens: { "--pen": "#2F4BE0" } },
+    home: { sections: [{ type: "today_plan", key: "today_plan", variant: "large", enabled: true }, { type: "news", key: "news", variant: "compact", enabled: true }] },
+    flags: { voice_lesson: false },
   });
   it("suggests the next free patch version", () => {
-    expect(nextVersion(["2.0.2", "2.0.10", "2.0.3"])).toBe("2.0.11");
+    expect(nextVersion(["1.0.2", "1.0.10", "1.0.3"])).toBe("1.0.11");
     expect(nextVersion([])).toBe("1.0.0");
   });
   it("lists draft changes", () => {
@@ -182,14 +170,14 @@ describe("config versions", () => {
     const b = mini();
     b.home.sections.reverse();
     b.home.sections[0]!.enabled = false;
-    b.flags.ai_concierge = false;
-    b.hotel_rating_min = 9;
-    expect(payloadChanges("miniapp", a, b)).toEqual(["home.sections: order", "news: off", "hotel_rating_min: 8.5 → 9", "flag ai_concierge: true → false"]);
-    const ad: AdminPayload = { theme: { id: "default", version: "1.0.0", tokens: { "--accent": "#DFFF56" } }, layout: { density: "compact", table_presets: { users: "support", audit: "security" }, dashboard_widgets: [] }, flags: {} };
+    b.flags.voice_lesson = true;
+    b.theme.tokens["--pen"] = "#3B5BDB";
+    expect(payloadChanges("miniapp", a, b)).toEqual(["--pen: #2F4BE0 → #3B5BDB", "home.sections: order", "news: off", "flag voice_lesson: false → true"]);
+    const ad: AdminPayload = { theme: { id: "admin_light", version: "1.0.0", tokens: { "--pen": "#2F4BE0" } }, layout: { density: "compact", menu: [{ id: "overview", enabled: true }, { id: "content", enabled: true }] }, flags: {} };
     const ad2: AdminPayload = JSON.parse(JSON.stringify(ad));
-    ad2.theme.tokens["--accent"] = "#7CF0C8";
     ad2.layout.density = "comfortable";
-    expect(payloadChanges("admin", ad, ad2)).toEqual(["--accent: #DFFF56 → #7CF0C8", "density: compact → comfortable"]);
+    ad2.layout.menu[1]!.enabled = false;
+    expect(payloadChanges("admin", ad, ad2)).toEqual(["density: compact → comfortable", "menu content: off"]);
   });
 });
 
@@ -198,7 +186,7 @@ describe("roles and audit helpers", () => {
   it("summarises four-eyes requests", () => {
     const rn = (r: string) => r.toUpperCase();
     const tr = (k: Parameters<typeof translate>[1], v?: Record<string, string | number>) => translate("ru", k, v);
-    expect(approvalLabel({ ...base, kind: "role.permissions_change", summary: { role: "support", added: ["export.csv"], removed: ["support.reply"] } } as Approval, rn, tr)).toBe("SUPPORT: +export.csv, −support.reply");
+    expect(approvalLabel({ ...base, kind: "role.permissions_change", summary: { role: "support", added: ["support.manage"], removed: ["support.reply"] } } as Approval, rn, tr)).toBe("SUPPORT: +support.manage, −support.reply");
     expect(approvalLabel({ ...base, kind: "staff.role_grant", summary: { staff: { display_name: "Oleg" }, from_role: "support", to_role: "operations" } } as Approval, rn, tr)).toBe("Oleg: SUPPORT → OPERATIONS");
     expect(approvalLabel({ ...base, kind: "staff.privileged_reset", summary: { staff: { display_name: "Нодира" }, action: "password" } } as Approval, rn, tr)).toBe("Нодира: сброс пароля");
     expect(approvalLabel({ ...base, kind: "staff.privileged_reset", summary: { staff: { email: "n@x" }, action: "mfa" } } as Approval, rn, tr)).toBe("n@x: сброс MFA");

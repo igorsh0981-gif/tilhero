@@ -74,7 +74,7 @@ describe("admin-bff client", () => {
 describe("error texts", () => {
   const i = { t: (k: Parameters<typeof translate>[1], v?: Record<string, string | number>) => translate("ru", k, v) };
   it("403 PERMISSION_DENIED names the permission; without details it is still clear", () => {
-    expect(errText(i, new ApiError(403, errBody("PERMISSION_DENIED", { permission: "billing.refund" })))).toBe("Недостаточно прав: нужно право billing.refund");
+    expect(errText(i, new ApiError(403, errBody("PERMISSION_DENIED", { permission: "whatsnew.publish" })))).toBe("Недостаточно прав: нужно право whatsnew.publish");
     expect(errText(i, new ApiError(403, errBody("PERMISSION_DENIED")))).toContain("нет права");
     expect(errText(i, new ApiError(403, errBody("SOMETHING_NEW")))).toContain("нет права");
   });

@@ -1,82 +1,58 @@
 /**
- * Fixture data of the mock admin-bff. Shapes follow packages/contracts/src/admin.ts; PII in fixtures is fake
- * and masked the way the real services mask it (telegram_id_masked).
+ * Fixture data of the mock admin-bff (TilHero sprint 2). Shapes follow packages/contracts/src/admin.ts; PII is fake
+ * and masked the way the real services mask it (telegram_id_masked = ••••••789).
  */
 import type {
-  AdminUserCard,
-  AdminUserRow,
+  AdminLearnerCard,
+  AdminLearnerRow,
   AuditRecord,
-  Dashboard,
+  Campaign,
   Permission,
   ReplyTemplate,
   Role,
   RoleCode,
+  SlaPolicy,
   Staff,
+  StaffReleaseNote,
   StaffTicket,
   StaffTicketMessage,
+  TemplateInfo,
+  TemplateVersion,
   TicketPriority,
   TicketStatus,
 } from "@tilhero/contracts/admin";
+import { PERMISSIONS } from "@tilhero/contracts/admin";
 
-export const ALL_PERMS: Permission[] = [
-  "dashboard.read",
-  "users.read",
-  "users.sensitive.read",
-  "ai.content.read",
-  "export.csv",
-  "support.read",
-  "support.reply",
-  "support.manage",
-  "subscriptions.override",
-  "billing.refund",
-  "skills.edit",
-  "skills.publish",
-  "audit.read",
-  "config.read",
-  "config.edit",
-  "config.publish",
-  "ops.kill_switch",
-  "staff.manage",
-  "roles.manage",
-  "events.review",
-  "sources.manage",
-  "discovery.manage",
-  "news.manage",
-  "users.access.manage",
-  "ops.queues.manage",
-];
+export const ALL_PERMS: Permission[] = [...PERMISSIONS];
 
-/** Default matrix (docs/sprint2/INTERNAL_API.md, admin-identity seed; sprint 4 additions). */
+/** Default matrix (PLAN.md «Роли и права»; super_admin — all; users.sensitive.read, staff.manage, roles.manage — only super_admin). */
 export const MATRIX: Record<RoleCode, Permission[]> = {
   super_admin: [...ALL_PERMS],
-  // sprint 4: operations + events.review, sources.manage, discovery.manage (docs/sprint4/INTERNAL_API.md §7)
-  // sprint 6: + news.manage (docs/sprint6/INTERNAL_API.md §8)
-  // sprint 7: + users.access.manage (admin-identity migration 0007)
-  // sprint 8: + ops.queues.manage (admin-identity migration 0008)
-  operations: ["dashboard.read", "users.read", "support.read", "config.read", "ops.kill_switch", "audit.read", "events.review", "sources.manage", "discovery.manage", "news.manage", "users.access.manage", "ops.queues.manage"],
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read"],
+  communications: ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"],
   support: ["dashboard.read", "users.read", "support.read", "support.reply"],
-  billing: ["dashboard.read", "users.read", "subscriptions.override", "billing.refund"],
-  agent_manager: ["dashboard.read", "skills.edit"],
+  methodist: ["dashboard.read", "users.read"],
   analyst: ["dashboard.read", "users.read"],
   auditor: ["dashboard.read", "audit.read"],
   read_only: ["dashboard.read"],
 };
 
-const ROLE_NAMES: Record<RoleCode, { ru: string; en: string }> = {
+export const ROLE_NAMES: Record<RoleCode, { ru: string; en: string }> = {
   super_admin: { ru: "Super Admin", en: "Super Admin" },
-  operations: { ru: "Operations", en: "Operations" },
-  support: { ru: "Support", en: "Support" },
-  billing: { ru: "Billing", en: "Billing" },
-  agent_manager: { ru: "Agent Manager", en: "Agent Manager" },
-  analyst: { ru: "Analyst", en: "Analyst" },
-  auditor: { ru: "Auditor", en: "Auditor" },
-  read_only: { ru: "Read Only", en: "Read Only" },
+  operations: { ru: "Операции", en: "Operations" },
+  communications: { ru: "Коммуникации", en: "Communications" },
+  support: { ru: "Поддержка", en: "Support" },
+  methodist: { ru: "Методист", en: "Methodist" },
+  analyst: { ru: "Аналитик", en: "Analyst" },
+  auditor: { ru: "Аудитор", en: "Auditor" },
+  read_only: { ru: "Только чтение", en: "Read only" },
 };
-export const PRIVILEGED: RoleCode[] = ["super_admin", "operations", "billing", "agent_manager"];
+export const PRIVILEGED: RoleCode[] = ["super_admin", "operations", "communications"];
 
 export const iso = (msFromNow: number) => new Date(Date.now() + msFromNow).toISOString();
-const MIN = 60_000;
-const HOUR = 60 * MIN;
+export const MIN = 60_000;
+export const HOUR = 60 * MIN;
+export const DAY = 24 * HOUR;
 
 export interface Account {
   staff: Staff;
@@ -90,7 +66,8 @@ export const ID = {
   auditor: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a04",
   newbie: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a05",
   ops: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a06",
-  contractor: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a07",
+  comms: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a07",
+  methodist: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a08",
 };
 
 function staff(id: string, email: string, display_name: string, role: RoleCode, extra: Partial<Staff> = {}): Staff {
@@ -100,11 +77,10 @@ function staff(id: string, email: string, display_name: string, role: RoleCode, 
     display_name,
     role,
     status: "ACTIVE",
-    auth_provider: "local",
     mfa_enabled: PRIVILEGED.includes(role),
     must_change_password: false,
     last_login_at: iso(-2 * HOUR),
-    created_at: iso(-40 * 24 * HOUR),
+    created_at: iso(-40 * DAY),
     created_by: ID.admin,
     ...extra,
   };
@@ -115,358 +91,502 @@ export const TOTP = "123456";
 
 export function accounts(): Account[] {
   return [
-    { staff: staff(ID.admin, "admin@tilhero.local", "Admin Operator", "super_admin", { last_login_at: iso(-2 * MIN) }), password: PASSWORD },
+    { staff: staff(ID.admin, "admin@tilhero.local", "Игорь Ш.", "super_admin", { last_login_at: iso(-2 * MIN) }), password: PASSWORD },
     { staff: staff(ID.admin2, "security@tilhero.local", "Нодира", "super_admin", { last_login_at: iso(-43 * MIN) }), password: PASSWORD },
+    { staff: staff(ID.comms, "comms@tilhero.local", "Дилноза", "communications", { last_login_at: iso(-5 * HOUR) }), password: PASSWORD },
     { staff: staff(ID.support, "support@tilhero.local", "Алина", "support", { last_login_at: iso(-21 * MIN) }), password: PASSWORD },
-    { staff: staff(ID.auditor, "audit@tilhero.local", "Бахтиёр", "auditor", { last_login_at: iso(-6 * 24 * HOUR) }), password: PASSWORD },
-    { staff: staff(ID.newbie, "new.ops@tilhero.local", "Олег", "operations", { must_change_password: true, mfa_enabled: false, last_login_at: null }), password: "Temp-Password-2026-x" },
-    { staff: staff(ID.ops, "ops@tilhero.local", "Тимур", "operations", { last_login_at: iso(-5 * HOUR) }), password: PASSWORD },
-    { staff: staff(ID.contractor, "contractor@tilhero.local", "Сергей (подрядчик)", "support", { status: "DISABLED", last_login_at: iso(-19 * 24 * HOUR) }), password: PASSWORD },
+    { staff: staff(ID.ops, "ops@tilhero.local", "Тимур", "operations", { last_login_at: iso(-3 * HOUR) }), password: PASSWORD },
+    { staff: staff(ID.methodist, "methodist@tilhero.local", "Гульнора", "methodist", { mfa_enabled: false }), password: PASSWORD },
+    { staff: staff(ID.auditor, "auditor@tilhero.local", "Сардор", "auditor", { mfa_enabled: false }), password: PASSWORD },
+    { staff: staff(ID.newbie, "newbie@tilhero.local", "Новый сотрудник", "operations", { mfa_enabled: false, must_change_password: true, last_login_at: null }), password: "Temp-Pass-0001" },
   ];
 }
 
-export function roles(staffList: Staff[], matrix: Record<RoleCode, Permission[]>): Role[] {
-  return (Object.keys(ROLE_NAMES) as RoleCode[]).map((code) => ({
+export function roles(matrix: Record<RoleCode, Permission[]>, accs: Account[]): Role[] {
+  return (Object.keys(matrix) as RoleCode[]).map((code) => ({
     code,
     name: ROLE_NAMES[code],
     permissions: [...matrix[code]],
     privileged: PRIVILEGED.includes(code),
-    staff_count: staffList.filter((s) => s.role === code).length,
-    updated_at: iso(-3 * 24 * HOUR),
-    updated_by: ID.admin,
+    staff_count: accs.filter((a) => a.staff.role === code).length,
+    updated_at: iso(-12 * DAY),
+    updated_by: null,
   }));
 }
 
-/* ---------------------------------------------------------------- users */
+/* ---------------------------------------------------------------- learners */
 
-export const USER = {
-  igor: "5f1c2a3b-4d5e-4f60-8a71-92b3c4d5e601",
-  maria: "5f1c2a3b-4d5e-4f60-8a71-92b3c4d5e602",
-  aziza: "5f1c2a3b-4d5e-4f60-8a71-92b3c4d5e603",
-  nomad: "5f1c2a3b-4d5e-4f60-8a71-92b3c4d5e604",
+export const LEARNER = {
+  madina: "a1000000-0000-4000-8000-000000000001",
+  botir: "a1000000-0000-4000-8000-000000000002",
+  lola: "a1000000-0000-4000-8000-000000000003",
+  timur: "a1000000-0000-4000-8000-000000000004",
+  anya: "a1000000-0000-4000-8000-000000000005",
+  jasur: "a1000000-0000-4000-8000-000000000006",
+  kamila: "a1000000-0000-4000-8000-000000000007",
+  oleg: "a1000000-0000-4000-8000-000000000008",
 };
-export const FULL_TG_ID = "918273645";
 
-export function users(): AdminUserRow[] {
-  const row = (user_id: string, username: string, display_name: string, locale: string, extra: Partial<AdminUserRow> = {}): AdminUserRow => ({
-    user_id,
-    username,
-    display_name,
-    telegram_id_masked: "••••••645",
-    locale,
+function row(id: string, extra: Partial<AdminLearnerRow>): AdminLearnerRow {
+  return {
+    user_id: id,
+    kind: "account",
+    guardian_user_id: null,
+    display_name: null,
+    username: null,
+    telegram_id_masked: null,
+    locale: "ru",
+    age_band: "18+",
+    guardian_consent: "not_required",
     status: "ACTIVE",
     onboarding_completed: true,
+    goal: "travel",
+    reminders_enabled: true,
+    children_count: 0,
     open_tickets: 0,
     tickets_total: 0,
-    created_at: iso(-30 * 24 * HOUR),
-    last_seen_at: iso(-3 * HOUR),
-    plan: "FREE",
+    created_at: iso(-30 * DAY),
+    last_activity_at: iso(-3 * HOUR),
     ...extra,
-  });
+  };
+}
+
+export function learners(): AdminLearnerRow[] {
   return [
-    row(USER.igor, "igor_demo", "Игорь", "ru", { open_tickets: 1, tickets_total: 2 }),
-    row(USER.maria, "maria_milano", "Maria", "en", { telegram_id_masked: "••••••112", open_tickets: 1, tickets_total: 1 }),
-    row(USER.aziza, "aziza_events", "Азиза", "ru", { telegram_id_masked: "••••••907", onboarding_completed: false, open_tickets: 1, tickets_total: 1 }),
-    row(USER.nomad, "nomad_tickets", "Nomad", "en", { telegram_id_masked: "••••••330", status: "DELETION_REQUESTED", last_seen_at: null }),
+    row(LEARNER.madina, { display_name: "Мадина К.", username: "madina_k", telegram_id_masked: "••••••417", goal: "work", open_tickets: 1, tickets_total: 2, last_activity_at: iso(-40 * MIN) }),
+    row(LEARNER.botir, { display_name: "Ботир Р.", username: "botir_r", telegram_id_masked: "••••••932", locale: "uz", goal: "daily", children_count: 2, tickets_total: 1, open_tickets: 1, last_activity_at: iso(-1 * DAY) }),
+    row(LEARNER.lola, { kind: "child", guardian_user_id: LEARNER.botir, display_name: "Лола", locale: "uz", age_band: "6-9", guardian_consent: "granted", goal: "study", reminders_enabled: false, last_activity_at: iso(-5 * HOUR) }),
+    row(LEARNER.timur, { kind: "child", guardian_user_id: LEARNER.botir, display_name: "Тимур", locale: "ru", age_band: "10-13", guardian_consent: "granted", goal: "study", last_activity_at: iso(-2 * DAY) }),
+    row(LEARNER.anya, { display_name: "Аня", username: "anya_14", telegram_id_masked: "••••••781", age_band: "14-17", guardian_consent: "granted", goal: "exam", last_activity_at: iso(-3 * DAY) }),
+    row(LEARNER.jasur, { display_name: "Жасур", username: null, telegram_id_masked: "••••••205", locale: "uz", onboarding_completed: false, goal: null, reminders_enabled: false, last_activity_at: null, created_at: iso(-2 * HOUR) }),
+    row(LEARNER.kamila, { display_name: "Камила", username: "kamila_t", telegram_id_masked: "••••••560", age_band: "14-17", guardian_consent: "pending", goal: "career", last_activity_at: iso(-12 * DAY) }),
+    row(LEARNER.oleg, { display_name: "Олег", username: "oleg_v", telegram_id_masked: "••••••118", status: "DELETION_REQUESTED", goal: "travel", last_activity_at: iso(-20 * DAY), tickets_total: 1 }),
   ];
 }
 
-export function userCard(u: AdminUserRow, tickets: StaffTicket[]): AdminUserCard {
+export const TELEGRAM_IDS: Record<string, string> = {
+  [LEARNER.madina]: "5120934417",
+  [LEARNER.botir]: "6011280932",
+  [LEARNER.anya]: "7004512781",
+  [LEARNER.jasur]: "5900011205",
+  [LEARNER.kamila]: "6112003560",
+  [LEARNER.oleg]: "5002441118",
+};
+
+export function card(rows: AdminLearnerRow[], id: string, tickets: AdminLearnerCard["tickets"]): AdminLearnerCard | null {
+  const r = rows.find((x) => x.user_id === id);
+  if (!r) return null;
+  const child = r.kind === "child";
   return {
-    ...u,
-    consent: { policy_version: "1.0", purposes: ["service", "personalization"], accepted_at: iso(-30 * 24 * HOUR), age_confirmed_18_plus: true, revoked_at: null },
-    security: { pin_enabled: true, biometric_enabled: false },
-    preferences: { onboarding_completed: u.onboarding_completed, updated_at: iso(-2 * 24 * HOUR), changed_fields: ["interests", "budget"] },
-    tickets: tickets.filter((t) => t.user_id === u.user_id).map((t) => ({ ticket_id: t.ticket_id, number: t.number, status: t.status, subject: t.subject, created_at: t.created_at })),
-    ai_conversations: [],
-    // sprint 7: filled by the mock admin-bff from fixtures/ai.ts (access level, usage, conversation metadata)
-    access_level: null,
-    ai_usage_30d: null,
+    ...r,
+    consent: {
+      policy_version: "1.2",
+      purposes: child ? ["terms", "privacy", "guardian"] : r.user_id === LEARNER.madina ? ["terms", "privacy", "product_news", "social"] : ["terms", "privacy"],
+      accepted_at: iso(-29 * DAY),
+      revoked_at: null,
+      basis: child || r.age_band === "14-17" ? "guardian" : "self",
+    },
+    security: { pin_enabled: r.user_id === LEARNER.botir, pin_reset_pending: false },
+    notifications: { enabled: r.reminders_enabled, categories: { reminders: r.reminders_enabled, missed: true, social: !child, support: true, product: r.user_id === LEARNER.madina } },
+    plan: r.onboarding_completed
+      ? {
+          goal: r.goal,
+          level_self: "beginner",
+          ui_lang: r.locale,
+          schedule: { preset: "weekdays", days: [1, 2, 3, 4, 5], preferred_time: "19:30", duration_min: 20, reminders_enabled: r.reminders_enabled, timezone: "Asia/Tashkent" },
+          onboarding_completed_at: iso(-28 * DAY),
+          updated_at: iso(-3 * DAY),
+        }
+      : null,
+    children: r.kind === "account" ? rows.filter((x) => x.guardian_user_id === r.user_id) : [],
+    guardian: child ? (rows.find((x) => x.user_id === r.guardian_user_id) ?? null) : null,
+    tickets,
     refreshed_at: iso(0),
   };
 }
 
 /* ---------------------------------------------------------------- support */
 
-let msgSeq = 0;
-export function msg(sender_type: StaffTicketMessage["sender_type"], text: string, minutesAgo: number, extra: Partial<StaffTicketMessage> = {}): StaffTicketMessage {
-  msgSeq += 1;
+function msg(id: number, sender: StaffTicketMessage["sender_type"], text: string, minAgo: number, extra: Partial<StaffTicketMessage> = {}): StaffTicketMessage {
+  return { message_id: `c1000000-0000-4000-8000-${String(id).padStart(12, "0")}`, sender_type: sender, visibility: "public", author_id: null, author_name: null, text, created_at: iso(-minAgo * MIN), ...extra };
+}
+
+function ticket(n: number, user: AdminLearnerRow | null, extra: Partial<StaffTicket>): StaffTicket {
+  const created = extra.created_at ?? iso(-90 * MIN);
   return {
-    message_id: `9a000000-0000-4000-8000-${String(msgSeq).padStart(12, "0")}`,
-    sender_type,
-    visibility: "public",
-    author_id: null,
-    author_name: null,
-    text,
-    created_at: iso(-minutesAgo * MIN),
+    ticket_id: `b1000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
+    number: `TCK-${n}`,
+    user_id: user?.user_id ?? null,
+    channel: "miniapp",
+    category: "OTHER",
+    subject: "",
+    status: "NEW",
+    priority: "normal",
+    assignee_id: null,
+    assignee_name: null,
+    has_context: true,
+    anonymized: false,
+    created_at: created,
+    updated_at: created,
+    last_message_at: created,
+    first_response_at: null,
+    sla_first_response_at: iso(30 * MIN),
+    sla_resolution_at: iso(20 * HOUR),
+    sla_target: "first_response",
+    sla_due_at: iso(30 * MIN),
+    sla_state: "ok",
+    sla_paused: false,
+    context: { deeplink: "tilhero://lessons/L-014", client_version: "miniapp 1.0.0 · iOS" },
+    correlation_id: "7f3a9c1e5b2d4a6f",
+    resolved_at: null,
+    closed_at: null,
+    user_unread_operator_replies: 0,
+    messages: [],
+    status_history: [{ from_status: null, status: "NEW", at: created, changed_by: "user", actor_id: null }],
+    escalations: [],
+    learner: user ? { user_id: user.user_id, kind: user.kind, username: user.username, telegram_id_masked: user.telegram_id_masked, locale: user.locale, age_band: user.age_band, status: user.status } : null,
     ...extra,
   };
 }
 
-interface TicketSpec {
-  n: number;
-  subject: string;
-  category: string;
-  priority: TicketPriority;
-  status: TicketStatus;
-  user: string | null;
-  createdMin: number;
-  /** minutes until the current SLA deadline (negative = breached) */
-  dueMin: number;
-  assignee?: { id: string; name: string } | null;
-  firstResponseMin?: number;
-  context?: StaffTicket["context"];
-  messages?: StaffTicketMessage[];
-}
-
-export function ticket(s: TicketSpec, usersList: AdminUserRow[]): StaffTicket {
-  const created = iso(-s.createdMin * MIN);
-  const due = iso(s.dueMin * MIN);
-  const first = s.firstResponseMin != null ? iso(-s.firstResponseMin * MIN) : null;
-  const running = s.status === "NEW" || s.status === "IN_PROGRESS";
-  const target = s.status === "RESOLVED" || s.status === "CLOSED" ? null : first ? "resolution" : "first_response";
-  const u = usersList.find((x) => x.user_id === s.user);
-  return {
-    ticket_id: `7e000000-0000-4000-8000-00000000${String(s.n).padStart(4, "0")}`,
-    number: `TCK-${s.n}`,
-    user_id: s.user,
-    channel: "telegram",
-    category: s.category,
-    subject: s.subject,
-    status: s.status,
-    priority: s.priority,
-    assignee_id: s.assignee?.id ?? null,
-    assignee_name: s.assignee?.name ?? null,
-    has_event_context: !!s.context,
-    anonymized: false,
-    created_at: created,
-    updated_at: iso(-5 * MIN),
-    last_message_at: iso(-5 * MIN),
-    first_response_at: first,
-    sla_first_response_at: first ? iso(-(s.createdMin - 30) * MIN) : due,
-    sla_resolution_at: first ? due : iso(s.dueMin * MIN + 4 * HOUR),
-    sla_target: target,
-    sla_due_at: target ? due : null,
-    sla_state: !running ? "ok" : s.dueMin < 0 ? "breached" : s.dueMin < 30 ? "soon" : "ok",
-    sla_paused: s.status === "WAITING_CUSTOMER",
-    context: s.context ?? null,
-    correlation_id: null,
-    resolved_at: s.status === "RESOLVED" || s.status === "CLOSED" ? iso(-30 * MIN) : null,
-    closed_at: s.status === "CLOSED" ? iso(-20 * MIN) : null,
-    user_unread_operator_replies: 0,
-    messages: s.messages ?? [msg("user", s.subject, s.createdMin)],
-    status_history: [{ from_status: null, status: "NEW", at: created, changed_by: "user", actor_id: null }],
-    escalations: [],
-    user: u ? { user_id: u.user_id, username: u.username, telegram_id_masked: u.telegram_id_masked, locale: u.locale, status: u.status } : null,
-  };
-}
-
-export function tickets(usersList: AdminUserRow[]): StaffTicket[] {
-  const alina = { id: ID.support, name: "Алина" };
-  const timur = { id: ID.ops, name: "Тимур" };
+export function tickets(ls: AdminLearnerRow[]): StaffTicket[] {
+  const by = (id: string) => ls.find((x) => x.user_id === id) ?? null;
   return [
-    ticket(
-      {
-        n: 3081,
-        subject: "Не открывается ссылка на билет",
-        category: "TICKET_SOURCE",
-        priority: "high",
-        status: "IN_PROGRESS",
-        user: USER.igor,
-        createdMin: 41,
-        dueMin: 12,
-        assignee: alina,
-        context: {
-          event_id: "evt_f1_auh_2026",
-          offer_id: "off_987",
-          provider_id: "ticket_provider_x",
-          deeplink: "https://www.abudhabigp.com/en/tickets",
-          price_snapshot: { amount: "850.00", currency: "USD" },
-          fetched_at: iso(-50 * MIN),
-          trace_id: "7f3a9c2e1b0d4e5f8a7b6c5d4e3f2c21",
-          client_version: "telegram-miniapp-2.0",
-        },
-        messages: [
-          msg("user", "Нажимаю «Купить билет» на Formula 1 Abu Dhabi — открывается страница sold out, хотя в приложении билеты есть.", 41),
-          msg("system", "Назначено: Алина.", 38),
-          msg("operator", "Проверила deeplink: провайдер отвечает 302 на sold-out для части регионов. Похоже на гео-редирект — нужен Provider issue.", 30, { visibility: "internal", author_id: ID.support, author_name: "Алина" }),
-        ],
-      },
-      usersList,
-    ),
-    // sprint 5: tickets with an offer snapshot (Mini App «Problem with the offer?»): 3074 — snapshot exists, 3069 — expired and removed (404)
-    ticket(
-      {
-        n: 3069, subject: "Цена билета изменилась после перехода", category: "PRICE", priority: "high", status: "IN_PROGRESS", user: USER.maria, createdMin: 180, dueMin: -65, assignee: timur,
-        context: { event_id: "e1000000-0000-4000-8000-000000000041", offer_id: "0ffe0000-0000-4000-8000-000000003069", provider_id: "aviasales", deeplink: "https://www.aviasales.com/search/TAS0512IST09121", price_snapshot: { amount: "318.00", currency: "USD" }, fetched_at: iso(-200 * MIN), trace_id: null, client_version: "telegram-miniapp-2.1" },
-      },
-      usersList,
-    ),
-    ticket(
-      {
-        n: 3074, subject: "Отель далеко от площадки", category: "HOTEL", priority: "low", status: "NEW", user: USER.aziza, createdMin: 240, dueMin: -17,
-        context: { event_id: "e1000000-0000-4000-8000-000000000042", offer_id: "0ffe0000-0000-4000-8000-000000003074", provider_id: "liteapi", deeplink: "https://book.tilhero.app/hotels/lp1beec?checkin=2026-11-13&checkout=2026-11-16", price_snapshot: { amount: "390.00", currency: "USD" }, fetched_at: iso(-250 * MIN), trace_id: "3b9e7c1d2a4f4e6b8c0d1e2f3a4b5c6d", client_version: "telegram-miniapp-2.1" },
-        messages: [msg("user", "В подборке «Комфорт» отель Rixos, но до Almaty Arena почти 2 км, а писали «рядом с площадкой». Можно вариант ближе?", 240)],
-      },
-      usersList,
-    ),
-    ticket({ n: 3072, subject: "Хочу выгрузить свои данные", category: "PERSONAL_DATA", priority: "high", status: "NEW", user: USER.nomad, createdMin: 230, dueMin: 10 }, usersList),
-    ticket({ n: 3071, subject: "Mini App не открывается на Android", category: "BUG", priority: "high", status: "NEW", user: USER.igor, createdMin: 55, dueMin: 65 }, usersList),
-    ticket({ n: 3080, subject: "Пришли два одинаковых уведомления", category: "BUG", priority: "normal", status: "WAITING_CUSTOMER", user: USER.maria, createdMin: 27, dueMin: 93, assignee: alina, firstResponseMin: 10 }, usersList),
-    ticket({ n: 3060, subject: "Как поменять язык?", category: "OTHER", priority: "normal", status: "RESOLVED", user: USER.aziza, createdMin: 2000, dueMin: 600, assignee: alina, firstResponseMin: 1900 }, usersList),
+    ticket(1042, by(LEARNER.madina), {
+      category: "ASSESSMENT",
+      subject: "Ошибку нашли там, где её нет",
+      priority: "high",
+      created_at: iso(-55 * MIN),
+      sla_due_at: iso(-12 * MIN),
+      sla_state: "breached",
+      messages: [msg(1, "user", "В уроке «В кафе» мне засчитали ошибку во фразе «We'd like a table for three», но там всё верно.", 55)],
+    }),
+    ticket(1043, by(LEARNER.botir), {
+      category: "SCHEDULE_REMINDERS",
+      subject: "Eslatmalar kech keladi",
+      status: "IN_PROGRESS",
+      assignee_id: ID.support,
+      assignee_name: "Алина",
+      created_at: iso(-4 * HOUR),
+      first_response_at: iso(-3 * HOUR),
+      sla_target: "resolution",
+      sla_due_at: iso(6 * HOUR),
+      messages: [
+        msg(2, "user", "Eslatma 19:30 ga qoʻyilgan, lekin 21:00 da keladi.", 240),
+        msg(3, "operator", "Assalomu alaykum! Vaqt mintaqangizni tekshirib koʻramiz.", 180, { author_id: ID.support, author_name: "Алина" }),
+        msg(4, "operator", "Похоже, в профиле стоит Europe/Moscow — проверить после обновления 1.0.1.", 175, { author_id: ID.support, author_name: "Алина", visibility: "internal" }),
+      ],
+      status_history: [
+        { from_status: null, status: "NEW", at: iso(-4 * HOUR), changed_by: "user", actor_id: null },
+        { from_status: "NEW", status: "IN_PROGRESS", at: iso(-3 * HOUR), changed_by: "staff", actor_id: ID.support },
+      ],
+    }),
+    ticket(1044, by(LEARNER.botir), {
+      category: "CHILD_PROFILE",
+      subject: "Как добавить второго ребёнка",
+      status: "WAITING_CUSTOMER",
+      assignee_id: ID.support,
+      assignee_name: "Алина",
+      created_at: iso(-1 * DAY),
+      first_response_at: iso(-20 * HOUR),
+      sla_target: "resolution",
+      sla_due_at: iso(30 * HOUR),
+      sla_paused: true,
+      messages: [msg(5, "user", "Хочу добавить второго ребёнка, но кнопка неактивна.", 1440), msg(6, "operator", "Подскажите, пожалуйста, возраст ребёнка?", 1200, { author_id: ID.support, author_name: "Алина" })],
+    }),
+    ticket(1045, by(LEARNER.oleg), {
+      category: "BUG",
+      subject: "Не открывается урок после обновления",
+      status: "RESOLVED",
+      created_at: iso(-3 * DAY),
+      first_response_at: iso(-3 * DAY + HOUR),
+      resolved_at: iso(-2 * DAY),
+      sla_target: null,
+      sla_due_at: null,
+      messages: [msg(7, "user", "Урок L-003 висит на загрузке.", 4320), msg(8, "operator", "Исправили в версии 1.0.1 — обновите, пожалуйста, приложение.", 2880, { author_id: ID.admin, author_name: "Игорь Ш." })],
+    }),
   ];
 }
 
-export const TEMPLATES: ReplyTemplate[] = [
+export const REPLY_TEMPLATES: ReplyTemplate[] = [
   {
-    id: "tpl_link",
-    title: { ru: "Ссылка провайдера не работает", en: "Provider link is broken" },
-    text: {
-      ru: "Здравствуйте! Мы проверили ссылку: проблема на стороне продавца билетов. Пока откройте официальную страницу напрямую — {deeplink}.",
-      en: "Hi! We checked the link: the issue is on the ticket seller’s side. For now, open the official page directly — {deeplink}.",
-    },
-    categories: ["TICKET_SOURCE", "EVENT_RECOMMENDATION"],
+    id: "greet",
+    title: { ru: "Приветствие", en: "Greeting" },
+    text: { ru: "Здравствуйте! Спасибо, что написали в поддержку TilHero. Обращение {number} у нас.", uz: "Assalomu alaykum! TilHero yordam xizmatiga yozganingiz uchun rahmat. Murojaat {number} bizda." },
+    categories: ["OTHER", "ACCOUNT", "BUG"],
   },
   {
-    id: "tpl_more",
-    title: { ru: "Нужны подробности", en: "Need more details" },
-    text: { ru: "Здравствуйте! Пришлите, пожалуйста, скриншот ошибки по обращению {number}.", en: "Hi! Please send a screenshot of the error for request {number}." },
-    categories: ["BUG", "OTHER"],
+    id: "assessment",
+    title: { ru: "Переоценка", en: "Re-evaluation" },
+    text: { ru: "Мы проверили оценку и пересчитали результат урока. Исходная оценка сохранена в истории.", uz: "Baholashni tekshirdik va dars natijasini qayta hisobladik. Dastlabki baho tarixda saqlangan." },
+    categories: ["ASSESSMENT"],
+  },
+  {
+    id: "timezone",
+    title: { ru: "Часовой пояс", en: "Time zone" },
+    text: { ru: "Проверьте, пожалуйста, часовой пояс в «Профиль → График»: напоминания приходят по нему.", uz: "" },
+    categories: ["SCHEDULE_REMINDERS"],
   },
 ];
 
-export const SLA_POLICIES = () => {
-  const at = iso(-7 * 24 * HOUR);
-  const row = (category: string, priority: TicketPriority, f: number, r: number) => ({ category, priority, first_response_minutes: f, resolution_minutes: r, updated_at: at, updated_by: ID.admin });
-  return {
-    items: [row("*", "urgent", 30, 240), row("*", "high", 60, 480), row("*", "normal", 240, 1440), row("*", "low", 480, 2880), row("PERSONAL_DATA", "high", 60, 1440)],
-    category_defaults: { PERSONAL_DATA: "high", ACCOUNT: "high" },
-  };
-};
+export const SLA_POLICIES = (): SlaPolicy[] => [
+  { category: "*", priority: "normal", first_response_minutes: 60, resolution_minutes: 1440, updated_at: iso(-10 * DAY), updated_by: ID.admin },
+  { category: "*", priority: "urgent", first_response_minutes: 15, resolution_minutes: 240, updated_at: iso(-10 * DAY), updated_by: ID.admin },
+  { category: "CHILD_PROFILE", priority: "normal", first_response_minutes: 30, resolution_minutes: 720, updated_at: iso(-10 * DAY), updated_by: ID.admin },
+];
 
-/* ---------------------------------------------------------------- dashboard */
+/* ---------------------------------------------------------------- «Что нового» */
 
-/** users block numbers (sprint 2 dashboard); the full DashboardV2 of sprint 8 — fixtures/ops.ts */
-export function dashboardLegacy(period: Dashboard["period"]) {
-  const k = period === "today" ? 1 : period === "7d" ? 7 : 30;
-  return {
-    users: { total: 12846, new_in_period: 31 * k, onboarding_completed_pct: 87.4, by_status: { ACTIVE: 12801, DISABLED: 12, DELETION_REQUESTED: 3, DELETED: 30 } },
+const L = (ru: string, uz: string) => ({ ru, uz });
+
+export function releaseNotes(): StaffReleaseNote[] {
+  const base = {
+    created_by: ID.comms,
+    created_by_name: "Дилноза",
+    updated_by: ID.comms,
+    published_by: null as string | null,
+    published_by_name: null as string | null,
+    published_at: null as string | null,
+    archived_by: null as string | null,
+    archived_at: null as string | null,
+    segments: {},
   };
+  return [
+    {
+      ...base,
+      release_note_id: "d1000000-0000-4000-8000-000000000003",
+      slug: "2026.11",
+      status: "draft",
+      version: 3,
+      title: L("Ноябрь: семья и график", "Noyabr: oila va jadval"),
+      items: [
+        { title: L("Семейный график", "Oilaviy jadval"), text: L("Родитель видит, когда занимаются дети, и может поменять время напоминаний.", "Ota-ona bolalar qachon shugʻullanishini koʻradi va eslatma vaqtini oʻzgartira oladi."), link: "family", icon: "users" },
+        { title: L("Тихие часы", "Tinch soatlar"), text: L("После 21:00 напоминания не приходят — даже если урок пропущен.", "21:00 dan keyin eslatmalar kelmaydi — dars oʻtkazib yuborilsa ham."), link: "schedule", icon: "clock" },
+      ],
+      audience: "existing",
+      created_at: iso(-2 * DAY),
+      updated_at: iso(-3 * HOUR),
+      views_total: 0,
+    },
+    {
+      ...base,
+      release_note_id: "d1000000-0000-4000-8000-000000000002",
+      slug: "2026.10",
+      status: "published",
+      version: 5,
+      title: L("Октябрь: повторение слов", "Oktyabr: soʻzlarni takrorlash"),
+      items: [
+        { title: L("Умное повторение", "Aqlli takrorlash"), text: L("Слова возвращаются, когда вы начинаете их забывать.", "Soʻzlar ularni unuta boshlaganingizda qaytadi."), link: "review", icon: "book" },
+        { title: L("Герой растёт с навыками", "Qahramon koʻnikmalar bilan oʻsadi"), text: L("Новая ступень — за подтверждённые навыки, а не за XP.", "Yangi bosqich — tasdiqlangan koʻnikmalar uchun, XP uchun emas."), link: "progress", icon: "hero" },
+      ],
+      audience: "existing",
+      segments: { age: ["teens", "adults"] },
+      created_at: iso(-35 * DAY),
+      updated_at: iso(-30 * DAY),
+      published_by: ID.comms,
+      published_by_name: "Дилноза",
+      published_at: iso(-30 * DAY),
+      views_total: 812,
+    },
+    {
+      ...base,
+      release_note_id: "d1000000-0000-4000-8000-000000000001",
+      slug: "2026.09",
+      status: "archived",
+      version: 2,
+      title: L("Знакомство с TilHero", "TilHero bilan tanishuv"),
+      items: [{ title: L("Урок за 20 минут", "20 daqiqalik dars"), text: L("Каждый день — короткий урок с героем.", "Har kuni — qahramon bilan qisqa dars."), link: "lessons", icon: "spark" }],
+      audience: "new",
+      created_at: iso(-70 * DAY),
+      updated_at: iso(-60 * DAY),
+      published_by: ID.admin,
+      published_by_name: "Игорь Ш.",
+      published_at: iso(-65 * DAY),
+      archived_by: ID.admin,
+      archived_at: iso(-31 * DAY),
+      views_total: 1204,
+    },
+  ];
+}
+
+/* ---------------------------------------------------------------- notification templates */
+
+const TT = (ru: [string, string, string | null], uz: [string, string, string | null]) => ({ ru: { title: ru[0], body: ru[1], button: ru[2] }, uz: { title: uz[0], body: uz[1], button: uz[2] } });
+const PH = (name: string, ru: string, en: string, sRu: string, sUz: string) => ({ name, description: { ru, en }, sample: { ru: sRu, uz: sUz } });
+
+export function templates(): Array<TemplateInfo & { versions: TemplateVersion[] }> {
+  const name = PH("learner_name", "Имя ученика", "Learner name", "Мадина", "Madina");
+  const slot = PH("slot_time", "Время занятия", "Lesson time", "19:30", "19:30");
+  const dur = PH("duration", "Длительность урока", "Lesson duration", "20 минут", "20 daqiqa");
+  const days = PH("days_missed", "Сколько дней пропущено", "Days missed", "3 дня", "3 kun");
+  const inviter = PH("inviter_name", "Кто пригласил", "Inviter", "Ботир", "Botir");
+  const tck = PH("ticket_number", "Номер обращения", "Ticket number", "TCK-1042", "TCK-1042");
+  const note = PH("note_title", "Заголовок заметки", "Note title", "Ноябрь: семья и график", "Noyabr: oila va jadval");
+  const lessonDefault = TT(["Пора заниматься, {learner_name}", "Урок на {duration} ждёт вас в {slot_time}. Герой уже готов!", "Начать урок"], ["{learner_name}, dars vaqti", "{duration} lik dars {slot_time} da kutmoqda. Qahramon tayyor!", "Darsni boshlash"]);
+  const lessonV2 = TT(["{learner_name}, урок ждёт", "В {slot_time} — {duration} английского. Начнём с повторения слов.", "Начать"], ["{learner_name}, dars kutmoqda", "{slot_time} da — {duration} ingliz tili. Soʻzlarni takrorlashdan boshlaymiz.", "Boshlash"]);
+  const v = (key: string, version: number, status: TemplateVersion["status"], texts: TemplateVersion["texts"], noteText: string, daysAgo: number, activated: boolean): TemplateVersion => ({
+    key,
+    version,
+    status,
+    texts,
+    note: noteText,
+    created_by: ID.comms,
+    created_by_name: "Дилноза",
+    created_at: iso(-daysAgo * DAY),
+    activated_by: activated ? ID.comms : null,
+    activated_by_name: activated ? "Дилноза" : null,
+    activated_at: activated ? iso(-(daysAgo - 1) * DAY) : null,
+  });
+  const info = (key: string, category: TemplateInfo["category"], kid: boolean, ru: string, en: string, placeholders: TemplateInfo["placeholders"], default_texts: TemplateInfo["default_texts"], versions: TemplateVersion[]) => {
+    const active = versions.find((x) => x.status === "active");
+    return { key, category, kid, description: { ru, en }, placeholders, default_texts, active_version: active?.version ?? null, active_since: active?.activated_at ?? null, updated_at: versions[0]?.created_at ?? null, versions };
+  };
+  return [
+    info("reminder.lesson", "reminders", false, "Напоминание о занятии", "Lesson reminder", [name, slot, dur], lessonDefault, [
+      v("reminder.lesson", 2, "active", lessonV2, "Короче и с повторением в начале", 6, true),
+      v("reminder.lesson", 1, "archived", lessonDefault, "Первая версия поверх текста из кода", 20, true),
+    ]),
+    info("reminder.lesson.kid", "reminders", true, "Напоминание о занятии ребёнка (опекуну)", "Child lesson reminder (to the guardian)", [name, slot], TT(["У {learner_name} урок в {slot_time}", "Короткий урок с героем ждёт. Можно начать вместе!", "Открыть"], ["{learner_name}ning darsi {slot_time} da", "Qahramon bilan qisqa dars kutmoqda. Birga boshlash mumkin!", "Ochish"]), []),
+    info("missed.comeback", "missed", false, "Возвращение после пропуска", "Come back after a pause", [name, days], TT(["{learner_name}, продолжим?", "Вы не занимались {days_missed}. Навыки и слова на месте — вернитесь, когда удобно.", "Продолжить"], ["{learner_name}, davom etamizmi?", "Siz {days_missed} shugʻullanmadingiz. Koʻnikmalar va soʻzlar joyida — qulay paytda qayting.", "Davom etish"]), []),
+    info("social.family_invite", "social", false, "Приглашение в семью", "Family invitation", [inviter], TT(["{inviter_name} зовёт заниматься вместе", "Присоединяйтесь к семейному графику TilHero.", "Принять"], ["{inviter_name} birga shugʻullanishga taklif qilmoqda", "TilHero oilaviy jadvaliga qoʻshiling.", "Qabul qilish"]), []),
+    info("support.reply", "support", false, "Ответ поддержки", "Support reply", [tck], TT(["Ответ по обращению {ticket_number}", "Поддержка TilHero ответила на ваше обращение.", "Открыть"], ["{ticket_number} murojaatiga javob", "TilHero yordam xizmati murojaatingizga javob berdi.", "Ochish"]), []),
+    info("release_note.published", "product", false, "«Что нового» опубликовано", "“What’s new” published", [note, name], TT(["Новое в TilHero", "{note_title}. Откройте приложение, чтобы посмотреть.", "Посмотреть"], ["TilHeroda yangilik", "{note_title}. Koʻrish uchun ilovani oching.", "Koʻrish"]), []),
+  ];
+}
+
+/* ---------------------------------------------------------------- campaigns */
+
+export function campaigns(): Campaign[] {
+  const stats = (o: Partial<Campaign["stats"]> = {}): Campaign["stats"] => ({ audience: 0, created: 0, sent: 0, in_app_only: 0, deferred: 0, skipped_frequency: 0, failed: 0, ...o });
+  const base = {
+    created_by: ID.comms,
+    created_by_name: "Дилноза",
+    scheduled_by: null as string | null,
+    scheduled_at: null as string | null,
+    started_at: null as string | null,
+    finished_at: null as string | null,
+    stopped_by: null as string | null,
+    stopped_at: null as string | null,
+    stop_reason: null as string | null,
+  };
+  return [
+    {
+      ...base,
+      campaign_id: "e1000000-0000-4000-8000-000000000003",
+      title: "Ноябрь: вернуться к урокам",
+      texts: TT(["{learner_name}, вас ждёт новый урок", "Мы добавили уроки про путешествия. 20 минут — и вы закажете кофе в Лондоне.", "Открыть урок"], ["{learner_name}, yangi dars kutmoqda", "Sayohat haqida darslar qoʻshdik. 20 daqiqa — va Londonda qahva buyurtma qilasiz.", "Darsni ochish"]),
+      route: "lessons",
+      segment: { ui_lang: ["ru", "uz"], age: ["adults"], onboarded: true, active_days: -14 },
+      status: "draft",
+      version: 2,
+      send_at: null,
+      created_at: iso(-1 * DAY),
+      updated_at: iso(-2 * HOUR),
+      stats: stats(),
+    },
+    {
+      ...base,
+      campaign_id: "e1000000-0000-4000-8000-000000000002",
+      title: "Голосовые уроки — скоро",
+      texts: TT(["Скоро: говорим вслух", "В декабре в TilHero появятся голосовые уроки. Следите за новостями!", null], ["Tez orada: ovoz chiqarib gapiramiz", "Dekabrda TilHeroda ovozli darslar paydo boʻladi. Yangiliklarni kuzatib boring!", null]),
+      route: "news",
+      segment: { age: ["teens", "adults"] },
+      status: "scheduled",
+      version: 4,
+      send_at: iso(2 * DAY),
+      scheduled_by: ID.comms,
+      scheduled_at: iso(-3 * HOUR),
+      created_at: iso(-3 * DAY),
+      updated_at: iso(-3 * HOUR),
+      stats: stats({ audience: 1840 }),
+    },
+    {
+      ...base,
+      campaign_id: "e1000000-0000-4000-8000-000000000001",
+      title: "Новый раздел «Семья»",
+      texts: TT(["Занимайтесь всей семьёй", "Добавьте детей и смотрите их прогресс в одном месте.", "Открыть «Семью»"], ["Butun oila bilan shugʻullaning", "Bolalarni qoʻshing va ularning yutuqlarini bir joyda kuzating.", "«Oila»ni ochish"]),
+      route: "family",
+      segment: { ui_lang: ["ru", "uz"], age: ["adults"] },
+      status: "done",
+      version: 6,
+      send_at: iso(-9 * DAY),
+      scheduled_by: ID.comms,
+      scheduled_at: iso(-10 * DAY),
+      started_at: iso(-9 * DAY),
+      finished_at: iso(-9 * DAY + 3 * HOUR),
+      created_at: iso(-12 * DAY),
+      updated_at: iso(-9 * DAY),
+      stats: stats({ audience: 2410, created: 2288, sent: 2051, in_app_only: 203, deferred: 0, skipped_frequency: 122, failed: 34 }),
+    },
+  ];
 }
 
 /* ---------------------------------------------------------------- audit */
 
-const hex = (n: number, len = 64) => {
-  let s = "";
-  let x = (n * 2654435761) >>> 0;
-  while (s.length < len) {
-    x = (x * 1103515245 + 12345) >>> 0;
-    s += x.toString(16).padStart(8, "0");
-  }
-  return s.slice(0, len);
-};
-
 export function auditRecords(): AuditRecord[] {
-  const specs: Array<[string, string, string | null, string | null, Record<string, unknown> | null, string | null]> = [
-    ["auth.login", "admin-identity", "staff", ID.admin, { mfa: true }, null],
-    ["sensitive.view", "identity-consent", "user", USER.igor, { field: "telegram_user_id" }, "ticket: TCK-3081"],
-    ["ticket.reply", "support", "ticket", "7e000000-0000-4000-8000-000000003080", { status: "WAITING_CUSTOMER" }, null],
-    ["config.rollback", "experience-config", "config", "miniapp", { version: "2.0.2" }, "Контраст на тёмной теме"],
-    ["staff.created", "admin-identity", "staff", ID.newbie, { role: "operations", temporary_password: "never-shown", must_change_password: true }, null],
-    ["auth.login_failed", "admin-identity", "staff", null, { email_hash: "5c1f…" }, null],
-    ["approval.waived", "admin-identity", "approval", "4a000000-0000-4000-8000-000000000001", { waived: "single_super_admin" }, "Первый оператор смены"],
-    ["auth.step_up", "admin-bff", "staff", ID.admin, null, null],
+  const rec = (seq: number, minAgo: number, action: string, actor: string | null, role: string | null, ot: string | null, oid: string | null, reason: string | null, extra: Partial<AuditRecord> = {}): AuditRecord => ({
+    seq,
+    record_id: `ad000000-0000-4000-8000-${String(seq).padStart(12, "0")}`,
+    occurred_at: iso(-minAgo * MIN),
+    recorded_at: iso(-minAgo * MIN + 800),
+    source: ot === "release_note" || ot === "config" ? "experience-config" : ot === "campaign" || ot === "notification_template" ? "notifications" : ot === "learner" ? "identity-consent" : ot === "ticket" ? "support" : "admin-identity",
+    actor_type: actor ? "staff" : "system",
+    actor_id: actor,
+    actor_role: role,
+    action,
+    object_type: ot,
+    object_id: oid,
+    before: null,
+    after: null,
+    reason,
+    ip: "10.12.0.4",
+    session_id: "s-7f3a",
+    trace_id: `tr-${seq}`,
+    prev_hash: (seq * 7919 - 1).toString(16).padStart(64, "f"),
+    hash: (seq * 7919).toString(16).padStart(64, "f"),
+    ...extra,
+  });
+  return [
+    rec(1009, 12, "sensitive.view", ID.admin, "super_admin", "learner", LEARNER.madina, "Обращение ученика — TCK-1042: сверяем аккаунт"),
+    rec(1008, 45, "release_note.update", ID.comms, "communications", "release_note", "d1000000-0000-4000-8000-000000000003", null, { before: { version: 2 }, after: { version: 3 } }),
+    rec(1007, 120, "template.activated", ID.comms, "communications", "notification_template", "reminder.lesson", "Короче и с повторением в начале", { after: { version: 2 } }),
+    rec(1006, 180, "campaign.scheduled", ID.comms, "communications", "campaign", "e1000000-0000-4000-8000-000000000002", "Анонс голосовых уроков"),
+    rec(1005, 240, "ticket.reply", ID.support, "support", "ticket", "b1000000-0000-4000-8000-000000001043", null),
+    rec(1004, 600, "config.activate", ID.ops, "operations", "config", "miniapp:1.0.0", "Первая версия TilHero"),
+    rec(1003, 1440, "auth.login", ID.admin, "super_admin", "staff", ID.admin, null),
+    rec(1002, 2880, "staff.created", ID.admin, "super_admin", "staff", ID.comms, "Команда коммуникаций", { after: { role: "communications" } }),
+    rec(1001, 4320, "staff.bootstrap", null, null, "staff", ID.admin, null),
   ];
-  const out: AuditRecord[] = [];
-  let prev = "0".repeat(64);
-  for (let k = 0; k < 24; k++) {
-    const [action, source, object_type, object_id, after, reason] = specs[k % specs.length]!;
-    const seq = 1000 + k;
-    const h = hex(seq);
-    out.push({
-      seq,
-      record_id: `ad000000-0000-4000-8000-${String(seq).padStart(12, "0")}`,
-      occurred_at: iso(-(24 - k) * 17 * MIN),
-      recorded_at: iso(-(24 - k) * 17 * MIN + 150),
-      source,
-      actor_type: action === "auth.login_failed" ? "system" : "staff",
-      actor_id: action === "auth.login_failed" ? null : ID.admin,
-      actor_role: action === "auth.login_failed" ? null : "super_admin",
-      action,
-      object_type,
-      object_id,
-      before: action === "config.rollback" ? { version: "2.0.3" } : null,
-      after,
-      reason,
-      ip: "10.12.0.4",
-      session_id: "s-8f2a91c0",
-      trace_id: hex(seq + 7, 32),
-      prev_hash: prev,
-      hash: h,
-    });
-    prev = h;
-  }
-  return out.reverse();
 }
 
-/* ---------------------------------------------------------------- experience config */
+/* ---------------------------------------------------------------- experience config payloads */
 
-export const MINI_TOKENS_203 = { "--accent": "#DFFF56", "--accent-ink": "#1A2200", "--r-card": "22px" };
-export const MINI_TOKENS_202 = { "--accent": "#8EF5C2", "--accent-ink": "#00261A", "--r-card": "14px" };
+export const MINI_TOKENS = {
+  "--paper": "#FBFCFE", "--grid": "#E8ECF5", "--ink": "#1C2340", "--ink2": "#4A5272", "--line": "#E1E6F2",
+  "--card": "#FFFFFF", "--pen": "#2F4BE0", "--pen-ink": "#FFFFFF", "--pen-soft": "#E9EDFF", "--mark": "#FFE45C",
+  "--margin": "#F2A7B0", "--err": "#C8323C", "--err-soft": "#FDECEE", "--ok": "#1E7A4F", "--ok-soft": "#E3F3EA",
+  "--warn": "#8F5300", "--warn-soft": "#FFF1D6", "--scrim": "rgba(18,22,44,.45)",
+  "--r-card": "14px", "--r-btn": "12px", "--r-field": "12px", "--r-sheet": "22px", "--gutter": "18px",
+  "--font-display": "Unbounded", "--font-body": "Onest", "--font-hand": "Caveat",
+};
+export const SECTIONS = ["today_plan", "lesson_of_day", "review", "whats_new", "family", "news"].map((t, i) => ({ type: t, key: t, variant: i < 2 ? "large" : "compact", enabled: true }));
+export const miniPayload = (version: string, pen = "#2F4BE0") => ({
+  theme: { id: "notebook", version, tokens: { ...MINI_TOKENS, "--pen": pen } },
+  home: { sections: SECTIONS },
+  flags: { whats_new_on_login: true, news: true, family_invites: true, uz_ui: true, voice_lesson: false },
+});
+export const ADMIN_TOKENS = {
+  "--bg": "#F4F6FB", "--card": "#FFFFFF", "--ink": "#1C2340", "--ink2": "#4A5272", "--line": "#E1E6F2",
+  "--pen": "#2F4BE0", "--pen-soft": "#E9EDFF", "--side": "#1C2340", "--side2": "#B9C0DA",
+  "--ok": "#1E7A4F", "--ok-soft": "#E3F3EA", "--warn": "#8F5300", "--warn-soft": "#FFF1D6", "--err": "#C8323C", "--err-soft": "#FDECEE",
+  "--r-card": "14px", "--r-btn": "10px", "--r-field": "10px", "--nav-w": "236px",
+  "--font-ui": "Onest,system-ui,sans-serif", "--font-display": "Unbounded,sans-serif", "--font-mono": "ui-monospace,SFMono-Regular,Menlo,monospace",
+};
+export const MENU_IDS = ["overview", "users", "content", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit"];
+export const adminPayload = (version: string, extra: { density?: "compact" | "comfortable"; off?: string[]; pen?: string } = {}) => ({
+  theme: { id: "admin_light", version, tokens: { ...ADMIN_TOKENS, ...(extra.pen ? { "--pen": extra.pen } : {}) } },
+  layout: { density: extra.density ?? "compact", menu: MENU_IDS.map((id) => ({ id, enabled: !(extra.off ?? []).includes(id) })) },
+  flags: {},
+});
 
-export function miniPayload(themeVersion: string, tokens: Record<string, string>) {
-  return {
-    theme: { id: "default", version: themeVersion, tokens },
-    home: {
-      welcome_mode: "first_visit_only",
-      sections: [
-        { type: "event_carousel", key: "best_for_you", variant: "large", enabled: true },
-        { type: "watch_changes", key: "watch", variant: "compact", enabled: true },
-        { type: "event_carousel", key: "sales_soon", variant: "compact", enabled: true },
-        { type: "news_carousel", key: "news", variant: "compact", enabled: true },
-      ],
-    },
-    flags: { ai_concierge: true, group_trip: true, calendar_export: false, premium_teaser: true },
-    hotel_rating_min: 8.5,
-  };
-}
-
-/** admin 1.0.0 = the built-in default (lime accent); 1.0.1 = a mint accent, active at start — the rollback test returns to lime. */
-export const ADMIN_ACCENT_100 = "#DFFF56";
-export const ADMIN_ACCENT_101 = "#7CF0C8";
-export function adminPayload(version: string, accent: string, widgets?: string[]) {
-  return {
-    theme: { id: "default", version, tokens: { "--accent": accent, "--accent-press": accent, "--r": "8px" } },
-    layout: {
-      density: "compact",
-      table_presets: { users: "support", audit: "security" },
-      dashboard_widgets: (widgets ?? ["kpi_users", "kpi_ai", "kpi_support", "kpi_system", "kpi_commerce", "budget", "hourly", "cost_agents", "dau", "agents_table"]).map((id) => ({ id, enabled: true })),
-    },
-    flags: {},
-  };
-}
-
-/* ---------- 9.4: «Что нового» — сид-черновик «Ноябрь 2026» (как миграция 0004 experience-config) ---------- */
-export function releaseNoteSeed(): import("@tilhero/contracts/admin").StaffReleaseNote {
-  return {
-    release_note_id: "5b2c1a7e-0d3f-5e6a-9b8c-2026110000aa",
-    slug: "2026.11",
-    title: { ru: "Ноябрь 2026", en: "November 2026" },
-    items: [
-      { icon: "pin", link: "catalog", title: { ru: "Больше событий в Алматы", en: "More events in Almaty" }, text: { ru: "Собираем афишу с сайтов площадок и театров, из билетных касс и городских Telegram-каналов.", en: "We now collect listings from venue and theatre websites, ticket offices and the city's Telegram channels." } },
-      { icon: "globe", link: "catalog", title: { ru: "Новые источники в Астане и Бишкеке", en: "New sources in Astana and Bishkek" }, text: { ru: "Концерты, спектакли и выставки этих городов теперь тоже попадают в подборку.", en: "Concerts, plays and exhibitions in these cities now show up in your picks too." } },
-      { icon: "phone", link: "profile", title: { ru: "TilHero на главном экране", en: "TilHero on your Home Screen" }, text: { ru: "Добавьте иконку на экран телефона и открывайте TilHero одной кнопкой. Кнопка — в Профиле, нужна свежая версия Telegram.", en: "Add the icon to your phone's Home Screen and open TilHero in one tap. It's in Profile; requires an up-to-date Telegram." } },
-    ],
-    audience: "existing",
-    status: "draft",
-    version: 1,
-    created_by: "system:seed",
-    created_at: "2026-11-08T06:00:00.000Z",
-    updated_by: "system:seed",
-    updated_at: "2026-11-08T06:00:00.000Z",
-    published_by: null,
-    published_at: null,
-    archived_by: null,
-    archived_at: null,
-  };
-}
+export type { TicketPriority, TicketStatus };

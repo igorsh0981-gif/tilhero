@@ -22,12 +22,12 @@
 	encode zstd gzip
 
 	# Заголовки безопасности. Скрипты и стили — только свои файлы (никаких inline/eval; React задаёт
-	# style через CSSOM, это CSP не нарушает), шрифты лежат в бандле, сеть — только свой origin
+	# style через CSSOM, это CSP не нарушает). Шрифты (Onest, Unbounded) лежат в бандле — сторонних CDN нет;
+	# картинки только свои (QR подключения MFA рисуется локально в SVG, секрет TOTP не уходит со страницы;
+	# vite собирается с assetsInlineLimit: 0, поэтому data: не нужен). Сеть — только свой origin
 	# (/admin/v1 проксируется сюда же). Админку нельзя встроить в чужую страницу (frame-ancestors 'none').
-	# img-src https: — баннеры кандидатов в «Проверке событий» (спринт 4) грузятся с CDN источников; клиент рисует
-	# только https-картинки с referrerpolicy=no-referrer, а Referrer-Policy ниже — no-referrer для всего документа.
 	header {
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; frame-src 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; manifest-src 'none'; worker-src 'none'"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; frame-src 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; manifest-src 'none'; worker-src 'none'"
 		Strict-Transport-Security "max-age=31536000"
 		X-Frame-Options "DENY"
 		X-Content-Type-Options "nosniff"
@@ -64,7 +64,7 @@
 	}
 
 	# Всё остальное (index.html, favicon, маршруты SPA) — всегда перепроверять: новый релиз подхватывается
-	# сразу (тема админки приходит из experience-config отдельно и без пересборки, A46).
+	# сразу (тема и меню админки приходят из experience-config `admin` отдельно и без пересборки).
 	handle {
 		header Cache-Control "no-cache"
 		try_files {path} /index.html

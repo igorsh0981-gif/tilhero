@@ -1,112 +1,105 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Permission, RoleCode } from "@tilhero/contracts/admin";
-import { homePage, pageAllowed, visibleNav } from "../src/state/nav";
+import { homePage, NAV_ITEMS, orderedItems, pageAllowed, visibleNav } from "../src/state/nav";
 import { parseHash, routeHash } from "../src/state/route";
+import { parseNewsRoute } from "../src/screens/news/News";
 
-/** Default matrix (docs/sprint2/INTERNAL_API.md + sprint 4 §7: operations gets the event-catalog permissions). */
+/** Default matrix (docs/sprint2/PLAN.md «Роли и права»). */
+const ALL: Permission[] = [
+  "dashboard.read", "users.read", "users.sensitive.read", "support.read", "support.reply", "support.manage", "audit.read", "config.read",
+  "config.edit", "config.publish", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage",
+  "notif.campaigns.send", "staff.manage", "roles.manage",
+];
 const MATRIX: Record<RoleCode, Permission[]> = {
-  super_admin: [
-    "dashboard.read", "users.read", "users.sensitive.read", "ai.content.read", "export.csv", "support.read", "support.reply", "support.manage",
-    "subscriptions.override", "billing.refund", "skills.edit", "skills.publish", "audit.read", "config.read", "config.edit", "config.publish",
-    "ops.kill_switch", "staff.manage", "roles.manage", "events.review", "sources.manage", "discovery.manage", "news.manage", "users.access.manage",
-  ],
-  operations: ["dashboard.read", "users.read", "support.read", "config.read", "ops.kill_switch", "audit.read", "events.review", "sources.manage", "discovery.manage", "news.manage", "users.access.manage"],
+  super_admin: ALL,
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read"],
+  communications: ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"],
   support: ["dashboard.read", "users.read", "support.read", "support.reply"],
-  billing: ["dashboard.read", "users.read", "subscriptions.override", "billing.refund"],
-  agent_manager: ["dashboard.read", "skills.edit"],
+  methodist: ["dashboard.read", "users.read"],
   analyst: ["dashboard.read", "users.read"],
   auditor: ["dashboard.read", "audit.read"],
   read_only: ["dashboard.read"],
 };
-const ids = (role: RoleCode) => visibleNav(new Set(MATRIX[role])).flatMap((g) => g.items.map((i) => i.id));
-const groups = (role: RoleCode) => visibleNav(new Set(MATRIX[role])).map((g) => g.group);
+const SOON = ["content", "agents", "qa", "costs", "heroes", "game", "events", "langs"];
+const ids = (role: RoleCode, menu?: Array<{ id: string; enabled: boolean }>) => visibleNav(new Set(MATRIX[role]), menu).flatMap((g) => g.items.map((i) => i.id));
+const live = (role: RoleCode) => ids(role).filter((x) => !SOON.includes(x));
 
-describe("RBAC menu filter (UX only — every command is re-checked by admin-bff)", () => {
-  it("support: operations group only", () => {
-    // sprint 7: «Requests and cost» is for the people who run AI / the platform (support does not see AI content anyway)
-    expect(ids("support")).toEqual(["dashboard", "users", "support"]);
-    expect(groups("support")).toEqual(["ops"]);
+describe("menu: 15 sections of the experience-config seed, filtered by role (UX only — admin-bff re-checks)", () => {
+  it("the menu ids are exactly the admin seed (services/experience-config 0002_seed.py) and the payload whitelist", () => {
+    const seed = readFileSync(resolve(__dirname, "../../../services/experience-config/migrations/versions/0002_seed.py"), "utf8");
+    const m = seed.match(/for m in \(\s*([\s\S]*?)\)\]/);
+    const fromSeed = [...(m?.[1] ?? "").matchAll(/"([a-z]+)"/g)].map((x) => x[1]);
+    expect(NAV_ITEMS.map((i) => i.id)).toEqual(fromSeed);
+    expect(fromSeed).toHaveLength(15);
   });
-  it("auditor: dashboard + audit, no roles, no support", () => {
-    expect(ids("auditor")).toEqual(["dashboard", "requests", "audit"]);
-    expect(pageAllowed("roles", new Set(MATRIX.auditor))).toBe(false);
-    expect(pageAllowed("support", new Set(MATRIX.auditor))).toBe(false);
+  it("super_admin sees every section in the prototype order and groups", () => {
+    expect(ids("super_admin")).toEqual(["overview", "users", "content", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit"]);
+    expect(visibleNav(new Set(ALL)).map((g) => g.group)).toEqual(["product", "ai", "game", "comms", "manage"]);
   });
-  it("super_admin: every section in prototype order", () => {
-    expect(ids("super_admin")).toEqual(["dashboard", "users", "requests", "budgets", "support", "review", "sources", "discovery", "travel", "feeds", "news", "watches", "subscriptions", "billing", "agents", "monitoring", "config", "audit", "roles"]);
+  it("live sections per role", () => {
+    expect(live("operations")).toEqual(["overview", "users", "support", "config", "audit"]);
+    expect(live("communications")).toEqual(["overview", "news"]);
+    expect(live("support")).toEqual(["overview", "users", "support"]);
+    expect(live("methodist")).toEqual(["overview", "users"]);
+    expect(live("auditor")).toEqual(["overview", "audit"]);
+    expect(live("read_only")).toEqual(["overview"]);
   });
-  it("operations sees the AI sections (kill switch, emergency rollback), config and audit but not roles", () => {
-    expect(ids("operations")).toEqual(["dashboard", "users", "requests", "budgets", "support", "review", "sources", "discovery", "travel", "feeds", "news", "watches", "agents", "monitoring", "config", "audit"]);
-    expect(groups("operations")).toEqual(["ops", "catalog", "content", "ai", "system"]);
-  });
-  it("billing gets its «soon» sections; agent_manager — requests, budgets and agents", () => {
-    expect(ids("billing")).toEqual(["dashboard", "users", "subscriptions", "billing"]);
-    expect(ids("agent_manager")).toEqual(["dashboard", "requests", "budgets", "agents"]);
-  });
-  it("sprint 7: AI sections need dashboard.read (their API) AND an AI / platform permission", () => {
-    const has = (page: string, ps: Permission[]) => pageAllowed(page, new Set<Permission>(ps));
-    expect(has("requests", ["dashboard.read", "ai.content.read"])).toBe(true);
-    expect(has("requests", ["dashboard.read"])).toBe(false);
-    expect(has("budgets", ["dashboard.read", "ops.kill_switch"])).toBe(true);
-    expect(has("budgets", ["ops.kill_switch"])).toBe(false);
-    expect(has("agents", ["dashboard.read", "skills.publish"])).toBe(true);
-    expect(has("agents", ["skills.edit"])).toBe(false);
-    for (const r of ["support", "billing", "analyst", "read_only"] as RoleCode[]) expect(groups(r)).not.toContain("ai");
-    expect(parseHash("#/agents/concierge.event")).toEqual({ page: "agents", id: "concierge.event" });
-    expect(parseHash("#/requests/user:0f8fad5b-d9cb-469f-a165-70867728950e")).toEqual({ page: "requests", id: "user:0f8fad5b-d9cb-469f-a165-70867728950e" });
-  });
-  it("roles page needs staff.manage OR roles.manage", () => {
+  it("«news» opens with any communications right; roles with staff.manage OR roles.manage", () => {
+    for (const p of ["whatsnew.manage", "notif.templates.manage", "notif.campaigns.manage"] as Permission[]) expect(pageAllowed("news", new Set([p]))).toBe(true);
+    expect(pageAllowed("news", new Set<Permission>(["whatsnew.publish"]))).toBe(false);
     expect(pageAllowed("roles", new Set<Permission>(["roles.manage"]))).toBe(true);
     expect(pageAllowed("roles", new Set<Permission>(["staff.manage"]))).toBe(true);
-    expect(pageAllowed("nope", new Set(MATRIX.super_admin))).toBe(false);
+    expect(pageAllowed("nope", new Set(ALL))).toBe(false);
   });
-  it("sprint 4: each catalog item needs its own permission; other roles get no catalog group", () => {
-    const only = (p: Permission) => visibleNav(new Set<Permission>([p])).flatMap((g) => g.items.map((i) => i.id));
-    expect(only("events.review")).toEqual(["review"]);
-    expect(only("sources.manage")).toEqual(["sources"]);
-    expect(only("discovery.manage")).toEqual(["discovery"]);
-    expect(only("ops.kill_switch")).not.toContain("discovery"); // the kill switch alone does not open the search screen
-    for (const r of ["support", "billing", "agent_manager", "analyst", "auditor", "read_only"] as RoleCode[]) expect(groups(r)).not.toContain("catalog");
-    expect(pageAllowed("sources", new Set(MATRIX.support))).toBe(false);
-    expect(homePage(new Set<Permission>(["events.review"]))).toBe("review");
+  it("«soon» sections carry the sprint number of the plan", () => {
+    const soon = Object.fromEntries(NAV_ITEMS.filter((i) => i.soon).map((i) => [i.id, i.soon]));
+    expect(soon).toEqual({ content: 3, langs: 3, agents: 4, qa: 4, costs: 4, heroes: 6, game: 6, events: 6 });
   });
-  it("sprint 5: «Trip providers» needs dashboard.read (its API) AND a catalogue / platform permission", () => {
-    const has = (ps: Permission[]) => pageAllowed("travel", new Set<Permission>(ps));
-    expect(has(["dashboard.read", "discovery.manage"])).toBe(true);
-    expect(has(["dashboard.read", "ops.kill_switch"])).toBe(true);
-    expect(has(["discovery.manage"])).toBe(false); // the API would answer 403
-    expect(has(["dashboard.read"])).toBe(false); // read_only / analyst keep their short menu
-    for (const r of ["support", "billing", "agent_manager", "analyst", "auditor", "read_only"] as RoleCode[]) expect(ids(r)).not.toContain("travel");
-    expect(homePage(new Set<Permission>(["dashboard.read", "events.review"]))).toBe("dashboard");
+  it("the start screen is the first live section", () => {
+    expect(homePage(new Set(MATRIX.communications))).toBe("overview");
+    expect(homePage(new Set<Permission>(["support.read"]))).toBe("support");
+    expect(homePage(new Set<Permission>([]))).toBeNull();
   });
-  it("sprint 6: «Content» group — feeds and news need news.manage; «Watches» needs dashboard.read AND a content / platform permission", () => {
-    const only = (ps: Permission[]) => visibleNav(new Set<Permission>(ps)).flatMap((g) => g.items.map((i) => i.id));
-    expect(only(["news.manage"])).toEqual(["feeds", "news"]);
-    expect(only(["dashboard.read", "news.manage"])).toEqual(["dashboard", "feeds", "news", "watches"]);
-    expect(pageAllowed("watches", new Set<Permission>(["dashboard.read", "ops.kill_switch"]))).toBe(true);
-    expect(pageAllowed("watches", new Set<Permission>(["dashboard.read"]))).toBe(false);
-    for (const r of ["support", "billing", "agent_manager", "analyst", "auditor", "read_only"] as RoleCode[]) expect(groups(r)).not.toContain("content");
-    expect(homePage(new Set<Permission>(["news.manage"]))).toBe("feeds");
-    expect(parseHash("#/feeds/a6000000-0000-4000-8000-000000000001")).toEqual({ page: "feeds", id: "a6000000-0000-4000-8000-000000000001" });
+});
+
+describe("menu order and switches from the active admin config (layout.menu)", () => {
+  it("follows the config order; switched-off sections are hidden and closed by link", () => {
+    const menu = [
+      { id: "support", enabled: true },
+      { id: "overview", enabled: true },
+      { id: "content", enabled: false },
+      { id: "users", enabled: true },
+      { id: "bogus", enabled: true },
+    ];
+    const o = orderedItems(menu).map((i) => i.id);
+    expect(o.slice(0, 3)).toEqual(["support", "overview", "users"]);
+    expect(o).not.toContain("content");
+    expect(o).not.toContain("bogus");
+    expect(o).toContain("audit"); // not mentioned → default order at the end
+    expect(pageAllowed("content", new Set(ALL), menu)).toBe(false);
+    // groups follow the first appearance of their sections
+    expect(visibleNav(new Set(ALL), menu).map((g) => g.group).slice(0, 2)).toEqual(["comms", "product"]);
   });
-  it("fail-closed: no permissions → no menu, no start page", () => {
-    expect(visibleNav(new Set())).toEqual([]);
-    expect(homePage(new Set())).toBeNull();
-  });
-  it("start page is the first live section (a «soon» stub only if nothing else is allowed)", () => {
-    expect(homePage(new Set(MATRIX.read_only))).toBe("dashboard");
-    expect(homePage(new Set<Permission>(["subscriptions.override"]))).toBe("subscriptions");
-    expect(homePage(new Set<Permission>(["dashboard.read", "skills.edit"]))).toBe("dashboard");
-    expect(homePage(new Set<Permission>(["audit.read"]))).toBe("audit");
+  it("an empty menu falls back to the defaults", () => {
+    expect(orderedItems([]).map((i) => i.id)).toEqual(NAV_ITEMS.map((i) => i.id));
+    expect(orderedItems(null)).toHaveLength(15);
   });
 });
 
 describe("hash routes", () => {
-  it("parses page and id, strips junk", () => {
-    expect(parseHash("#/support/TCK-3081")).toEqual({ page: "support", id: "TCK-3081" });
-    expect(parseHash("#/users")).toEqual({ page: "users", id: null });
-    expect(parseHash("#/su<p>port/x")).toEqual({ page: "support", id: "x" });
-    expect(parseHash("#/support/%E0%A4%A")).toEqual({ page: "support", id: null });
-    expect(routeHash("support", "TCK 1")).toBe("#/support/TCK%201");
+  it("parses and builds page/id routes", () => {
+    expect(parseHash("#/support/TCK-1042")).toEqual({ page: "support", id: "TCK-1042" });
+    expect(parseHash("#/news/templates/reminder.lesson")).toEqual({ page: "news", id: "templates/reminder.lesson" });
+    expect(routeHash("users", "a1000000-0000-4000-8000-000000000001")).toBe("#/users/a1000000-0000-4000-8000-000000000001");
+    expect(parseHash("#/<script>")).toEqual({ page: "script", id: null });
+  });
+  it("news tabs: #/news/<tab>[/<id>]", () => {
+    expect(parseNewsRoute(null)).toEqual({ tab: null, id: null });
+    expect(parseNewsRoute("templates")).toEqual({ tab: "templates", id: null });
+    expect(parseNewsRoute("templates/reminder.lesson")).toEqual({ tab: "templates", id: "reminder.lesson" });
+    expect(parseNewsRoute("campaigns/e1000000-0000-4000-8000-000000000003")).toEqual({ tab: "campaigns", id: "e1000000-0000-4000-8000-000000000003" });
+    expect(parseNewsRoute("bogus/x")).toEqual({ tab: null, id: null });
   });
 });

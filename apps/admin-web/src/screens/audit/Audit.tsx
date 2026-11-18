@@ -11,7 +11,7 @@ import { Drawer } from "../../ui/overlays";
 import { useToast } from "../../ui/toasts";
 import { errMeta, errText } from "../../ui/errors";
 
-/** Actions written by the sprint-2 producers (admin-identity, admin-bff, user-admin, support, experience-config). */
+/** Actions written by the sprint-2 producers (admin-identity, admin-bff, identity-consent, support, experience-config, notifications). */
 export const KNOWN_ACTIONS = [
   "auth.login",
   "auth.login_failed",
@@ -51,9 +51,23 @@ export const KNOWN_ACTIONS = [
   "release_note.update",
   "release_note.publish",
   "release_note.archive",
+  "template.version_created",
+  "template.activated",
+  "template.reset",
+  "template.test_sent",
+  "campaign.created",
+  "campaign.updated",
+  "campaign.scheduled",
+  "campaign.unscheduled",
+  "campaign.stopped",
+  "campaign.finished",
+  "campaign.test_sent",
 ] as const;
 
-const CRIT = new Set(["sensitive.view", "auth.locked", "staff.mfa_reset", "staff.mfa_reset_all", "staff.bootstrap", "approval.waived", "ai.content.view"]);
+/** object_type of the TilHero producers (INTERNAL_API sprint 2). */
+export const OBJECT_TYPES = ["staff", "role", "approval", "learner", "release_note", "notification_template", "campaign", "config", "ticket"] as const;
+
+const CRIT = new Set(["sensitive.view", "auth.locked", "staff.mfa_reset", "staff.mfa_reset_all", "staff.bootstrap", "approval.waived", "campaign.stopped"]);
 const SEC = /^(auth|staff|role|approval|impersonat|export|dev)\b/;
 
 /** Severity of an audit action: crit (red bar), sec (amber), "" (neutral). */
@@ -169,7 +183,14 @@ export function AuditPage() {
           </datalist>
         </div>
         <input className="input mono aud-f" placeholder="actor_id" aria-label={t("aud.actor")} value={actor} maxLength={64} onChange={(e) => setActor(e.target.value)} />
-        <input className="input mono aud-f" placeholder="object_type" aria-label={t("aud.objType")} value={objType} maxLength={64} onChange={(e) => setObjType(e.target.value)} />
+        <select className="select aud-f" aria-label={t("aud.objType")} value={objType} onChange={(e) => setObjType(e.target.value)} data-testid="aud-objtype">
+          <option value="">{t("aud.allObjects")}</option>
+          {OBJECT_TYPES.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
         <input className="input mono aud-f" placeholder="object_id" aria-label={t("aud.objId")} value={objId} maxLength={128} onChange={(e) => setObjId(e.target.value)} />
         <label className="row aud-date">
           <span className="xs muted">{t("aud.from")}</span>

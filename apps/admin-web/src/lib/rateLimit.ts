@@ -8,8 +8,8 @@ import { createContext, useContext, useEffect, useState, useSyncExternalStore } 
 import { ApiError } from "../api/errors";
 
 export const STAFF_POLICY = "adm.staff";
-/** commands of the admin (step-up dialogs): adm.command, DLQ commands */
-export const COMMAND_SCOPE: readonly string[] = ["adm.command", "adm.dlq"];
+/** commands of the admin (step-up dialogs): adm.command */
+export const COMMAND_SCOPE: readonly string[] = ["adm.command"];
 /** sign-in: password, e-mail, MFA steps */
 export const LOGIN_SCOPE: readonly string[] = ["adm.login_ip", "adm.login_email", "adm.auth_step_ip", "adm.mfa"];
 

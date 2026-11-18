@@ -1,99 +1,96 @@
 /* =====================================================================
-   theme.default.css — TilHero Admin default theme (prototype v2, 02-style.css).
-   Colours only. Light theme on bare :root, dark theme for the OS preference
-   (unless the viewer forced light) and for [data-theme="dark"] — identical values.
-   The light values equal experience-config admin 1.0.0 (seed); a config version
-   may override any whitelisted token at runtime (src/theme/config.ts) without a build.
+   theme.default.css — colours of TilHero Admin.
+   1) The TilHero tokens (`--bg --card --ink --ink2 --line --pen --pen-soft --side --side2 --ok(-soft) --warn(-soft)
+      --err(-soft)`) — light values = prototype `.ad` = experience-config admin 1.0.0 (a config version may override
+      them at runtime, light theme only); dark values = the Mini App «notebook at night» (packages/ui-tokens
+      themes/notebook-dark.css) adapted to the admin.
+   2) Component roles (--surface, --primary, --good-bg …) are DERIVED from the TilHero tokens with var(), so a config
+      override of --pen or --side recolours buttons, links, the sidebar and pills without a build.
+   Light on bare :root; dark for the OS preference (unless the viewer forced light) and for [data-theme="dark"].
+   Contrast: text roles ≥ 4.5:1 on --bg and --card in both themes, field borders ≥ 3:1 (WCAG 2.1 AA).
    ===================================================================== */
 :root{
   color-scheme:light;
-  --bg:#F5F6F9; --surface:#FFFFFF; --surface-2:#F0F2F6; --surface-3:#E7EAF0; --surface-sunk:#F8F9FB;
-  --line:#E4E7EE; --line-strong:#D2D7E1;
-  --ink:#0E1324; --ink-2:#4A5168; --muted:#646B80; --faint:#A0A7B8; --field-line:#858EA1;
-  --nav:#0B1020; --nav-2:#161D33; --nav-3:#1E263F; --nav-ink:#AEB7CA; --nav-ink-strong:#FFFFFF; --nav-muted:#808BA6; --nav-line:rgba(174,183,202,.12);
-  --accent:#DFFF56; --accent-press:#CDEE3C; --accent-ink:#1A2200;
-  --primary:#0E1324; --primary-ink:#FFFFFF; --primary-hover:#262D45;
-  --info:#315EFB; --info-bg:#EDF2FF; --info-ink:#1D45D1; --info-line:#C9D6FF;
-  --good:#0F9F6E; --good-bg:#E5F6EF; --good-ink:#0A7552; --good-line:#BDE8D6;
-  --warn:#C27803; --warn-bg:#FDF2DE; --warn-ink:#8F5800; --warn-line:#F2D49B;
-  --bad:#D92D20; --bad-bg:#FDECEA; --bad-ink:#B42318; --bad-line:#F7C3BE;
-  --neutral-bg:#EEF0F4; --neutral-ink:#4A5168;
-  --note-bg:#FFF7DB; --note-line:#EED98C; --note-ink:#6B5300;
-  --focus:#315EFB;
-  --scrim:rgba(11,16,32,.42);
-  --shadow-pop:0 14px 36px -10px rgba(14,19,36,.28),0 2px 6px rgba(14,19,36,.08);
-  --shadow-drawer:-24px 0 48px -12px rgba(14,19,36,.24);
-  --chart-grid:#ECEEF3; --chart-axis:#8D96A8; --chart-label:#646B80;
-  --s1:#2A78D6; --s2:#D9541F; --s3:#178A61; --s4:#A86F00; --s-other:#7D8699; --s-single:#315EFB; --s-ghost:#E4E7EE;
-  --code-key:#1D45D1; --code-str:#0A7552; --code-num:#9A4A00; --code-bool:#8A2BB0;
-  --diff-add:#E5F6EF; --diff-add-ink:#0A7552; --diff-del:#FDECEA; --diff-del-ink:#B42318;
-  /* additional colour roles (not in the experience-config whitelist — fixed per theme) */
-  --on-solid:#FFFFFF; --knob:#FFFFFF; --knob-shadow:rgba(0,0,0,.25);
-  --shadow-seg:0 1px 2px rgba(14,19,36,.10);
-  --shadow-login:0 30px 60px -24px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.04);
-  --toast-ok:#4FD69C; --toast-err:#FF8A80; --toast-info:#A8BBFF;
-  --qr-bg:#FFFFFF; --qr-ink:#0E1324;
-  --tg-wall:#DCE6EE; --tg-own:#E1F7C8; --tg-own-ink:#0E1324; --tg-own-meta:#4E7A3A; --tg-svc:rgba(14,19,36,.42); --tg-svc-ink:#FFFFFF;
-  --phone-frame:#0B1020; --phone-bg:#F4F5F8; --phone-ink:#0E1324; --phone-card:#FFFFFF; --phone-chip:rgba(14,19,36,.06); --phone-line:rgba(14,19,36,.08); --phone-thumb:#E7EAF0;
-  --phone-media-a:#1C2A5A; --phone-media-b:#315EFB; --phone-media-c:#DFFF56; --phone-prov:rgba(0,0,0,.45); --phone-shadow:rgba(14,19,36,.45);
+  --bg:#F4F6FB; --card:#FFFFFF; --ink:#1C2340; --ink2:#4A5272; --line:#E1E6F2;
+  --pen:#2F4BE0; --pen-soft:#E9EDFF; --side:#1C2340; --side2:#B9C0DA;
+  --ok:#1E7A4F; --ok-soft:#E3F3EA; --warn:#8F5300; --warn-soft:#FFF1D6; --err:#C8323C; --err-soft:#FDECEE;
+  /* fixed per theme (not in the config whitelist) */
+  --on-pen:#FFFFFF; --pen-press:#2440C8; --line-strong:#CDD4E5; --field-line:#7F88A6; --faint:#8A92AE;
+  --surface-2:#EDF0F6; --surface-3:#E1E6F2; --surface-sunk:#FAFBFE;
+  --mark:#FFE45C; --margin:#F2A7B0; --paper:#FBFCFE; --grid:#E8ECF5;
+  --note-bg:#FFF6CC; --note-line:#E3C64A; --note-ink:#5E4700;
+  --info-line:#C5CEFA; --good-line:#B9E2CB; --warn-line:#F2D49B; --bad-line:#F4C2C6;
+  --focus-ring:#9DAEFF;
+  --scrim:rgba(18,22,44,.42);
+  --shadow-pop:0 20px 60px rgba(18,22,44,.22),0 2px 6px rgba(18,22,44,.08);
+  --shadow-drawer:-24px 0 48px -12px rgba(18,22,44,.24);
+  --shadow-login:0 24px 60px -24px rgba(28,35,64,.35),0 0 0 1px rgba(28,35,64,.06);
+  --chart-1:#2F4BE0; --chart-2:#1E7A4F; --chart-3:#B86A00; --chart-4:#8E44AD; --chart-5:#6B7390; --chart-6:#C8323C;
+  --code-bg:#1C2340; --code-ink:#DDE3FF; --code-key:#9DAEFF; --code-str:#8FE3B6; --code-num:#FFD28A; --code-bool:#F0A6FF;
+  --on-solid:#FFFFFF; --knob:#FFFFFF; --knob-shadow:rgba(0,0,0,.22);
+  --toast-ok:#7CE3B0; --toast-err:#FF9D94; --toast-info:#B9C6FF;
+  --qr-bg:#FFFFFF; --qr-ink:#1C2340;
+  --tg-wall:#DCE6EE; --tg-own:#E1F7C8; --tg-own-ink:#1C2340; --tg-own-meta:#4E7A3A; --tg-svc:rgba(28,35,64,.42); --tg-svc-ink:#FFFFFF; --tg-bubble:#FFFFFF; --tg-btn:#FFFFFF; --tg-link:#2A6FB0;
+  --phone-frame:#1C2340;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
     color-scheme:dark;
-    --bg:#0A0D18; --surface:#111628; --surface-2:#171D33; --surface-3:#1F2641; --surface-sunk:#0D1121;
-    --line:rgba(154,170,230,.12); --line-strong:rgba(154,170,230,.22);
-    --ink:#EEF1F8; --ink-2:#B9C0D4; --muted:#8F97AC; --faint:#5E6680; --field-line:#6B7593;
-    --nav:#070A13; --nav-2:#121830; --nav-3:#1A2140; --nav-ink:#A3ACC2; --nav-ink-strong:#FFFFFF; --nav-muted:#7F8AA6; --nav-line:rgba(174,183,202,.10);
-    --accent:#DFFF56; --accent-press:#CDEE3C; --accent-ink:#1A2200;
-    --primary:#EEF1F8; --primary-ink:#0A0D18; --primary-hover:#D5DAE8;
-    --info:#7193FF; --info-bg:rgba(113,147,255,.14); --info-ink:#A8BBFF; --info-line:rgba(113,147,255,.32);
-    --good:#33C48F; --good-bg:rgba(51,196,143,.13); --good-ink:#6FE0B4; --good-line:rgba(51,196,143,.30);
-    --warn:#F0A63A; --warn-bg:rgba(240,166,58,.14); --warn-ink:#F7C47E; --warn-line:rgba(240,166,58,.32);
-    --bad:#F2685D; --bad-bg:rgba(242,104,93,.14); --bad-ink:#FF9D94; --bad-line:rgba(242,104,93,.32);
-    --neutral-bg:rgba(154,170,230,.10); --neutral-ink:#B9C0D4;
-    --note-bg:rgba(240,200,80,.09); --note-line:rgba(240,200,80,.28); --note-ink:#F2D27A;
-    --focus:#8FA8FF;
+    --bg:#0F1328; --card:#171C38; --ink:#EEF1FA; --ink2:#B1B8D3; --line:#2A3157;
+    --pen:#8A9DFF; --pen-soft:#252D5E; --side:#0A0D1F; --side2:#9AA3C7;
+    --ok:#63D6A0; --ok-soft:#163427; --warn:#FFC466; --warn-soft:#3A2D12; --err:#FF8F8F; --err-soft:#3B1F2A;
+    --on-pen:#0E1330; --pen-press:#A6B4FF; --line-strong:#39416B; --field-line:#7880A6; --faint:#6E7697;
+    --surface-2:#1F2547; --surface-3:#2A3157; --surface-sunk:#131833;
+    --note-bg:#3A3212; --note-line:#8C7524; --note-ink:#FFE38A;
+    --info-line:#3A4590; --good-line:#245A41; --warn-line:#6B5222; --bad-line:#6B3140;
+    --focus-ring:#B9C6FF;
     --scrim:rgba(3,5,12,.62);
-    --shadow-pop:0 18px 40px -10px rgba(0,0,0,.6),0 0 0 1px rgba(154,170,230,.10);
+    --shadow-pop:0 20px 60px rgba(0,0,0,.55),0 0 0 1px rgba(154,170,230,.10);
     --shadow-drawer:-24px 0 48px -12px rgba(0,0,0,.6);
-    --chart-grid:rgba(154,170,230,.09); --chart-axis:rgba(154,170,230,.24); --chart-label:#8890A6;
-    --s1:#3987E5; --s2:#D95926; --s3:#199E70; --s4:#C98500; --s-other:#5D6680; --s-single:#7193FF; --s-ghost:rgba(154,170,230,.12);
-    --code-key:#A8BBFF; --code-str:#6FE0B4; --code-num:#F7C47E; --code-bool:#E3A6FF;
-    --diff-add:rgba(51,196,143,.13); --diff-add-ink:#6FE0B4; --diff-del:rgba(242,104,93,.14); --diff-del-ink:#FF9D94;
-    --on-solid:#FFFFFF; --knob:#FFFFFF; --knob-shadow:rgba(0,0,0,.4);
-    --shadow-seg:0 1px 2px rgba(0,0,0,.4);
-    --shadow-login:0 30px 60px -24px rgba(0,0,0,.7),0 0 0 1px rgba(154,170,230,.10);
-    --toast-ok:#0F9F6E; --toast-err:#D92D20; --toast-info:#315EFB;
-    --tg-wall:#0F1A24; --tg-own:#2B5278; --tg-own-ink:#EEF1F8; --tg-own-meta:#A8C7E8; --tg-svc:rgba(0,0,0,.45); --tg-svc-ink:#EEF1F8;
-    --phone-shadow:rgba(0,0,0,.6);
+    --shadow-login:0 24px 60px -24px rgba(0,0,0,.7),0 0 0 1px rgba(154,170,230,.10);
+    --chart-1:#8A9DFF; --chart-2:#63D6A0; --chart-3:#FFC466; --chart-4:#D9A6FF; --chart-5:#9AA3C7; --chart-6:#FF8F8F;
+    --code-bg:#0A0D1F;
+    --knob-shadow:rgba(0,0,0,.45);
+    --toast-ok:#1E7A4F; --toast-err:#C8323C; --toast-info:#2F4BE0;
+    --tg-wall:#0F1A24; --tg-own:#2B5278; --tg-own-ink:#EEF1FA; --tg-own-meta:#A8C7E8; --tg-svc:rgba(0,0,0,.45); --tg-svc-ink:#EEF1FA; --tg-bubble:#1C2733; --tg-btn:#24313E; --tg-link:#7DB8F0;
+    --phone-frame:#05070F;
   }
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
-  --bg:#0A0D18; --surface:#111628; --surface-2:#171D33; --surface-3:#1F2641; --surface-sunk:#0D1121;
-  --line:rgba(154,170,230,.12); --line-strong:rgba(154,170,230,.22);
-  --ink:#EEF1F8; --ink-2:#B9C0D4; --muted:#8F97AC; --faint:#5E6680; --field-line:#6B7593;
-  --nav:#070A13; --nav-2:#121830; --nav-3:#1A2140; --nav-ink:#A3ACC2; --nav-ink-strong:#FFFFFF; --nav-muted:#7F8AA6; --nav-line:rgba(174,183,202,.10);
-  --accent:#DFFF56; --accent-press:#CDEE3C; --accent-ink:#1A2200;
-  --primary:#EEF1F8; --primary-ink:#0A0D18; --primary-hover:#D5DAE8;
-  --info:#7193FF; --info-bg:rgba(113,147,255,.14); --info-ink:#A8BBFF; --info-line:rgba(113,147,255,.32);
-  --good:#33C48F; --good-bg:rgba(51,196,143,.13); --good-ink:#6FE0B4; --good-line:rgba(51,196,143,.30);
-  --warn:#F0A63A; --warn-bg:rgba(240,166,58,.14); --warn-ink:#F7C47E; --warn-line:rgba(240,166,58,.32);
-  --bad:#F2685D; --bad-bg:rgba(242,104,93,.14); --bad-ink:#FF9D94; --bad-line:rgba(242,104,93,.32);
-  --neutral-bg:rgba(154,170,230,.10); --neutral-ink:#B9C0D4;
-  --note-bg:rgba(240,200,80,.09); --note-line:rgba(240,200,80,.28); --note-ink:#F2D27A;
-  --focus:#8FA8FF;
+  --bg:#0F1328; --card:#171C38; --ink:#EEF1FA; --ink2:#B1B8D3; --line:#2A3157;
+  --pen:#8A9DFF; --pen-soft:#252D5E; --side:#0A0D1F; --side2:#9AA3C7;
+  --ok:#63D6A0; --ok-soft:#163427; --warn:#FFC466; --warn-soft:#3A2D12; --err:#FF8F8F; --err-soft:#3B1F2A;
+  --on-pen:#0E1330; --pen-press:#A6B4FF; --line-strong:#39416B; --field-line:#7880A6; --faint:#6E7697;
+  --surface-2:#1F2547; --surface-3:#2A3157; --surface-sunk:#131833;
+  --note-bg:#3A3212; --note-line:#8C7524; --note-ink:#FFE38A;
+  --info-line:#3A4590; --good-line:#245A41; --warn-line:#6B5222; --bad-line:#6B3140;
+  --focus-ring:#B9C6FF;
   --scrim:rgba(3,5,12,.62);
-  --shadow-pop:0 18px 40px -10px rgba(0,0,0,.6),0 0 0 1px rgba(154,170,230,.10);
+  --shadow-pop:0 20px 60px rgba(0,0,0,.55),0 0 0 1px rgba(154,170,230,.10);
   --shadow-drawer:-24px 0 48px -12px rgba(0,0,0,.6);
-  --chart-grid:rgba(154,170,230,.09); --chart-axis:rgba(154,170,230,.24); --chart-label:#8890A6;
-  --s1:#3987E5; --s2:#D95926; --s3:#199E70; --s4:#C98500; --s-other:#5D6680; --s-single:#7193FF; --s-ghost:rgba(154,170,230,.12);
-  --code-key:#A8BBFF; --code-str:#6FE0B4; --code-num:#F7C47E; --code-bool:#E3A6FF;
-  --diff-add:rgba(51,196,143,.13); --diff-add-ink:#6FE0B4; --diff-del:rgba(242,104,93,.14); --diff-del-ink:#FF9D94;
-  --on-solid:#FFFFFF; --knob:#FFFFFF; --knob-shadow:rgba(0,0,0,.4);
-  --shadow-seg:0 1px 2px rgba(0,0,0,.4);
-  --shadow-login:0 30px 60px -24px rgba(0,0,0,.7),0 0 0 1px rgba(154,170,230,.10);
-  --toast-ok:#0F9F6E; --toast-err:#D92D20; --toast-info:#315EFB;
-  --tg-wall:#0F1A24; --tg-own:#2B5278; --tg-own-ink:#EEF1F8; --tg-own-meta:#A8C7E8; --tg-svc:rgba(0,0,0,.45); --tg-svc-ink:#EEF1F8;
-  --phone-shadow:rgba(0,0,0,.6);
+  --shadow-login:0 24px 60px -24px rgba(0,0,0,.7),0 0 0 1px rgba(154,170,230,.10);
+  --chart-1:#8A9DFF; --chart-2:#63D6A0; --chart-3:#FFC466; --chart-4:#D9A6FF; --chart-5:#9AA3C7; --chart-6:#FF8F8F;
+  --code-bg:#0A0D1F;
+  --knob-shadow:rgba(0,0,0,.45);
+  --toast-ok:#1E7A4F; --toast-err:#C8323C; --toast-info:#2F4BE0;
+  --tg-wall:#0F1A24; --tg-own:#2B5278; --tg-own-ink:#EEF1FA; --tg-own-meta:#A8C7E8; --tg-svc:rgba(0,0,0,.45); --tg-svc-ink:#EEF1FA; --tg-bubble:#1C2733; --tg-btn:#24313E; --tg-link:#7DB8F0;
+  --phone-frame:#05070F;
+}
+
+/* Component roles derived from the TilHero tokens: one place, both themes, follows a config override. */
+:root{
+  --surface:var(--card);
+  --ink-2:var(--ink2);
+  --muted:var(--ink2);
+  --nav:var(--side); --nav-ink:#E6E9F5; --nav-ink-strong:#FFFFFF; --nav-muted:var(--side2);
+  --nav-2:rgba(255,255,255,.07); --nav-3:rgba(255,255,255,.13); --nav-line:rgba(185,192,218,.16);
+  --primary:var(--pen); --primary-ink:var(--on-pen); --primary-hover:var(--pen-press);
+  --accent:var(--pen); --accent-ink:var(--on-pen); --accent-press:var(--pen-press);
+  --info:var(--pen); --info-bg:var(--pen-soft); --info-ink:var(--pen);
+  --good:var(--ok); --good-bg:var(--ok-soft); --good-ink:var(--ok);
+  --warn-bg:var(--warn-soft); --warn-ink:var(--warn);
+  --bad:var(--err); --bad-bg:var(--err-soft); --bad-ink:var(--err);
+  --neutral-bg:var(--surface-2); --neutral-ink:var(--ink2);
+  --focus:var(--pen);
 }

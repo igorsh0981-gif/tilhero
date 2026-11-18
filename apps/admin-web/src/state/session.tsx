@@ -1,12 +1,13 @@
 import { createContext, useContext } from "react";
 import type { Me, Permission } from "@tilhero/contracts/admin";
+import type { MenuEntry } from "./nav";
 
 export type SignOutReason = "explicit" | "idle" | "expired" | "revoked";
 
-/** Admin layout of the active experience-config version (payload.layout, app=admin). */
+/** Admin layout of the active experience-config version (payload.layout, app=admin): density, order and switches of the menu. */
 export interface AdminLayout {
   density: "compact" | "comfortable";
-  widgets: Array<{ id: string; enabled: boolean }>;
+  menu: MenuEntry[];
 }
 
 export interface Session {
@@ -17,10 +18,10 @@ export interface Session {
   refreshMe(): Promise<Me | null>;
   setMe(me: Me): void;
   signOut(reason?: SignOutReason): Promise<void>;
-  /** re-reads the active admin experience config and applies its theme tokens (A46) */
+  /** re-reads the active admin experience config and applies its theme tokens and menu */
   reloadTheme(): Promise<void>;
   themeVersion: string | null;
-  /** null until the active admin config has been read (or without config.read) → built-in defaults */
+  /** null until the active admin config has been read (or when it is unavailable) → built-in defaults */
   adminLayout: AdminLayout | null;
 }
 

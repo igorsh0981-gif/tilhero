@@ -1,44 +1,48 @@
+/**
+ * «Конфигурация интерфейса» (config.read / config.edit / config.publish): Remote Experience Config of the Mini App
+ * (theme «Тетрадь», Home sections, flags) and of the admin (theme tokens, density, order and switches of the menu).
+ * Versions are immutable; activation and rollback are new activations (step-up, reason → audit) and apply without a
+ * build: the Mini App and the admin re-read the configuration on the next open (the admin — immediately here).
+ */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ConfigActivation, ConfigApp, ConfigState, ConfigVersion } from "@tilhero/contracts/admin";
 import { Experience } from "../../api/endpoints";
 import { ApiError } from "../../api/errors";
-import { useI18n, type MessageKey } from "../../i18n";
+import { useI18n } from "../../i18n";
+import { redactSecrets } from "../../lib/redact";
+import { navItem, PAGE_IDS, type PageId } from "../../state/nav";
 import { useSession } from "../../state/session";
 import { isColor } from "../../theme/config";
 import { Icon } from "../../ui/Icon";
 import { LoadError } from "../../ui/LoadError";
-import { Btn, Callout, cx, Empty, FieldErr, Pill, Select, Spinner, Switch, TabPanel, Tabs } from "../../ui/kit";
+import { Btn, Callout, cx, Empty, FieldErr, JsonView, Pill, Select, Seg, Spinner, Switch } from "../../ui/kit";
 import { ConfirmCommand, Modal } from "../../ui/overlays";
 import { useToast } from "../../ui/toasts";
 import { errText } from "../../ui/errors";
-import { WhatsNewConfig } from "./WhatsNew";
 
 /* ---------------------------------------------------------------- payload shapes (experience-config domain/payload.py) */
 
+export const SECTION_TYPES = ["today_plan", "lesson_of_day", "review", "whats_new", "family", "news"] as const;
 export interface Section {
-  type: string;
+  type: (typeof SECTION_TYPES)[number];
   key: string;
   variant: "large" | "compact";
   enabled: boolean;
 }
 export interface MiniPayload {
-  theme: { id: string; version: string; tokens: Record<string, string> };
-  home: { welcome_mode: "first_visit_only" | "always" | "never"; sections: Section[] };
+  theme: { id: "notebook" | "notebook_dark"; version: string; tokens: Record<string, string> };
+  home: { sections: Section[] };
   flags: Record<string, boolean>;
-  hotel_rating_min: number;
 }
 export interface AdminPayload {
-  theme: { id: "default" | "high_contrast"; version: string; tokens: Record<string, string> };
-  layout: {
-    density: "compact" | "comfortable";
-    table_presets: { users: "support" | "analytics"; audit: "security" | "full" };
-    dashboard_widgets: Array<{ id: string; enabled: boolean }>;
-  };
+  theme: { id: "admin_light"; version: string; tokens: Record<string, string> };
+  layout: { density: "compact" | "comfortable"; menu: Array<{ id: string; enabled: boolean }> };
   flags: Record<string, boolean>;
 }
 type Payload = MiniPayload | AdminPayload;
 
 const SEMVER = /^(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})$/;
+const HEX6 = /^#[0-9a-f]{6}$/i;
 
 /** Next free patch version after the highest existing one (1.0.3 → 1.0.4). */
 export function nextVersion(existing: readonly string[]): string {
@@ -49,15 +53,24 @@ export function nextVersion(existing: readonly string[]): string {
   return `${M}.${m}.${p + 1}`;
 }
 
+/** Colour tokens the editor offers (the rest of the whitelist stays as in the base version). */
+export const MINI_COLORS = ["--pen", "--mark", "--margin", "--paper"] as const;
+export const ADMIN_COLORS = ["--pen", "--side", "--bg"] as const;
+
 /** Human list of what the draft changes against the base payload (shown before saving a version). */
 export function payloadChanges(app: ConfigApp, base: Payload, draft: Payload): string[] {
   const out: string[] = [];
   const flags = (a: Record<string, boolean>, b: Record<string, boolean>) => {
     for (const k of Object.keys(b)) if (a[k] !== b[k]) out.push(`flag ${k}: ${a[k] ?? "∅"} → ${b[k]}`);
   };
+  const tokens = (a: Record<string, string>, b: Record<string, string>) => {
+    for (const k of Object.keys(b)) if (a[k] !== b[k]) out.push(`${k}: ${a[k] ?? "∅"} → ${b[k]}`);
+  };
   if (app === "miniapp") {
     const a = base as MiniPayload;
     const b = draft as MiniPayload;
+    if (a.theme.id !== b.theme.id) out.push(`theme.id: ${a.theme.id} → ${b.theme.id}`);
+    tokens(a.theme.tokens, b.theme.tokens);
     if (a.home.sections.map((s) => s.key).join() !== b.home.sections.map((s) => s.key).join()) out.push("home.sections: order");
     for (const s of b.home.sections) {
       const o = a.home.sections.find((x) => x.key === s.key);
@@ -65,19 +78,17 @@ export function payloadChanges(app: ConfigApp, base: Payload, draft: Payload): s
       if (o.enabled !== s.enabled) out.push(`${s.key}: ${s.enabled ? "on" : "off"}`);
       if (o.variant !== s.variant) out.push(`${s.key}: ${o.variant} → ${s.variant}`);
     }
-    if (a.home.welcome_mode !== b.home.welcome_mode) out.push(`welcome_mode: ${a.home.welcome_mode} → ${b.home.welcome_mode}`);
-    if (a.hotel_rating_min !== b.hotel_rating_min) out.push(`hotel_rating_min: ${a.hotel_rating_min} → ${b.hotel_rating_min}`);
     flags(a.flags, b.flags);
   } else {
     const a = base as AdminPayload;
     const b = draft as AdminPayload;
-    if (a.theme.id !== b.theme.id) out.push(`theme.id: ${a.theme.id} → ${b.theme.id}`);
-    if (a.theme.tokens["--accent"] !== b.theme.tokens["--accent"]) out.push(`--accent: ${a.theme.tokens["--accent"] ?? "∅"} → ${b.theme.tokens["--accent"]}`);
+    tokens(a.theme.tokens, b.theme.tokens);
     if (a.layout.density !== b.layout.density) out.push(`density: ${a.layout.density} → ${b.layout.density}`);
-    if (a.layout.table_presets.users !== b.layout.table_presets.users) out.push(`table_presets.users: ${a.layout.table_presets.users} → ${b.layout.table_presets.users}`);
-    if (a.layout.table_presets.audit !== b.layout.table_presets.audit) out.push(`table_presets.audit: ${a.layout.table_presets.audit} → ${b.layout.table_presets.audit}`);
-    const w = (x: AdminPayload) => JSON.stringify(x.layout.dashboard_widgets);
-    if (w(a) !== w(b)) out.push("dashboard_widgets");
+    if (a.layout.menu.map((m) => m.id).join() !== b.layout.menu.map((m) => m.id).join()) out.push("layout.menu: order");
+    for (const m of b.layout.menu) {
+      const o = a.layout.menu.find((x) => x.id === m.id);
+      if (o && o.enabled !== m.enabled) out.push(`menu ${m.id}: ${m.enabled ? "on" : "off"}`);
+    }
     flags(a.flags, b.flags);
   }
   return out;
@@ -88,34 +99,23 @@ const isMini = (app: ConfigApp, _p: Payload): _p is MiniPayload => app === "mini
 
 /* ---------------------------------------------------------------- page */
 
-type ConfigTab = ConfigApp | "whats_new";
-
 export function ConfigPage() {
   const { t } = useI18n();
-  const [app, setApp] = useState<ConfigTab>("miniapp");
+  const [app, setApp] = useState<ConfigApp>("miniapp");
   return (
-    <div data-testid="config">
-      <div className="page-head">
-        <div className="lead">
-          <p>{t("cfg.lead")}</p>
-        </div>
-      </div>
-      <Tabs<ConfigTab>
-        id="cfg"
+    <div className="stack" data-testid="config">
+      <p className="sub page-lead">{t("cfg.lead")}</p>
+      <Seg<ConfigApp>
         label={t("page.config")}
         value={app}
         onChange={setApp}
-        className="mb-16"
+        testId="cfg-app"
         items={[
-          { v: "miniapp", label: "Mini App", icon: "phone", testId: "cfg-tab-miniapp" },
-          { v: "admin", label: "Admin", icon: "monitor", testId: "cfg-tab-admin" },
-          // 9.4: заметки о релизах Mini App
-          { v: "whats_new", label: t("wn.tab"), icon: "sparkles", testId: "cfg-tab-whats-new" },
+          { v: "miniapp", label: t("cfg.app.miniapp") },
+          { v: "admin", label: t("cfg.app.admin") },
         ]}
       />
-      <TabPanel id="cfg" value={app}>
-        {app === "whats_new" ? <WhatsNewConfig /> : <AppConfig key={app} app={app} />}
-      </TabPanel>
+      <AppConfig key={app} app={app} />
     </div>
   );
 }
@@ -130,6 +130,7 @@ function AppConfig({ app }: { app: ConfigApp }) {
   const [acts, setActs] = useState<ConfigActivation[]>([]);
   const [base, setBase] = useState<Payload | null>(null);
   const [draft, setDraft] = useState<Payload | null>(null);
+  const [editing, setEditing] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [cmd, setCmd] = useState<{ kind: "activate"; version: string } | { kind: "rollback" } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -172,62 +173,77 @@ function AppConfig({ app }: { app: ConfigApp }) {
   const afterSwitch = async (msg: string, meta: string) => {
     toast(msg, "ok", meta);
     await load();
-    if (app === "admin") await reloadTheme(); // A46: the admin look follows the active version without a rebuild
+    if (app === "admin") await reloadTheme(); // the admin look follows the active version without a rebuild
   };
 
   return (
-    <div className="cfg-layout">
-      <div className="stack">
+    <>
+      <div className="grid2">
         <section className="panel" data-testid="cfg-versions">
           <div className="panel-h">
             <h2 className="panel-t">
               <Icon name="layers" />
               {t(app === "miniapp" ? "cfg.versionsMini" : "cfg.versionsAdmin")}
             </h2>
-            <span className="panel-sub">experience-config · {app}</span>
           </div>
-          <div className="panel-b stack sm">
-            {sorted.length ? (
-              <div className="ver-pill-row">
+          <div className="table-wrap">
+            <table className="tbl compact">
+              <thead>
+                <tr>
+                  <th scope="col">{t("cfg.col.version")}</th>
+                  <th scope="col">{t("cfg.col.note")}</th>
+                  <th scope="col">{t("cfg.col.by")}</th>
+                  <th scope="col">{t("cfg.col.state")}</th>
+                  <th scope="col">
+                    <span className="sr-only">{t("cfg.activate")}</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
                 {sorted.map((v) => {
                   const isCur = v.version === cur;
                   return (
-                    <div key={v.version_id} className={cx("ver-card", isCur && "is-current")} data-testid={`ver-${v.version}`}>
-                      <div className="row between">
-                        <span className="mono b">{v.version}</span>
-                        {isCur ? <Pill tone="good">{t("cfg.current")}</Pill> : v.version === prev ? <span className="pill outline no-dot">{t("cfg.previous")}</span> : null}
-                      </div>
-                      <div className="xs muted mt-8">
-                        {i.fmt.dateTime(v.created_at)} · {v.created_by}
-                      </div>
-                      <div className="small mt-8 wrap-any">{v.change_note}</div>
-                      <div className="row mt-8">
-                        <span className="hash" title={v.checksum}>
-                          sha256 {v.checksum.slice(0, 10)}
-                        </span>
-                        <span className="grow" />
-                        {!isCur && <Btn size="xs" icon="zap" label={t("cfg.activate")} perm="config.publish" onClick={() => setCmd({ kind: "activate", version: v.version })} testId={`activate-${v.version}`} />}
-                      </div>
-                    </div>
+                    <tr key={v.version_id} className={isCur ? "is-sel" : undefined} data-testid={`ver-${v.version}`}>
+                      <td className="mono b nowrap">{v.version}</td>
+                      <td className="small wrap-any">{v.change_note}</td>
+                      <td className="small nowrap">
+                        {v.created_by}
+                        <div className="cell-sub">{i.fmt.date(v.created_at)}</div>
+                      </td>
+                      <td>{isCur ? <Pill tone="good">{t("cfg.current")}</Pill> : v.version === prev ? <Pill tone="neutral">{t("cfg.previous")}</Pill> : <span className="muted small">—</span>}</td>
+                      <td className="actions-cell">{!isCur && <Btn size="xs" icon="zap" label={t("cfg.activate")} perm="config.publish" onClick={() => setCmd({ kind: "activate", version: v.version })} testId={`activate-${v.version}`} />}</td>
+                    </tr>
                   );
                 })}
-              </div>
-            ) : (
-              <Empty icon="layers" title={t("cfg.noVersions")} />
-            )}
-            <div className="row">
-              {prev ? (
-                <Btn icon="rollback" label={t("cfg.rollback", { v: prev })} perm="config.publish" onClick={() => setCmd({ kind: "rollback" })} testId="cfg-rollback" />
-              ) : (
-                <Btn icon="rollback" label={t("cfg.rollbackNone")} disabled />
-              )}
-              <span className="small muted">{t("cfg.noRebuild")}</span>
-            </div>
+                {!sorted.length && (
+                  <tr>
+                    <td colSpan={5} className="empty-cell">
+                      <Empty icon="layers" title={t("cfg.noVersions")} />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </section>
+        <section className="card stack sm" data-testid="cfg-current">
+          <h2 className="h2">{t("cfg.currentT", { v: cur ?? "—" })}</h2>
+          {base ? <JsonView value={redactSecrets(base)} className="cfg-json" testId="cfg-payload" /> : <Empty icon="sliders" title={t("cfg.noCurrent")} />}
+          <div className="acts">
+            {prev ? (
+              <Btn icon="rollback" label={t("cfg.rollback", { v: prev })} perm="config.publish" onClick={() => setCmd({ kind: "rollback" })} testId="cfg-rollback" />
+            ) : (
+              <Btn icon="rollback" label={t("cfg.rollbackNone")} disabled />
+            )}
+            {base && !editing && <Btn icon="edit" label={t("cfg.newVersion")} perm="config.edit" onClick={() => setEditing(true)} testId="cfg-edit" />}
+          </div>
+          <p className="sub">{t("cfg.noRebuild")}</p>
+        </section>
+      </div>
 
-        {draft && base ? (
-          <>
+      {editing && draft && base && (
+        <div className="cfg-layout" data-testid="cfg-editor">
+          <div className="stack">
             {!editable && <Callout icon="lock">{t("cfg.ro", { p: "config.edit" })}</Callout>}
             {isMini(app, draft) ? <MiniEditor d={draft} set={(d) => setDraft(d)} ro={!editable} /> : <AdminEditor d={draft as AdminPayload} set={(d) => setDraft(d)} ro={!editable} />}
             <section className={cx("panel", changes.length > 0 && "sev-info")} data-testid="cfg-changes">
@@ -245,61 +261,66 @@ function AppConfig({ app }: { app: ConfigApp }) {
                     <span className="muted">{t("cfg.noChanges", { v: cur ?? "—" })}</span>
                   )}
                 </div>
-                <Btn kind="ghost" label={t("cfg.discard")} disabled={!changes.length} onClick={() => setDraft(clone(base))} />
+                <Btn
+                  kind="ghost"
+                  label={t("common.cancel")}
+                  onClick={() => {
+                    setDraft(clone(base));
+                    setEditing(false);
+                  }}
+                />
                 <Btn kind="primary" icon="plus" label={t("cfg.saveVersion")} perm="config.edit" disabled={!changes.length} onClick={() => setSaving(true)} testId="cfg-save" />
               </div>
             </section>
-          </>
-        ) : (
-          <Empty icon="sliders" title={t("cfg.noCurrent")} />
-        )}
+          </div>
+          <aside className="cfg-preview">{isMini(app, draft) ? <MiniPreview d={draft} /> : <AdminPreview d={draft as AdminPayload} />}</aside>
+        </div>
+      )}
 
-        <section className="panel" data-testid="cfg-activations">
-          <div className="panel-h">
-            <h2 className="panel-t">
-              <Icon name="activity" />
-              {t("cfg.history")}
-            </h2>
-          </div>
-          <div className="table-wrap">
-            <table className="tbl compact">
-              <thead>
-                <tr>
-                  <th>{t("col.created")}</th>
-                  <th>{t("cfg.col.kind")}</th>
-                  <th>{t("cfg.col.version")}</th>
-                  <th>{t("cmd.reason")}</th>
-                  <th>{t("cfg.col.by")}</th>
+      <section className="panel" data-testid="cfg-activations">
+        <div className="panel-h">
+          <h2 className="panel-t">
+            <Icon name="activity" />
+            {t("cfg.history")}
+          </h2>
+        </div>
+        <div className="table-wrap">
+          <table className="tbl compact">
+            <thead>
+              <tr>
+                <th scope="col">{t("cfg.col.when")}</th>
+                <th scope="col">{t("cfg.col.kind")}</th>
+                <th scope="col">{t("cfg.col.version")}</th>
+                <th scope="col">{t("cmd.reason")}</th>
+                <th scope="col">{t("cfg.col.by")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {acts.map((a) => (
+                <tr key={a.activation_id}>
+                  <td className="nowrap mono small">{i.fmt.dateTime(a.activated_at)}</td>
+                  <td>
+                    <Pill tone={a.kind === "rollback" ? "warn" : "info"}>{t(`cfg.kind.${a.kind}`)}</Pill>
+                  </td>
+                  <td className="mono nowrap">
+                    {a.previous_version ? `${a.previous_version} → ` : ""}
+                    <b>{a.version}</b>
+                  </td>
+                  <td className="small">{a.reason}</td>
+                  <td className="small nowrap">{a.activated_by}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {acts.map((a) => (
-                  <tr key={a.activation_id}>
-                    <td className="nowrap mono small">{i.fmt.dateTime(a.activated_at)}</td>
-                    <td>
-                      <Pill tone={a.kind === "rollback" ? "warn" : "info"}>{t(`cfg.kind.${a.kind}`)}</Pill>
-                    </td>
-                    <td className="mono nowrap">
-                      {a.previous_version ? `${a.previous_version} → ` : ""}
-                      <b>{a.version}</b>
-                    </td>
-                    <td className="small">{a.reason}</td>
-                    <td className="small nowrap">{a.activated_by}</td>
-                  </tr>
-                ))}
-                {!acts.length && (
-                  <tr>
-                    <td colSpan={5} className="empty-cell">
-                      <Empty icon="activity" title={t("cfg.noHistory")} />
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-      <aside className="cfg-preview">{draft && (isMini(app, draft) ? <PhonePreview d={draft} version={cur} /> : <AdminPreview d={draft as AdminPayload} />)}</aside>
+              ))}
+              {!acts.length && (
+                <tr>
+                  <td colSpan={5} className="empty-cell">
+                    <Empty icon="activity" title={t("cfg.noHistory")} />
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       {cmd && (
         <ConfirmCommand
@@ -330,12 +351,13 @@ function AppConfig({ app }: { app: ConfigApp }) {
           onClose={() => setSaving(false)}
           onSaved={async (v) => {
             setSaving(false);
+            setEditing(false);
             toast(t("cfg.created", { v: v.version }), "ok", t("cfg.createdM"));
             await load();
           }}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -356,15 +378,15 @@ function Ordered<T extends { enabled: boolean }>({ items, label, sub, set, ro, e
         <li key={label(x)} className={x.enabled ? undefined : "is-off"}>
           <span className="idx">{idx + 1}</span>
           <span className="grow">
-            <span className="mono b">{label(x)}</span>
-            <span className="small muted block">{sub(x)}</span>
+            <span className="b">{sub(x)}</span>
+            <span className="small muted block mono">{label(x)}</span>
           </span>
           {extra?.(x, idx)}
           <span className="mv">
-            <Btn size="xs" kind="ghost" icon="up" aria={`${t("cfg.up")}: ${label(x)}`} disabled={ro || idx === 0} onClick={() => move(idx, -1)} />
-            <Btn size="xs" kind="ghost" icon="down" aria={`${t("cfg.down")}: ${label(x)}`} disabled={ro || idx === items.length - 1} onClick={() => move(idx, 1)} />
+            <Btn size="xs" kind="ghost" icon="up" aria={`${t("cfg.up")}: ${sub(x)}`} disabled={ro || idx === 0} onClick={() => move(idx, -1)} />
+            <Btn size="xs" kind="ghost" icon="down" aria={`${t("cfg.down")}: ${sub(x)}`} disabled={ro || idx === items.length - 1} onClick={() => move(idx, 1)} />
           </span>
-          <Switch id={`ol-${label(x)}`} checked={x.enabled} disabled={ro} aria={label(x)} onChange={(v) => set(items.map((y, k) => (k === idx ? { ...y, enabled: v } : y)))} />
+          <Switch id={`ol-${label(x)}`} checked={x.enabled} disabled={ro} aria={sub(x)} onChange={(v) => set(items.map((y, k) => (k === idx ? { ...y, enabled: v } : y)))} />
         </li>
       ))}
     </ol>
@@ -384,43 +406,85 @@ function Flags({ flags, set, ro }: { flags: Record<string, boolean>; set: (f: Re
   );
 }
 
-const SEC_KEYS = new Set(["best_for_you", "watch", "sales_soon", "news"]);
-const secLabel = (t: (k: MessageKey) => string, key: string) => (SEC_KEYS.has(key) ? t(`cfg.sec.${key as "news"}`) : key);
+function ColorField({ id, label, value, ro, onChange }: { id: string; label: string; value: string; ro: boolean; onChange: (v: string) => void }) {
+  const { t } = useI18n();
+  const [hex, setHex] = useState(value);
+  useEffect(() => setHex(value), [value]);
+  const err = HEX6.test(hex.trim()) && isColor(hex.trim()) ? null : t("cfg.colorErr");
+  const set = (v: string) => {
+    setHex(v);
+    if (HEX6.test(v.trim())) onChange(v.trim().toUpperCase());
+  };
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <div className="row nowrap-row">
+        <input type="color" className="color-in" value={HEX6.test(hex) ? hex : "#000000"} disabled={ro} aria-label={label} onChange={(e) => set(e.target.value)} />
+        <input id={id} className={cx("input mono grow", err && "is-invalid")} value={hex} maxLength={7} disabled={ro} aria-invalid={!!err || undefined} onChange={(e) => set(e.target.value)} data-testid={id} />
+      </div>
+      <FieldErr msg={err} />
+    </div>
+  );
+}
 
 function MiniEditor({ d, set, ro }: { d: MiniPayload; set: (d: MiniPayload) => void; ro: boolean }) {
   const { t } = useI18n();
-  const [hotel, setHotel] = useState(String(d.hotel_rating_min));
-  useEffect(() => setHotel(String(d.hotel_rating_min)), [d.hotel_rating_min]);
-  const hv = Number(hotel.replace(",", "."));
-  const hotelErr = !(hv >= 7 && hv <= 10) ? t("cfg.hotelErr") : null;
   return (
     <>
+      <section className="panel">
+        <div className="panel-h">
+          <h2 className="panel-t">
+            <Icon name="sliders" />
+            {t("cfg.theme")}
+          </h2>
+          <span className="panel-sub">theme</span>
+        </div>
+        <div className="panel-b form-grid">
+          <div className="field">
+            <label htmlFor="cfg-m-theme">{t("cfg.themeId")}</label>
+            <Select<MiniPayload["theme"]["id"]>
+              id="cfg-m-theme"
+              label={t("cfg.themeId")}
+              value={d.theme.id}
+              disabled={ro}
+              onChange={(v) => set({ ...d, theme: { ...d.theme, id: v } })}
+              options={[
+                { v: "notebook", label: t("cfg.th.notebook") },
+                { v: "notebook_dark", label: t("cfg.th.notebook_dark") },
+              ]}
+            />
+          </div>
+          {MINI_COLORS.filter((k) => d.theme.tokens[k] != null).map((k) => (
+            <ColorField key={k} id={`cfg-m${k}`} label={`${t(`cfg.tok.${k}`)} (${k})`} value={d.theme.tokens[k]!} ro={ro} onChange={(v) => set({ ...d, theme: { ...d.theme, tokens: { ...d.theme.tokens, [k]: v } } })} />
+          ))}
+        </div>
+      </section>
       <section className="panel">
         <div className="panel-h">
           <h2 className="panel-t">
             <Icon name="layout" />
             {t("cfg.home")}
           </h2>
-          <span className="panel-sub">home.sections[]</span>
+          <span className="panel-sub">home.sections</span>
         </div>
         <div className="panel-b">
           <Ordered<Section>
             items={d.home.sections}
             label={(s) => s.key}
-            sub={(s) => `${secLabel(t, s.key)} · ${s.type}`}
+            sub={(s) => ((SECTION_TYPES as readonly string[]).includes(s.type) ? t(`cfg.sec.${s.type}`) : s.type)}
             ro={ro}
             testId="cfg-sections"
-            set={(sections) => set({ ...d, home: { ...d.home, sections } })}
+            set={(sections) => set({ ...d, home: { sections } })}
             extra={(s, idx) => (
               <Select<Section["variant"]>
                 id={`var-${s.key}`}
-                label={`${s.key} variant`}
+                label={t("cfg.variant", { s: s.key })}
                 value={s.variant}
                 disabled={ro}
-                onChange={(v) => set({ ...d, home: { ...d.home, sections: d.home.sections.map((x, k) => (k === idx ? { ...x, variant: v } : x)) } })}
+                onChange={(v) => set({ ...d, home: { sections: d.home.sections.map((x, k) => (k === idx ? { ...x, variant: v } : x)) } })}
                 options={[
-                  { v: "large", label: "large" },
-                  { v: "compact", label: "compact" },
+                  { v: "large", label: t("cfg.v.large") },
+                  { v: "compact", label: t("cfg.v.compact") },
                 ]}
               />
             )}
@@ -430,62 +494,20 @@ function MiniEditor({ d, set, ro }: { d: MiniPayload; set: (d: MiniPayload) => v
       <section className="panel">
         <div className="panel-h">
           <h2 className="panel-t">
-            <Icon name="sliders" />
-            {t("cfg.params")}
+            <Icon name="zap" />
+            {t("cfg.flags")}
           </h2>
         </div>
         <div className="panel-b">
-          <div className="form-grid">
-            <div className="field">
-              <label htmlFor="cfg-welcome">welcome_mode</label>
-              <Select<MiniPayload["home"]["welcome_mode"]>
-                id="cfg-welcome"
-                label="welcome_mode"
-                value={d.home.welcome_mode}
-                disabled={ro}
-                onChange={(v) => set({ ...d, home: { ...d.home, welcome_mode: v } })}
-                options={(["first_visit_only", "always", "never"] as const).map((v) => ({ v, label: v }))}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="cfg-hotel">{t("cfg.hotelMin")}</label>
-              <input
-                id="cfg-hotel"
-                className={cx("input mono", hotelErr && "is-invalid")}
-                inputMode="decimal"
-                value={hotel}
-                disabled={ro}
-                onChange={(e) => {
-                  setHotel(e.target.value);
-                  const v = Number(e.target.value.replace(",", "."));
-                  if (v >= 7 && v <= 10) set({ ...d, hotel_rating_min: Math.round(v * 10) / 10 });
-                }}
-              />
-              <FieldErr msg={hotelErr} />
-            </div>
-            <div className="field span-2">
-              <span className="field-label">Feature flags</span>
-              <Flags flags={d.flags} ro={ro} set={(flags) => set({ ...d, flags })} />
-            </div>
-          </div>
+          <Flags flags={d.flags} ro={ro} set={(flags) => set({ ...d, flags })} />
         </div>
       </section>
     </>
   );
 }
 
-const WIDGET_KEYS = new Set(["kpi_users", "kpi_ai", "kpi_support", "kpi_system", "kpi_commerce", "budget", "hourly", "cost_agents", "dau", "agents_table"]);
-
 function AdminEditor({ d, set, ro }: { d: AdminPayload; set: (d: AdminPayload) => void; ro: boolean }) {
   const { t } = useI18n();
-  const accent = d.theme.tokens["--accent"] ?? "#DFFF56";
-  const [hex, setHex] = useState(accent);
-  useEffect(() => setHex(accent), [accent]);
-  const hexErr = isColor(hex.trim()) && /^#[0-9a-f]{6}$/i.test(hex.trim()) ? null : t("cfg.accentErr");
-  const setAccent = (v: string) => {
-    setHex(v);
-    if (/^#[0-9a-f]{6}$/i.test(v.trim())) set({ ...d, theme: { ...d.theme, tokens: { ...d.theme.tokens, "--accent": v.trim().toUpperCase() } } });
-  };
   return (
     <>
       <section className="panel">
@@ -496,77 +518,24 @@ function AdminEditor({ d, set, ro }: { d: AdminPayload; set: (d: AdminPayload) =
           </h2>
           <span className="panel-sub">theme · layout</span>
         </div>
-        <div className="panel-b">
-          <div className="form-grid">
-            <div className="field">
-              <label htmlFor="cfg-a-theme">{t("cfg.adminTheme")}</label>
-              <Select<AdminPayload["theme"]["id"]>
-                id="cfg-a-theme"
-                label={t("cfg.adminTheme")}
-                value={d.theme.id}
-                disabled={ro}
-                onChange={(v) => set({ ...d, theme: { ...d.theme, id: v } })}
-                options={[
-                  { v: "default", label: "default (navy + lime)" },
-                  { v: "high_contrast", label: "high_contrast" },
-                ]}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="cfg-accent">{t("cfg.accent")}</label>
-              <div className="row">
-                <input type="color" className="color-in" value={/^#[0-9a-f]{6}$/i.test(hex) ? hex : "#000000"} disabled={ro} aria-label={t("cfg.accent")} onChange={(e) => setAccent(e.target.value)} />
-                <input id="cfg-accent" className={cx("input mono grow", hexErr && "is-invalid")} value={hex} maxLength={7} disabled={ro} onChange={(e) => setAccent(e.target.value)} data-testid="cfg-accent" />
-              </div>
-              <FieldErr msg={hexErr} />
-            </div>
-            <div className="field">
-              <label htmlFor="cfg-density">{t("cfg.density")}</label>
-              <Select<AdminPayload["layout"]["density"]>
-                id="cfg-density"
-                label={t("cfg.density")}
-                value={d.layout.density}
-                disabled={ro}
-                onChange={(v) => set({ ...d, layout: { ...d.layout, density: v } })}
-                options={[
-                  { v: "compact", label: "compact" },
-                  { v: "comfortable", label: "comfortable" },
-                ]}
-                testId="cfg-density"
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="cfg-p-users">{t("cfg.presetUsers")}</label>
-              <Select<AdminPayload["layout"]["table_presets"]["users"]>
-                id="cfg-p-users"
-                label={t("cfg.presetUsers")}
-                value={d.layout.table_presets.users}
-                disabled={ro}
-                onChange={(v) => set({ ...d, layout: { ...d.layout, table_presets: { ...d.layout.table_presets, users: v } } })}
-                options={[
-                  { v: "support", label: "support" },
-                  { v: "analytics", label: "analytics" },
-                ]}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="cfg-p-audit">{t("cfg.presetAudit")}</label>
-              <Select<AdminPayload["layout"]["table_presets"]["audit"]>
-                id="cfg-p-audit"
-                label={t("cfg.presetAudit")}
-                value={d.layout.table_presets.audit}
-                disabled={ro}
-                onChange={(v) => set({ ...d, layout: { ...d.layout, table_presets: { ...d.layout.table_presets, audit: v } } })}
-                options={[
-                  { v: "security", label: "security" },
-                  { v: "full", label: "full" },
-                ]}
-              />
-            </div>
-            <div className="field">
-              <span className="field-label">Feature flags</span>
-              <Flags flags={d.flags} ro={ro} set={(flags) => set({ ...d, flags })} />
-            </div>
+        <div className="panel-b form-grid">
+          {ADMIN_COLORS.filter((k) => d.theme.tokens[k] != null).map((k) => (
+            <ColorField key={k} id={`cfg-a${k}`} label={`${t(`cfg.tok.${k}`)} (${k})`} value={d.theme.tokens[k]!} ro={ro} onChange={(v) => set({ ...d, theme: { ...d.theme, tokens: { ...d.theme.tokens, [k]: v } } })} />
+          ))}
+          <div className="field">
+            <label htmlFor="cfg-density">{t("cfg.density")}</label>
+            <Select<AdminPayload["layout"]["density"]>
+              id="cfg-density"
+              label={t("cfg.density")}
+              value={d.layout.density}
+              disabled={ro}
+              onChange={(v) => set({ ...d, layout: { ...d.layout, density: v } })}
+              options={[
+                { v: "compact", label: t("cfg.d.compact") },
+                { v: "comfortable", label: t("cfg.d.comfortable") },
+              ]}
+              testId="cfg-density"
+            />
           </div>
         </div>
       </section>
@@ -574,111 +543,63 @@ function AdminEditor({ d, set, ro }: { d: AdminPayload; set: (d: AdminPayload) =
         <div className="panel-h">
           <h2 className="panel-t">
             <Icon name="layout" />
-            {t("cfg.widgets")}
+            {t("cfg.menu")}
           </h2>
-          <span className="panel-sub">layout.dashboard_widgets</span>
+          <span className="panel-sub">layout.menu</span>
         </div>
         <div className="panel-b stack sm">
           <Ordered<{ id: string; enabled: boolean }>
-            items={d.layout.dashboard_widgets}
-            label={(w) => w.id}
-            sub={(w) => (WIDGET_KEYS.has(w.id) ? t(`cfg.wd.${w.id as "dau"}`) : w.id)}
+            items={d.layout.menu}
+            label={(m) => m.id}
+            sub={(m) => ((PAGE_IDS as readonly string[]).includes(m.id) ? t(`page.${m.id as PageId}`) : m.id)}
             ro={ro}
-            testId="cfg-widgets"
-            set={(dashboard_widgets) => set({ ...d, layout: { ...d.layout, dashboard_widgets } })}
+            testId="cfg-menu"
+            set={(menu) => set({ ...d, layout: { ...d.layout, menu } })}
+            extra={(m) => (navItem(m.id)?.soon ? <span className="soon-tag">{t("nav.soonN", { n: navItem(m.id)!.soon! })}</span> : null)}
           />
-          <p className="xs muted">{t("cfg.widgetsNote")}</p>
+          <p className="xs muted">{t("cfg.menuNote")}</p>
         </div>
       </section>
-      <Callout kind="info" icon="info">
-        {t("cfg.adminNote")}
-      </Callout>
     </>
   );
 }
 
 /* ---------------------------------------------------------------- previews */
 
-function PhonePreview({ d, version }: { d: MiniPayload; version: string | null }) {
+function MiniPreview({ d }: { d: MiniPayload }) {
   const { t } = useI18n();
-  const [dark, setDark] = useState(true);
-  const card = (n: number) => (
-    <div className="ph-card" key={n}>
-      <div className="ph-media" />
-      <div className="ct">{t("cfg.ph.event", { n })}</div>
-    </div>
-  );
+  const tk = d.theme.tokens;
+  const style = {
+    "--ph-paper": tk["--paper"] ?? "#FBFCFE",
+    "--ph-pen": tk["--pen"] ?? "#2F4BE0",
+    "--ph-mark": tk["--mark"] ?? "#FFE45C",
+    "--ph-margin": tk["--margin"] ?? "#F2A7B0",
+  } as React.CSSProperties;
   return (
     <div className="stack sm" data-testid="cfg-preview">
-      <div className="row between">
-        <span className="field-label">{t("cfg.preview")}</span>
-        <div className="seg-mini" role="group" aria-label={t("theme.label")}>
-          <button type="button" aria-pressed={!dark} onClick={() => setDark(false)}>
-            {t("theme.light")}
-          </button>
-          <button type="button" aria-pressed={dark} onClick={() => setDark(true)}>
-            {t("theme.dark")}
-          </button>
+      <span className="field-label">{t("cfg.preview")}</span>
+      <div className={cx("phone cfg-phone", d.theme.id === "notebook_dark" && "is-dark")} style={style} role="img" aria-label={t("cfg.preview")}>
+        <div className="cp-paper">
+          <div className="cp-hi">TilHero</div>
+          {d.home.sections
+            .filter((s) => s.enabled)
+            .map((s) => (
+              <div key={s.key} className={cx("cp-sec", s.variant === "large" && "is-large")} data-sec={s.key}>
+                <span>{t(`cfg.sec.${s.type}`)}</span>
+              </div>
+            ))}
         </div>
       </div>
-      <div className="phone" role="img" aria-label={t("cfg.preview")}>
-        <div className={cx("phone-screen", dark && "is-dark")}>
-          <div className="ph-top">
-            <span className="wm">
-              Ai<b>Event</b>
-            </span>
-            <span>{t("cfg.ph.hi")}</span>
-          </div>
-          <div className="ph-flags">
-            {Object.keys(d.flags)
-              .filter((k) => d.flags[k])
-              .map((k) => (
-                <span key={k}>{k}</span>
-              ))}
-          </div>
-          <div className="ph-body">
-            {d.home.sections
-              .filter((s) => s.enabled)
-              .map((s) => (
-                <div className="ph-sec" key={s.key} data-sec={s.key}>
-                  <div className="h">
-                    <span>{secLabel(t, s.key)}</span>
-                    <span>{s.variant}</span>
-                  </div>
-                  {s.variant === "large" ? (
-                    <div className="ph-car">{[1, 2].map(card)}</div>
-                  ) : (
-                    <div className="ph-list">
-                      {[1, 2].map((n) => (
-                        <div className="ph-li" key={n}>
-                          <i />
-                          <span>{t("cfg.ph.item", { n })}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-          </div>
-          <div className="ph-tab">
-            <span>{t("cfg.ph.home")}</span>
-            <span>Watch</span>
-            {d.flags.ai_concierge && <span>AI</span>}
-            <span>{t("cfg.ph.profile")}</span>
-          </div>
-        </div>
-      </div>
-      <p className="xs muted" style={{ textAlign: "center" }}>
-        {t("cfg.previewNote", { v: version ?? "—", th: d.theme.version })}
-      </p>
+      <p className="xs muted center">{t("cfg.previewNote")}</p>
     </div>
   );
 }
 
-const SWATCHES = ["--nav", "--accent", "--primary", "--info", "--good", "--warn", "--bad", "--bg", "--surface"];
+const ADMIN_SWATCHES = ["--side", "--pen", "--pen-soft", "--bg", "--card", "--ink", "--ok", "--warn", "--err"];
 
 function AdminPreview({ d }: { d: AdminPayload }) {
   const { t } = useI18n();
+  const on = d.layout.menu.filter((m) => m.enabled);
   return (
     <section className="panel" data-testid="cfg-preview">
       <div className="panel-h">
@@ -686,39 +607,23 @@ function AdminPreview({ d }: { d: AdminPayload }) {
       </div>
       <div className="panel-b stack sm">
         <div className="row">
-          <span className="tag">theme: {d.theme.id}</span>
           <span className="tag">density: {d.layout.density}</span>
+          <span className="tag">{t("cfg.menuOn", { n: on.length, m: d.layout.menu.length })}</span>
         </div>
         <div className="token-swatches">
-          {SWATCHES.filter((k) => d.theme.tokens[k] && isColor(d.theme.tokens[k]!)).map((k) => (
+          {ADMIN_SWATCHES.filter((k) => d.theme.tokens[k] && isColor(d.theme.tokens[k]!)).map((k) => (
             <span key={k}>
               <i style={{ background: d.theme.tokens[k] }} />
               {k}
             </span>
           ))}
         </div>
-        <div className="table-wrap">
-          <table className={cx("tbl", d.layout.density === "compact" ? "dense" : undefined)}>
-            <thead>
-              <tr>
-                <th>User ID</th>
-                <th>Telegram</th>
-                <th>{t("users.col.tickets")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="mono">3f9a…c21</td>
-                <td>@demo_user</td>
-                <td>1</td>
-              </tr>
-              <tr>
-                <td className="mono">7b20…e04</td>
-                <td>@travel_user</td>
-                <td>0</td>
-              </tr>
-            </tbody>
-          </table>
+        <div className="mini-side" style={{ background: d.theme.tokens["--side"] }} aria-hidden="true">
+          {on.slice(0, 6).map((m, k) => (
+            <span key={m.id} className={k === 0 ? "on" : undefined} style={k === 0 ? { background: d.theme.tokens["--pen"] } : undefined}>
+              {(PAGE_IDS as readonly string[]).includes(m.id) ? t(`page.${m.id as PageId}`) : m.id}
+            </span>
+          ))}
         </div>
         <p className="xs muted">{t("cfg.adminPrevNote")}</p>
       </div>
@@ -744,8 +649,8 @@ function SaveVersion({ app, existing, changes, draft, onClose, onSaved }: { app:
     if (e.v || e.n) return;
     const v = version.trim();
     const payload = clone(draft) as Payload;
-    // a changed admin theme gets the new version as its theme version (the tokens are part of this version)
-    if (app === "admin" && changes.some((c) => c.startsWith("--accent") || c.startsWith("theme.id"))) payload.theme.version = v;
+    // changed tokens are part of this version: the theme gets the new version number
+    if (changes.some((c) => c.startsWith("--") || c.startsWith("theme.id"))) payload.theme.version = v;
     setBusy(true);
     try {
       const res = await Experience.create(app, v, payload as unknown as Record<string, unknown>, note.trim());
@@ -785,14 +690,14 @@ function SaveVersion({ app, existing, changes, draft, onClose, onSaved }: { app:
         <label htmlFor="cfg-ver" className="req">
           {t("cfg.version")}
         </label>
-        <input id="cfg-ver" className={cx("input mono", err.v && "is-invalid")} value={version} maxLength={14} onChange={(e) => setVersion(e.target.value)} data-autofocus="" />
+        <input id="cfg-ver" className={cx("input mono", err.v && "is-invalid")} value={version} maxLength={14} onChange={(e) => setVersion(e.target.value)} aria-invalid={!!err.v || undefined} data-autofocus="" />
         <FieldErr msg={err.v} />
       </div>
       <div className="field mt-12">
         <label htmlFor="cfg-note" className="req">
-          change_note
+          {t("cfg.note")}
         </label>
-        <textarea id="cfg-note" className={cx("textarea", err.n && "is-invalid")} rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("cfg.notePh")} />
+        <textarea id="cfg-note" className={cx("textarea", err.n && "is-invalid")} rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("cfg.notePh")} aria-invalid={!!err.n || undefined} />
         <FieldErr msg={err.n} />
       </div>
       <FieldErr msg={err.g} />

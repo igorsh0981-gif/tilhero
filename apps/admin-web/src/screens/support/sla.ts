@@ -41,5 +41,5 @@ export const STAFF_TRANSITIONS: Readonly<Record<TicketStatus, readonly TicketSta
   CLOSED: [],
 };
 export const TICKET_STATUSES: readonly TicketStatus[] = ["NEW", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED"];
-export const CATEGORIES = ["EVENT_RECOMMENDATION", "TICKET_SOURCE", "FLIGHT", "HOTEL", "PRICE", "SUBSCRIPTION_PAYMENT", "ACCOUNT", "PERSONAL_DATA", "BUG", "OTHER"] as const;
+export const CATEGORIES = ["LESSON", "ASSESSMENT", "SCHEDULE_REMINDERS", "CHILD_PROFILE", "ACCOUNT", "SUBSCRIPTION_PAYMENT", "PERSONAL_DATA", "BUG", "OTHER"] as const;
 export const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
