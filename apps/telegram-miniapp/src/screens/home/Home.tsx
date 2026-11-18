@@ -26,7 +26,8 @@ export function greetingKey(hour: number): MessageKey {
 }
 
 /**
- * Home: the plan for today by the learner's own schedule (slot, duration, marking a session), the week, the hero
+ * Home: the plan for today by the learner's own schedule (slot, duration, «Начать занятие» → «Уроки», marking a
+ * session), the week, the hero
  * and the sections of Remote Experience Config. Lessons, reviews and the hero's growth arrive in later sprints.
  */
 export function Home() {
@@ -149,12 +150,20 @@ function TodaySection({ today }: { today: ReturnType<typeof useLoad<TodayPlan>> 
           <p className="h2">
             {d.done_today ? t("home.doneLine") : d.is_scheduled_today ? t("home.slotLine", { time: slot }) : d.next_slot ? t("home.nextLine", { day: dayName(d.next_slot.local_date, t, fmt.localDate), time: d.next_slot.time }) : t("home.noSlot")}
           </p>
-          <p className="sub">{d.done_today ? t("home.doneHint", { n: d.minutes_today }) : t("home.markHint")}</p>
           <ErrorLine text={mark.error} />
-          <Btn variant={d.done_today ? "secondary" : "primary"} busy={mark.busy} onClick={() => void mark.run()} data-testid="mark-activity">
-            <Icon name="check" size={18} />
-            {d.done_today ? t("home.markMore") : t("home.mark")}
-          </Btn>
+          {/* owner's decision: lessons arrive by the sprint plan (3–4) — «Начать занятие» leads to «Уроки» (the honest
+              «скоро» screen); marking a session done on one's own stays as the secondary action */}
+          <div className="plan-actions">
+            <Btn onClick={() => nav.goTab("lessons")} data-testid="start-lesson">
+              <Icon name="lessons" size={18} />
+              {t("home.start")}
+            </Btn>
+            <Btn variant="secondary" busy={mark.busy} onClick={() => void mark.run()} data-testid="mark-activity">
+              <Icon name="check" size={18} />
+              {d.done_today ? t("home.markMore") : t("home.mark")}
+            </Btn>
+          </div>
+          <p className="sub small">{d.done_today ? t("home.doneHint", { n: d.minutes_today }) : t("home.markHint")}</p>
           {!plan.schedule.reminders_enabled ? (
             <Btn variant="link" onClick={() => nav.route("schedule")}>
               <Icon name="bell" size={18} />

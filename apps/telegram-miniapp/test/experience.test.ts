@@ -66,13 +66,15 @@ describe("Remote Experience Config", () => {
     expect(css).toContain(":root { --r-card: 14px; --gutter: 18px; --font-hand:");
     expect(css).toContain(':root:not([data-scheme="dark"]) { --paper: #FBFCFE; --pen: #2F4BE0; --scrim: rgba(18,22,44,.45); }');
   });
-  it("notebook_dark pins its colours for every scheme; applying replaces the previous tokens", () => {
+  it("notebook_dark tunes the dark notebook only (the user's scheme wins); applying replaces the previous tokens", () => {
     const dark = validateConfig({ ...SEED, theme: { id: "notebook_dark", version: "1.1.0", tokens: { "--paper": "#11152B" } } })!;
     applyTheme(validateConfig(SEED)!);
     applyTheme(dark);
     const el = document.getElementById(REMOTE_STYLE_ID)!;
-    expect(el.textContent).toBe(":root { --paper: #11152B; }");
-    expect(document.documentElement.dataset.theme).toBe("notebook_dark");
+    expect(el.textContent).toBe(':root[data-scheme="dark"] { --paper: #11152B; }');
+    // the server's id does not pin the scheme: html[data-theme] stays with the user's notebook
+    expect(document.documentElement.dataset.themeRemote).toBe("notebook_dark");
+    expect(document.documentElement.dataset.theme).not.toBe("notebook_dark");
     applyTheme(FALLBACK_CONFIG);
     expect(el.textContent).toBe("");
     expect(document.querySelectorAll(`#${REMOTE_STYLE_ID}`)).toHaveLength(1);

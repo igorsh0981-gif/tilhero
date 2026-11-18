@@ -7,12 +7,15 @@ import { useApp, usePlan } from "../../state/app";
 import { useLoad } from "../../state/hooks";
 import { Icon } from "../../ui/Icon";
 import { Btn, NavRow, Pill } from "../../ui/kit";
+import { useThemePref } from "../../tg";
+import { HomeScreenRow } from "../homescreen/HomeScreen";
 import { PinResetPending } from "../lock/PinFlows";
 import { daysText } from "../schedule/parts";
 import { useSwitchToParent } from "./switching";
 
-/** Profile (prototype «Профиль»): course, schedule, notifications, language, family, parent consent, news, support,
- *  data and deletion. A child profile shows only its learning settings and the way back to the parent. */
+/** Profile (prototype «Профиль»): course with the goal and level, schedule, notifications, language, theme, the home
+ *  screen icon (Bot API 8.0), family, parent consent, news, support, data and deletion. A child profile shows only its
+ *  learning settings and the way back to the parent. */
 export function Profile() {
   const { bff, session, syncProfile, nav, config } = useApp();
   const plan = usePlan();
@@ -30,6 +33,10 @@ export function Profile() {
     : acc.age_band === "14-17"
       ? t("profile.kind.teen", { status: t(`gc.${acc.guardian_consent}` as MessageKey) })
       : t("profile.kind.adult");
+  const themePref = useThemePref();
+  const direction = [plan.goal ? t(`goal.${plan.goal}` as MessageKey) : null, plan.level_self ? t(`level.${plan.level_self}` as MessageKey) : null]
+    .filter(Boolean)
+    .join(" · ");
   const notif = profile.data?.notifications;
   const notifValue = notif ? (notif.enabled ? t("c.on") : t("c.off")) : "";
 
@@ -65,6 +72,7 @@ export function Profile() {
               </span>
               <Pill tone="ok">{t("profile.active")}</Pill>
             </div>
+            <NavRow title={t("profile.goal")} note={direction} onClick={() => nav.push({ name: "goal" })} testId="row-goal" />
           </div>
         </div>
 
@@ -73,6 +81,8 @@ export function Profile() {
             <NavRow title={t("profile.schedule")} value={`${daysText(plan.schedule, t)} · ${plan.schedule.preferred_time}`} onClick={() => nav.push({ name: "schedule" })} testId="row-schedule" />
             <NavRow title={t("profile.notif")} value={notifValue} onClick={() => nav.push({ name: "notifSettings" })} testId="row-notif" />
             <NavRow title={t("profile.lang")} value={lang === "uz" ? "Oʻzbekcha" : "Русский"} onClick={() => nav.push({ name: "language" })} testId="row-lang" />
+            <NavRow title={t("profile.theme")} value={t(`theme.${themePref}` as MessageKey)} onClick={() => nav.push({ name: "theme" })} testId="row-theme" />
+            <HomeScreenRow />
             {!kid ? <NavRow title={t("profile.family")} onClick={() => nav.push({ name: "family" })} testId="row-family" /> : null}
             {!kid && acc.age_band === "18+" ? (
               <NavRow
