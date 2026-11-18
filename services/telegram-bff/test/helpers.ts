@@ -129,6 +129,9 @@ export interface FakeAccount {
   settings: NotificationSettings;
   failedPins: number;
   children: string[];
+  /** Ожидающий сброс кода (ревью T-8): новый код и признак «срок наступил» (тест переводит часы флагом). */
+  pendingPin: string | null;
+  resetDue: boolean;
 }
 
 export interface FakeChild {
@@ -164,6 +167,9 @@ const DEFAULT_SETTINGS = (): NotificationSettings => ({
   quiet_hours: { start: "22:00", end: "08:00" },
   timezone: "Asia/Tashkent",
 });
+
+/** Срок ожидающего сброса в подделке identity (now + 24 ч условно). */
+export const RESET_EFFECTIVE_AT = "2026-11-19T17:30:00.000Z";
 
 export const GOALS = ["work", "career", "travel", "daily", "study", "exam"];
 export const TOPICS = ["food", "travel", "work", "family", "hobby", "shopping", "health", "city", "school", "games", "music", "sport"];
@@ -227,6 +233,37 @@ export class FakeDomains {
     const u = this.accounts.get(userId);
     if (!u) throw new Error(`no fake account ${userId}`);
     return u;
+  }
+
+  /** Срок ожидающего сброса наступил: состояние показывает новый код (запись — при следующей проверке кода). */
+  makeResetDue(userId: string): void {
+    const u = this.account(userId);
+    u.resetDue = true;
+    u.security = { ...u.security, pin_length: (u.pendingPin?.length ?? 4) as 4 | 6, pin_reset_effective_at: null };
+  }
+
+  /** Проверка кода как в identity: наступивший сброс применяется, ненаступивший отменяется верным прежним кодом.
+   *  → null (верно; applied — сброс введён в действие) или ответ-ошибка. */
+  private checkPin(u: FakeAccount, pin: string | undefined): { applied: boolean } | Response {
+    let applied = false;
+    let pinNow = u.pin;
+    if (u.pendingPin && u.resetDue) pinNow = u.pendingPin;
+    if (pin !== pinNow) {
+      u.failedPins += 1;
+      if (u.failedPins >= 5) return domainError(423, "PIN_LOCKED", { retry_after: 300 });
+      return domainError(401, "PIN_INVALID", { remaining: 5 - u.failedPins });
+    }
+    u.failedPins = 0;
+    if (u.pendingPin && u.resetDue) {
+      u.pin = u.pendingPin;
+      applied = true;
+      u.biometricToken = null;
+      u.security = { ...u.security, biometric_enabled: false };
+    }
+    u.pendingPin = null;
+    u.resetDue = false;
+    u.security = { ...u.security, pin_length: (u.pin?.length ?? null) as 4 | 6 | null, pin_reset_effective_at: null };
+    return { applied };
   }
 
   /** Включить код родителя напрямую (как будто задан ранее). */
@@ -407,12 +444,14 @@ export class FakeDomains {
             age_band: null,
             guardian_consent: "not_required",
           },
-          security: { pin_enabled: false, pin_length: null, biometric_enabled: false, pin_required: false, locked_until: null },
+          security: { pin_enabled: false, pin_length: null, biometric_enabled: false, pin_required: false, locked_until: null, pin_reset_effective_at: null },
           pin: null,
           biometricToken: null,
           consent: { accepted: false, policy_version: null, current_policy_version: "2026-11-18", accepted_at: null, evidence_hash: null, purposes: [] },
           settings: DEFAULT_SETTINGS(),
           failedPins: 0,
+          pendingPin: null,
+          resetDue: false,
           children: [],
         };
         this.usersByTg.set(b.telegram_user_id, u);
@@ -530,35 +569,47 @@ export class FakeDomains {
       }
       case "PUT /internal/v1/me/pin": {
         const b = r.body as { pin: string; current_pin?: string };
-        if (u.pin && b.current_pin !== u.pin) return domainError(401, "PIN_INVALID", { remaining: 4 });
+        if (u.pin) {
+          const checked = this.checkPin(u, b.current_pin);
+          if (checked instanceof Response) return checked;
+        }
         u.pin = b.pin;
         u.security = { ...u.security, pin_enabled: true, pin_length: b.pin.length as 4 | 6 };
         return json(200, u.security);
       }
       case "DELETE /internal/v1/me/pin": {
         const b = r.body as { current_pin: string };
-        if (b.current_pin !== u.pin) return domainError(401, "PIN_INVALID", { remaining: 4 });
+        const checked = this.checkPin(u, b.current_pin);
+        if (checked instanceof Response) return checked;
         u.pin = null;
         u.security = { ...u.security, pin_enabled: false, pin_length: null, biometric_enabled: false };
         return json(200, u.security);
       }
       case "POST /internal/v1/me/pin/verify": {
         const b = r.body as { pin: string };
-        if (b.pin !== u.pin) {
-          u.failedPins += 1;
-          if (u.failedPins >= 5) return domainError(423, "PIN_LOCKED", { retry_after: 300 });
-          return domainError(401, "PIN_INVALID", { remaining: 5 - u.failedPins });
-        }
-        u.failedPins = 0;
-        return json(200, { ok: true });
+        if (!u.pin) return domainError(409, "PIN_NOT_SET");
+        const checked = this.checkPin(u, b.pin);
+        if (checked instanceof Response) return checked;
+        return json(200, { ok: true, pin_reset_applied: checked.applied });
       }
       case "POST /internal/v1/me/pin/reset-request":
         return json(200, { expires_in: 600 });
       case "POST /internal/v1/me/pin/reset-confirm": {
         const b = r.body as { code: string; new_pin: string };
         if (b.code !== "246810") return domainError(401, "RESET_CODE_INVALID", { remaining: 4 });
-        u.pin = b.new_pin;
-        u.security = { ...u.security, pin_enabled: true, pin_length: b.new_pin.length as 4 | 6 };
+        // ревью T-8: новый код ждёт 24 ч, прежний действует до срока
+        u.pendingPin = b.new_pin;
+        u.resetDue = false;
+        u.security = { ...u.security, pin_length: (u.pin?.length ?? 4) as 4 | 6, pin_reset_effective_at: RESET_EFFECTIVE_AT };
+        return json(200, u.security);
+      }
+      case "POST /internal/v1/me/pin/reset-cancel": {
+        const b = r.body as { current_pin: string };
+        if (!u.pin) return domainError(409, "PIN_NOT_SET");
+        if (u.pendingPin && !u.resetDue) {
+          const checked = this.checkPin(u, b.current_pin);
+          if (checked instanceof Response) return checked;
+        }
         return json(200, u.security);
       }
       case "PUT /internal/v1/me/biometric":
@@ -592,8 +643,11 @@ export class FakeDomains {
         return json(200, u.consent);
       case "POST /internal/v1/me/deletion-request": {
         const b = r.body as { pin?: string; confirm_word?: string };
-        if (u.pin ? b.pin !== u.pin : !["УДАЛИТЬ", "OʻCHIRISH"].includes(b.confirm_word ?? "")) {
-          return u.pin ? domainError(401, "PIN_INVALID", { remaining: 4 }) : domainError(422, "CONFIRM_WORD_REQUIRED");
+        if (u.pin) {
+          const checked = this.checkPin(u, b.pin);
+          if (checked instanceof Response) return checked.status === 401 ? domainError(401, "PIN_INVALID", { remaining: 4 }) : checked;
+        } else if (!["УДАЛИТЬ", "OʻCHIRISH"].includes(b.confirm_word ?? "")) {
+          return domainError(422, "CONFIRM_WORD_REQUIRED");
         }
         u.summary = { ...u.summary, status: "DELETION_REQUESTED" };
         return json(202, {

@@ -81,7 +81,10 @@ class FakeNotifications:
         return httpx.Response(200, json=item or {"notification_id": body["notification_id"], "status": "sent"})
 
     def codes(self, user_id: str) -> list[str]:
-        return [c["params"]["code"] for c in self.calls if c["user_id"] == user_id]
+        return [c["params"]["code"] for c in self.of(user_id, "pin.reset_code")]
+
+    def of(self, user_id: str, template: str) -> list[dict[str, Any]]:
+        return [c for c in self.calls if c["user_id"] == user_id and c["template"] == template]
 
 
 @dataclass
@@ -92,6 +95,11 @@ class Env:
     bus: InMemoryBus
     schema: str
     notifications: FakeNotifications
+    app: Any = None
+
+    # ---------- часы сервиса (app.state.clock): None — реальное время ----------
+    def set_clock(self, now: Any) -> None:
+        self.app.state.clock = (lambda: now) if now is not None else None
 
     # ---------- заголовки ----------
     def h(self, user_id: str | None = None, *, issuer: str = "telegram-bff") -> dict[str, str]:
@@ -231,6 +239,7 @@ async def env():
         client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://identity-consent")
         environment = Env(
             settings=settings, client=client, runtime=runtime, bus=bus, schema=schema, notifications=notifications,
+            app=app,
         )
         yield environment
         await client.aclose()

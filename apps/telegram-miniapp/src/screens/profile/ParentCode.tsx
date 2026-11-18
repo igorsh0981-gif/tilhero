@@ -7,7 +7,7 @@ import { Icon } from "../../ui/Icon";
 import { Btn, NavRow, Pill } from "../../ui/kit";
 import { Sheet, showToast } from "../../ui/overlays";
 import { Bar } from "../../ui/shell";
-import { PinReset, PinSetup } from "../lock/PinFlows";
+import { PinReset, PinResetPending, PinSetup } from "../lock/PinFlows";
 import { PinPad } from "../lock/PinPad";
 
 type Mode =
@@ -15,18 +15,22 @@ type Mode =
   | { k: "set" }
   | { k: "current"; then: "change" | "remove"; note?: string | null }
   | { k: "change"; current: string }
-  | { k: "reset" };
+  | { k: "reset" }
+  | { k: "cancel" };
 
 /**
  * Profile → «Код родителя» (review T-1, bff.ts «Код родителя (PIN)»): set, change, switch off, reset through the bot.
  * The code locks the way out of a child profile, deletion and the code itself. Setting or changing it signs out the
- * other devices of the account; the reset gives a new session (the previous ones are revoked).
+ * other devices of the account. The reset waits 24 hours (review T-8): until then the old code works, the screen shows
+ * «Сброс кода запрошен, вступит в силу …» and «Отменить сброс» (the old code). `cancel` — opened from that banner in the
+ * profile: straight to the old-code entry.
  */
-export function ParentCode() {
-  const { bff, session, nav, patchSession, applySession } = useApp();
+export function ParentCode({ cancel = false }: { cancel?: boolean }) {
+  const { bff, session, nav, patchSession } = useApp();
   const { t, fmt } = useI18n();
   const sec = session.security;
-  const [mode, setMode] = useState<Mode>({ k: "menu" });
+  const pendingAt = sec.pin_reset_effective_at;
+  const [mode, setMode] = useState<Mode>(cancel && pendingAt ? { k: "cancel" } : { k: "menu" });
   const menu = () => setMode({ k: "menu" });
   const done = (s: SecurityState, msg: MessageKey) => {
     patchSession({ security: s });
@@ -41,6 +45,7 @@ export function ParentCode() {
         <div className="pad stack">
           {mode.k === "menu" ? (
             <>
+              {sec.pin_enabled && pendingAt ? <PinResetPending at={pendingAt} onCancel={() => setMode({ k: "cancel" })} /> : null}
               <div className={sec.pin_enabled ? "card ok" : "card warn"}>
                 <div className="hrow between">
                   <b className="h3">{t("pc.title")}</b>
@@ -112,13 +117,30 @@ export function ParentCode() {
               <PinReset
                 request={() => bff.pinResetRequest()}
                 confirm={async (code, pin) => {
-                  await applySession(await bff.pinResetConfirm(code, pin));
-                  setMode({ k: "menu" });
-                  showToast(t("pc.reset.done"));
+                  // review T-8: no new session — the new code waits, the old one keeps working
+                  const security = await bff.pinResetConfirm(code, pin);
+                  patchSession({ security });
+                  return security;
                 }}
+                onDone={menu}
                 onCancel={menu}
               />
             </>
+          ) : null}
+
+          {mode.k === "cancel" ? (
+            <div className="stack" data-testid="pin-reset-cancel-step">
+              <p className="h3 center" data-testid="pin-step">{t("pc.cancel.title")}</p>
+              <p className="sub center">{t("pc.cancel.text")}</p>
+              <PinPad
+                length={sec.pin_length ?? 4}
+                submit={async (pin) => {
+                  // the deadline may pass while the screen is open: then nothing is cancelled, the new code already works
+                  const late = !!pendingAt && Date.parse(pendingAt) <= Date.now();
+                  done(await bff.pinResetCancel(pin), late ? "pc.cancel.late" : "pc.cancel.done");
+                }}
+              />
+            </div>
           ) : null}
         </div>
       </main>

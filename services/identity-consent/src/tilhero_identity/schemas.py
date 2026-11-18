@@ -132,6 +132,10 @@ class PinResetConfirmRequest(_In):
     new_pin: str = Field(max_length=16)
 
 
+class PinResetCancelRequest(_In):
+    current_pin: str = Field(max_length=16)
+
+
 class BiometricVerifyRequest(_In):
     biometric_token: str = Field(min_length=1, max_length=128)
 
@@ -195,6 +199,8 @@ class SecurityState(BaseModel):
     biometric_enabled: bool
     pin_required: bool
     locked_until: datetime | None
+    # Ожидающий сброс кода (ревью T-8): с этого времени действует новый код; null — сброса нет (или уже действует).
+    pin_reset_effective_at: datetime | None = None
 
 
 class ConsentState(BaseModel):
@@ -274,6 +280,13 @@ class GuardianConsentGrantList(BaseModel):
 
 class OkResponse(BaseModel):
     ok: Literal[True] = True
+
+
+class PinVerifyResponse(OkResponse):
+    """`{ok: true}` + `pin_reset_applied`: эта проверка ввела в действие ожидающий сброс кода (срок наступил) —
+    BFF отзывает прежние сессии аккаунта (ревью T-8). BFF событий не потребляет, поэтому признак — в ответе."""
+
+    pin_reset_applied: bool = False
 
 
 class PinResetRequestResponse(BaseModel):

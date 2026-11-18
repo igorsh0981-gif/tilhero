@@ -13,20 +13,23 @@ import { ApiClient } from "../src/api/client";
 import { ApiError, BUSINESS_401, KNOWN_CODES, consentRequiredPurpose, errorText } from "../src/api/errors";
 import { FALLBACK_CONFIG } from "../src/config/experience";
 import { KID_WINDOW, inKidWindow, scheduleProblem, DEFAULT_SCHEDULE } from "../src/domain/schedule";
-import { I18nProvider, makeI18n } from "../src/i18n";
+import { I18nProvider, makeI18n, pluralForm, translate, type Lang } from "../src/i18n";
 import { ru } from "../src/i18n/ru";
 import { uz } from "../src/i18n/uz";
 import { GuardianSheet } from "../src/screens/deeplink/GuardianSheet";
 import { InviteSheet } from "../src/screens/deeplink/InviteSheet";
 import { Family } from "../src/screens/profile/Family";
+import { LockScreen } from "../src/screens/lock/LockScreen";
+import { PinResetPending, PinResetWaiting, hoursUntil } from "../src/screens/lock/PinFlows";
 import { ParentCode } from "../src/screens/profile/ParentCode";
 import { Profile } from "../src/screens/profile/Profile";
 import { ScheduleScreen } from "../src/screens/profile/ScheduleScreen";
-import { AppProvider, type AppCtx } from "../src/state/app";
+import { AppProvider, useApp, type AppCtx } from "../src/state/app";
 import { useNav } from "../src/state/nav";
 import { PopupHost, ToastHost } from "../src/ui/overlays";
 
 const ME = "6f1c2b3a-1111-4a2b-9c3d-000000000001";
+const pluralHours = (lang: Lang, n: number) => pluralForm(lang, n, translate(lang, "pc.reset.hours"));
 const KID = "7a1c2b3a-2222-4a2b-9c3d-000000000001";
 const TEEN = "8b1c2b3a-3333-4a2b-9c3d-000000000001";
 const INVITE = "33333333-aaaa-4bbb-8ccc-0000000000aa";
@@ -43,7 +46,7 @@ function makeSession(o: { pin?: boolean; consent?: string[] | null; kid?: boolea
     account: { user_id: ME, display_name: "Азиз", username: null, locale: "ru", status: "ACTIVE", is_new: false, age_band: self.age_band, guardian_consent: "not_required" },
     learner: o.kid ? kid : self,
     learners: o.kid || o.children ? [self, kid] : [self],
-    security: { pin_enabled: !!o.pin, pin_length: o.pin ? 4 : null, biometric_enabled: false, pin_required: false, locked_until: null },
+    security: { pin_enabled: !!o.pin, pin_length: o.pin ? 4 : null, biometric_enabled: false, pin_required: false, locked_until: null, pin_reset_effective_at: null },
     consent: consent
       ? { accepted: true, policy_version: "1.2", current_policy_version: "1.2", accepted_at: "2026-11-10T08:00:00Z", evidence_hash: "sha256:x", purposes: consent }
       : { accepted: false, policy_version: null, current_policy_version: "1.2", accepted_at: null, evidence_hash: null, purposes: [] },
@@ -162,7 +165,14 @@ async function typePin(pin: string) {
   await userEvent.type(field, pin);
 }
 
-const security = (on: boolean, len: 4 | 6 | null = on ? 4 : null) => ({ pin_enabled: on, pin_length: len, biometric_enabled: false, pin_required: false, locked_until: null });
+const security = (on: boolean, len: 4 | 6 | null = on ? 4 : null, resetAt: string | null = null) => ({
+  pin_enabled: on,
+  pin_length: len,
+  biometric_enabled: false,
+  pin_required: false,
+  locked_until: null,
+  pin_reset_effective_at: resetAt,
+});
 
 describe("«Код родителя» (T-1)", () => {
   it("set: length, the code twice (a mismatch starts again) → PUT {pin}; the status and the toast", async () => {
@@ -211,11 +221,11 @@ describe("«Код родителя» (T-1)", () => {
     expect(await screen.findByTestId("pc-status")).toHaveTextContent("Код не задан");
   });
 
-  it("reset through the bot: request → the code from Telegram → a new code; a wrong code leads back to it; new session applied", async () => {
-    const next = { ...makeSession({ pin: true }), access_token: "acc-2", refresh_token: "ref-2" };
+  it("reset through the bot: request → the code from Telegram → a new code; a wrong code leads back to it; the reset waits 24 h (T-8)", async () => {
+    const at = new Date(Date.now() + 24 * 3600_000).toISOString();
     const f = mount(<ParentCode />, makeSession({ pin: true }), {
       "POST /v1/profile/security/pin/reset-request": [200, { expires_in: 600 }],
-      "POST /v1/profile/security/pin/reset-confirm": [err(401, "RESET_CODE_INVALID", { remaining: 4 }), [200, next]],
+      "POST /v1/profile/security/pin/reset-confirm": [err(401, "RESET_CODE_INVALID", { remaining: 4 }), [200, security(true, 4, at)]],
     });
     await userEvent.click(screen.getByTestId("pc-forgot"));
     await userEvent.click(screen.getByTestId("pin-reset-send"));
@@ -236,9 +246,18 @@ describe("«Код родителя» (T-1)", () => {
     await typePin("2468");
     await waitFor(() => expect(f.of("POST /v1/profile/security/pin/reset-confirm")).toHaveLength(2));
     expect(f.of("POST /v1/profile/security/pin/reset-confirm")[1]!.body).toEqual({ code: "246810", new_pin: "2468" });
-    await waitFor(() => expect(f.spy.applied).toHaveLength(1));
-    expect(await screen.findByTestId("toast")).toHaveTextContent("Новый код родителя задан");
-    expect(f.calls.some((c) => c.key.includes("/session/refresh"))).toBe(false);
+    // review T-8: no new session — «Новый код заработает через 24 часа» with the date and time
+    expect(await screen.findByTestId("pin-reset-wait-title")).toHaveTextContent("Новый код заработает через 24 часа");
+    expect(screen.getByTestId("pin-reset-wait-when")).toHaveTextContent(`Он начнёт действовать ${makeI18n("ru").fmt.dateTime(at)}.`);
+    expect(screen.getByTestId("pin-reset-wait")).toHaveTextContent("Если сброс запросили не вы, введите прежний код — сброс отменится.");
+    expect(f.spy.applied).toHaveLength(0);
+    expect(f.spy.session!.security).toMatchObject({ pin_length: 4, pin_reset_effective_at: at });
+    await userEvent.click(screen.getByTestId("pin-reset-wait-ok"));
+    // back to the menu: the pending reset with the date and «Отменить сброс»
+    expect(await screen.findByTestId("pin-reset-pending")).toHaveTextContent("Сброс кода запрошен");
+    expect(screen.getByTestId("pin-reset-pending-when")).toHaveTextContent(`Вступит в силу ${makeI18n("ru").fmt.dateTime(at)}. До этого действует прежний код.`);
+    expect(screen.getByTestId("pin-reset-cancel")).toHaveTextContent("Отменить сброс");
+    expect(f.calls.some((c) => c.key.includes("/session/"))).toBe(false);
   });
 
   it("the profile row: adults only; a dot while there are children and no code", async () => {
@@ -252,6 +271,141 @@ describe("«Код родителя» (T-1)", () => {
   it("the row is not shown in a child profile", async () => {
     mount(<Profile />, makeSession({ kid: true }), { "GET /v1/profile": [503, { code: "UPSTREAM_UNAVAILABLE", message: "", trace_id: "t", details: {} }] });
     expect(screen.queryByTestId("row-pin")).toBeNull();
+  });
+});
+
+/** The current pushed screen of the real nav (the Shell renders only the screen under test). */
+function NavTop() {
+  const { nav } = useApp();
+  return <pre data-testid="nav-top">{JSON.stringify(nav.top)}</pre>;
+}
+
+const inHours = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();
+const withPending = (at: string | null, o: Parameters<typeof makeSession>[0] = { pin: true }): SessionResponse => {
+  const s = makeSession(o);
+  return { ...s, security: { ...s.security, pin_reset_effective_at: at } };
+};
+
+describe("сброс кода родителя через бота ждёт 24 часа (T-8)", () => {
+  it("«Код родителя»: the banner with the date → «Отменить сброс» → the old code; a wrong one shows the server's text", async () => {
+    const at = inHours(23);
+    const f = mount(<ParentCode />, withPending(at), {
+      "POST /v1/profile/security/pin/reset-cancel": [err(401, "PIN_INVALID", { remaining: 4 }), [200, security(true)]],
+    });
+    expect(screen.getByTestId("pin-reset-pending-when")).toHaveTextContent(`Вступит в силу ${makeI18n("ru").fmt.dateTime(at)}.`);
+    await userEvent.click(screen.getByTestId("pin-reset-cancel"));
+    expect(screen.getByTestId("pin-step")).toHaveTextContent("Введите прежний код");
+    expect(screen.getByText("Сброс отменится, новый код не заработает.")).toBeInTheDocument();
+    await typePin("0000");
+    expect(await screen.findByText("Неверный код. Осталось попыток: 4.")).toBeInTheDocument();
+    await typePin("1357");
+    await waitFor(() => expect(f.of("POST /v1/profile/security/pin/reset-cancel")).toHaveLength(2));
+    expect(f.of("POST /v1/profile/security/pin/reset-cancel").map((c) => c.body)).toEqual([{ current_pin: "0000" }, { current_pin: "1357" }]);
+    expect(await screen.findByTestId("toast")).toHaveTextContent("Сброс кода отменён");
+    expect(screen.queryByTestId("pin-reset-pending")).toBeNull();
+    expect(f.spy.session!.security.pin_reset_effective_at).toBeNull();
+  });
+
+  it("the deadline passed while the screen was open: nothing to cancel, the new code already works", async () => {
+    mount(<ParentCode />, withPending(inHours(-0.01)), { "POST /v1/profile/security/pin/reset-cancel": [200, security(true, 6)] });
+    await userEvent.click(screen.getByTestId("pin-reset-cancel"));
+    await typePin("1357");
+    expect(await screen.findByTestId("toast")).toHaveTextContent("Срок прошёл — новый код уже действует.");
+  });
+
+  it("opened from the profile banner (cancel): straight to the old code; without a pending reset — the menu", async () => {
+    mount(<ParentCode cancel />, withPending(inHours(10)), {});
+    expect(screen.getByTestId("pin-reset-cancel-step")).toBeInTheDocument();
+  });
+
+  it("the adult profile shows the pending reset; «Отменить сброс» opens «Код родителя» on the old code; a child profile does not", async () => {
+    const at = inHours(5);
+    const down = { "GET /v1/profile": [503, { code: "UPSTREAM_UNAVAILABLE", message: "", trace_id: "t", details: {} }] as Reply };
+    mount(<><Profile /><NavTop /></>, withPending(at), down);
+    expect(screen.getByTestId("pin-reset-pending-when")).toHaveTextContent(makeI18n("ru").fmt.dateTime(at));
+    await userEvent.click(screen.getByTestId("pin-reset-cancel"));
+    expect(screen.getByTestId("nav-top")).toHaveTextContent(JSON.stringify({ name: "parentCode", cancel: true }));
+  });
+
+  it("no banner in a child profile or without a pending reset", () => {
+    const down = { "GET /v1/profile": [503, { code: "UPSTREAM_UNAVAILABLE", message: "", trace_id: "t", details: {} }] as Reply };
+    mount(<Profile />, withPending(inHours(5), { pin: true, kid: true }), down);
+    expect(screen.queryByTestId("pin-reset-pending")).toBeNull();
+  });
+
+  it("no banner without a pending reset", () => {
+    const down = { "GET /v1/profile": [503, { code: "UPSTREAM_UNAVAILABLE", message: "", trace_id: "t", details: {} }] as Reply };
+    mount(<Profile />, withPending(null), down);
+    expect(screen.queryByTestId("pin-reset-pending")).toBeNull();
+  });
+
+  it("the lock screen: the reset stays (waiting screen, the lock remains), then the hint that the old code cancels it", async () => {
+    const at = inHours(24);
+    const verify = vi.fn(async () => makeSession({ pin: true }));
+    const confirm = vi.fn(async (_code: string, _pin: string) => security(true, 4, at));
+    function Lock() {
+      const [pending, setPending] = useState<string | null>(null);
+      return (
+        <LockScreen
+          length={4}
+          pendingAt={pending}
+          verify={verify}
+          reset={{
+            request: async () => ({ expires_in: 600 }),
+            confirm: async (code, pin) => {
+              const s = await confirm(code, pin);
+              setPending(s.pin_reset_effective_at);
+              return s;
+            },
+          }}
+        />
+      );
+    }
+    render(
+      <I18nProvider initial="ru">
+        <Lock />
+      </I18nProvider>,
+    );
+    expect(screen.queryByTestId("pin-reset-pending")).toBeNull();
+    await userEvent.click(screen.getByTestId("lock-forgot"));
+    await userEvent.click(screen.getByTestId("pin-reset-send"));
+    await userEvent.type(await screen.findByTestId("pin-reset-code"), "246810");
+    await userEvent.click(screen.getByTestId("pin-reset-next"));
+    await typePin("2468");
+    await typePin("2468");
+    expect(await screen.findByTestId("pin-reset-wait-title")).toHaveTextContent("Новый код заработает через 24 часа");
+    expect(confirm).toHaveBeenCalledWith("246810", "2468");
+    await userEvent.click(screen.getByTestId("pin-reset-wait-ok"));
+    const banner = await screen.findByTestId("pin-reset-pending");
+    expect(banner).toHaveTextContent("Введите прежний код — сброс отменится.");
+    expect(within(banner).queryByTestId("pin-reset-cancel")).toBeNull();
+    expect(screen.getByTestId("pin-field")).toBeInTheDocument(); // still locked: the old code is asked
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it("Uzbek texts of the waiting screen and the banner", async () => {
+    const at = inHours(24);
+    render(
+      <I18nProvider initial="uz">
+        <PinResetWaiting effectiveAt={at} onOk={() => undefined} />
+        <PinResetPending at={at} />
+      </I18nProvider>,
+    );
+    expect(screen.getByTestId("pin-reset-wait-title")).toHaveTextContent("Yangi kod 24 soatdan keyin ishlay boshlaydi");
+    expect(screen.getByTestId("pin-reset-wait-when")).toHaveTextContent(`U ${makeI18n("uz").fmt.dateTime(at)} dan boshlab amal qiladi.`);
+    expect(screen.getByTestId("pin-reset-pending")).toHaveTextContent("Kodni tiklash soʻralgan");
+  });
+
+  it("hours until the deadline: rounded, at least 1, 24 for a broken date", () => {
+    const now = Date.parse("2026-11-18T17:30:00Z");
+    expect(hoursUntil("2026-11-19T17:30:00Z", now)).toBe(24);
+    expect(hoursUntil("2026-11-19T17:10:00Z", now)).toBe(24);
+    expect(hoursUntil("2026-11-18T17:40:00Z", now)).toBe(1);
+    expect(hoursUntil("2026-11-18T17:00:00Z", now)).toBe(1);
+    expect(hoursUntil("bad", now)).toBe(24);
+    expect(pluralHours("ru", 24)).toBe("часа");
+    expect(pluralHours("ru", 1)).toBe("час");
+    expect(pluralHours("ru", 5)).toBe("часов");
   });
 });
 

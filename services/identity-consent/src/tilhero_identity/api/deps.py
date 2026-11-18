@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import uuid
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 
 from tilhero_common.app import Runtime, get_runtime
 from tilhero_common.errors import unauthorized, unprocessable
@@ -38,5 +38,6 @@ def idempotency_key(value: str | None = Header(default=None, alias="Idempotency-
     return value
 
 
-def get_service(rt: Runtime = Depends(get_runtime)) -> IdentityService:
-    return IdentityService(rt)
+def get_service(request: Request, rt: Runtime = Depends(get_runtime)) -> IdentityService:
+    """Часы сервиса (UTC): тесты подменяют `app.state.clock` (срок ожидающего сброса кода родителя)."""
+    return IdentityService(rt, clock=getattr(request.app.state, "clock", None))

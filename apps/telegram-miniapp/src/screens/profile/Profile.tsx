@@ -7,6 +7,7 @@ import { useApp, usePlan } from "../../state/app";
 import { useLoad } from "../../state/hooks";
 import { Icon } from "../../ui/Icon";
 import { Btn, NavRow, Pill } from "../../ui/kit";
+import { PinResetPending } from "../lock/PinFlows";
 import { daysText } from "../schedule/parts";
 import { useSwitchToParent } from "./switching";
 
@@ -46,6 +47,13 @@ export function Profile() {
             </div>
           </div>
         </div>
+
+        {!kid && session.security.pin_enabled && session.security.pin_reset_effective_at ? (
+          <div className="pad">
+            {/* review T-8: a reset requested through the bot waits 24 h — the parent sees it and can cancel it */}
+            <PinResetPending at={session.security.pin_reset_effective_at} onCancel={() => nav.push({ name: "parentCode", cancel: true })} />
+          </div>
+        ) : null}
 
         <div className="pad">
           <p className="sec mb8">{t("profile.course")}</p>

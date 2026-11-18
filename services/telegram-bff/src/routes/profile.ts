@@ -5,7 +5,7 @@
  */
 import type { ConsentState, DeletionResponse, PinResetRequestResponse, PolicyDocument, Profile, SecurityState } from "@tilhero/contracts/bff";
 import { AppError } from "@tilhero/ts-common";
-import { buildSession, learnersOf, learnersState, loadLearner, loadMe, notificationsFor } from "../account.js";
+import { learnersOf, learnersState, loadLearner, loadMe, notificationsFor } from "../account.js";
 import type { BffContext } from "../context.js";
 import {
   BEARER,
@@ -25,6 +25,7 @@ import {
   DeletionRequestSchema,
   DeletionResponseSchema,
   PinRemoveRequestSchema,
+  PinResetCancelRequestSchema,
   PinResetConfirmRequestSchema,
   PinResetRequestResponseSchema,
   PinSetRequestSchema,
@@ -32,7 +33,6 @@ import {
   PolicyQuerySchema,
   ProfileSchema,
   SecurityStateSchema,
-  SessionResponseSchema,
   SettingsPatchSchema,
   type BiometricEnableResponse,
 } from "../schemas.js";
@@ -299,29 +299,57 @@ export function profileRoutes(app: App, ctx: BffContext): void {
       config: { ...user, pinExempt: true, pinLimited: "reset" },
       schema: {
         tags: ["security"],
-        summary: "Подтвердить сброс кодом из бота и задать новый код родителя",
+        summary: "Подтвердить сброс кодом из бота: новый код родителя заработает через 24 часа",
         description:
-          "401 RESET_CODE_INVALID {remaining}; 410 RESET_CODE_EXPIRED; 403 ADULT_REQUIRED в детском профиле. Все сессии " +
-          "аккаунта отзываются, в ответе — новая сессия (pin=true, активный ученик — сам аккаунт).",
+          "→ SecurityState с pin_reset_effective_at (ревью T-8: телефон с Telegram может быть у ребёнка). До срока " +
+          "действует прежний код, любой его верный ввод сброс отменяет; бот сообщает аккаунту о запрошенном сбросе. " +
+          "Сессия не меняется (pin остаётся прежним), другие сессии не отзываются — их отзывает проверка кода, которая " +
+          "введёт новый код в действие. 401 RESET_CODE_INVALID {remaining}; 410 RESET_CODE_EXPIRED; 422 PIN_FORMAT; " +
+          "403 ADULT_REQUIRED в детском профиле.",
         security: BEARER,
         body: PinResetConfirmRequestSchema,
-        response: { 200: SessionResponseSchema, ...errorResponses(401, 403, 410) },
+        response: { 200: SecurityStateSchema, ...errorResponses(401, 403, 410) },
       },
     },
-    async (req, reply) => {
+    async (req) => {
       const auth = authOf(req);
       forbidInChildProfile(auth, "ADULT_REQUIRED");
-      await identity.post<SecurityState>("/internal/v1/me/pin/reset-confirm", {
+      const state = await identity.post<SecurityState>("/internal/v1/me/pin/reset-confirm", {
         subject: auth.accountId,
         body: { code: req.body.code, new_pin: req.body.new_pin },
       });
-      // Отзыв — сразу после смены кода, до чтения профиля: сбой домена не должен оставить старые сессии живыми.
-      const revoked = await ctx.store(() => sessions.revokeAllForUser(auth.accountId));
-      req.log.info({ revoked_sessions: revoked }, "parent pin reset, all sessions revoked");
-      const { sid, refreshToken } = await ctx.store(() => sessions.create(auth.accountId, true));
-      const me = await loadMe(ctx, auth.accountId);
-      void reply.header("cache-control", "no-store");
-      return buildSession(ctx, { accountId: auth.accountId, learnerId: auth.accountId, sid, refreshToken, pinOk: true, tz: clientTimezone(req) }, me);
+      req.log.info({ pin_reset_scheduled: state.pin_reset_effective_at != null }, "parent pin reset requested, waiting for the delay");
+      return securityView(state, auth.pin);
+    },
+  );
+
+  app.post(
+    "/v1/profile/security/pin/reset-cancel",
+    {
+      schemaErrorFormatter: PIN_FORMAT,
+      config: { ...user, pinExempt: true, pinLimited: true },
+      schema: {
+        tags: ["security"],
+        summary: "Отменить ожидающий сброс кода родителя прежним кодом",
+        description:
+          "→ SecurityState (pin_reset_effective_at = null). Неверный код — 401 PIN_INVALID {remaining}, 423 PIN_LOCKED " +
+          "{retry_after} (общий счётчик с проверкой кода, лимит 5/мин). Отменять нечего (сброса нет или срок уже наступил) " +
+          "— текущее состояние без проверки кода. Доступно и в сессии, ожидающей код родителя (верный прежний код на " +
+          "экране блокировки тоже отменяет сброс). 403 ADULT_REQUIRED в детском профиле.",
+        security: BEARER,
+        body: PinResetCancelRequestSchema,
+        response: { 200: SecurityStateSchema, ...errorResponses(401, 403, 409, 423) },
+      },
+    },
+    async (req) => {
+      const auth = authOf(req);
+      forbidInChildProfile(auth, "ADULT_REQUIRED");
+      const state = await identity.post<SecurityState>("/internal/v1/me/pin/reset-cancel", {
+        subject: auth.accountId,
+        body: { current_pin: req.body.current_pin },
+      });
+      req.log.info("parent pin reset cancel requested");
+      return securityView(state, auth.pin);
     },
   );
 

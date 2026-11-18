@@ -82,9 +82,12 @@ export function createBff(client: ApiClient) {
     removePin: (currentPin: string) => client.request<SecurityState>("DELETE", "/v1/profile/security/pin", { body: { current_pin: currentPin } }),
     /** the bot sends a 6-digit code to the chat */
     pinResetRequest: () => client.request<PinResetRequestResponse>("POST", "/v1/profile/security/pin/reset-request"),
-    /** a new session (all previous ones are revoked) */
+    /** review T-8: the new code takes effect in 24 h (security.pin_reset_effective_at); the session does not change */
     pinResetConfirm: (code: string, newPin: string) =>
-      client.issueSession("POST", "/v1/profile/security/pin/reset-confirm", { body: { code, new_pin: newPin } }),
+      client.request<SecurityState>("POST", "/v1/profile/security/pin/reset-confirm", { body: { code, new_pin: newPin } }),
+    /** cancel the pending reset with the current (old) code */
+    pinResetCancel: (currentPin: string) =>
+      client.request<SecurityState>("POST", "/v1/profile/security/pin/reset-cancel", { body: { current_pin: currentPin } }),
 
     // ---- consents ----
     policy: (lang: UiLang) => client.request<PolicyDocument>("GET", "/v1/legal/policy", { query: { lang }, auth: false }),

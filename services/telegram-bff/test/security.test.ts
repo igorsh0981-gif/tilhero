@@ -108,7 +108,8 @@ describe("rate limits (Redis)", () => {
       method: "POST", url: "/v1/profile/security/pin/reset-confirm", headers: bearer(s.access), payload: { code: "246810", new_pin: "1470" },
     });
     expect(ok.statusCode).toBe(200);
-    expect(ok.json().security.pin_required).toBe(false);
+    // ревью T-8: новый код заработает через 24 ч, сессия по-прежнему ждёт код родителя
+    expect(ok.json()).toMatchObject({ pin_required: true, pin_reset_effective_at: expect.any(String) });
   });
 
   it("reset code entry has its own 5/min limit", async () => {

@@ -31,6 +31,7 @@ ME_ENDPOINTS = [
     ("POST", "/internal/v1/me/pin/verify", {"pin": "2580"}),
     ("POST", "/internal/v1/me/pin/reset-request", None),
     ("POST", "/internal/v1/me/pin/reset-confirm", {"code": "123456", "new_pin": "2580"}),
+    ("POST", "/internal/v1/me/pin/reset-cancel", {"current_pin": "2580"}),
     ("PUT", "/internal/v1/me/biometric", None),
     ("DELETE", "/internal/v1/me/biometric", None),
     ("POST", "/internal/v1/me/biometric/verify", {"biometric_token": "x" * 43}),
@@ -111,6 +112,7 @@ async def test_telegram_login_creates_profile_once(env) -> None:
         "biometric_enabled": False,
         "pin_required": False,
         "locked_until": None,
+        "pin_reset_effective_at": None,
     }
     assert first["consent"] == {
         "accepted": False,

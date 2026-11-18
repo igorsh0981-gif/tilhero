@@ -74,6 +74,9 @@ export interface SecurityState {
   biometric_enabled: boolean;
   pin_required: boolean;
   locked_until: string | null;
+  /** Сброс кода через бота ждёт 24 ч (ревью T-8: телефон может быть у ребёнка); до этого времени действует
+   *  прежний код, любой верный ввод прежнего кода отменяет сброс. null — сброса нет. */
+  pin_reset_effective_at: string | null;
 }
 
 export interface ConsentState {
@@ -206,7 +209,11 @@ export interface GuardianConsentGrant {
  *  PUT /v1/profile/security/pin → SecurityState: задать (без current_pin) или сменить (с current_pin). 401 PIN_INVALID.
  *  DELETE /v1/profile/security/pin {current_pin} → SecurityState.
  *  POST /v1/profile/security/pin/reset-request → {expires_in}: бот присылает 6-значный код в чат.
- *  POST /v1/profile/security/pin/reset-confirm {code, new_pin} → SessionResponse (прежние сессии отозваны).
+ *  POST /v1/profile/security/pin/reset-confirm {code, new_pin} → SecurityState с pin_reset_effective_at = now + 24 ч:
+ *    новый код начинает действовать только через 24 ч; бот сразу сообщает аккаунту о запрошенном сбросе.
+ *    Когда срок наступил, новый код применяется при следующей проверке кода, прежние сессии отзываются.
+ *  POST /v1/profile/security/pin/reset-cancel {current_pin} → SecurityState: отмена сброса (или любой верный ввод
+ *    прежнего кода). 401 PIN_INVALID.
  *  В детском профиле все эти маршруты → 403 ADULT_REQUIRED. */
 export interface PinSetRequest {
   pin: string; // 4 или 6 цифр
@@ -221,6 +228,9 @@ export interface PinResetRequestResponse {
 export interface PinResetConfirmRequest {
   code: string;
   new_pin: string;
+}
+export interface PinResetCancelRequest {
+  current_pin: string;
 }
 
 // ---------- Согласия ----------

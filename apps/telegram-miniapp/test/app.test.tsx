@@ -17,7 +17,7 @@ function session(onboarded: boolean, startParam: string | null = null): SessionR
     account: { user_id: ME, display_name: "Азиз", username: null, locale: "ru", status: "ACTIVE", is_new: !onboarded, age_band: learner.age_band, guardian_consent: "not_required" },
     learner,
     learners: [learner],
-    security: { pin_enabled: false, pin_length: null, biometric_enabled: false, pin_required: false, locked_until: null },
+    security: { pin_enabled: false, pin_length: null, biometric_enabled: false, pin_required: false, locked_until: null, pin_reset_effective_at: null },
     consent: { accepted: onboarded, policy_version: onboarded ? "1.2" : null, current_policy_version: "1.2", accepted_at: null, evidence_hash: null, purposes: [] },
     onboarding_completed: onboarded,
     start_param: startParam,

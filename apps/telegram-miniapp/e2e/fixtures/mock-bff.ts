@@ -44,6 +44,8 @@ export interface Scenario {
   family?: Family | null;
   pin?: string | null;
   pinRequired?: boolean;
+  /** a reset through the bot is pending (review T-8): the new code and when it takes effect */
+  pendingReset?: { pin: string; at: string };
   /** guardian consent links (gc_<token>) */
   guardianLinks?: Record<string, { teen: string; status: "pending" | "granted" | "declined" | "expired" }>;
   /** answer this status (and code) once for "METHOD /path" */
@@ -104,6 +106,8 @@ export class MockBff {
   grants: GuardianConsentGrant[];
   /** the parent code of the account (PUT/DELETE /v1/profile/security/pin, reset) */
   pin: string | null;
+  /** the new code of a pending reset (review T-8): it does not work until security.pin_reset_effective_at */
+  pendingPin: string | null;
   private access = 0;
   private failOnce: Record<string, number | [number, string]>;
   private conflictOnce: boolean;
@@ -119,6 +123,8 @@ export class MockBff {
     this.security = F.security(sc.pin ? { pin_enabled: true, pin_length: sc.pin.length as 4 | 6, pin_required: !!sc.pinRequired } : {});
     this.consent = F.consent(onboarded, sc.purposes ?? ["terms", "privacy", "learning", "product_news"]);
     this.pin = sc.pin ?? null;
+    this.pendingPin = sc.pendingReset?.pin ?? null;
+    if (sc.pendingReset) this.security.pin_reset_effective_at = sc.pendingReset.at;
     this.grants = sc.grants ? sc.grants.map((g) => ({ ...g })) : [];
     this.settings[F.ACCOUNT_ID] = F.settings(onboarded ? { categories: { reminders: true, missed: true, social: true, support: true, product: true } } : {});
     this.plans[F.ACCOUNT_ID] = onboarded ? F.onboardedPlan(F.ACCOUNT_ID) : F.plan(F.ACCOUNT_ID, { ui_lang: sc.locale ?? "ru" });
@@ -154,6 +160,11 @@ export class MockBff {
     const c = this.calls(method, path);
     return c[c.length - 1];
   }
+  private cancelPendingReset(): void {
+    this.pendingPin = null;
+    this.security = { ...this.security, pin_reset_effective_at: null };
+  }
+
   private session(): SessionResponse {
     this.access += 1;
     const l = this.learner();
@@ -262,12 +273,16 @@ export class MockBff {
     if (key === "POST /v1/session/pin/verify") {
       if (b.pin !== this.pin) return this.err(route, 401, "PIN_INVALID", { remaining: 4 });
       this.security.pin_required = false;
+      this.cancelPendingReset(); // the old code cancels a pending reset
       return this.ok(route, this.session());
     }
     if (key === "POST /v1/session/learner") {
       const target = this.learners.find((l) => l.learner_id === b.learner_id);
       if (!target) return this.err(route, 404, "LEARNER_NOT_FOUND");
-      if (this.learner().kind === "child" && this.security.pin_enabled && b.pin !== this.pin) return this.err(route, 401, "PIN_INVALID", { remaining: 4 });
+      if (this.learner().kind === "child" && this.security.pin_enabled) {
+        if (b.pin !== this.pin) return this.err(route, 401, "PIN_INVALID", { remaining: 4 });
+        this.cancelPendingReset();
+      }
       this.active = target.learner_id;
       return this.ok(route, this.session());
     }
@@ -361,10 +376,17 @@ export class MockBff {
     if (key === "POST /v1/profile/security/pin/reset-request") return this.ok(route, { expires_in: 600 });
     if (key === "POST /v1/profile/security/pin/reset-confirm") {
       if (b.code !== "246810") return this.err(route, 401, "RESET_CODE_INVALID", { remaining: 4 });
-      this.pin = String(b.new_pin);
-      this.security = { ...this.security, pin_enabled: true, pin_length: this.pin.length as 4 | 6, pin_required: false };
-      this.active = F.ACCOUNT_ID;
-      return this.ok(route, this.session());
+      // review T-8: the new code waits 24 h; the session and the old code do not change
+      this.pendingPin = String(b.new_pin);
+      this.security = { ...this.security, pin_reset_effective_at: new Date(Date.now() + 24 * 3600_000).toISOString() };
+      return this.ok(route, this.security);
+    }
+    if (key === "POST /v1/profile/security/pin/reset-cancel") {
+      if (this.pendingPin) {
+        if (b.current_pin !== this.pin) return this.err(route, 401, "PIN_INVALID", { remaining: 4 });
+        this.cancelPendingReset();
+      }
+      return this.ok(route, { ...this.security });
     }
 
     // ---- consents ----

@@ -40,6 +40,7 @@ CATALOG = {
     "user.status.changed.v1": ({"user_id": UUID, "status": enum("ACTIVE", "DISABLED", "DELETION_REQUESTED", "DELETED"),
                                 "previous_status": STR, "reason_code": STR}, ["user_id", "status", "previous_status"]),
     "user.security.changed.v1": ({"user_id": UUID, "change": enum("pin_set", "pin_changed", "pin_removed", "pin_reset",
+                                                                   "pin_reset_requested", "pin_reset_cancelled",
                                                                    "pin_locked", "biometric_enabled", "biometric_disabled")},
                                  ["user_id", "change"]),
     # basis: self — сам ученик; guardian — родитель за ребёнка 6–13 или подростка 14–17 (granted_by_user_id — родитель)

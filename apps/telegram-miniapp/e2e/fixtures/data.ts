@@ -35,7 +35,7 @@ export function selfLearner(over: Partial<LearnerSummary> = {}): LearnerSummary 
 }
 
 export function security(over: Partial<SecurityState> = {}): SecurityState {
-  return { pin_enabled: false, pin_length: null, biometric_enabled: false, pin_required: false, locked_until: null, ...over };
+  return { pin_enabled: false, pin_length: null, biometric_enabled: false, pin_required: false, locked_until: null, pin_reset_effective_at: null, ...over };
 }
 
 export const POLICY_VERSION = "1.2";

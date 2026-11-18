@@ -63,7 +63,7 @@ class TransactionalIn(BaseModel):
 
     notification_id: uuid.UUID
     user_id: uuid.UUID
-    template: Literal["pin.reset_code"]
+    template: Literal["pin.reset_code", "pin.reset_scheduled"]
     params: dict[str, Any]
     dedup_key: Annotated[str, Field(min_length=1, max_length=200)]
 

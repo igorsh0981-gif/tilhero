@@ -317,6 +317,7 @@ export function App({ boot, client: injected }: { boot: BootMode; client?: Parti
       <Frame>
         <LockScreen
           length={session.security.pin_length ?? 4}
+          pendingAt={session.security.pin_reset_effective_at}
           verify={async (pin) => {
             const s = await bff.verifyPin(pin);
             await loadAfterSession(s);
@@ -324,7 +325,12 @@ export function App({ boot, client: injected }: { boot: BootMode; client?: Parti
           }}
           reset={{
             request: () => bff.pinResetRequest(),
-            confirm: async (code, pin) => loadAfterSession(await bff.pinResetConfirm(code, pin)),
+            // review T-8: the reset waits 24 h — the session stays locked, the lock screen shows the pending reset
+            confirm: async (code, pin) => {
+              const security = await bff.pinResetConfirm(code, pin);
+              setSession((prev) => (prev ? { ...prev, security } : prev));
+              return security;
+            },
           }}
         />
       </Frame>
@@ -429,7 +435,7 @@ function PushedScreen({ p }: { p: Pushed }) {
     case "privacy":
       return <Privacy />;
     case "parentCode":
-      return <ParentCode />;
+      return <ParentCode cancel={p.cancel} />;
     case "delete":
       return <DeleteScreen />;
     case "support":

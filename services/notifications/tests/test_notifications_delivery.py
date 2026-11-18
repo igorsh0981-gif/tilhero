@@ -30,8 +30,10 @@ async def test_pin_code_sent_immediately_and_cleared(env) -> None:
         assert r.status_code == 200 and r.json()["status"] == "sent", r.text
     texts = [c["text"] for c in env.gateway.calls]
     assert texts == [
-        "Код для сброса PIN-кода родителя в TilHero: <b>482913</b>. Никому не сообщайте его. Действует 10 минут.",
-        "TilHero ota-ona PIN-kodini tiklash kodi: <b>482913</b>. Uni hech kimga aytmang. 10 daqiqa amal qiladi.",
+        "Код для сброса PIN-кода родителя в TilHero: <b>482913</b>. Никому не сообщайте его. Действует 10 минут. "
+        "Новый PIN-код заработает через 24 часа.",
+        "TilHero ota-ona PIN-kodini tiklash kodi: <b>482913</b>. Uni hech kimga aytmang. 10 daqiqa amal qiladi. "
+        "Yangi PIN-kod 24 soatdan keyin ishlaydi.",
     ]
     assert all(c["buttons"] is None for c in env.gateway.calls)
     for row in await env.rows():

@@ -19,8 +19,9 @@ import unicodedata
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -78,6 +79,7 @@ class Context:
 
     learner_name: str | None = None  # имя ребёнка — в сообщении родителю
     other_name: str | None = None  # пригласивший / принявший / новый участник семьи
+    timezone: str | None = None  # часовой пояс адресата (DeliveryInfo.timezone) — даты в тексте по местному времени
 
 
 @dataclass(frozen=True)
@@ -340,14 +342,42 @@ def _pin_reset(lang: Lang, p: PinResetParams, ctx: Context) -> Rendered:
     if lang == "ru":
         text = (
             f"Код для сброса PIN-кода родителя в TilHero: <b>{esc(p.code)}</b>. Никому не сообщайте его. "
-            f"Действует {_minutes_ru(p.ttl_minutes)}."
+            f"Действует {_minutes_ru(p.ttl_minutes)}. Новый PIN-код заработает через 24 часа."
         )
         return Rendered("Код для сброса PIN-кода", "", OPEN[lang], None, html=text)
     text = (
         f"TilHero ota-ona PIN-kodini tiklash kodi: <b>{esc(p.code)}</b>. Uni hech kimga aytmang. "
-        f"{p.ttl_minutes} daqiqa amal qiladi."
+        f"{p.ttl_minutes} daqiqa amal qiladi. Yangi PIN-kod 24 soatdan keyin ishlaydi."
     )
     return Rendered("PIN-kodni tiklash kodi", "", OPEN[lang], None, html=text)
+
+
+class PinResetScheduledParams(Params):
+    effective_at: datetime
+
+
+def _local(dt: datetime, tz: str | None) -> datetime:
+    try:
+        zone = ZoneInfo(tz or "Asia/Tashkent")
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = ZoneInfo("Asia/Tashkent")
+    return dt.astimezone(zone)
+
+
+def _pin_reset_scheduled(lang: Lang, p: PinResetScheduledParams, ctx: Context) -> Rendered:
+    """Ревью T-8: сброс кода родителя через бота вступает в силу через 24 ч; без кода и без PII."""
+    at = _local(p.effective_at, ctx.timezone).strftime("%d.%m %H:%M")
+    if lang == "ru":
+        text = (
+            f"<b>Запрошен сброс кода родителя</b>\nНовый код начнёт действовать {at}. Если это не вы — откройте "
+            "TilHero и введите прежний код: сброс отменится."
+        )
+        return Rendered("Запрошен сброс кода родителя", "", OPEN[lang], "route_profile", html=text)
+    text = (
+        f"<b>Ota-ona kodini tiklash soʻraldi</b>\nYangi kod {at} dan amal qiladi. Agar bu siz boʻlmasangiz — "
+        "TilHeroʼni oching va avvalgi kodni kiriting: tiklash bekor qilinadi."
+    )
+    return Rendered("Ota-ona kodini tiklash soʻraldi", "", OPEN[lang], "route_profile", html=text)
 
 
 # ---------------------------------------------------------------- реестр
@@ -401,6 +431,15 @@ TEMPLATES: dict[str, TemplateSpec] = {
         TemplateSpec("support.reply", "support", TicketParams, _support_reply),
         TemplateSpec("support.resolved", "support", TicketParams, _support_resolved),
         TemplateSpec("release_note.published", "product", ReleaseNoteParams, _release_note),
+        TemplateSpec(
+            "pin.reset_scheduled",
+            "service",
+            PinResetScheduledParams,
+            _pin_reset_scheduled,
+            in_app=False,
+            transactional=True,
+            direct_only=True,
+        ),
         TemplateSpec(
             "pin.reset_code",
             "service",

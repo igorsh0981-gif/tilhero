@@ -2,10 +2,11 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { SignJWT } from "jose";
 import { Value } from "typebox/value";
-import { SessionResponseSchema } from "../src/schemas.js";
+import { SecurityStateSchema, SessionResponseSchema } from "../src/schemas.js";
 import { ACCESS_AUDIENCE, ACCESS_ISSUER } from "../src/tokens.js";
 import {
   BOT_TOKEN,
+  RESET_EFFECTIVE_AT,
   SESSION_SECRET,
   TG_OTHER,
   TG_USER,
@@ -372,6 +373,27 @@ describe("POST /v1/session/learner — активный ученик", () => {
     expect(verifies.every((c) => c.subject === s.userId)).toBe(true);
   });
 
+  it("выход из детского профиля новым кодом после срока сброса: сброс вступает в силу, остальные сессии отозваны (T-8)", async () => {
+    const { s, childId } = await parentWithChild();
+    h.fake.onboard(childId);
+    h.fake.enablePin(s.userId, "4826");
+    const verified = (await post("/v1/session/pin/verify", { pin: "4826" }, bearer(s.access))).json();
+    const parent = { access: verified.access_token, refresh: verified.refresh_token, userId: s.userId, body: verified };
+    const otherDevice = (await post("/v1/session/pin/verify", { pin: "4826" }, bearer((await login(h)).access))).json();
+    await post("/v1/profile/security/pin/reset-confirm", { code: "246810", new_pin: "739104" }, bearer(parent.access));
+    const child = await switchTo(h, parent, childId);
+    // до срока новый код не выпускает из детского профиля
+    const early = await post("/v1/session/learner", { learner_id: s.userId, pin: "739104" }, bearer(child.access));
+    expect(early.json().code).toBe("PIN_INVALID");
+    h.fake.makeResetDue(s.userId);
+    const back = await post("/v1/session/learner", { learner_id: s.userId, pin: "739104" }, bearer(child.access));
+    expect(back.statusCode).toBe(200);
+    expect(back.json().learner).toMatchObject({ learner_id: s.userId, kind: "self" });
+    expect(back.json().security).toMatchObject({ pin_length: 6, pin_reset_effective_at: null });
+    expect((await h.app.inject({ url: "/v1/profile", headers: bearer(back.json().access_token) })).statusCode).toBe(200);
+    expect((await h.app.inject({ url: "/v1/profile", headers: bearer(otherDevice.access_token) })).json().code).toBe("SESSION_REVOKED");
+  });
+
   it("подтверждение кода родителя в детском профиле сохраняет ученика (refresh после reissue — тот же lrn)", async () => {
     const { s, childId } = await parentWithChild();
     const child = await switchTo(h, s, childId);
@@ -488,7 +510,7 @@ describe("PIN gate (код родителя)", () => {
     expect((await h.app.inject({ url: "/v1/plan", headers: bearer(ok.json().access_token) })).statusCode).toBe(200);
   });
 
-  it("PIN reset-confirm (allowed while pin_required) → new session, all old sessions revoked", async () => {
+  it("PIN reset-confirm (allowed while pin_required) → SecurityState: the new code waits 24 h, the session stays locked (T-8)", async () => {
     const other = await login(h);
     h.fake.enablePin(other.userId, "4826");
     const s = await login(h);
@@ -496,14 +518,98 @@ describe("PIN gate (код родителя)", () => {
     expect(bad.json()).toMatchObject({ code: "RESET_CODE_INVALID", details: { remaining: 4 } });
     const ok = await post("/v1/profile/security/pin/reset-confirm", { code: "246810", new_pin: "7391" }, bearer(s.access));
     expect(ok.statusCode).toBe(200);
-    const b = ok.json();
-    expect(b.security.pin_required).toBe(false);
-    expect(b.learner.kind).toBe("self");
-    expect((await h.app.inject({ url: "/v1/profile", headers: bearer(b.access_token) })).statusCode).toBe(200);
-    for (const old of [other, s]) {
-      expect((await post("/v1/session/logout", undefined, bearer(old.access))).json().code).toBe("SESSION_REVOKED");
-      expect((await post("/v1/session/refresh", { refresh_token: old.refresh })).json().code).toBe("REFRESH_INVALID");
+    expect(Value.Check(SecurityStateSchema, ok.json())).toBe(true);
+    expect(ok.json()).toEqual({
+      pin_enabled: true, pin_length: 4, biometric_enabled: false, pin_required: true, locked_until: null,
+      pin_reset_effective_at: RESET_EFFECTIVE_AT,
+    });
+    // ни новой сессии, ни прав родителя: текущая сессия по-прежнему ждёт код, остальные живы
+    expect(ok.json().access_token).toBeUndefined();
+    expect((await h.app.inject({ url: "/v1/profile", headers: bearer(s.access) })).json().code).toBe("PIN_REQUIRED");
+    expect((await h.app.inject({ url: "/v1/experience/config", headers: bearer(other.access) })).statusCode).toBe(200);
+    // до срока новый код не подходит, прежний — подходит и отменяет сброс
+    expect((await post("/v1/session/pin/verify", { pin: "7391" }, bearer(s.access))).json().code).toBe("PIN_INVALID");
+    const old = await post("/v1/session/pin/verify", { pin: "4826" }, bearer(s.access));
+    expect(old.statusCode).toBe(200);
+    expect(old.json().security).toMatchObject({ pin_required: false, pin_reset_effective_at: null });
+    expect((await post("/v1/session/refresh", { refresh_token: other.refresh })).statusCode).toBe(200);
+  });
+
+  it("due reset takes effect at the next PIN check: the checking session is unlocked, all other sessions are revoked (T-8)", async () => {
+    const parent = await login(h);
+    h.fake.enablePin(parent.userId, "4826");
+    const unlocked = (await post("/v1/session/pin/verify", { pin: "4826" }, bearer(parent.access))).json();
+    const s = await login(h);
+    await post("/v1/profile/security/pin/reset-confirm", { code: "246810", new_pin: "739104" }, bearer(s.access));
+    h.fake.makeResetDue(parent.userId);
+    expect((await post("/v1/session/pin/verify", { pin: "4826" }, bearer(s.access))).json().code).toBe("PIN_INVALID");
+    const ok = await post("/v1/session/pin/verify", { pin: "739104" }, bearer(s.access));
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().security).toMatchObject({ pin_length: 6, pin_required: false, pin_reset_effective_at: null, biometric_enabled: false });
+    expect((await h.app.inject({ url: "/v1/profile", headers: bearer(ok.json().access_token) })).statusCode).toBe(200);
+    // сессия, открытая прежним кодом, отозвана (и её refresh)
+    expect((await h.app.inject({ url: "/v1/profile", headers: bearer(unlocked.access_token) })).json().code).toBe("SESSION_REVOKED");
+    expect((await post("/v1/session/refresh", { refresh_token: unlocked.refresh_token })).json().code).toBe("REFRESH_INVALID");
+    // следующая проверка уже ничего не применяет — сессии не отзываются
+    const again = await login(h);
+    await post("/v1/session/pin/verify", { pin: "739104" }, bearer(again.access));
+    expect((await h.app.inject({ url: "/v1/profile", headers: bearer(ok.json().access_token) })).statusCode).toBe(200);
+  });
+
+  it("POST /v1/profile/security/pin/reset-cancel: old code cancels the pending reset; wrong → 401 PIN_INVALID; allowed while pin_required", async () => {
+    const parent = await login(h);
+    h.fake.enablePin(parent.userId, "4826");
+    const unlocked = (await post("/v1/session/pin/verify", { pin: "4826" }, bearer(parent.access))).json();
+    await post("/v1/profile/security/pin/reset-confirm", { code: "246810", new_pin: "7391" }, bearer(unlocked.access_token));
+    const profile = await h.app.inject({ url: "/v1/profile", headers: bearer(unlocked.access_token) });
+    expect(profile.json().security.pin_reset_effective_at).toBe(RESET_EFFECTIVE_AT);
+
+    const locked = await login(h);
+    const wrong = await post("/v1/profile/security/pin/reset-cancel", { current_pin: "0000" }, bearer(locked.access));
+    expect(wrong.statusCode).toBe(401);
+    expect(wrong.json()).toMatchObject({ code: "PIN_INVALID", details: { remaining: 4 } });
+    const stranger = await login(h, TG_OTHER); // свой лимит проверок кода (5/мин на аккаунт)
+    for (const body of [{}, { current_pin: "12" }, { current_pin: "4826", extra: 1 }]) {
+      const r = await post("/v1/profile/security/pin/reset-cancel", body, bearer(stranger.access));
+      expect(r.statusCode, JSON.stringify(body)).toBe(422);
     }
+    const ok = await post("/v1/profile/security/pin/reset-cancel", { current_pin: "4826" }, bearer(unlocked.access_token));
+    expect(ok.statusCode).toBe(200);
+    expect(Value.Check(SecurityStateSchema, ok.json())).toBe(true);
+    expect(ok.json()).toMatchObject({ pin_reset_effective_at: null, pin_length: 4, pin_required: false });
+    const calls = h.fake.callsTo("identity", "POST", "/internal/v1/me/pin/reset-cancel");
+    expect(calls.map((c) => [c.subject, c.body])).toEqual([
+      [parent.userId, { current_pin: "0000" }],
+      [parent.userId, { current_pin: "4826" }],
+    ]);
+    // отмена в ожидающей сессии не снимает блокировку сессии
+    const lockedCancel = await post("/v1/profile/security/pin/reset-cancel", { current_pin: "4826" }, bearer(locked.access));
+    expect(lockedCancel.json().pin_required).toBe(true);
+    expect((await h.app.inject({ url: "/v1/profile", headers: bearer(locked.access) })).json().code).toBe("PIN_REQUIRED");
+  });
+
+  it("reset-cancel and reset-confirm in a child profile → 403 ADULT_REQUIRED; reset-cancel shares the 5/min PIN limit", async () => {
+    const parent = await login(h);
+    h.fake.setAge(parent.userId, "18+");
+    const childId = h.fake.addChild(parent.userId);
+    h.fake.onboard(childId);
+    const child = await switchTo(h, parent, childId);
+    for (const [url, body] of [
+      ["/v1/profile/security/pin/reset-cancel", { current_pin: "4826" }],
+      ["/v1/profile/security/pin/reset-confirm", { code: "246810", new_pin: "7391" }],
+    ] as const) {
+      const r = await post(url, body, bearer(child.access));
+      expect(r.statusCode, url).toBe(403);
+      expect(r.json().code).toBe("ADULT_REQUIRED");
+    }
+    expect(h.fake.callsTo("identity", "POST", "/internal/v1/me/pin/reset-cancel")).toHaveLength(0);
+
+    h.fake.enablePin(parent.userId, "4826");
+    const s = await login(h);
+    for (let i = 0; i < 5; i++) await post("/v1/session/pin/verify", { pin: "0000" }, bearer(s.access));
+    const limited = await post("/v1/profile/security/pin/reset-cancel", { current_pin: "4826" }, bearer(s.access));
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json().code).toBe("RATE_LIMITED");
   });
 
   it("setting/changing PIN revokes all OTHER sessions; the current one stays", async () => {

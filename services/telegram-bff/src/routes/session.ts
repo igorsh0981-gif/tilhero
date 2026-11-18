@@ -29,6 +29,24 @@ export const refreshInvalid = () => new AppError(401, "REFRESH_INVALID", "Сес
 export const userDeleted = () => new AppError(410, "USER_DELETED", "Профиль удалён по запросу пользователя");
 const parentPinMissing = () => new AppError(401, "PIN_INVALID", "Введите код родителя, чтобы выйти из детского профиля", { reason: "missing" });
 
+/** identity POST /me/pin/verify: pin_reset_applied — эта проверка ввела в действие ожидающий сброс кода (ревью T-8). */
+interface PinVerifyResult {
+  ok: true;
+  pin_reset_applied?: boolean;
+}
+
+/**
+ * Проверка кода родителя в identity. Если она ввела в действие сброс кода (срок 24 ч наступил), прежние сессии
+ * аккаунта отзываются — кроме текущей, которая только что подтвердила новый код (как при смене кода).
+ */
+async function verifyParentPin(ctx: BffContext, auth: AccessClaims, pin: string, log: { info: (o: object, m: string) => void }): Promise<boolean> {
+  const res = await ctx.domains.identity.post<PinVerifyResult | null>("/internal/v1/me/pin/verify", { subject: auth.accountId, body: { pin } });
+  if (res?.pin_reset_applied !== true) return false;
+  const revoked = await ctx.store(() => ctx.sessions.revokeAllForUser(auth.accountId, auth.sid));
+  log.info({ revoked_sessions: revoked }, "pending parent pin reset took effect, other sessions revoked");
+  return true;
+}
+
 /** Обрезка по кодовым точкам (как len() в Python): Telegram допускает имена до 64 символов, identity — тоже. */
 const clip = (s: string, max: number) => Array.from(s).slice(0, max).join("");
 
@@ -206,7 +224,10 @@ export function sessionRoutes(app: App, ctx: BffContext): void {
       schema: {
         tags: TAG,
         summary: "Подтверждение сессии кодом родителя",
-        description: "→ новые токены с pin=true. 401 PIN_INVALID {remaining}; 423 PIN_LOCKED {retry_after}; 422 PIN_FORMAT. Лимит 5/мин.",
+        description:
+          "→ новые токены с pin=true. 401 PIN_INVALID {remaining}; 423 PIN_LOCKED {retry_after}; 422 PIN_FORMAT. Лимит 5/мин. " +
+          "Верный прежний код отменяет ожидающий сброс; если срок сброса наступил, действует новый код, и эта проверка " +
+          "отзывает остальные сессии аккаунта (ревью T-8).",
         security: BEARER,
         body: PinVerifyRequestSchema,
         response: { 200: SessionResponseSchema, ...errorResponses(401, 423) },
@@ -214,7 +235,7 @@ export function sessionRoutes(app: App, ctx: BffContext): void {
     },
     async (req, reply) => {
       const auth = authOf(req);
-      await domains.identity.post("/internal/v1/me/pin/verify", { subject: auth.accountId, body: { pin: req.body.pin } });
+      await verifyParentPin(ctx, auth, req.body.pin, req.log);
       void reply.header("cache-control", "no-store");
       return confirmSession(ctx, auth, clientTimezone(req));
     },
@@ -265,11 +286,12 @@ export function sessionRoutes(app: App, ctx: BffContext): void {
     async (req, reply) => {
       const auth = authOf(req);
       const target = req.body.learner_id.toLowerCase();
-      const [me, learner] = await Promise.all([
+      const [loaded, learner] = await Promise.all([
         loadMe(ctx, auth.accountId),
         target === auth.accountId ? Promise.resolve(null) : loadLearner(ctx, auth.accountId, target),
       ]);
       // ответ identity сверяется с запросом: не тот ученик или не ребёнок аккаунта — как чужой
+      let me = loaded;
       if (learner && (learner.learner_id?.toLowerCase() !== target || learner.kind !== "child" || !hasLearner(me, target))) {
         throw learnerNotFound();
       }
@@ -278,7 +300,8 @@ export function sessionRoutes(app: App, ctx: BffContext): void {
         const pin = req.body.pin;
         if (!pin) throw parentPinMissing();
         await ctx.limiter.enforce("tg.pin", auth.accountId);
-        await domains.identity.post("/internal/v1/me/pin/verify", { subject: auth.accountId, body: { pin } });
+        // применённый сброс снял биометрию и сменил длину кода — состояние для ответа читается заново
+        if (await verifyParentPin(ctx, auth, pin, req.log)) me = await loadMe(ctx, auth.accountId);
       }
       const res = await reissueSession(ctx, auth, target, auth.pin, clientTimezone(req), me);
       req.log.info({ learner_kind: target === auth.accountId ? "self" : "child", parent_pin_checked: leavingChild && me.security.pin_enabled }, "active learner switched");

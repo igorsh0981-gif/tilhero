@@ -198,11 +198,27 @@ class Consent(Base):
     evidence_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
 
 
+PIN_RESET_COMPLETE_SQL = (
+    "(reset_pin_hash IS NULL) = (reset_pin_length IS NULL) AND (reset_pin_hash IS NULL) = (reset_requested_at IS NULL)"
+    " AND (reset_pin_hash IS NULL) = (reset_effective_at IS NULL)"
+)
+PIN_RESET_LENGTH_SQL = "reset_pin_length IS NULL OR reset_pin_length IN (4, 6)"
+
+
 class PinCredential(Base):
-    """Код родителя (PIN 4/6 цифр) аккаунта."""
+    """Код родителя (PIN 4/6 цифр) аккаунта.
+
+    `reset_*` — ожидающий сброс кодом из бота (ревью T-8): новый код (Argon2id) начинает действовать с
+    `reset_effective_at` (через PIN_RESET_DELAY_HOURS); до этого действует прежний `pin_hash`, любой верный ввод
+    прежнего кода сброс отменяет. Все четыре поля заданы вместе или все NULL.
+    """
 
     __tablename__ = "pin_credentials"
-    __table_args__ = (CheckConstraint("pin_length IN (4, 6)", name="ck_pin_length"),)
+    __table_args__ = (
+        CheckConstraint("pin_length IN (4, 6)", name="ck_pin_length"),
+        CheckConstraint(PIN_RESET_COMPLETE_SQL, name="ck_pin_reset_complete"),
+        CheckConstraint(PIN_RESET_LENGTH_SQL, name="ck_pin_reset_length"),
+    )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True
@@ -211,6 +227,10 @@ class PinCredential(Base):
     pin_length: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
+    reset_pin_hash: Mapped[str | None] = mapped_column(Text)  # Argon2id нового кода, ещё не действующего
+    reset_pin_length: Mapped[int | None] = mapped_column(SmallInteger)
+    reset_requested_at: Mapped[datetime | None] = mapped_column(TS)
+    reset_effective_at: Mapped[datetime | None] = mapped_column(TS)
 
 
 class BiometricCredential(Base):

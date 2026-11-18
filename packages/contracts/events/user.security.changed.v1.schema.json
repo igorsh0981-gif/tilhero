@@ -20,6 +20,8 @@
         "pin_changed",
         "pin_removed",
         "pin_reset",
+        "pin_reset_requested",
+        "pin_reset_cancelled",
         "pin_locked",
         "biometric_enabled",
         "biometric_disabled"

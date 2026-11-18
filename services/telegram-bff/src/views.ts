@@ -68,6 +68,7 @@ export function securityView(s: SecurityState, sessionPinOk: boolean): SecurityS
     biometric_enabled: s.biometric_enabled,
     pin_required: s.pin_enabled && !sessionPinOk,
     locked_until: s.locked_until ?? null,
+    pin_reset_effective_at: s.pin_reset_effective_at ?? null,
   };
 }
 

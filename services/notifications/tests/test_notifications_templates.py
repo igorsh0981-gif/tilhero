@@ -29,6 +29,7 @@ PARAMS: dict[str, dict] = {
     "support.resolved": {"number": "TCK-3081"},
     "release_note.published": {"release_note_id": INVITE, "slug": "2026.11"},
     "pin.reset_code": {"code": "482913", "ttl_minutes": 10},
+    "pin.reset_scheduled": {"effective_at": "2026-11-19T05:30:00.000Z"},
 }
 for base in ("lesson.reminder", "lesson.missed", "lesson.comeback"):
     PARAMS[base + ".kid"] = PARAMS[base]
@@ -62,7 +63,7 @@ def test_renders_both_languages(name: str, locale: str) -> None:
     assert r.title and len(r.title) <= 200 and len(r.body) <= 1000
     text = r.telegram_text()
     assert 0 < len(text) <= 4000
-    if name != "pin.reset_code":
+    if not name.startswith("pin."):
         assert text == f"<b>{r.title}</b>\n{r.body}"
         base = name.removesuffix(".kid")
         assert r.startapp == STARTAPP[base] and r.buttons() == [[{"text": r.button, "startapp": r.startapp}]]
@@ -90,8 +91,24 @@ def test_russian_texts() -> None:
     assert r.body == "Поддержка ответила на обращение TCK-3081. Откройте, чтобы прочитать."
     assert r.button == "Открыть обращение"
     pin = TEMPLATES["pin.reset_code"].render("ru", {"code": "135790", "ttl_minutes": 2})
-    assert pin.telegram_text().endswith("<b>135790</b>. Никому не сообщайте его. Действует 2 минуты.")
+    assert pin.telegram_text().endswith(
+        "<b>135790</b>. Никому не сообщайте его. Действует 2 минуты. Новый PIN-код заработает через 24 часа."
+    )
     assert pin.buttons() == []
+
+
+def test_pin_reset_scheduled_local_time_without_code() -> None:
+    """Ревью T-8: сообщение о запрошенном сбросе — местное время вступления в силу, без кода, кнопка в профиль."""
+    params = PARAMS["pin.reset_scheduled"]
+    r = TEMPLATES["pin.reset_scheduled"].render("ru", params, Context(timezone="Asia/Tashkent"))
+    assert "19.11 10:30" in r.telegram_text() and "прежний код" in r.telegram_text()
+    assert r.startapp == "route_profile" and not re.search(r"\d{6}", r.telegram_text())
+    moscow = TEMPLATES["pin.reset_scheduled"].render("uz", params, Context(timezone="Europe/Moscow"))
+    assert "19.11 08:30" in moscow.telegram_text()
+    fallback = TEMPLATES["pin.reset_scheduled"].render("ru", params, Context(timezone="Nowhere/Bad"))
+    assert "19.11 10:30" in fallback.telegram_text()
+    spec = TEMPLATES["pin.reset_scheduled"]
+    assert spec.direct_only and spec.transactional and not spec.in_app
 
 
 def test_uzbek_texts() -> None:
@@ -139,6 +156,7 @@ def test_names_are_escaped_and_cleaned() -> None:
         ("invite.pending", {"invite_id": "nope", "kind": "family"}),
         ("family.joined", {"family_id": INVITE, "role": "child"}),
         ("pin.reset_code", {"code": "12345"}),
+        ("pin.reset_scheduled", {"effective_at": "завтра"}),
     ],
 )
 def test_invalid_params(name: str, params: dict) -> None:

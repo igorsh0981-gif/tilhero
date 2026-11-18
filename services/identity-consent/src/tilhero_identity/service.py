@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn
@@ -90,6 +90,7 @@ from tilhero_identity.schemas import (
     NotificationSettings,
     NotificationSettingsPatch,
     PinSetRequest,
+    PinVerifyResponse,
     PublicProfile,
     QuietHours,
     SecurityState,
@@ -119,6 +120,8 @@ EV_CONSENT_REVOKED = "consent.revoked.v1"
 EV_DELETION_REQUESTED = "user.deletion.requested.v1"
 EV_DOMAIN_DELETED = "user.domain.deleted.v1"
 RESET_TEMPLATE = "pin.reset_code"
+# Сообщение аккаунту о запрошенном сбросе (без кода и без PII): шаблон в notifications — «Запросы к общему коду»
+RESET_SCHEDULED_TEMPLATE = "pin.reset_scheduled"
 
 _hasher = PinHasher()
 
@@ -275,10 +278,12 @@ def _preview_status(row: GuardianConsentRequest, now: datetime) -> str:
 
 
 class IdentityService:
-    def __init__(self, runtime: Runtime) -> None:
+    def __init__(self, runtime: Runtime, *, clock: Callable[[], datetime] | None = None) -> None:
         self.rt = runtime
         self.settings: Settings = runtime.settings  # type: ignore[assignment]
         self._locked_users: list[uuid.UUID] = []  # pin_locked — опубликовать после отката основной транзакции
+        # Часы сроков ожидающего сброса кода родителя (тесты подменяют app.state.clock).
+        self.now: Callable[[], datetime] = clock or _now
 
     @asynccontextmanager
     async def _tx(self) -> AsyncIterator[AsyncSession]:
@@ -433,9 +438,17 @@ class IdentityService:
             raise _learner_not_found()
         return child, False
 
+    def _reset_due(self, pin: PinCredential) -> bool:
+        return pin.reset_effective_at is not None and pin.reset_effective_at <= self.now()
+
     async def _security(
         self, user_id: uuid.UUID, pin: PinCredential | None, bio: BiometricCredential | None
     ) -> SecurityState:
+        # Ожидающий сброс с наступившим сроком уже действует (применится при следующей проверке кода): длина — нового
+        # кода, срока нет. До срока — длина прежнего кода и срок.
+        due = pin is not None and self._reset_due(pin)
+        pin_length = (pin.reset_pin_length if due else pin.pin_length) if pin is not None else None
+        effective_at = pin.reset_effective_at if pin is not None and not due else None
         locked_until = None
         if self.rt.redis is not None:
             try:
@@ -446,11 +459,12 @@ class IdentityService:
                 log.warning("attempt state unavailable", exc_info=True)
         return SecurityState(
             pin_enabled=pin is not None,
-            pin_length=pin.pin_length if pin else None,  # type: ignore[arg-type]
+            pin_length=pin_length,  # type: ignore[arg-type]
             biometric_enabled=bio is not None,
             # Домен сообщает «для новой сессии нужен код родителя»; BFF уточняет по состоянию конкретной сессии.
             pin_required=pin is not None,
             locked_until=locked_until,
+            pin_reset_effective_at=effective_at,
         )
 
     async def _security_for(self, session: AsyncSession, user_id: uuid.UUID) -> SecurityState:
@@ -572,14 +586,52 @@ class IdentityService:
             raise pin_locked(state.retry_after)
         raise ApiError(401, failure.code, failure.message, {"remaining": state.remaining})
 
-    async def _check_pin(self, user_id: uuid.UUID, cred: PinCredential, pin: str) -> None:
+    async def _check_pin(self, session: AsyncSession, user_id: uuid.UUID, cred: PinCredential, pin: str) -> bool:
+        """Проверка кода родителя с общим счётчиком попыток → True, если эта проверка ввела в действие ожидающий сброс.
+
+        Ожидающий сброс (ревью T-8): срок наступил — сначала новый код становится действующим (`pin_reset`), затем
+        проверяется он; срок не наступил — проверяется прежний код, и верный ввод сброс отменяет. Неверный код
+        откатывает транзакцию целиком (вместе с применением сброса — он применится при следующей верной проверке).
+        """
         reserved = await self.attempts.reserve(user_id)  # попытка занята до проверки (атомарно)
+        applied = await self._apply_due_reset(session, user_id, cred)
         result = await _hasher.verify(cred.pin_hash, pin)
         if not result.ok:
             await self._fail(user_id, PIN_INVALID, reserved)
         await self.attempts.succeeded(user_id)
         if result.rehash:
             cred.pin_hash = result.rehash
+        if cred.reset_pin_hash is not None:  # срок не наступил (наступивший применён выше): прежний код отменяет сброс
+            self._clear_reset(cred)
+            await self._emit_security(session, user_id, "pin_reset_cancelled")
+            log.info("pending pin reset cancelled by the current code", extra={"user_pid": pseudonymize(str(user_id))})
+        return applied
+
+    @staticmethod
+    def _clear_reset(cred: PinCredential) -> None:
+        cred.reset_pin_hash = None
+        cred.reset_pin_length = None
+        cred.reset_requested_at = None
+        cred.reset_effective_at = None
+
+    async def _apply_due_reset(self, session: AsyncSession, user_id: uuid.UUID, cred: PinCredential) -> bool:
+        """Срок ожидающего сброса наступил → новый код становится действующим, биометрия снимается (учётные данные
+        переустанавливаются целиком), `user.security.changed.v1 {pin_reset}`; прежние сессии отзывает BFF
+        (PinVerifyResponse.pin_reset_applied)."""
+        if not self._reset_due(cred) or cred.reset_pin_hash is None or cred.reset_pin_length is None:
+            return False
+        cred.pin_hash = cred.reset_pin_hash
+        cred.pin_length = cred.reset_pin_length
+        cred.updated_at = self.now()
+        self._clear_reset(cred)
+        await self._emit_security(session, user_id, "pin_reset")
+        bio = await session.get(BiometricCredential, user_id)
+        if bio is not None:
+            await session.delete(bio)
+            await session.flush()  # дальше в той же транзакции session.get(BiometricCredential) → None
+            await self._emit_security(session, user_id, "biometric_disabled")
+        log.info("pending pin reset applied", extra={"user_pid": pseudonymize(str(user_id))})
+        return True
 
     @staticmethod
     def _require_pin_format(pin: str) -> None:
@@ -1031,7 +1083,6 @@ class IdentityService:
             user = await self._load_account(session, user_id, lock=True)
             _ensure_mutable(user)
             cred = await session.get(PinCredential, user_id)
-            bio = await session.get(BiometricCredential, user_id)
             if cred is None:
                 cred = PinCredential(
                     user_id=user_id, pin_hash=await _hasher.hash(body.pin), pin_length=len(body.pin)
@@ -1042,13 +1093,15 @@ class IdentityService:
                 # Смена — только с текущим кодом (повторная установка без него не перезаписывает).
                 if body.current_pin is None:
                     raise conflict("PIN_ALREADY_SET", "Код уже задан — для смены укажите текущий код")
-                await self._check_pin(user_id, cred, body.current_pin)
+                # ожидающий сброс: наступивший применяется, ненаступивший отменяется верным прежним кодом
+                await self._check_pin(session, user_id, cred, body.current_pin)
                 cred.pin_hash = await _hasher.hash(body.pin)
                 cred.pin_length = len(body.pin)
                 cred.updated_at = _now()
                 change = "pin_changed"
             await self._emit_security(session, user_id, change)
-            return await self._security(user_id, cred, bio)
+            # биометрия — после проверки: применённый сброс её снимает
+            return await self._security(user_id, cred, await session.get(BiometricCredential, user_id))
 
     async def remove_pin(self, user_id: uuid.UUID, current_pin: str) -> SecurityState:
         async with self._tx() as session:
@@ -1057,7 +1110,7 @@ class IdentityService:
             cred = await session.get(PinCredential, user_id)
             if cred is None:
                 raise conflict("PIN_NOT_SET", "Код не задан")
-            await self._check_pin(user_id, cred, current_pin)
+            await self._check_pin(session, user_id, cred, current_pin)
             bio = await session.get(BiometricCredential, user_id)
             await session.delete(cred)
             await self._emit_security(session, user_id, "pin_removed")
@@ -1066,14 +1119,15 @@ class IdentityService:
                 await self._emit_security(session, user_id, "biometric_disabled")
             return await self._security(user_id, None, None)
 
-    async def verify_pin(self, user_id: uuid.UUID, pin: str) -> None:
+    async def verify_pin(self, user_id: uuid.UUID, pin: str) -> PinVerifyResponse:
         async with self._tx() as session:
             # FOR UPDATE: проверки одного пользователя идут по очереди, параллельные запросы не обходят лимит.
             await self._load_account(session, user_id, lock=True)
             cred = await session.get(PinCredential, user_id)
             if cred is None:
                 raise conflict("PIN_NOT_SET", "Код не задан")
-            await self._check_pin(user_id, cred, pin)
+            applied = await self._check_pin(session, user_id, cred, pin)
+        return PinVerifyResponse(pin_reset_applied=applied)
 
     async def request_pin_reset(self, user_id: uuid.UUID) -> int:
         """Код сброса: Redis хранит только HMAC; сам код уходит синхронно в notifications (в событиях и outbox
@@ -1146,16 +1200,63 @@ class IdentityService:
                 raise ApiError(410, "RESET_CODE_EXPIRED", "Код истёк или уже использован — запросите новый")
             if not result.ok:
                 raise ApiError(401, "RESET_CODE_INVALID", "Неверный код", {"remaining": result.remaining})
-            cred.pin_hash = await _hasher.hash(new_pin)
-            cred.pin_length = len(new_pin)
-            cred.updated_at = _now()
-            bio = await session.get(BiometricCredential, user_id)
-            await self._emit_security(session, user_id, "pin_reset")
-            if bio is not None:  # учётные данные переустанавливаются целиком: биометрию нужно включить заново
-                await session.delete(bio)
-                await self._emit_security(session, user_id, "biometric_disabled")
-            await self.attempts.succeeded(user_id)  # успешный сброс снимает блокировку и обнуляет счётчик
-            return await self._security(user_id, cred, None)
+            # Ревью T-8: код из бота может ввести ребёнок с телефоном родителя — новый код ждёт срока, прежний
+            # действует до него (и его верный ввод сброс отменяет). Повторный сброс заменяет ожидающий и начинает
+            # срок заново. Счётчик попыток и блокировка не снимаются: иначе сброс давал бы лишние попытки подбора.
+            now = self.now()
+            cred.reset_pin_hash = await _hasher.hash(new_pin)
+            cred.reset_pin_length = len(new_pin)
+            cred.reset_requested_at = now
+            cred.reset_effective_at = now + timedelta(hours=self.settings.pin_reset_delay_hours)
+            # pin_reset_requested — сейчас; pin_reset — когда новый код начнёт действовать; pin_reset_cancelled —
+            # при верном вводе прежнего кода до срока.
+            await self._emit_security(session, user_id, "pin_reset_requested")
+            effective_at = cred.reset_effective_at
+            security = await self._security(user_id, cred, await session.get(BiometricCredential, user_id))
+        log.info("pin reset scheduled", extra={"user_pid": pseudonymize(str(user_id)),
+                                               "delay_hours": self.settings.pin_reset_delay_hours})
+        await self._send_reset_scheduled(user_id, effective_at)
+        return security
+
+    async def _send_reset_scheduled(self, user_id: uuid.UUID, effective_at: datetime) -> None:
+        """Сообщение аккаунту: сброс запрошен, когда вступит в силу, как отменить. Без кода и без PII (только срок).
+        Не доставлено — сброс всё равно запланирован (плашка в Mini App, отмена прежним кодом); пишем предупреждение."""
+        notification_id = uuid.uuid4()
+        try:
+            result = await self.rt.client("notifications").post(
+                "/internal/v1/notifications/transactional",
+                json={
+                    "notification_id": str(notification_id),
+                    "user_id": str(user_id),
+                    "template": RESET_SCHEDULED_TEMPLATE,
+                    "params": {"effective_at": iso_utc_ms(effective_at)},
+                    "dedup_key": f"pin_reset_scheduled:{user_id}:{notification_id.hex}",
+                },
+                idempotency_key=str(notification_id),
+            )
+        except UpstreamError as exc:
+            log.warning("pin reset notice not delivered", extra={"status": exc.status, "error_code": exc.code})
+            return
+        except Exception:  # сброс уже записан; ответ клиенту важнее
+            log.warning("pin reset notice not delivered", exc_info=True)
+            return
+        status = (result or {}).get("status")
+        if status not in ("sent", "queued"):
+            log.warning("pin reset notice not delivered",
+                        extra={"delivery_status": str(status), "reason": str((result or {}).get("reason"))})
+
+    async def cancel_pin_reset(self, user_id: uuid.UUID, current_pin: str) -> SecurityState:
+        """Явная отмена ожидающего сброса прежним кодом (ревью T-8). Неверный код — 401 PIN_INVALID / 423 по общему
+        счётчику. Отменять нечего (сброса нет или его срок уже наступил) — текущее состояние без проверки кода:
+        ответ от кода не зависит, попытка не тратится, наступивший сброс не применяется мимо проверки кода."""
+        async with self._tx() as session:
+            await self._load_account(session, user_id, lock=True)
+            cred = await session.get(PinCredential, user_id)
+            if cred is None:
+                raise conflict("PIN_NOT_SET", "Код не задан")
+            if cred.reset_pin_hash is not None and not self._reset_due(cred):
+                await self._check_pin(session, user_id, cred, current_pin)  # верный прежний код отменяет сброс
+            return await self._security(user_id, cred, await session.get(BiometricCredential, user_id))
 
     # ---------- биометрия ----------
     async def enable_biometric(self, user_id: uuid.UUID) -> BiometricEnableResponse:
@@ -1285,7 +1386,7 @@ class IdentityService:
                 if not body.pin:
                     raise unprocessable("DELETION_CONFIRMATION_REQUIRED", "Подтвердите удаление кодом родителя",
                                         {"method": "pin"})
-                await self._check_pin(user_id, cred, body.pin)
+                await self._check_pin(session, user_id, cred, body.pin)
             elif _deletion_word(body.confirm_word) not in DELETION_WORDS:
                 raise unprocessable("DELETION_CONFIRMATION_REQUIRED",
                                     "Введите слово УДАЛИТЬ, чтобы подтвердить", {"method": "confirm_word"})

@@ -31,10 +31,12 @@ from tilhero_identity.schemas import (
     MeResponse,
     OkResponse,
     PinRemoveRequest,
+    PinResetCancelRequest,
     PinResetConfirmRequest,
     PinResetRequestResponse,
     PinSetRequest,
     PinVerifyRequest,
+    PinVerifyResponse,
     PolicyDocument,
     PolicyPurposeOut,
     SecurityState,
@@ -178,12 +180,11 @@ async def remove_pin(
     return await svc.remove_pin(user_id, body.current_pin)
 
 
-@router.post("/me/pin/verify", response_model=OkResponse)
+@router.post("/me/pin/verify", response_model=PinVerifyResponse)
 async def verify_pin(
     body: PinVerifyRequest, user_id: uuid.UUID = Me, svc: IdentityService = Svc
-) -> OkResponse:
-    await svc.verify_pin(user_id, body.pin)
-    return OkResponse()
+) -> PinVerifyResponse:
+    return await svc.verify_pin(user_id, body.pin)
 
 
 @router.post("/me/pin/reset-request", response_model=PinResetRequestResponse)
@@ -196,6 +197,13 @@ async def pin_reset_confirm(
     body: PinResetConfirmRequest, user_id: uuid.UUID = Me, svc: IdentityService = Svc
 ) -> SecurityState:
     return await svc.confirm_pin_reset(user_id, body.code, body.new_pin)
+
+
+@router.post("/me/pin/reset-cancel", response_model=SecurityState)
+async def pin_reset_cancel(
+    body: PinResetCancelRequest, user_id: uuid.UUID = Me, svc: IdentityService = Svc
+) -> SecurityState:
+    return await svc.cancel_pin_reset(user_id, body.current_pin)
 
 
 # ---------- биометрия ----------

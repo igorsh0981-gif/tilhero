@@ -1,4 +1,4 @@
-import type { PinResetRequestResponse } from "@tilhero/contracts/bff";
+import type { PinResetRequestResponse, SecurityState } from "@tilhero/contracts/bff";
 import { useState } from "react";
 import { ApiError, errorText } from "../../api/errors";
 import { useI18n } from "../../i18n";
@@ -60,14 +60,64 @@ export function PinSetup({ save, testId = "pin-setup" }: { save: (pin: string) =
   );
 }
 
+/** Whole hours left until `iso` (at least 1): «через 24 часа» right after the reset. */
+export function hoursUntil(iso: string, now: number = Date.now()): number {
+  const ms = Date.parse(iso) - now;
+  return Number.isFinite(ms) ? Math.max(1, Math.round(ms / 3_600_000)) : 24;
+}
+
+/**
+ * After the reset is confirmed (review T-8): the new code takes effect only in 24 hours — the phone with Telegram may
+ * be in a child's hands. Until then the old code works, and entering it cancels the reset.
+ */
+export function PinResetWaiting({ effectiveAt, onOk }: { effectiveAt: string | null; onOk: () => void }) {
+  const { t, tp, fmt } = useI18n();
+  const n = effectiveAt ? hoursUntil(effectiveAt) : 24;
+  return (
+    <div className="stack" data-testid="pin-reset-wait">
+      <h2 className="h2" data-testid="pin-reset-wait-title">{t("pc.reset.waitTitle", { n, h: tp("pc.reset.hours", n) })}</h2>
+      {effectiveAt ? (
+        <p className="sub ink" data-testid="pin-reset-wait-when">{t("pc.reset.waitWhen", { when: fmt.dateTime(effectiveAt) })}</p>
+      ) : null}
+      <p className="sub">{t("pc.reset.waitText")}</p>
+      <Btn onClick={onOk} data-testid="pin-reset-wait-ok">
+        {t("pc.reset.waitOk")}
+      </Btn>
+    </div>
+  );
+}
+
+/**
+ * «Сброс кода запрошен, вступит в силу …» (review T-8): in the adult profile and on «Код родителя» with «Отменить
+ * сброс» (the old code); on the lock screen — a hint that the old code cancels the reset.
+ */
+export function PinResetPending({ at, onCancel }: { at: string; onCancel?: () => void }) {
+  const { t, fmt } = useI18n();
+  return (
+    <div className="card warn stack tight" role="status" data-testid="pin-reset-pending">
+      <b className="h3">{t("pc.pending.title")}</b>
+      <p className="sub ink" data-testid="pin-reset-pending-when">{t("pc.pending.text", { when: fmt.dateTime(at) })}</p>
+      {onCancel ? (
+        <Btn variant="secondary" onClick={onCancel} data-testid="pin-reset-cancel">
+          {t("pc.pending.cancel")}
+        </Btn>
+      ) : (
+        <p className="sub small">{t("pc.pending.lock")}</p>
+      )}
+    </div>
+  );
+}
+
 /**
  * Reset of a forgotten parent code (bff.ts «Код родителя (PIN)»): the bot sends a 6-digit code to the chat → the code
- * here → a new parent code → a new session (the previous ones are revoked). Works in a session that still waits for the
- * code (the lock screen). `confirm` performs reset-confirm and accepts the new session.
+ * here → a new parent code → «Новый код заработает через 24 часа» (review T-8: the reset waits, the session does not
+ * change). Works in a session that still waits for the code (the lock screen). `confirm` performs reset-confirm and
+ * stores the returned SecurityState; `onDone` — the user has read the waiting screen.
  */
 export function PinReset(props: {
   request: () => Promise<PinResetRequestResponse>;
-  confirm: (code: string, newPin: string) => Promise<void>;
+  confirm: (code: string, newPin: string) => Promise<SecurityState>;
+  onDone: () => void;
   onCancel?: () => void;
 }) {
   const { t, fmt } = useI18n();
@@ -75,12 +125,14 @@ export function PinReset(props: {
   const [code, setCode] = useState("");
   const [step, setStep] = useState<"code" | "new">("code");
   const [codeError, setCodeError] = useState<string | null>(null);
+  const [scheduled, setScheduled] = useState<SecurityState | null>(null);
   const send = useAction(async () => {
     setSent(await props.request());
     setCode("");
     setStep("code");
     setCodeError(null);
   });
+  if (scheduled) return <PinResetWaiting effectiveAt={scheduled.pin_reset_effective_at} onOk={props.onDone} />;
   if (!sent) {
     return (
       <div className="stack" data-testid="pin-reset">
@@ -135,7 +187,7 @@ export function PinReset(props: {
       testId="pin-reset-new"
       save={async (pin) => {
         try {
-          await props.confirm(code, pin);
+          setScheduled(await props.confirm(code, pin));
         } catch (e) {
           // a wrong or expired code from the bot: back to the code, the new parent code is entered again after it
           if (e instanceof ApiError && (e.code === "RESET_CODE_INVALID" || e.code === "RESET_CODE_EXPIRED")) {

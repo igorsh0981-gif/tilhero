@@ -169,6 +169,7 @@ class Dispatcher:
         ctx = Context(
             learner_name=clean_name(delivery.learner_display_name) if delivery.is_kid else None,
             other_name=await self._other_name(c.subject_user_id),
+            timezone=delivery.timezone,
         )
         return spec, spec.render(delivery.locale, c.params, ctx)
 

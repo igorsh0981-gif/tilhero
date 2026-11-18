@@ -11,7 +11,12 @@ import { bearer, closeRedis, initDataFor, login, makeHarness, type Harness, type
 let h: Harness;
 let s: LoggedIn;
 beforeEach(async () => {
-  h = await makeHarness({ RATE_LIMIT_USER_PER_MIN: "1000", RATE_LIMIT_PUBLIC_IP_PER_MIN: "1000", RATE_LIMIT_SESSION_IP_PER_MIN: "1000" });
+  h = await makeHarness({
+    RATE_LIMIT_USER_PER_MIN: "1000",
+    RATE_LIMIT_PUBLIC_IP_PER_MIN: "1000",
+    RATE_LIMIT_SESSION_IP_PER_MIN: "1000",
+    RATE_LIMIT_PIN_PER_MIN: "20", // маршрутов с лимитом кода родителя больше 5 (reset-cancel — ревью T-8)
+  });
   s = await login(h);
   h.fake.setAge(s.userId, "18+");
   h.fake.onboard(s.userId);
@@ -43,6 +48,7 @@ const SAMPLES: Record<string, Sample> = {
   "delete /v1/profile/security/pin": { payload: { current_pin: "4826" } },
   "post /v1/profile/security/pin/reset-request": {},
   "post /v1/profile/security/pin/reset-confirm": { payload: { code: "246810", new_pin: "4826" } },
+  "post /v1/profile/security/pin/reset-cancel": { payload: { current_pin: "4826" } },
   "put /v1/profile/security/biometric": {},
   "delete /v1/profile/security/biometric": {},
   "post /v1/profile/delete-request": { payload: { confirm_word: "УДАЛИТЬ" } },

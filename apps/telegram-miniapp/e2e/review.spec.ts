@@ -79,20 +79,73 @@ test("parent code in onboarding: offered after the child profile is created, bef
   expect(bff.calls("PUT", "/v1/profile/security/pin")).toHaveLength(0);
 });
 
-test("forgot the parent code at login: reset through the bot from the lock screen", async ({ page }) => {
+/** «19 ноября, 22:30» in the page's time zone (playwright.config: Asia/Tashkent). */
+function tashkent(iso: string): string {
+  const d = new Date(iso);
+  const dm = new Intl.DateTimeFormat("ru-RU", { timeZone: "Asia/Tashkent", day: "numeric", month: "long" }).format(d);
+  const hm = new Intl.DateTimeFormat("ru-RU", { timeZone: "Asia/Tashkent", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
+  return `${dm}, ${hm}`;
+}
+
+test("forgot the parent code at login: the reset from the lock screen waits 24 h, the old code still unlocks and cancels it (T-8)", async ({ page }) => {
   const bff = await open(page, { onboarded: true, pin: "2580", pinRequired: true, seen: SEEN });
   const lock = page.getByTestId("lock");
   await expect(lock).toBeVisible();
   await lock.getByTestId("lock-forgot").click();
+  await expect(lock).toContainText("Новый код заработает через 24 часа — до этого действует прежний.");
   await lock.getByTestId("pin-reset-send").click();
   await expect(lock).toContainText("Код отправлен в чат с ботом. Он действует 10 мин.");
   await lock.getByTestId("pin-reset-code").fill("246810");
   await lock.getByTestId("pin-reset-next").click();
   await keypad(lock, "1357");
   await keypad(lock, "1357");
-  await expect(page.getByTestId("home")).toBeVisible();
+
+  // no rights of the parent: «Новый код заработает через 24 часа» with the date and time, the lock stays
+  const wait = lock.getByTestId("pin-reset-wait");
+  await expect(wait.getByTestId("pin-reset-wait-title")).toHaveText("Новый код заработает через 24 часа");
+  const at = bff.security.pin_reset_effective_at!;
+  await expect(wait.getByTestId("pin-reset-wait-when")).toHaveText(`Он начнёт действовать ${tashkent(at)}.`);
+  await shot(page, "17_pin_reset_wait");
   expect(bff.last("POST", "/v1/profile/security/pin/reset-confirm")?.body).toEqual({ code: "246810", new_pin: "1357" });
-  expect(bff.pin).toBe("1357");
+  expect(bff.pin).toBe("2580");
+  expect(bff.pendingPin).toBe("1357");
+  await wait.getByTestId("pin-reset-wait-ok").click();
+  await expect(lock.getByTestId("pin-reset-pending")).toContainText("Введите прежний код — сброс отменится.");
+  await expect(lock.getByTestId("pin-reset-pending-when")).toContainText(tashkent(at));
+  await expect(page.getByTestId("home")).toHaveCount(0);
+
+  // the new code does not open the app before the deadline; the old one does — and cancels the reset
+  await keypad(lock, "1357");
+  await expect(lock).toContainText("Неверный код");
+  await expect(page.getByTestId("home")).toHaveCount(0);
+  await keypad(lock, "2580");
+  await expect(page.getByTestId("home")).toBeVisible();
+  expect(bff.pendingPin).toBeNull();
+  expect(bff.calls("POST", "/v1/session/pin/verify").map((r) => r.body)).toEqual([{ pin: "1357" }, { pin: "2580" }]);
+});
+
+test("the adult profile shows the pending reset; «Отменить сброс» asks for the old code (T-8)", async ({ page }) => {
+  const at = new Date(Date.now() + 20 * 3600_000).toISOString();
+  const bff = await open(page, { onboarded: true, pin: "2580", pendingReset: { pin: "1357", at }, seen: SEEN });
+  await page.getByTestId("tab-profile").click();
+  const banner = page.getByTestId("pin-reset-pending");
+  await expect(banner).toContainText("Сброс кода запрошен");
+  await expect(banner.getByTestId("pin-reset-pending-when")).toHaveText(`Вступит в силу ${tashkent(at)}. До этого действует прежний код.`);
+  await shot(page, "18_pin_reset_pending");
+  await banner.getByTestId("pin-reset-cancel").click();
+
+  const step = page.getByTestId("pin-reset-cancel-step");
+  await expect(step.getByTestId("pin-step")).toHaveText("Введите прежний код");
+  await keypad(step, "0000");
+  await expect(step).toContainText("Неверный код. Осталось попыток: 4.");
+  await keypad(step, "2580");
+  await expect(page.getByTestId("toast")).toHaveText("Сброс кода отменён");
+  await expect(page.getByTestId("parent-code").getByTestId("pin-reset-pending")).toHaveCount(0);
+  expect(bff.calls("POST", "/v1/profile/security/pin/reset-cancel").map((r) => r.body)).toEqual([{ current_pin: "0000" }, { current_pin: "2580" }]);
+  expect(bff.pendingPin).toBeNull();
+  await page.getByTestId("bar-back").click();
+  await expect(page.getByTestId("profile")).toBeVisible();
+  await expect(page.getByTestId("pin-reset-pending")).toHaveCount(0);
 });
 
 test("a parent revokes the consent given for a teen (with a confirmation)", async ({ page }) => {

@@ -35,6 +35,9 @@ class Settings(ServiceSettings):
     pin_reset_code_max_attempts: int = Field(default=5, ge=1)
     pin_reset_min_interval_seconds: int = Field(default=60, ge=1)
     pin_reset_daily_limit: int = Field(default=5, ge=1)
+    # Новый код из сброса начинает действовать через N часов (ревью T-8: телефон с Telegram может быть у ребёнка);
+    # до этого действует прежний код, любой его верный ввод сброс отменяет.
+    pin_reset_delay_hours: float = Field(default=24, gt=0, le=7 * 24)
 
     # notifications: синхронная доставка кода сброса PIN (POST /internal/v1/notifications/transactional)
     notifications_url: str = "http://127.0.0.1:8104"

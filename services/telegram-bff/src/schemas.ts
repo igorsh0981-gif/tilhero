@@ -94,6 +94,7 @@ export const SecurityStateSchema = Type.Object({
   biometric_enabled: Type.Boolean(),
   pin_required: Type.Boolean(),
   locked_until: Nullable(IsoTime),
+  pin_reset_effective_at: Nullable(IsoTime),
 });
 assertSame<Same<Static<typeof SecurityStateSchema>, C.SecurityState>>();
 
@@ -264,6 +265,8 @@ export const PinResetConfirmRequestSchema = Type.Object(
   strict,
 );
 assertSame<Same<Static<typeof PinResetConfirmRequestSchema>, C.PinResetConfirmRequest>>();
+export const PinResetCancelRequestSchema = Type.Object({ current_pin: PinString }, strict);
+assertSame<Same<Static<typeof PinResetCancelRequestSchema>, C.PinResetCancelRequest>>();
 
 /** POST /v1/session/biometric/verify → SessionResponse. */
 export interface BiometricVerifyRequest {
