@@ -331,14 +331,15 @@ def cleanup_leftovers() -> list[str]:
                            json={"reason": "e2e: уборка"}, headers={**ehdr, **idem()})
             check(r.status_code in (200, 201), f"архив заметки {n['slug']}: {r.status_code} {r.text[:200]}")
             done.append(f"заметка {n['slug']}: в архив")
-    state = expect(httpx.get(f"{s1.EXPERIENCE}/admin/v1/experience/miniapp/state", headers=ehdr), 200)
-    cur = (state.get("current") or {}).get("version")
-    if cur:
-        ver = expect(httpx.get(f"{s1.EXPERIENCE}/admin/v1/experience/miniapp/versions/{cur}", headers=ehdr), 200)
-        if (ver.get("payload") or {}).get("flags", {}).get("e2e_admin_marker") and state.get("previous_version"):
-            expect(httpx.post(f"{s1.EXPERIENCE}/admin/v1/experience/miniapp/rollback",
-                              json={"reason": "e2e: уборка"}, headers=ehdr), 201)
-            done.append(f"тема Mini App {cur}: откат")
+    for app, label in (("miniapp", "Mini App"), ("admin", "админки")):  # QA: тема админки — AT-24 (шаг A16a)
+        state = expect(httpx.get(f"{s1.EXPERIENCE}/admin/v1/experience/{app}/state", headers=ehdr), 200)
+        cur = (state.get("current") or {}).get("version")
+        if cur:
+            ver = expect(httpx.get(f"{s1.EXPERIENCE}/admin/v1/experience/{app}/versions/{cur}", headers=ehdr), 200)
+            if (ver.get("payload") or {}).get("flags", {}).get("e2e_admin_marker") and state.get("previous_version"):
+                expect(httpx.post(f"{s1.EXPERIENCE}/admin/v1/experience/{app}/rollback",
+                                  json={"reason": "e2e: уборка"}, headers=ehdr), 201)
+                done.append(f"тема {label} {cur}: откат")
     return done
 
 
@@ -557,6 +558,18 @@ def s_rbac(c: Ctx) -> None:
     r = httpx.post(f"{s1.NOTIFICATIONS}/admin/v1/notifications/campaigns/{nid}/stop", json={"reason": "e2e: проверка"},
                    headers=staff_token("notifications", COMMS_PERMS - {"notif.campaigns.send"}, sup_id, "support"))
     expect(r, 403, "PERMISSION_DENIED")
+    # QA (AT-17 дословно): роль С правом whatsnew.manage, но БЕЗ whatsnew.publish — публикация 403 и в самом домене
+    cm_id = c.staff["comms"].staff_id
+    r = httpx.post(f"{s1.EXPERIENCE}/admin/v1/release-notes/{nid}/publish",
+                   json={"expected_version": 1, "reason": "e2e: проверка"},
+                   headers={**staff_token("experience-config", COMMS_PERMS - {"whatsnew.publish"}, cm_id,
+                                          "communications"), **idem()})
+    body = expect(r, 403, "PERMISSION_DENIED")
+    check(body["details"].get("permission") == "whatsnew.publish", f"право в отказе домена: {body['details']}")
+    r = httpx.post(f"{s1.EXPERIENCE}/admin/v1/release-notes/{nid}/archive", json={"reason": "e2e: проверка"},
+                   headers={**staff_token("experience-config", COMMS_PERMS - {"whatsnew.publish"}, cm_id,
+                                          "communications"), **idem()})
+    expect(r, 403, "PERMISSION_DENIED")
     # меню admin-web строится из me.permissions — у support нет разделов «Что нового» и «Уведомления»
     check(not ({"whatsnew.manage", "whatsnew.publish", "notif.templates.manage"} & set(
         expect(sp.get("/admin/v1/me"), 200)["permissions"])), "права «Что нового»/уведомлений у support")
@@ -570,10 +583,12 @@ def s_learners(c: Ctx) -> None:
     now = datetime.now(UTC)
     # слоты напоминаний AT-20: R1 — после активации версии шаблона, R2 — через минуту, после сброса к тексту по
     # умолчанию (часы сервисов не подменяются; местное время «дневной» зоны около 13:00 — не тихие часы)
-    t1 = (now + timedelta(seconds=75)).replace(second=0, microsecond=0) + timedelta(minutes=1)
-    t2 = t1 + timedelta(minutes=1)
-    c.data.update(slot1=t1, slot2=t2)
-    print(f"      дневная зона {z}; слоты напоминаний {t1:%H:%M}Z и {t2:%H:%M}Z", flush=True)
+    # QA: R3 — слот после отката к предыдущей версии шаблона (AT-20 «откат к предыдущей версии»), R2 — после сброса
+    t1 = (now + timedelta(seconds=100)).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    t_rb = t1 + timedelta(minutes=1)
+    t2 = t1 + timedelta(minutes=2)
+    c.data.update(slot1=t1, slot_rb=t_rb, slot2=t2)
+    print(f"      дневная зона {z}; слоты напоминаний {t1:%H:%M}Z, {t_rb:%H:%M}Z и {t2:%H:%M}Z", flush=True)
     news = [*s1.REQUIRED, "product_news"]
     la = lc.user("LA", "Азиза")  # взрослый, согласие «Новости TilHero», категория product — в аудитории рассылки
     s1.onboard(la, zone=z, purposes=news, categories={"product": True})
@@ -590,14 +605,24 @@ def s_learners(c: Ctx) -> None:
     c.data["kid_product_setting"] = r.status_code
     p.ok("POST", "/v1/plan/onboarding/complete")
     p.switch(p.account_id)
-    for role, name, slot in (("R1", "Рустам", t1), ("R2", "Бахром", t2)):
+    for role, name, slot in (("R1", "Рустам", t1), ("R3", "Сардор", t_rb), ("R2", "Бахром", t2)):
         u = lc.user(role, name)
         s1.onboard(u, zone=z, categories={"reminders": True}, schedule=s1.slot_schedule(slot, z, True))
+    # QA (AT-22 сегмент): LU — интерфейс UZ, согласие «Новости TilHero»; LN — согласие и категория есть, онбординг
+    # не пройден; LA — занимался сегодня (активность), остальные — нет
+    lu = lc.user("LU", "Улугбек")
+    s1.onboard(lu, zone=z, purposes=news, categories={"product": True})
+    check(lu.ok("PATCH", "/v1/profile/settings", json={"locale": "uz"})["account"]["locale"] == "uz", "locale LU")
+    s1.plan_patch(lu, {"ui_lang": "uz"})
+    ln = lc.user("LN", "Нигора")
+    s1.onboard(ln, zone=z, purposes=news, categories={"product": True}, complete=False)
+    la.ok("POST", "/v1/plan/activity", json={"kind": "practice", "minutes": 10}, idem=True)
     s = lc.user("S", "Севара")  # автор обращения AT-25
     s1.onboard(s, zone=z)
     # LQ — в аудитории рассылки, но сейчас у него тихие часы (рассылка откладывается до их конца)
     lq = lc.user("LQ", "Лазиз")
     quiet = {"start": s1.hhmm(now - timedelta(minutes=1), z), "end": s1.hhmm(now + timedelta(minutes=40), z)}
+    c.data["quiet_end"] = (now + timedelta(minutes=40)).replace(second=0, microsecond=0)  # QA: тот же момент в UTC
     s1.onboard(lq, zone=z, purposes=news, categories={"product": True}, quiet=quiet)
     # T — подросток 14–17: согласие родителя (P) по ссылке gc_, затем своё согласие с product_news; в рассылку —
     # только если в сегменте явно указаны teens
@@ -627,10 +652,13 @@ def s_learners(c: Ctx) -> None:
     check(la.ok("GET", "/v1/whats-new")["mode"] == "none", "после seen знакомство показывается снова")
     la.inbox()  # первое чтение центра уведомлений ставит водяной знак (как Mini App)
     # проекция активности identity-consent (аудитория рассылок: onboarded) — из learning.plan.updated.v1
-    ids = ",".join(f"'{s1.uid(x.account_id)}'" for x in (la, lb, p, lq, t))
+    ids = ",".join(f"'{s1.uid(x.account_id)}'" for x in (la, lb, p, lq, t, lu))
     wait_for(lambda: s1._psql("SELECT count(*) FROM identity_consent.learner_activity WHERE user_id IN "
-                              f"({ids}) AND onboarding_completed_at IS NOT NULL") == "5", 30,
+                              f"({ids}) AND onboarding_completed_at IS NOT NULL") == "6", 30,
              what="learner_activity (онбординг) в identity-consent")
+    wait_for(lambda: s1._psql("SELECT count(*) FROM identity_consent.learner_activity WHERE user_id = "
+                              f"'{s1.uid(la.account_id)}' AND last_activity_at IS NOT NULL") == "1", 30,
+             what="learner_activity (занятие LA) в identity-consent")
     s1.plan_tick()  # окно plan:tick — до слотов
     lead = (t1 - datetime.now(UTC)).total_seconds()
     check(lead > 30, f"подготовка учеников заняла слишком долго: до слота {lead:.0f} с")
@@ -656,6 +684,12 @@ def _note(c: Ctx, slug: str, *, uz: bool = True) -> dict[str, Any]:
     }
 
 
+def _fields(body: dict[str, Any]) -> set[str]:
+    """Поля ошибки VALIDATION_ERROR admin-bff: details.field и details.errors[].field (схема тела запроса BFF)."""
+    det = body.get("details") or {}
+    return {det.get("field") or ""} | {e.get("field") or "" for e in det.get("errors") or []}
+
+
 def s_note_translation(c: Ctx) -> None:
     cm = c.staff["comms"].browser
     body = expect(cm.post("/admin/v1/release-notes", _note(c, f"e2e-adm-{c.tag.lower()}-x", uz=False), headers=idem()),
@@ -667,8 +701,28 @@ def s_note_translation(c: Ctx) -> None:
     bad["items"][0]["link"] = "admin"
     r = cm.post("/admin/v1/release-notes", bad, headers=idem())
     check(r.status_code == 422, f"запрещённый маршрут: {r.status_code} {r.text[:200]}")
+    check(r.json().get("code") == "VALIDATION_ERROR" and "items.0.link" in _fields(r.json()),
+          f"запрещённый маршрут — поле в ответе: {r.text[:300]}")
     drafts = expect(cm.get("/admin/v1/release-notes", params={"status": "draft", "limit": 100}), 200)["items"]
     check(not [n for n in drafts if n["slug"].startswith(f"e2e-adm-{c.tag.lower()}")], "черновик сохранён при 422")
+    # QA (AT-19 «сохранить нельзя» — и правкой): PUT черновика с пустым UZ или запрещённым маршрутом → 422, черновик
+    # прежний (версия, тексты, маршрут). Черновик остаётся в списке (slug e2e-adz-…; учеников не касается)
+    ok = expect(cm.post("/admin/v1/release-notes", _note(c, f"e2e-adz-{c.tag.lower()}"), headers=idem()), 201)
+    nid, ver = ok["release_note_id"], ok["version"]
+    empty = {**_note(c, f"e2e-adz-{c.tag.lower()}", uz=False), "expected_version": ver}
+    body = expect(cm.request("PUT", f"/admin/v1/release-notes/{nid}", json_body=empty), 422,
+                  "RELEASE_NOTE_TRANSLATION_MISSING")
+    missing = set(body["details"].get("missing") or [])
+    check({"title.uz", "items[0].text.uz"} <= missing, f"PUT: подсвеченные поля: {sorted(missing)}")
+    routed = {**_note(c, f"e2e-adz-{c.tag.lower()}"), "expected_version": ver}
+    routed["items"][1]["link"] = "admin"
+    r = cm.request("PUT", f"/admin/v1/release-notes/{nid}", json_body=routed)
+    check(r.status_code == 422 and r.json().get("code") == "VALIDATION_ERROR" and "items.1.link" in _fields(r.json()),
+          f"PUT: запрещённый маршрут: {r.status_code} {r.text[:300]}")
+    got = expect(cm.get(f"/admin/v1/release-notes/{nid}"), 200)
+    check(got["status"] == "draft" and got["version"] == ver and got["title"]["uz"] == f"TilHero yangiliklari {c.tag}"
+          and got["items"][1]["link"] == "news" and got["items"][0]["text"]["uz"],
+          f"черновик изменён отклонённой правкой: v{got['version']} {got['title']} {got['items'][1]['link']}")
 
 
 def s_whats_new(c: Ctx) -> None:
@@ -791,6 +845,37 @@ def s_template(c: Ctx) -> None:
               f"напоминание с новым текстом: {text!r}")
         check("{" not in text and "Время занятия" not in text, f"плейсхолдеры/старый текст: {text!r}")
         check(not s1.tg_sent(r2.tg_id, seq), "напоминание R2 раньше его слота")
+        # QA (AT-20 «откат к предыдущей версии»): вторая версия v2 активна → снова активируем v (прежняя активная v2 →
+        # archived) → новое напоминание (слот R3) уходит текстом v, а не v2
+        marker2 = f"ШБЛ2-{c.tag}"
+        r3 = c.lc.users["R3"]
+        ver2 = expect(cm.post(f"/admin/v1/notifications/templates/{key}/versions",
+                              {"texts": _texts(c, marker2), "note": "e2e: вторая версия"}, headers=idem()), 201)
+        v2 = ver2["version"]
+        check(v2 > v and ver2["status"] == "draft", ver2)
+        ensure_step_up(cmst)
+        a2 = expect(cm.post(f"/admin/v1/notifications/templates/{key}/versions/{v2}/activate",
+                            {"reason": "e2e: активация второй версии"}), 200)
+        check(a2["status"] == "active" and a2["version"] == v2, a2)
+        det = expect(cm.get(f"/admin/v1/notifications/templates/{key}"), 200)
+        st = {x["version"]: x["status"] for x in det["versions"]}
+        check(det["active_version"] == v2 and st.get(v) == "archived" and st.get(v2) == "active", f"после v2: {st}")
+        ensure_step_up(cmst)
+        back = expect(cm.post(f"/admin/v1/notifications/templates/{key}/versions/{v}/activate",
+                              {"reason": "e2e: откат к предыдущей версии"}), 200)
+        check(back["status"] == "active" and back["version"] == v, f"откат к v{v}: {back}")
+        det = expect(cm.get(f"/admin/v1/notifications/templates/{key}"), 200)
+        st = {x["version"]: x["status"] for x in det["versions"]}
+        check(det["active_version"] == v and st.get(v) == "active" and st.get(v2) == "archived", f"после отката: {st}")
+        check(not s1.tg_sent(r3.tg_id, seq), "напоминание R3 раньше его слота")
+        s1.sleep_until(c.data["slot_rb"] + timedelta(seconds=2), "слот R3")
+        res = s1.plan_tick()
+        check(res["reminders"] >= 1, f"plan:tick: {res}")
+        msgs = wait_for(lambda: s1.tg_sent(r3.tg_id, seq), 30, what="напоминание R3 в Telegram")
+        text = msgs[0]["payload"]["text"]
+        check(marker in text and marker2 not in text and "{" not in text,
+              f"после отката к v{v} — текст v{v}: {text!r}")
+        c.data["tpl_rollback"] = True
         # сброс к тексту по умолчанию (step-up): новые напоминания — текстом из кода
         ensure_step_up(cmst)
         rs = expect(cm.post(f"/admin/v1/notifications/templates/{key}/reset", {"reason": "e2e: откат к тексту по умолчанию"}),
@@ -806,6 +891,7 @@ def s_template(c: Ctx) -> None:
         text = msgs[0]["payload"]["text"]
         check("Время занятия" in text and marker not in text, f"после сброса — текст по умолчанию: {text!r}")
         check(len(s1.tg_sent(r1.tg_id, seq)) == 1, "R1 получил напоминание повторно")
+        check(len(s1.tg_sent(r3.tg_id, seq)) == 1, "R3 получил напоминание повторно")
     finally:
         if active:
             hdr = staff_token("notifications", {"notif.templates.manage"}, cmst.staff_id, "communications")
@@ -861,6 +947,60 @@ def _campaign(c: Ctx, marker: str) -> dict[str, Any]:
         "route": "news",
         "segment": {"ui_lang": ["ru"], "age": ["adults"], "onboarded": True},
     }
+
+
+def _audience(params: dict[str, str]) -> tuple[set[str], list[dict[str, Any]]]:
+    """identity-consent /internal/v1/audience от имени notifications (как исполнение рассылки) — все страницы."""
+    hdr = s1.internal_token("notifications", "identity-consent")
+    ids: set[str] = set()
+    items: list[dict[str, Any]] = []
+    cursor: str | None = None
+    for _ in range(200):
+        q = {**params, "limit": "500", **({"cursor": cursor} if cursor else {})}
+        page = expect(httpx.get(f"{s1.IDENTITY}/internal/v1/audience", params=q, headers=hdr), 200)
+        items += page["items"]
+        ids |= {x["user_id"] for x in page["items"]}
+        cursor = page.get("next_cursor")
+        if not cursor:
+            break
+    return ids, items
+
+
+def s_audience_segments(c: Ctx) -> None:
+    """QA (AT-22 «сегмент: язык, возраст 14+/18+, онбординг, активность»): каждый фильтр сегмента отбирает и
+    исключает конкретных учеников сценария. Всегда вне аудитории: без согласия product_news (LB), детский профиль."""
+    u = c.lc.users
+    la, lb, p, lq, t, lu, ln = (u[k].account_id for k in ("LA", "LB", "P", "LQ", "T", "LU", "LN"))
+    kid = c.data["kid"]
+    cases: list[tuple[dict[str, str], set[str], set[str]]] = [
+        ({}, {la, p, lq, lu, ln}, {lb, t, kid}),                      # по умолчанию — взрослые с согласием
+        ({"ui_lang": "uz"}, {lu}, {la, p, lq, ln, lb, t, kid}),
+        ({"ui_lang": "ru"}, {la, p, lq, ln}, {lu, lb, t, kid}),
+        ({"age": "teens"}, {t}, {la, p, lu, lb, kid}),
+        ({"age": "teens,adults"}, {t, la, lu}, {lb, kid}),
+        ({"onboarded": "true"}, {la, p, lq, lu}, {ln, lb, kid}),
+        ({"onboarded": "false"}, {ln}, {la, p, lq, lu, lb, kid}),
+        ({"active_days": "1"}, {la}, {p, lq, lu, ln, lb, kid}),
+        ({"active_days": "-1"}, {p, lq, lu, ln}, {la, lb, kid}),
+        ({"ui_lang": "ru", "age": "teens,adults", "onboarded": "true", "active_days": "-7"}, {p, lq, t}, {la, lu, ln}),
+    ]
+    bad = []
+    for params, inside, outside in cases:
+        ids, items = _audience(params)
+        if not inside <= ids or ids & outside:
+            names = {v.account_id: k for k, v in u.items()} | {kid: "ребёнок"}
+            bad.append(f"{params}: нет {[names[x] for x in inside - ids]}, лишние {[names[x] for x in ids & outside]}")
+        extra = {k for x in items for k in x} - {"user_id", "locale"}
+        if extra:
+            bad.append(f"{params}: лишние поля аудитории {sorted(extra)}")
+    check(not bad, "; ".join(bad))
+    hdr = s1.internal_token("notifications", "identity-consent")
+    cnt = expect(httpx.get(f"{s1.IDENTITY}/internal/v1/audience/count", params={"ui_lang": "uz"}, headers=hdr), 200)
+    check(cnt["count"] == len(_audience({"ui_lang": "uz"})[0]) and cnt["by_lang"].get("ru", 0) == 0, f"count uz: {cnt}")
+    expect(httpx.get(f"{s1.IDENTITY}/internal/v1/audience", params={"age": "kids"}, headers=hdr), 422)
+    # аудиторию отдаёт только notifications
+    r = httpx.get(f"{s1.IDENTITY}/internal/v1/audience", headers=s1.internal_token("admin-bff", "identity-consent"))
+    check(r.status_code == 403, f"аудитория для admin-bff: {r.status_code}")
 
 
 def _run_campaign(cm: Browser, cid: str) -> dict[str, Any]:
@@ -941,6 +1081,19 @@ def s_campaigns(c: Ctx) -> None:
                         f"{s1.uid(lq.account_id)}'")
         check(st_q == "scheduled:quiet_hours", f"LQ в тихие часы: {st_q} (ожидали scheduled:quiet_hours)")
         check(not s1.tg_sent(lq.tg_id, seq, contains=m1), "рассылка ушла в тихие часы")
+        # QA (AT-22 «после окончания тихих часов по местному времени ученика»): запись отложена ровно до их конца
+        q_end = c.data["quiet_end"]
+        sched_at = s1._psql("SELECT to_char(scheduled_for AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') FROM "
+                            f"notifications.notifications WHERE user_id = '{s1.uid(lq.account_id)}' AND dedup_key = "
+                            f"'campaign:{s1.uid(cid1)}:{s1.uid(lq.account_id)}'")
+        check(sched_at and abs((parse_ts(sched_at) - q_end).total_seconds()) <= 90,
+              f"LQ: отложено до {sched_at}, конец тихих часов {q_end:%Y-%m-%dT%H:%M}Z")
+        # QA (AT-22 сегмент): язык UZ (LU) и «онбординг не пройден» (LN) — вне рассылки «RU, взрослые, онбординг»
+        lu, ln = c.lc.users["LU"], c.lc.users["LN"]
+        check(_recipient(cid1, lu.account_id) == "" and _recipient(cid1, ln.account_id) == "",
+              f"вне сегмента: LU={_recipient(cid1, lu.account_id)!r} LN={_recipient(cid1, ln.account_id)!r}")
+        check(not s1.tg_sent(lu.tg_id, seq, contains=m1) and not s1.tg_sent(ln.tg_id, seq, contains=m1),
+              "рассылка RU/онбординг ушла LU или LN")
         sent = wait_for(lambda: (lambda x: x if x["stats"]["sent"] >= 2 else None)(
             expect(cm.get(f"/admin/v1/notifications/campaigns/{cid1}"), 200)), 20, what="stats.sent")
         check(sent["stats"]["audience"] >= 3 and sent["stats"]["deferred"] >= 1, f"статистика: {sent['stats']}")
@@ -948,10 +1101,11 @@ def s_campaigns(c: Ctx) -> None:
         # подросток с согласием родителя её получает (первая рассылка для него)
         body2 = _campaign(c, m2)
         body2["segment"]["age"] = ["adults", "teens"]
+        body2["segment"]["ui_lang"] = ["ru", "uz"]  # QA: + UZ — LU получает текст UZ
         c2 = expect(cm.post("/admin/v1/notifications/campaigns", body2, headers=idem()), 201)
         cid2 = c2["campaign_id"]
         est2 = expect(cm.post(f"/admin/v1/notifications/campaigns/{cid2}/estimate", {}), 200)
-        check(est2["frequency_capped"] >= 2, f"оценка лимита частоты: {est2}")
+        check(est2["frequency_capped"] >= 2 and est2["by_lang"]["uz"] >= 1, f"оценка лимита частоты и UZ: {est2}")
         ensure_step_up(cmst)
         expect(cm.post(f"/admin/v1/notifications/campaigns/{cid2}/schedule",
                        {**sched, "expected_version": c2["version"]}, headers=idem()), 200)
@@ -964,6 +1118,27 @@ def s_campaigns(c: Ctx) -> None:
         check(_recipient(cid2, teen.account_id) == "created", f"подросток (teens в сегменте): "
               f"{_recipient(cid2, teen.account_id)}")
         wait_for(lambda: s1.tg_sent(teen.tg_id, seq, contains=m2), 30, what="рассылка с teens у подростка")
+        # QA: LU (интерфейс UZ) — текст UZ с его именем; LN (онбординг не пройден) — нет
+        check(_recipient(cid2, lu.account_id) == "created", f"LU во второй: {_recipient(cid2, lu.account_id)}")
+        uz_msg = wait_for(lambda: s1.tg_sent(lu.tg_id, seq, contains=m2), 30, what="рассылка UZ у LU")[0]
+        uz_text = uz_msg["payload"]["text"]
+        check(f"TilHero yangiliklari {m2}" in uz_text and "bizda yangilik" in uz_text and lu.first in uz_text
+              and "Новости TilHero" not in uz_text, f"текст UZ: {uz_text!r}")
+        check(_recipient(cid2, ln.account_id) == "", f"LN (онбординг не пройден): {_recipient(cid2, ln.account_id)}")
+        # QA (AT-22 «экстренная остановка прекращает отправку»): стоп уже завершённой первой рассылки отменяет то, что
+        # ещё не ушло, — отложенное тихими часами сообщение LQ; отправленное (LA) не отзывается
+        ensure_step_up(cmst)
+        st1 = expect(cm.post(f"/admin/v1/notifications/campaigns/{cid1}/stop", {"reason": "e2e: стоп после отправки"}),
+                     200)
+        check(st1["status"] == "stopped" and st1["stopped_by"] == cmst.staff_id, f"стоп done: {st1['status']}")
+        lq_st = s1._psql("SELECT telegram_status FROM notifications.notifications WHERE user_id = "
+                         f"'{s1.uid(lq.account_id)}' AND dedup_key = 'campaign:{s1.uid(cid1)}:{s1.uid(lq.account_id)}'")
+        la_st = s1._psql("SELECT telegram_status FROM notifications.notifications WHERE user_id = "
+                         f"'{s1.uid(la.account_id)}' AND dedup_key = 'campaign:{s1.uid(cid1)}:{s1.uid(la.account_id)}'")
+        check(lq_st == "cancelled" and la_st == "sent", f"после стопа: LQ={lq_st} LA={la_st}")
+        check(_recipient(cid1, lq.account_id) == "cancelled", f"получатель LQ: {_recipient(cid1, lq.account_id)}")
+        check(m1 not in json.dumps(lq.inbox(), ensure_ascii=False), "отменённая рассылка в центре уведомлений LQ")
+        c.data["campaign_stopped_done"] = cid1
         # третья: расписание → экстренная остановка до dispatch → никому не ушло
         c3 = expect(cm.post("/admin/v1/notifications/campaigns", _campaign(c, m3), headers=idem()), 201)
         cid3 = c3["campaign_id"]
@@ -987,9 +1162,33 @@ def s_campaigns(c: Ctx) -> None:
         leaked = [x for x in tg_all(seq3) if m3 in x["payload"].get("text", "")]
         check(not leaked, f"остановленная рассылка ушла: {len(leaked)}")
         scheduled.remove(cid3)
+        # QA (AT-22 «расписание → доставка в момент отправки»): рассылка на время через 2 ч — dispatch её не трогает
+        # (ни получателей, ни сообщений), снятие с расписания возвращает черновик
+        m4 = f"РСЛ4-{c.tag}"
+        c4 = expect(cm.post("/admin/v1/notifications/campaigns", _campaign(c, m4), headers=idem()), 201)
+        cid4 = c4["campaign_id"]
+        later = (datetime.now(UTC) + timedelta(hours=2)).replace(microsecond=0)
+        ensure_step_up(cmst)
+        s4 = expect(cm.post(f"/admin/v1/notifications/campaigns/{cid4}/schedule",
+                            {**sched, "expected_version": c4["version"],
+                             "send_at": later.isoformat().replace("+00:00", "Z")}, headers=idem()), 200)
+        scheduled.append(cid4)
+        check(s4["status"] == "scheduled" and parse_ts(s4["send_at"]) == later, f"расписание +2 ч: {s4['send_at']}")
+        seq4 = s1.tg_last_seq()
+        s1.dispatch()
+        time.sleep(1.5)
+        camp4 = expect(cm.get(f"/admin/v1/notifications/campaigns/{cid4}"), 200)
+        n4 = s1._psql(f"SELECT count(*) FROM notifications.campaign_recipients WHERE campaign_id = '{s1.uid(cid4)}'")
+        check(camp4["status"] == "scheduled" and camp4["started_at"] is None and n4 == "0",
+              f"до send_at: {camp4['status']} started_at={camp4['started_at']} получателей={n4}")
+        check(not [x for x in tg_all(seq4) if m4 in x["payload"].get("text", "")], "рассылка ушла раньше send_at")
+        un = expect(cm.post(f"/admin/v1/notifications/campaigns/{cid4}/unschedule", {"reason": "e2e: перенос"}), 200)
+        check(un["status"] == "draft", f"снятие с расписания: {un['status']}")
+        scheduled.remove(cid4)
+        c.data["campaign_future"] = cid4
         # список рассылок и сводка для дашборда
         lst = expect(cm.get("/admin/v1/notifications/campaigns", params={"limit": 50}), 200)["items"]
-        check({cid1, cid2, cid3} <= {x["campaign_id"] for x in lst}, "рассылки не в списке")
+        check({cid1, cid2, cid3, cid4} <= {x["campaign_id"] for x in lst}, "рассылки не в списке")
         c.data["campaigns"] = [cid1, cid2, cid3]
     finally:
         # уборка: незавершённые рассылки этого прогона не должны уйти позже (следующие dispatch)
@@ -1037,6 +1236,17 @@ def s_learners_admin(c: Ctx) -> None:
     check(card["plan"] and card["plan"]["goal"] == "travel" and card["notifications"]["categories"]["product"] is True,
           f"план/уведомления: {card['plan']} {card['notifications']}")
     check(card["tickets"] == [] and card["refreshed_at"], f"обращения в карточке: {card['tickets']}")
+    # QA (AT-23): график в карточке; полный @username — только с users.sensitive.read (super_admin)
+    sch = (card["plan"] or {}).get("schedule") or {}
+    check(sch.get("timezone") == c.lc.data["zone_day"] and sch.get("preferred_time") == "19:00"
+          and sch.get("duration_min") == 20, f"график в карточке: {sch}")
+    check(card["username"] == p.username, f"@username у super_admin: {card['username']!r}")
+    # QA (AT-23 «у аккаунта — собственное согласие, решение родителя — отдельно»): подросток T
+    t = c.lc.users["T"]
+    tc = expect(b.get(f"/admin/v1/learners/{t.account_id}"), 200)
+    check(tc["age_band"] == "14-17" and tc["guardian_consent"] == "granted" and tc["consent"]["basis"] == "self"
+          and "product_news" in tc["consent"]["purposes"] and tc["consent"]["revoked_at"] is None,
+          f"согласие подростка: guardian_consent={tc['guardian_consent']} consent={tc['consent']}")
     kc = expect(b.get(f"/admin/v1/learners/{kid}"), 200)
     check(kc["kind"] == "child" and kc["guardian"] and kc["guardian"]["user_id"] == p.account_id
           and kc["guardian_user_id"] == p.account_id and kc["children"] == [], f"карточка ребёнка: {kc.get('guardian')}")
@@ -1062,6 +1272,17 @@ def s_learners_admin(c: Ctx) -> None:
     sp = c.staff["support"].browser
     check(expect(sp.get("/admin/v1/learners", params={"q": p.account_id}), 200)["items"], "support не видит реестр")
     expect(sp.post(f"/admin/v1/learners/{p.account_id}/reveal", reveal), 403, "PERMISSION_DENIED")
+    # QA (AT-23): support (users.read без users.sensitive.read) — @username маской «первые 2 + ••• + последние 2» в
+    # реестре, карточке и у опекуна в карточке ребёнка; поиск по точному @username работает, полного значения нет
+    mask = f"{p.username[:2]}•••{p.username[-2:]}"
+    rows = expect(sp.get("/admin/v1/learners", params={"q": f"@{p.username}"}), 200)["items"]
+    check([x["user_id"] for x in rows] == [p.account_id] and rows[0]["username"] == mask,
+          f"support: поиск по @username → {[(x['user_id'], x['username']) for x in rows]}")
+    sc = expect(sp.get(f"/admin/v1/learners/{p.account_id}"), 200)
+    skc = expect(sp.get(f"/admin/v1/learners/{kid}"), 200)
+    blob = json.dumps([rows, sc, skc], ensure_ascii=False)
+    check(sc["username"] == mask and (skc["guardian"] or {}).get("username") == mask and p.username not in blob,
+          f"support: маска @username {sc['username']!r} / опекун {(skc['guardian'] or {}).get('username')!r}")
 
 
 # ---------------------------------------------------------------- AT-25 поддержка
@@ -1186,6 +1407,56 @@ def s_config_rollback(c: Ctx) -> None:
     c.data["config"] = (cur, new)
 
 
+def s_admin_theme_rollback(c: Ctx) -> None:
+    """QA (AT-24 «откат темы … и админки без сборки»): версия конфигурации admin → активация → admin-web получает её
+    из /admin/v1/experience/admin/current (читается при каждом открытии) → откат → снова прежняя."""
+    r2 = c.staff["root2"]
+    b = r2.browser
+    state = expect(b.get("/admin/v1/experience/admin/state"), 200)
+    cur = state["current"]["version"]
+    base = expect(b.get(f"/admin/v1/experience/admin/versions/{cur}"), 200)
+    payload = {k: v for k, v in base["payload"].items() if k not in ("app", "version")}
+    payload["flags"] = {**payload.get("flags", {}), "e2e_admin_marker": True}
+    payload["layout"] = {**payload["layout"], "density": "compact" if payload["layout"].get("density") != "compact"
+                         else "comfortable"}
+    for _ in range(5):
+        new = f"1.{secrets.randbelow(9000) + 1000}.{secrets.randbelow(9000) + 1000}"
+        r = b.post("/admin/v1/experience/admin/versions",
+                   {"version": new, "payload": payload, "change_note": f"e2e: тема админки {c.tag}"}, headers=idem())
+        if r.status_code != 409:
+            break
+    expect(r, 201)
+    other = expect(c.staff["comms"].browser.get("/admin/v1/experience/admin/current"), 200)  # любой сотрудник
+    check(other["version"] == cur, f"до активации: {other['version']}")
+    activated = False
+    try:
+        ensure_step_up(r2)
+        act = expect(b.post("/admin/v1/experience/admin/activate", {"version": new, "reason": "e2e: тема админки"}),
+                     201)
+        activated = True
+        check(act["version"] == new and act["previous_version"] == cur and act["app"] == "admin", act)
+        got = expect(c.staff["comms"].browser.get("/admin/v1/experience/admin/current"), 200)
+        check(got["version"] == new and got["layout"]["density"] == payload["layout"]["density"],
+              f"админка после активации: {got['version']} {got['layout'].get('density')}")
+        rb = expect(b.post("/admin/v1/experience/admin/rollback", {"reason": "e2e: откат темы админки"}), 201)
+        activated = False
+        check(rb["version"] == cur and rb["kind"] == "rollback" and rb["previous_version"] == new, rb)
+        got = expect(c.staff["comms"].browser.get("/admin/v1/experience/admin/current"), 200)
+        check(got["version"] == cur and got["layout"]["density"] == base["payload"]["layout"]["density"]
+              and "e2e_admin_marker" not in (got.get("flags") or {}), f"админка после отката: {got['version']}")
+        acts = expect(b.get("/admin/v1/experience/admin/activations", params={"limit": 5}), 200)["items"]
+        check([a["kind"] for a in acts[:2]] == ["rollback", "activate"], [a["kind"] for a in acts[:2]])
+        if c.data.get("config"):  # тема Mini App не тронута
+            mini = expect(b.get("/admin/v1/experience/miniapp/state"), 200)
+            check(mini["current"]["version"] == c.data["config"][0], f"Mini App: {mini['current']['version']}")
+    finally:
+        if activated:
+            hdr = staff_token("experience-config", {"config.publish"}, r2.staff_id, "super_admin")
+            httpx.post(f"{s1.EXPERIENCE}/admin/v1/experience/admin/rollback", json={"reason": "e2e: уборка"},
+                       headers=hdr)
+    c.data["admin_config"] = (cur, new)
+
+
 def all_records(b: Browser, since: int) -> list[dict[str, Any]]:
     """Журнал аудита с начала прогона — постранично (одна выборка вместо запроса на каждое действие: лимит admin-bff
     на сотрудника — 300 запросов в минуту)."""
@@ -1243,6 +1514,14 @@ def s_audit(c: Ctx) -> None:
     if d.get("config"):
         want += [("config.create", {"actor_id": root.staff_id}), ("config.publish", {"actor_id": root.staff_id}),
                  ("config.rollback", {"actor_id": root.staff_id})]
+    # QA: дополнительные команды шагов A11 (откат к версии), A13 (стоп завершённой, снятие с расписания), A16a
+    if d.get("campaign_stopped_done"):
+        want += [("campaign.stopped", {"object_id": d["campaign_stopped_done"], "actor_id": cm.staff_id})]
+    if d.get("campaign_future"):
+        want += [("campaign.unscheduled", {"object_id": d["campaign_future"], "actor_id": cm.staff_id})]
+    if d.get("admin_config"):
+        want += [("config.publish", {"actor_id": root.staff_id, "object_id": f"admin@{d['admin_config'][1]}"}),
+                 ("config.rollback", {"actor_id": root.staff_id, "object_id": f"admin@{d['admin_config'][0]}"})]
     since = d["started_at"]
     recs: list[dict[str, Any]] = []
 
@@ -1398,22 +1677,28 @@ STEPS: list[tuple[str, Callable[[Ctx], None], bool]] = [
     ("A04 AT-16 5 неверных паролей → 423 ACCOUNT_LOCKED; верный во время блокировки — тоже 423", s_lockout, False),
     ("A05 AT-16 первый вход communications: временный пароль → смена → TOTP → done", s_comms_login, True),
     ("A06 AT-16 первый вход support: временный пароль → смена → done (MFA по желанию)", s_support_login, True),
-    ("A07 AT-17 RBAC: support без «Что нового»/уведомлений — 403 в admin-bff и в доменах", s_rbac, False),
-    ("A08 ученики через telegram-bff: LA (product_news), LB, родитель + ребёнок, R1/R2 со слотами, S", s_learners,
-     True),
-    ("A09 AT-19 пустой перевод UZ / запрещённый маршрут → 422, черновик не сохранён", s_note_translation, False),
+    ("A07 AT-17 RBAC: support без «Что нового»/уведомлений — 403 в admin-bff и в доменах; manage без publish — 403",
+     s_rbac, False),
+    ("A08 ученики через telegram-bff: LA (product_news, занятие), LB, родитель + ребёнок, R1/R3/R2 со слотами, S, "
+     "LQ, T, LU (UZ), LN (без онбординга)", s_learners, True),
+    ("A09 AT-19 пустой перевод UZ / запрещённый маршрут → 422 при создании и правке (PUT), черновик не изменён",
+     s_note_translation, False),
     ("A10 AT-18 «Что нового»: черновик → публикация (403 без step-up → step-up → 201) → ученик видит один раз → "
      "статистика → архив", s_whats_new, False),
-    ("A11 AT-20 шаблон lesson.reminder: 422 → версия → активация → напоминание с новым текстом → сброс → текст по "
-     "умолчанию", s_template, False),
+    ("A11 AT-20 шаблон lesson.reminder: 422 → версия → активация → напоминание с новым текстом → v2 → откат к v → "
+     "напоминание текстом v → сброс → текст по умолчанию", s_template, False),
     ("A12 AT-21 тестовая отправка — только тестовый чат, «[ТЕСТ]», ученикам ничего", s_test_send, False),
-    ("A13 AT-22 рассылки: охват → расписание → доставка по сегменту; лимит 7 дней; экстренная остановка",
-     s_campaigns, False),
-    ("A14 AT-23 реестр и карточка ученика (с ребёнком), маска; reveal 403 без step-up → значение + аудит",
-     s_learners_admin, False),
+    ("A12a AT-22 сегменты аудитории (identity-consent): язык, возраст 14+/18+, онбординг, активность [QA]",
+     s_audience_segments, False),
+    ("A13 AT-22 рассылки: охват → расписание → доставка по сегменту (RU/UZ); тихие часы до их конца; лимит 7 дней; "
+     "стоп отменяет неотправленное; send_at в будущем", s_campaigns, False),
+    ("A14 AT-23 реестр и карточка ученика (с ребёнком), маски Telegram ID и @username, согласие подростка; reveal 403 "
+     "без step-up → значение + аудит", s_learners_admin, False),
     ("A15 AT-25 поддержка: взять, ответ и заметка; ученик видит только ответ, уведомление в Telegram", s_support_desk,
      False),
     ("A16 AT-24 конфигурация miniapp: активация → откат → telegram-bff отдаёт прежнюю версию", s_config_rollback, False),
+    ("A16a AT-24 тема админки: активация → admin-web получает её → откат → прежняя [QA]", s_admin_theme_rollback,
+     False),
     ("A17 AT-24 аудит: записи привилегированных команд, без секретов; цепочка цела", s_audit, False),
     ("A18 дашборд: 4 блока available=true", s_dashboard, False),
     ("A19 сессия: чужой User-Agent → отзыв; logout → 401", s_logout, False),
