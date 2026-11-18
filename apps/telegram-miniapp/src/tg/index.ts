@@ -5,7 +5,5 @@ export * from "./theme";
 export * from "./haptics";
 export * from "./buttons";
 export * from "./popup";
-export * from "./biometric";
-export * from "./storage";
-export * from "./homeScreen";
+export * from "./store";
 export type * from "./types";

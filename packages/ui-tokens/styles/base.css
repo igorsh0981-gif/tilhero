@@ -1,14 +1,14 @@
 /* ==========================================================================
-   Base: reset, document typography, focus, utilities. ТЗ UI/CSS §2 base.css
+   Base: fallback faces, reset, notebook paper, typography helpers, focus.
    ========================================================================== */
-/* Metric-matched fallbacks for the brand fonts (size-adjust / ascent / descent computed from the font files
-   against Arial / Arial Bold / Courier New and their metric clones Liberation Sans / Mono). */
+/* Size-matched fallbacks for the brand fonts (approximate size-adjust against Arial / Arial Bold and their metric
+   clones), so the first frame and the swapped frame occupy the same lines. */
 @font-face {
-  font-family: "Manrope Fallback";
+  font-family: "Onest Fallback";
   src: local("Arial"), local("ArialMT"), local("Liberation Sans"), local("Roboto");
-  size-adjust: 102.1%;
-  ascent-override: 104.41%;
-  descent-override: 29.38%;
+  size-adjust: 101%;
+  ascent-override: 100%;
+  descent-override: 26%;
   line-gap-override: 0%;
 }
 @font-face {
@@ -21,12 +21,9 @@
   line-gap-override: 0%;
 }
 @font-face {
-  font-family: "JetBrains Mono Fallback";
-  src: local("Courier New"), local("CourierNewPSMT"), local("Liberation Mono"), local("Roboto Mono");
-  size-adjust: 99.98%;
-  ascent-override: 102.02%;
-  descent-override: 30%;
-  line-gap-override: 0%;
+  font-family: "Caveat Fallback";
+  src: local("Comic Sans MS"), local("Segoe Print"), local("Liberation Sans");
+  size-adjust: 82%;
 }
 
 @layer base {
@@ -35,61 +32,38 @@
   html, body { margin: 0; height: 100%; }
   html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   body {
-    background: var(--bg);
+    background-color: var(--paper);
     color: var(--ink);
     font-family: var(--font-body);
     font-size: var(--fs-base);
     line-height: var(--lh-base);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    text-rendering: optimizeLegibility;
     overflow: hidden;
     overscroll-behavior: none;
   }
   #root { height: 100%; }
   button, input, textarea, select { font: inherit; color: inherit; letter-spacing: inherit; }
-  button {
-    cursor: pointer; background: none; border: 0; padding: 0; margin: 0;
-    -webkit-tap-highlight-color: transparent; text-align: inherit;
-  }
-  button:disabled, [aria-disabled="true"] { cursor: default; }
-  a { color: inherit; text-decoration: none; -webkit-tap-highlight-color: transparent; }
-  h1, h2, h3, h4, p, ul, ol, dl, dd, figure { margin: 0; }
+  button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  button:disabled { cursor: not-allowed; }
+  h1, h2, h3, h4, p, ul, ol, figure { margin: 0; }
   ul, ol { padding: 0; list-style: none; }
-  input, textarea { border: 0; outline: 0; background: transparent; min-width: 0; }
-  ::placeholder { color: var(--muted); opacity: 1; }
-  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 10px; }
   img, svg { display: block; }
+  ::placeholder { color: var(--ink2); opacity: .8; }
+  :focus-visible { outline: 3px solid var(--pen); outline-offset: 2px; }
 
-  .mono { font-family: var(--font-mono); font-feature-settings: "zero" 0; }
-  .num { font-variant-numeric: tabular-nums; }
   .sr {
     position: absolute !important; width: 1px; height: 1px; overflow: hidden;
     clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
   }
-  .ic { flex: 0 0 auto; display: block; }
+  .disp { font-family: var(--font-display); }
+  .hand { font-family: var(--font-hand); }
+  .num { font-variant-numeric: tabular-nums; }
   .grow { flex: 1; min-width: 0; }
-  .pd { padding: 0 var(--gutter); }
-  .mt4 { margin-top: 4px; } .mt8 { margin-top: 8px; } .mt12 { margin-top: 12px; }
-  .mt16 { margin-top: 16px; } .mt24 { margin-top: 24px; } .mb6 { margin-bottom: 6px; }
-  .lead { font-size: var(--fs-base); line-height: 1.5; color: var(--ink-2); }
-  .hint { font-size: 12px; color: var(--muted); line-height: 1.4; }
-  .hint.bad { color: var(--bad); }
-  .hint.ok { color: var(--good); }
 
-  /* Bento Volt labels (FinAdvisor family): 800 · uppercase · tracked */
-  .lbl {
-    font-family: var(--font-body); font-weight: 800; font-size: var(--fs-micro); line-height: 1.3;
-    letter-spacing: var(--label-tracking); text-transform: uppercase; color: var(--muted);
-  }
-
-  @keyframes enterPush { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
-  @keyframes enterPop { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: none; } }
-  @keyframes enterFade { from { opacity: 0; } to { opacity: 1; } }
   @keyframes sheetUp { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
-  @keyframes popIn { from { transform: scale(.94); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   @keyframes toastIn { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes shake { 20% { transform: translateX(-9px); } 40% { transform: translateX(8px); } 60% { transform: translateX(-5px); } 80% { transform: translateX(3px); } }
-  @keyframes livePulse { 50% { opacity: .25; } }
 }

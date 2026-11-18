@@ -1,160 +1,140 @@
 # telegram-bff
 
-**Владелец:** команда Telegram-контура. **Bounded context:** сессия Mini App по Telegram `initData` и агрегация API доменов для Mini App. Своих данных не хранит (stateless), в Redis — refresh-сессии, счётчики rate limit, кэш Home, время прошлого визита (AT-23) и последний расчёт «Поездки» по событию.
+**Владелец:** команда Telegram-контура. **Bounded context:** сессия Mini App TilHero по Telegram `initData`, активный ученик (родитель ↔ детский профиль 6–13) и агрегация API доменов для Mini App. Своих данных не хранит (stateless), в Redis — refresh-сессии с активным учеником, одноразовость initData, счётчики лимитов.
 
-Стек: Node 22, Fastify 5, TypeBox, `@tilhero/ts-common` (контекст трассировки, формат ошибок, внутренний JWT, `ServiceClient`, health). Порт 8001.
-Публичный контракт — `packages/contracts/src/bff.ts` (типы импортируются, схемы TypeBox сверяются с ними при `tsc`).
+Стек: Node 22, Fastify 5, TypeBox, `@tilhero/ts-common` (контекст трассировки, формат ошибок, внутренний JWT, `ServiceClient`, лимитер, health). Порт 8001.
+Публичный контракт — `packages/contracts/src/bff.ts` (типы импортируются, схемы TypeBox в `src/schemas.ts` сверяются с ними при `tsc`). Внутренние API доменов — `docs/sprint1/INTERNAL_API.md` §1–§6, §9.
 
 ## Как это работает
 
 ```
-Mini App ──initData──▶ POST /v1/session/telegram ──▶ identity-consent /internal/v1/users/telegram-login
-          ◀── access JWT (15 мин) + refresh (12 ч)      preferences /internal/v1/me/preferences (onboarding_completed)
-Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA, kid=iss=telegram-bff, aud=<домен>, sub=user_id)──▶ домены
+Mini App ──initData──▶ POST /v1/session/telegram ──▶ identity-consent /internal/v1/users/telegram-login (аккаунт, ученики)
+          ◀── access JWT (15 мин) + refresh (12 ч)      learning-plan /internal/v1/me/plan?tz= × каждый ученик (onboarding)
+Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA, kid=iss=telegram-bff, aud=<домен>, sub=аккаунт|ученик)──▶ домены
 ```
 
-- **initData** проверяется по спецификации Telegram: HMAC-SHA256 с ключом `HMAC("WebAppData", BOT_TOKEN)`, сравнение подписи `crypto.timingSafeEqual`, `auth_date` обязателен, не старше `INIT_DATA_MAX_AGE_SECONDS` и не из будущего (> 60 с), `user` обязателен, повторяющиеся ключи отклоняются. Подделка → `401 INIT_DATA_INVALID`, просрочка → `401 INIT_DATA_EXPIRED` (AT-18).
-- **Access JWT** — HS256 (`SESSION_JWT_SECRET`), `iss=telegram-bff`, `aud=telegram-miniapp`, claims `sub` (user_id), `sid` (сессия), `pin` (true — PIN не нужен или подтверждён).
-- **Refresh** — 32 случайных байта (base64url). В Redis только `sha256(token)` → `{sid, uid, pin}`, TTL `REFRESH_TTL_SECONDS`. Каждый refresh одноразовый (ротация); повтор использованного токена = кража → отзывается вся сессия `sid`. Access-токен отозванной сессии отклоняется сразу (`401 SESSION_REVOKED`) — при каждом запросе проверяется, что `sid` жив.
-- **Гейт PIN.** Если у пользователя включён PIN, новая сессия получает `pin=false` (`security.pin_required=true`) и до `POST /v1/session/pin/verify` или `/biometric/verify` доступны только `/v1/session/*`, `/v1/profile/security/pin/reset-*`, `/v1/legal/policy`, `/v1/experience/config`; остальное → `423 PIN_REQUIRED`. После подтверждения выдаются новые токены с `pin=true`.
-- **Отзыв сессий:** logout — текущая; смена/установка PIN — все остальные сессии пользователя; сброс PIN кодом — все (в ответе новая сессия); запрос удаления — все.
-- **Внутренний JWT v2** (ts-common, совместим с py-common): Ed25519, подпись личным ключом BFF, `kid = iss`. Stage/prod — `INTERNAL_JWT_PRIVATE_KEY`; dev/test — ключ выводится из `INTERNAL_JWT_SECRET` (`HMAC-SHA256(secret, "tilhero-internal-jwt:telegram-bff")`). Повтор вызова домена после 5xx/таймаута — только для GET/HEAD/OPTIONS или с `Idempotency-Key` (PUT/DELETE PIN не повторяются).
-- **Ответы сериализуются по схеме** (fast-json-stringify, схемы сверены с `bff.ts` при `tsc`): клиент получает только поля контракта, служебные поля доменов (`user_id`, внутренние заметки, `assignee_id`, …) отбрасываются. Маршрут `/v1` без схемы 2xx не даёт приложению стартовать.
-- **Ошибки доменов** (4xx) отдаются клиенту как есть: `code`, HTTP-статус, `details`, `trace_id` запроса. Недоступность/таймаут/5xx/открытый circuit breaker, а также отказ внутренней авторизации (ошибка конфигурации) → `503 UPSTREAM_UNAVAILABLE {service}`. Stack trace наружу не уходит никогда (`500 INTERNAL_ERROR`).
-- **Remote Experience Config** кэшируется в памяти инстанса на `EXPERIENCE_CACHE_SECONDS`; при недоступности experience-config отдаётся последняя полученная версия (stale-cache для Home), а если её нет — Home строится по вшитой раскладке (как сид 2.0.3).
-- **Каталог событий** (`src/events.ts`): Mini App → BFF → event-catalog (`EVENTS_URL`, aud внутреннего JWT `events`, без `sub` — каталог не пользовательский домен); n8n в read path не участвует. EventSummary/EventDetail маппятся в `EventCard`/`EventDetailView` поле-в-поле (служебные поля каталога не копируются), медиа без https/provenance → `null` (UI рисует fallback), запись с неизвестным контракту статусом lifecycle отбрасывается (деталь → 404), неизвестные и повторные шаги трека — тоже, цена — только строки-десятичные с ISO-валютой и https-источником, ссылки — только https. Сбой каталога → `503 EVENTS_UNAVAILABLE` (stale-копии у поиска нет).
-- **Предложения поездки** (`src/offers.ts`, спринт 5): Mini App → BFF → offers `POST /internal/v1/offers:build` (`OFFERS_URL`, aud `offers`, `sub` = user_id). Города вылета и `flight_prefs` BFF читает из preferences пользователя (сбой preferences → 503: без городов вылета расчёт был бы неверным), язык — из identity (сбой → `ru`). GET шлёт нейтральные overrides (`departure_iata: null, direct_only/near_venue: false, extra_nights: 0`) — тот же `params_hash`, что и пересчёт без изменений. Ответ offers — недоверенные данные: тело читается с пределом `OFFERS_MAX_RESPONSE_BYTES`, строки чистятся от управляющих/bidi-символов, необязательные ссылки (`photo_url`, `website`) не-https → `null`, битые элементы `hotels_nearby`/`poi` отбрасываются (не больше 8/10), неизвестные `notes` — тоже; всё остальное обязано пройти схему `OfferSetView` (Ajv: ссылки только `https://host…` без userinfo/пробелов, деньги — строки-десятичные, длины строк, перечисления кодов, `offer_id` — UUID, `event_id` = запрошенному), иначе `503 OFFERS_UNAVAILABLE` и строка лога `offers bad response` (путь и правило, без значений). Лишние поля удаляются проекцией по схеме. Лимит — `RATE_LIMIT_OFFERS_PER_MIN` (20) расчётов в минуту на пользователя (Redis, общий для GET и пересчёта). Ошибки offers: 404 → `404 EVENT_NOT_FOUND`; 422 → `OFFER_DEPARTURE_INVALID` как есть, прочее — `VALIDATION_ERROR` без текста домена; 429 → `429 RATE_LIMITED {retry_after}`; 5xx, таймаут `OFFERS_TIMEOUT_MS`, сеть, отказ внутренней авторизации → `503 OFFERS_UNAVAILABLE`. Деталь события от offers не зависит.
-- **Исправление 5.1 — бюджет и выбор отеля** (`docs/sprint5/FEEDBACK_5_1.md` §B): в `offers:build` BFF передаёт `budget: {min, max}` — бюджет профиля на 1 человека за поездку, USD, строки с 2 знаками. Пресет → границы как `BUDGET_PRESETS` в preferences (`under_500` → `{min: null, max: "500.00"}` — нижняя граница 0 означает «без нижней»; `500_1000` → `{"500.00", "1000.00"}`; `1000_2000`; `2000_5000`); `custom` → `{min: null, max: custom_amount}`; диапазон без пресета — `min/max` профиля; нет бюджета, не-USD, больше 1 000 000 (предел offers) или мусор → поле `budget` не отправляется (расчёт без бюджета). Пересчёт принимает `hotel_id` (≤ 64, `^[A-Za-z0-9_-]+$` или `null`) → `overrides.hotel_id`; `null`/не задан и GET — поле не отправляется. В ответе проверяются `budget`, `recommended_tier`, `hotel_chosen_by`, у тарифа и отеля рядом `budget_fit` (`within|over|unknown`) и `over_by` (только при `over` и обязателен при нём — иначе тариф → 503, отель рядом отбрасывается), у отеля рядом `per_person_share`, у билета `fx` (`{price_per_person_usd, rate (положительная десятичная, ≤ 8 цифр до и ≤ 12 после запятой, ≤ 24 символов — как отдаёт gateway), date YYYY-MM-DD, source: "cbu.uz"} | null`; при `fx` обязательно `in_total: true` и валюта не USD, иначе 503; note `TICKET_FX_CONVERTED`); `budget.min > max` → 503; `recommended_tier` при `tiers: null` → `null`. **Совместимость со старым offers** (полей нет): `budget: null`, `recommended_tier: null`, `hotel_chosen_by: "rules"`, `budget_fit: "unknown"`, `over_by: null`, `ticket.fx: null`, `per_person_share` = `price_total / travellers` (центы, банковское округление) и одно предупреждение `offers response without 5.1 fields` в лог. **Выкладка при старом offers** (`extra="forbid"`): без бюджета и выбранного отеля поля 5.1 не отправляются; если offers ответил 422 `VALIDATION_ERROR` и все ошибки — по `budget`/`overrides.hotel_id`, BFF один раз повторяет запрос без них (расчёт без бюджета, отель по правилам) и один раз пишет в лог `offers rejected 5.1 request fields`. Повтор снова неудачен → обычное отображение ошибки.
-- **Прошедшие события (5.1, §A):** `is_past` из каталога пропускается в карточках (каталог, Home/рельсы, в т.ч. копия Home из Redis) и в детали. Каталог без поля (events ещё не обновлён) → `is_past: false` и одно предупреждение `events response without boolean is_past` в лог; BFF дату сам не пересчитывает.
-- **Обращение с `context.offer_id`**: BFF читает снимок `GET /internal/v1/offers/{id}` с `sub` (только свой; обычный таймаут доменов `UPSTREAM_TIMEOUT_MS`). Найден — из снимка (единое правило с Mini App): `price_snapshot` = `totals.total` (сумма пакета, которую видел пользователь, USD; только положительная — `"0.00"` не кладётся, как и в Mini App), `fetched_at` = `created_at` снимка; `provider_id` и `deeplink` — компонента из `provider_id` клиента (если он есть в снимке со `status: ok`), иначе главного компонента (перелёт → отель → билет, первый `ok` с https-ссылкой); `offer_id`, `event_id` — из снимка. Клиентские `price_snapshot`/`deeplink` при `offer_id` не принимаются никогда. Чужой/несуществующий/не-UUID снимок, сбой или отсутствие offers → `offer_id` (и клиентские цена/ссылка) убираются, обращение создаётся. Результат проверки кэшируется в Redis по `Idempotency-Key` (`bff:support:offerctx:<user>:<key>:<offer_id>:<provider>`, 24 ч): повтор отправляет в support то же тело, даже если offers за это время упал или поднялся (нет ложного `IDEMPOTENCY_KEY_REUSED`). Запоминается только после ответа support или его 5xx/таймаута (исход неизвестен); при 4xx support — нет (повтор проверит снимок заново). Сбой Redis кэш пропускает. Без `offer_id` контекст передаётся как раньше.
-- **Home** (`src/home.ts`): рельсы из каталога, кэш `bff:home:<user_id>` в Redis (`HOME_CACHE_SECONDS` свежий, `HOME_STALE_SECONDS` TTL stale-копии). Ошибка чтения/записи кэша не ломает Home — кэш пропускается (полный отказ Redis → 503 раньше, на проверке сессии). Кэш сбрасывается (MULTI: `INCR bff:home:gen:<user_id>` + `DEL`; сборка читает поколение до запросов и пишет копию Lua-скриптом, только если поколение не изменилось — подборка по старым предпочтениям не перезапишет сброс) при `PATCH /v1/profile/preferences`, `PUT /v1/profile/departures`, `POST /v1/profile/onboarding/complete`; общая подборка при недоступном preferences не кэшируется и не затирает stale-копию; копия из Redis при чтении снова проходит маппинг контракта. `best_for_you` отказывает, только если упали все запросы по интересам.
+- **Два субъекта сессии.** Access JWT (HS256, `SESSION_JWT_SECRET`, `iss=telegram-bff`, `aud=telegram-miniapp`): `sub` — аккаунт Telegram, `lrn` — активный ученик (по умолчанию сам аккаунт), `sid`, `pin`. Новая сессия всегда начинается с `lrn = sub`.
+- **Субъект внутреннего JWT** (`src/account.ts`: `asAccount` / `asLearner`):
+
+  | Домен | sub |
+  |---|---|
+  | learning-plan (план, график, today, activities, справочники) | ученик (`lrn`) |
+  | notifications — центр уведомлений (`/me/inbox*`) | ученик |
+  | experience-config — `release-notes/for-me`, `/seen`, `/feed` | ученик |
+  | identity-consent `/me/*`, `guardian-consents/{token}/accept\|decline` | аккаунт |
+  | social (приглашения, семья) | аккаунт |
+  | support | аккаунт (пишет и получает ответы в Telegram аккаунт) |
+  | identity `telegram-login`, `legal/policy`, `GET guardian-consents/{token}`; experience `experience/miniapp/current` | без sub |
+
+  Матрица по всем маршрутам — `test/subjects.test.ts`.
+- **Переключение ученика** (`POST /v1/session/learner`): BFF проверяет ученика в identity-consent `GET /internal/v1/me/learners/{id}` от имени аккаунта (свой или свой ребёнок, иначе `404 LEARNER_NOT_FOUND`; ответ сверяется: тот же id, `kind=child`, есть в `/me.learners`). Выход **из** детского профиля (к родителю или другому ребёнку) при заданном коде родителя требует `pin` (нет/неверный → `401 PIN_INVALID`, блокировка → `423 PIN_LOCKED`, лимит `tg.pin` 5/мин); вход в детский профиль кода не требует. Ответ собирается до перевыпуска refresh (сбой домена не ломает текущую сессию), затем в той же сессии перевыпускаются токены с новым `lrn`. **Активный ученик — свойство сессии в Redis:** access-токен, выданный до переключения, сразу перестаёт действовать (`401 TOKEN_EXPIRED {reason: learner_switched}` → клиент делает refresh).
+- **Refresh** — 32 случайных байта (base64url), в Redis только `sha256` → `{sid, uid, lrn, pin}`; ротация на каждом использовании, повтор использованного токена = кража → отзыв всей сессии. При refresh ученик перепроверяется по `/me.learners`: детский профиль исчез → активным становится аккаунт.
+- **Гейт кода родителя** (как PIN aievent): если код задан, новая сессия получает `pin=false` (`security.pin_required=true`), до `POST /v1/session/pin/verify` или `/biometric/verify` доступны только `/v1/session/*` (кроме `learner`), сброс кода, политика, конфиг, просмотр ссылки согласия родителя; остальное → `423 PIN_REQUIRED`.
+- **Сброс кода с задержкой (ревью T-8).** Верный прежний код (проверка, выход из детского профиля) отменяет ожидающий сброс. Если срок сброса наступил, identity вводит новый код в действие при проверке и отвечает `pin_reset_applied: true` — BFF отзывает все остальные сессии аккаунта (текущая, подтвердившая новый код, остаётся).
+- **Детский профиль** (`lrn ≠ sub`): приглашения — `403 INVITES_NOT_ALLOWED` (контракт); команды взрослого — создание детей, решение по согласию подростка и список/отзыв решений, код родителя и биометрия, согласия и возраст аккаунта (`POST/DELETE /v1/profile/consent`, `PUT /v1/profile/age`), удаление аккаунта, переписка с поддержкой (CONVENTIONS §8: детям — никаких сообщений от незнакомых) — `403 ADULT_REQUIRED`. Домены в этих случаях не вызываются.
+- **Зона клиента для плана** (QA D-03, ревью T-2): learning-plan создаёт план по умолчанию при первом `GET /internal/v1/me/plan` в зоне `?tz=`. BFF передаёт зону клиента в **каждый** запрос плана: `GET /v1/plan?tz=<IANA>` (контракт) или заголовок `X-Timezone` (Mini App шлёт его с каждым запросом; не формата IANA — игнорируется), в том числе при сборке сессии, профиля и списка учеников (`onboarding_completed` каждого ученика). При первом входе (identity `is_new=true`) план аккаунта не запрашивается вовсе: его ещё нет, `onboarding_completed=false`; план создаст первый `GET /v1/plan?tz=` клиента. Без зоны клиента (не Mini App) learning-plan берёт зону по умолчанию, как раньше.
+- **Профиль:** `account` — identity `/me`; `learners` — ученики из identity + `onboarding_completed` из плана каждого (learning-plan, параллельно; сбой → 503, частичного профиля нет); `notifications` — активного ученика: аккаунт — `/me.settings`, детский профиль — `settings` из identity `/me/learners/{id}` (если identity их не отдаёт — настройки аккаунта, см. «Отклонения»). `PATCH /v1/profile/settings`: `locale` — всегда аккаунту (`/me/settings`), `notifications` и `display_name` — активному ученику (аккаунт → `/me/settings`, ребёнок → `PATCH /me/learners/{id}` `{display_name?, settings?}`); `display_name` у аккаунта → 422.
+- **«Что нового»** (`GET /v1/whats-new`): из плана активного ученика — `onboarded_at = onboarding_completed_at`, из identity — `lang = locale` аккаунта (язык интерфейса Mini App и сообщений; один источник языка для родителя и детских профилей — ревью T-6) и возраст ученика → `age`: `kids` (6-9, 10-13), `teens` (14-17), `adults` (18+ и не выбран); режим выбирает experience-config. Онбординг не завершён → `{mode: none}` без вызова experience-config. Заметок ≤ 5; маршрут/иконка пункта не из `packages/contracts/release-notes.json` → `null`; режим вне контракта или пусто → `none`. Лента `GET /v1/news` — тот же сегмент.
+- **Согласие родителя (14–17):** `POST /v1/profile/guardian-consent` → identity `{token, expires_at}` → ссылка `${TELEGRAM_APP_LINK}?startapp=gc_<token>` (токен неожиданного формата → 503, ссылка не строится). `GET /v1/guardian-consents/{token}` — публично (лимит по IP), решение — от имени аккаунта родителя (родитель без своего согласия → `403 CONSENT_REQUIRED {purpose: "terms"}` identity, проходит клиенту). Решения родителя (§11): `GET /v1/family/guardian-consents` → identity `GET /internal/v1/me/guardian-consents`, `POST /v1/family/guardian-consents/{teen_user_id}/revoke` → identity `POST /internal/v1/me/guardian-consents/{teen_user_id}:revoke` (sub = аккаунт; чужой подросток — `404 GUARDIAN_CONSENT_NOT_FOUND` identity; неверный формат id — тот же 404 без вызова домена; ответ о другом подростке → 503). Статус домена `revoked` → `declined`, записи вне контракта не показываются.
+- **Идемпотентность:** `Idempotency-Key` (UUID) обязателен для `POST /v1/plan/activity`, `POST /v1/invites`, `POST /v1/support/tickets` (`422 IDEMPOTENCY_KEY_REQUIRED`), необязателен для `POST /v1/learners` и сообщений поддержки; пробрасывается в домен в нижнем регистре. Создающие команды с ключом ServiceClient повторяет после 5xx/таймаута с тем же ключом, без ключа — не повторяет.
+- **If-Match** (`PATCH /v1/plan`): `3`, `"3"` или `W/"3"` → домену `If-Match: 3`; ServiceClient заголовков не принимает — `DomainClient` добавляет их через `AsyncLocalStorage` (см. «Запросы к общему коду»).
+- **Ответы сериализуются по схеме** (fast-json-stringify): клиент получает только поля контракта; маршрут `/v1` без схемы 2xx не даёт приложению стартовать. Перечисления домена вне контракта приводятся в `src/views.ts` (центр уведомлений: `telegram_status=skipped` → `in_app_only`, неизвестная категория → `service`, `startapp` не формата start_param → `null`).
+- **Ошибки доменов** (4xx) отдаются клиенту как есть: `code`, HTTP-статус, `details`, `trace_id` запроса. Недоступность/таймаут/5xx/открытый circuit breaker и отказ внутренней авторизации (`INTERNAL_*`, `USER_CONTEXT_*`, `CALLER_*`, `ACTOR_*`) → `503 UPSTREAM_UNAVAILABLE {service}`. Любой другой **401 домена** тоже → 503, кроме ответов о коде (`PIN_INVALID`, `BIOMETRIC_INVALID`, `RESET_CODE_INVALID`): для Mini App 401 — «сессия истекла» (refresh и повтор), а сессию BFF домен оценить не может (ревью T-4). Ошибки роутера (битый URL, параметр длиннее 100 символов) — ErrorBody без эха пути (в пути бывают токены). Stack trace наружу не уходит (`500 INTERNAL_ERROR`).
+- **Remote Experience Config** — кэш в памяти инстанса `EXPERIENCE_CACHE_SECONDS`, при недоступности experience-config — последняя полученная версия.
 
 ## API (`/openapi.json` — только вне production)
 
-Авторизация — `Authorization: Bearer <access_token>`, кроме помеченных «публично».
+Авторизация — `Authorization: Bearer <access_token>`, кроме помеченных «публично». Все маршруты — `bff.ts`; ниже — домен и особенности BFF.
 
-| Метод | Путь | Домен | Примечание |
+| Метод | Путь | Домен (sub) | Примечание |
 |---|---|---|---|
-| POST | `/v1/session/telegram` | identity, preferences | публично; 10/мин с IP; 401 `INIT_DATA_INVALID`/`INIT_DATA_EXPIRED`; 410 `USER_DELETED` |
-| POST | `/v1/session/refresh` | identity, preferences | публично; 401 `REFRESH_INVALID` |
-| POST | `/v1/session/pin/verify` | identity | 5/мин; 401 `PIN_INVALID {remaining}`; 423 `PIN_LOCKED {retry_after}` |
-| POST | `/v1/session/biometric/verify` | identity | 5/мин (общий с PIN); 401 `BIOMETRIC_INVALID` |
+| POST | `/v1/session/telegram` | identity, learning-plan | публично; 10/мин с IP; `start_param` из initData (только `[A-Za-z0-9_-]{1,64}`); 401 `INIT_DATA_*`; 410 `USER_DELETED` |
+| POST | `/v1/session/refresh` | identity, learning-plan | публично; 401 `REFRESH_INVALID` |
+| POST | `/v1/session/pin/verify`, `/biometric/verify` | identity (аккаунт) | 5/мин; ученик сохраняется |
+| POST | `/v1/session/learner` | identity (аккаунт), learning-plan | `SwitchLearnerRequest`; 404 `LEARNER_NOT_FOUND`; 401 `PIN_INVALID` / 423 `PIN_LOCKED` при выходе из детского профиля |
 | POST | `/v1/session/logout` | — | 204 |
-| GET | `/v1/profile` | identity + preferences (параллельно) | `Profile` |
-| PATCH | `/v1/profile/settings` | identity (+ preferences) | → `Profile` |
-| PATCH | `/v1/profile/preferences` | preferences | 422 `PREFERENCES_INVALID {field}`; 409 `PREFERENCES_VERSION_CONFLICT` |
-| PUT | `/v1/profile/departures` | preferences | ≤ 10 IATA; 422 `AIRPORT_UNKNOWN {iata}` |
-| POST | `/v1/profile/onboarding/complete` | preferences | |
-| PUT / DELETE | `/v1/profile/security/pin` | identity | 5/мин; PUT отзывает другие сессии |
-| POST | `/v1/profile/security/pin/reset-request` | identity | доступно при `pin_required`; 429 `PIN_RESET_TOO_OFTEN` |
-| POST | `/v1/profile/security/pin/reset-confirm` | identity | доступно при `pin_required`; 5/мин; → `SessionResponse`, все старые сессии отозваны |
-| PUT / DELETE | `/v1/profile/security/biometric` | identity | PUT: 409 `PIN_REQUIRED` без PIN |
-| GET | `/v1/legal/policy?lang=ru\|en` | identity | публично, `Cache-Control: public, max-age=300` |
-| POST / DELETE | `/v1/profile/consent` | identity | 422 `AGE_CONFIRMATION_REQUIRED`; 409 `POLICY_VERSION_OUTDATED` |
-| POST | `/v1/profile/disable`, `/v1/profile/enable` | identity (+ preferences) | → `Profile` |
-| POST | `/v1/profile/delete-request` | identity | 202; все сессии отозваны |
-| GET | `/v1/directory/airports?q=&limit=` | preferences | limit ≤ 50 |
-| GET | `/v1/directory/interests`, `/v1/directory/geographies` | preferences | |
+| GET | `/v1/profile` | identity (аккаунт), learning-plan (каждый ученик) | `Profile` |
+| PATCH | `/v1/profile/settings` | identity (аккаунт) | 422 `QUIET_HOURS_INVALID` |
+| PUT | `/v1/profile/age` | identity | 409 `AGE_ALREADY_SET` |
+| GET / POST | `/v1/learners` | identity, learning-plan | POST: 201; 403 `ADULT_REQUIRED`; 409 `CHILDREN_LIMIT` |
+| POST | `/v1/profile/guardian-consent` | identity | `GuardianConsentLink`; 409 `GUARDIAN_CONSENT_NOT_REQUIRED` |
+| GET | `/v1/guardian-consents/{token}` | identity (без sub) | публично; 404 `GUARDIAN_CONSENT_NOT_FOUND` (и неверный формат токена); 410 |
+| POST | `/v1/guardian-consents/{token}/accept`, `/decline` | identity (аккаунт родителя) | 409 `GUARDIAN_CONSENT_SELF`; 403 `ADULT_REQUIRED` / `CONSENT_REQUIRED {purpose: terms}` |
+| GET | `/v1/family/guardian-consents` | identity `/me/guardian-consents` (аккаунт) | `{items: GuardianConsentGrant[]}`; 403 `ADULT_REQUIRED` в детском профиле |
+| POST | `/v1/family/guardian-consents/{teen_user_id}/revoke` | identity `/me/guardian-consents/{id}:revoke` (аккаунт) | `GuardianConsentGrant`; 404 `GUARDIAN_CONSENT_NOT_FOUND` (не этот родитель / не UUID); 403 `ADULT_REQUIRED` |
+| GET | `/v1/legal/policy?lang=ru\|uz` | identity | публично, `Cache-Control: public, max-age=300` |
+| POST / DELETE | `/v1/profile/consent` | identity | 409 `POLICY_VERSION_OUTDATED`; 422 `CONSENT_REQUIRED_PURPOSES {missing}`; 403 `GUARDIAN_CONSENT_REQUIRED`; 403 `ADULT_REQUIRED` в детском профиле |
+| PUT / DELETE | `/v1/profile/security/pin` | identity | код родителя; 422 `PIN_FORMAT`; PUT отзывает другие сессии |
+| POST | `/v1/profile/security/pin/reset-request`, `/reset-confirm` | identity | доступно при `pin_required`; reset-confirm → `SecurityState` с `pin_reset_effective_at` (ревью T-8: новый код заработает через 24 ч, сессия не меняется, другие не отзываются) |
+| POST | `/v1/profile/security/pin/reset-cancel` | identity | `{current_pin}` → `SecurityState`; отмена ожидающего сброса прежним кодом (401 `PIN_INVALID`, 423, лимит `tg.pin`); доступно при `pin_required`; 403 `ADULT_REQUIRED` в детском профиле |
+| PUT / DELETE | `/v1/profile/security/biometric` | identity | 409 `PIN_REQUIRED` |
+| POST | `/v1/profile/delete-request` | identity | 202 `DeletionResponse` (с `learners`); все сессии отозваны |
+| GET / PATCH | `/v1/plan` | learning-plan (ученик) | GET: `?tz=<IANA>` (или `X-Timezone`) → learning-plan `?tz=`; PATCH: `If-Match`; 409 `PLAN_VERSION_CONFLICT`; 422 `PLAN_INVALID {field, reason}` |
+| POST | `/v1/plan/onboarding/complete` | learning-plan | 409 `PLAN_INCOMPLETE {missing}` |
+| GET | `/v1/plan/today` | learning-plan | `TodayPlan` |
+| POST | `/v1/plan/activity` | learning-plan (`/me/activities`) | `Idempotency-Key` обязателен |
+| GET | `/v1/directory/goals`, `/v1/directory/topics` | learning-plan | `Cache-Control: private, max-age=300` |
+| GET | `/v1/notifications?limit=&cursor=` | notifications (ученик) | `Page<InboxItem>` |
+| GET | `/v1/notifications/unread-count` | notifications | `{unread}` |
+| POST | `/v1/notifications/read` | notifications (`/me/inbox:read`) | 422, если нет ни `ids`, ни `all` |
+| POST / GET | `/v1/invites` | social (аккаунт) | POST: `Idempotency-Key` обязателен, 201; 403 `ADULT_REQUIRED` / `INVITES_NOT_ALLOWED`; 409 `INVITES_LIMIT` |
+| DELETE | `/v1/invites/{invite_id}` | social | чужое/не-UUID → 404 `INVITE_NOT_FOUND` |
+| POST | `/v1/invites/open` | social (`/invites:open`) | токен неверного формата → 404 `INVITE_NOT_FOUND` |
+| GET | `/v1/invites/{invite_id}/preview` | social | |
+| POST | `/v1/invites/{invite_id}/accept`, `/decline` | social | `family.members[].is_me` — активный ученик |
+| GET | `/v1/family` | social | 204 — семьи нет (`FAMILY_NOT_FOUND` домена) |
+| GET | `/v1/whats-new` | learning-plan + identity + experience-config (for-me, ученик) | см. выше |
+| POST | `/v1/whats-new/seen` | experience-config (ученик) | 204 |
+| GET | `/v1/news?limit=&cursor=` | experience-config (`release-notes/feed`, ученик) | `Page<WhatsNewNote>` |
 | GET | `/v1/experience/config` | experience-config | публично, кэш 60 с |
-| GET | `/v1/home` | experience-config, preferences, identity, events, recommendations, watch, news | секции из конфига. `best_for_you` — кандидаты из каталога как раньше (интересы и страны, quality → soonest; пусто — общий по quality; ≤ 100) → `recommendations:rank` (limit 10, diversity), карточки += `recommendation {score, reasons}`; ранжирование не настроено/недоступно/ответ битый → прежний порядок, `recommendation: null`. `sales_soon` — SALES_SOON, soonest. Карточки обеих рельс += `watch {watch_id, status}\|null` (`watches:by-events`, без WATCH_URL поля нет). `watch_changes` (key `watch`) — последние изменения активных слежений `{watch_id, event_id, event_title, status, change: WatchChange}` (до 10, новые сверху); `news_carousel` (key `news`) — `news:feed` limit 10 → `NewsItem[]`; домен не настроен → `pending_data`. Кэш в Redis: свежий 60 с, stale 24 ч → при сбое домена секция `stale`, без копии `unavailable`; деградация (нет preferences, ранжирования, by-events) не кэшируется; сброс — изменение профиля, слежений, реакций, настроек новостей. `summary` (AT-23) — см. ниже; всегда 200 (AT-34) |
-| GET | `/v1/events?q=&category=&country=&city=&date_from=&date_to=&has_tickets=&online=&sort=&limit=&cursor=` | events, watch | `Page<EventCard>`, карточки += `watch {watch_id, status}\|null` (один `watches:by-events`; watch не подключён/недоступен — поля нет); q ≤ 100, category — код таксономии или `other` (без категории), country — ISO-2, несколько стран повтором параметра или через запятую (до 20, без дублей; в каталог — `country=UZ,KZ`), даты `YYYY-MM-DD` (настоящие, from ≤ to), limit ≤ 50 (20), sort `soonest` (по умолчанию) \| `newest` \| `quality`; 422 `VALIDATION_ERROR`; 503 `EVENTS_UNAVAILABLE` |
-| GET | `/v1/events/facets?q=&category=&country=&city=&date_from=&date_to=&has_tickets=&online=&month_from=&month_to=` | events (`/internal/v1/events:facets`) | `EventFacets` — счётчики быстрых фильтров (каждый без своего измерения): `total`, `this_month`, `has_tickets`, `online`, `categories` (корневые коды + `other`), `countries` (ISO-2); те же правила параметров, что у поиска; `month_from`/`month_to` — окно чипа «В этом месяце» в календаре пользователя (YYYY-MM-DD, оба или ни одного, `month_from ≤ month_to`, ≤ 31 дня — проверяется в BFF, иначе 422), `this_month` считается по нему (без окна — по UTC), у поиска этих параметров нет; общий кэш в Redis `bff:facets:v1:<sha256 фильтров и окна>` на `FACETS_CACHE_SECONDS` (60 с), одинаковые одновременные запросы склеиваются; ответ каталога маппится (целые ≥ 0, ключи — коды/ISO-2); 422 `VALIDATION_ERROR`; 503 `EVENTS_UNAVAILABLE` (не кэшируется) |
-| GET | `/v1/events/{eventId}` | events, recommendations, watch | `EventDetailView` + `recommendation {score, reasons, factors}\|null` (rank одного кандидата; сбой/не настроено/«Не интересно» — null) + `watch {watch_id, status}\|null` + `reaction: more_like_this\|not_interested\|null` (recommendations `GET /internal/v1/reactions/{id}`; сбой — null); не-UUID и неизвестное → 404 `EVENT_NOT_FOUND`; 503 `EVENTS_UNAVAILABLE` |
-| GET | `/v1/events/{eventId}/offers?travellers=1..6` | preferences, identity, offers | `OfferSetView` (спринт 5); travellers по умолчанию 1; не-UUID/неизвестное событие → 404 `EVENT_NOT_FOUND`; 422 `VALIDATION_ERROR`; 429 `RATE_LIMITED {retry_after}` (20/мин); 503 `OFFERS_UNAVAILABLE` |
-| POST | `/v1/events/{eventId}/offers/recalculate` | preferences, identity, offers | тело `OfferRecalculateRequest` (+ `selected_tier?` спринта 7 — `AiTripParams` консьержа применяется как есть, в offers не уходит) `{travellers 1..6, departure_iata? ^[A-Z]{3}$\|null, direct_only?, near_venue?, extra_nights? 0..3, hotel_id? ≤64 ^[A-Za-z0-9_-]+$\|null}` (лишние поля → 422) → `OfferSetView`; 422 `OFFER_DEPARTURE_INVALID`; остальное — как у GET, лимит общий |
-| POST | `/v1/recommendations/reactions` | events, recommendations | `ReactionRequest {event_id, reaction: more\|less, undo?}` → 204; категории события — из каталога; 60/мин (`RATE_LIMIT_REACTIONS_PER_MIN`); 404 `EVENT_NOT_FOUND`; 503 `FEATURE_UNAVAILABLE {feature}` без RECOMMENDATIONS_URL |
-| DELETE | `/v1/recommendations/reactions/{event_id}` | recommendations | снять текущую реакцию (GET состояния → POST undo) → 204; нет реакции — 204; не-UUID → 404 `EVENT_NOT_FOUND`; лимит реакций общий |
-| POST | `/v1/watches` | events, preferences, watch | `Idempotency-Key` (UUID) обязателен; `CreateWatchRequest {event_id, dimensions?, threshold_pct? 5\|10\|15, tier?, travellers?, offer_id? (UUID, пробрасывается в watch)}`; `offer_params` — из последнего расчёта «Поездки» пользователя по событию (Redis `trip:<user>:<event>`, 30 дней: tier = recommended_tier, travellers, departure_iata, direct_only, near_venue, extra_nights, hotel_id) + бюджет/города вылета/предпочтения перелёта из профиля; расчёта не было — comfort, 1; tier/travellers тела важнее → 201 `Watch` \| 200 (уже следим); 404 `EVENT_NOT_FOUND`, 409 `WATCH_LIMIT {limit}`, 422 `EVENT_PAST` |
-| GET | `/v1/watches?status=&cursor=&limit=` | watch, events | `Page<Watch>` (limit ≤ 20), `event` — карточка из каталога (`null` — нет/недоступен) |
-| GET / PATCH / DELETE | `/v1/watches/{id}` | watch (+ events) | PATCH `{dimensions?, threshold_pct?, status?: active\|paused, expected_version}` → `Watch`, 409 `VERSION_CONFLICT {current_version}`; DELETE → 204; чужое/не-UUID — 404 `WATCH_NOT_FOUND`; команды (POST/PATCH/DELETE) — 30/мин (`RATE_LIMIT_WATCH_PER_MIN`) |
-| GET | `/v1/watches/{id}/changes?cursor=&limit=` | watch | `Page<WatchChange>` (limit ≤ 50); битые записи отбрасываются |
-| GET | `/v1/news?filter=all\|watch\|interests&topic=&cursor=&limit=` | news, preferences, watch, identity | `Page<NewsItem>`; 6.1: `topic` music\|sport\|business\|culture\|education\|festivals (иначе 422), в `news:feed`/`:topics` — `geographies` профиля как в `recommendations:rank` (preferences недоступен — поле не передаётся; старый news с 422 на `geographies`/`topic` — один повтор без них); в `news:feed` — интересы и сущности профиля (если `by_interests`), активные слежения (если `from_watch`), `only_significant` из настроек; новость без https-ссылки на домене источника (или поддомене) отбрасывается |
-| GET | `/v1/news/topics?filter=` | news, preferences, watch, identity | 6.1: `NewsTopicsResponse {items: [{topic, count}], total}` — тело как у ленты без cursor/limit/topic → `news:topics`; непустые известные темы в порядке чипов; старый news (404 без кода) → `{items: [], total: null}`; прочие 4xx/мусор → 503 |
-| GET / PATCH | `/v1/news/preferences` | news | `NewsPreferences`; PATCH — любые поля (≥ 1), BFF сливает с текущими и делает PUT целиком |
-| POST | `/v1/ai/conversations` | preferences, identity, ai-concierge | спринт 7: `Idempotency-Key` (UUID) обязателен; `AiCreateConversationRequest {mode: event\|home, event_id?, query? ≤ 120, trip_params?}` (event — event_id обязателен; home — без event_id/trip_params) → 201 `AiConversation` \| 200 (открытая переписка за 24 ч); `constraints` (вылеты, перелёт, бюджет, отель, интересы, сущности, география, горизонт) и `lang` BFF собирает сам, клиент их не присылает (лишнее поле → 422); preferences недоступен → 503 |
-| GET / DELETE | `/v1/ai/conversations/{id}` | ai-concierge | `AiConversation` с историей (≤ 50, битые сообщения отбрасываются) / 204; чужая, удалённая, не-UUID → 404 `AI_CONVERSATION_NOT_FOUND` |
-| POST | `/v1/ai/conversations/{id}/messages`, `…/actions/{tool}` | preferences, identity, ai-concierge | ход: `{client_msg_id, text 1..500 \| args, trip_params?}` → `text/event-stream` (прокси без буферизации: `X-Accel-Buffering: no`, heartbeat `: ping` как есть, каждое событие проверено по `AiSseEvent`, не по схеме — отброшено с WARNING без содержимого; обрыв/таймаут без `done`/`error` → BFF шлёт `error` AI_PROVIDER_UNAVAILABLE/AI_TIMEOUT; закрытие клиента → abort upstream); `Accept: application/json` → `AiTurnResult`. tool ∉ шести → 404 `AI_TOOL_NOT_FOUND` (`reprice` = `reprice_offer`). 6 ходов в минуту (`AI_RATE_PER_MINUTE`) → 429 `RATE_LIMITED`; ошибки до стрима — JSON с кодами §8 (квота, пауза, бюджет, `AI_BUSY` + Retry-After…), 404 без кода / 5xx / 401–403 upstream → 503 |
-| GET | `/v1/ai/quota` | ai-concierge | `AiQuota {used, limit, remaining, level, level_name, resets_at}` (basic 10, plus 20 в сутки UTC); без `AI_CONCIERGE_URL` — 503 `FEATURE_UNAVAILABLE {feature: "ai"}` (кнопка скрыта) |
-| POST | `/v1/support/tickets` | support (+ offers) | `Idempotency-Key` (UUID) обязателен → иначе 422 `IDEMPOTENCY_KEY_REQUIRED`; 201; 422 `SUPPORT_CATEGORY_INVALID`; `context.offer_id` проверяется в offers, цена/ссылка — из снимка |
-| GET | `/v1/support/tickets?limit=&cursor=` | support | `{items, next_cursor}` |
-| GET | `/v1/support/tickets/{ticket_id}` | support | `ticket_id` — UUID или номер `TCK-NNNN` (deep link `startapp=ticket_TCK-NNNN`); 404 `SUPPORT_TICKET_NOT_FOUND` (чужое/неверный формат) |
-| POST | `/v1/support/tickets/{ticket_id}/messages` | support | необязательный `Idempotency-Key`; 409 `SUPPORT_TICKET_CLOSED` |
-| POST | `/v1/support/tickets/{ticket_id}/close` | support | |
-| GET | `/v1/support/categories` | support | |
-| GET | `/v1/whats-new` | experience-config, preferences | 9.4 «Что нового»: `WhatsNewResponse {items, latest}` — непросмотренные опубликованные заметки о релизах (новые первыми, ≤ 3) и последняя заметка (пункт в Профиле). Лента experience-config `GET /internal/v1/release-notes/published?limit=10` кэшируется в памяти на `EXPERIENCE_CACHE_SECONDS` (60 с) со stale при сбое — как Remote Experience Config. Отбор: новее отметки `preferences …/me/release-notes/seen`; аудитория `existing` — только если онбординг пройден до публикации; отметки нет — заметки после онбординга, иначе (новый пользователь) последняя отмечается просмотренной (если её аудитория `all` — показывается одна она). `ETag` (слабый, по телу) + `If-None-Match` → 304; `Cache-Control: private, no-cache`. Аудитория и сотрудники в ответ не попадают; маршрут/иконка пункта не из белого списка → null. Лимит — `tg.user` |
-| POST | `/v1/whats-new/seen` | experience-config, preferences | `{release_note_id}` (UUID, лишние поля → 422) → `{last_seen_release_note_id}`; время публикации — из ленты, не от клиента; отметка только вперёд (идемпотентно); неопубликованная/архивная/неизвестная → 404 `WHATS_NEW_NOT_FOUND` (лента перечитывается мимо кэша не чаще раза в 5 с) |
-| GET | `/health/live`, `/health/ready` | — | ready проверяет Redis |
-
-Коды ошибок самого BFF (дополнение к контракту): `503 OFFERS_UNAVAILABLE {service}` (предложения), `401 UNAUTHORIZED` (нет токена), `401 TOKEN_INVALID`, `401 TOKEN_EXPIRED` (→ клиент делает refresh), `401 SESSION_REVOKED` (→ вход заново по initData), `423 PIN_REQUIRED`, `429 RATE_LIMITED {retry_after}` + `Retry-After`, `422 VALIDATION_ERROR {in, field, errors}`, `400 INVALID_JSON`, `503 UPSTREAM_UNAVAILABLE {service}`, `500 INTERNAL_ERROR`. Клиент различает ответы только по `code` (например, 401 `PIN_INVALID` ≠ 401 `TOKEN_EXPIRED`).
-
-Правила для клиента: refresh-токен одноразовый — параллельные refresh одним токеном сериализовать (второй будет считаться повтором и отзовёт сессию). POST без тела можно слать с `content-type: application/json` и пустым телом.
+| POST / GET | `/v1/support/tickets` | support (аккаунт) | POST: `Idempotency-Key` обязателен, 10/ч (`tg.support_create`, повтор ключа лимит не тратит); 422 `SUPPORT_CATEGORY_INVALID` |
+| GET | `/v1/support/tickets/{id}` | support | UUID или `TCK-NNNN`; 404 `SUPPORT_TICKET_NOT_FOUND` |
+| POST | `/v1/support/tickets/{id}/messages`, `/close` | support | 409 `SUPPORT_TICKET_CLOSED` |
+| GET | `/v1/support/categories` | support | категории TilHero RU/UZ |
 
 ## Переменные окружения
 
 | Переменная | По умолчанию (вне production) | Описание |
 |---|---|---|
-| `ENV` | из `NODE_ENV` (`production`→`prod`, `test`→`test`, иначе `dev`) | `dev\|test\|stage\|prod`, как у Python-сервисов. **stage/prod или `NODE_ENV=production`** — защищённое окружение: все секреты/URL обязательны, dev-значения запрещены, `MINIAPP_ORIGIN` только https, `/openapi.json` выключен, dev-деривация ключа внутреннего JWT запрещена |
-| `NODE_ENV` | `development` | `production` = защищённое окружение (образ Docker ставит его сам) |
-| `PORT` / `HOST` | `8001` / `::` | Railway требует `::`; без IPv6 — автоматический откат на `0.0.0.0` |
-| `BOT_TOKEN` | dev-токен | токен бота для проверки initData (prod: формат `<id>:<secret>`) |
+| `ENV` | из `NODE_ENV` | `dev\|test\|stage\|prod`. **stage/prod или `NODE_ENV=production`** — защищённое окружение: все секреты/URL обязательны, dev-значения запрещены, `MINIAPP_ORIGIN` только https, `/openapi.json` выключен, dev-деривация ключа внутреннего JWT запрещена |
+| `PORT` / `HOST` | `8001` / `::` | Railway требует `::`; без IPv6 — откат на `0.0.0.0` |
+| `BOT_TOKEN` | dev-токен | токен бота для проверки initData |
 | `SESSION_JWT_SECRET` | dev-секрет | ≥ 32 символов; ≠ `INTERNAL_JWT_SECRET` |
-| `INTERNAL_JWT_PRIVATE_KEY` | — | **stage/prod обязателен**: base64url 32-байтного seed Ed25519 (`uv run python infra/scripts/gen_internal_keys.py` → значение `TELEGRAM_BFF__INTERNAL_JWT_PRIVATE_KEY`) |
-| `INTERNAL_JWT_PUBLIC_KEYS` | `{}` | общая переменная `{issuer: base64url pub}` (BFF только подписывает; проверяется на формат) |
-| `INTERNAL_JWT_SECRET` | `dev-internal-secret-change-me` (как в py-common) | только dev/test: из него выводится ключ Ed25519; в stage/prod игнорируется |
-| `REDIS_URL` | `redis://127.0.0.1:6379/0` | refresh-сессии, rate limit |
-| `REDIS_KEY_PREFIX` | `bff:` | префикс ключей |
-| `INIT_DATA_MAX_AGE_SECONDS` | `600` | максимальный возраст initData (спринт 9; было 3600) |
-| `INIT_DATA_ONE_TIME` | `true` | initData принимается один раз (хэш в Redis `SET NX` на срок + 60 с; повтор → 401 `INIT_DATA_REPLAYED`; без Redis — 503). `false` — только аварийно |
-| `ACCESS_TTL_SECONDS` | `900` | TTL access JWT |
-| `REFRESH_TTL_SECONDS` | `43200` | TTL refresh-сессии (продлевается при ротации) |
-| `MINIAPP_ORIGIN` | `http://localhost:5173` | CORS: origin Mini App, список через запятую |
-| `IDENTITY_URL`, `PREFERENCES_URL`, `SUPPORT_URL`, `EXPERIENCE_URL`, `EVENTS_URL` | `http://127.0.0.1:8101/8102/8103/8106/8110` | адреса доменов (Railway: `http://<svc>.railway.internal:<port>`; `EVENTS_URL` — event-catalog `services/events`, в stage/prod обязательна) |
-| `OFFERS_URL` | — (необязательная, и в stage/prod) | offers (`services/offers`, порт 8115; Railway: `http://offers.railway.internal:8115`). Не задана — `/v1/events/{id}/offers*` → `503 OFFERS_UNAVAILABLE`, `offer_id` в обращении убирается |
-| `OFFERS_TIMEOUT_MS` | `25000` | таймаут сборки предложения (offers укладывается в свой дедлайн 20 с); сборка не повторяется |
-| `OFFERS_MAX_RESPONSE_BYTES` | `1048576` | предел размера ответа offers (больше → 503) |
-| `RATE_LIMIT_OFFERS_PER_MIN` | `20` | расчётов предложений в минуту на пользователя (GET + пересчёт) |
-| `RECOMMENDATIONS_URL`, `WATCH_URL`, `NEWS_URL` | — (необязательные, и в stage/prod) | спринт 6: recommendations (8114), watch (8116), news (8117); Railway: `http://<svc>.railway.internal:<port>`. Не задана — Home работает без баллов/секции (`pending_data`), `/v1/recommendations/reactions`, `/v1/watches*`, `/v1/news*` → `503 FEATURE_UNAVAILABLE {feature}` |
-| `PERSONAL_MAX_RESPONSE_BYTES` | `524288` | предел размера ответа recommendations/watch/news (больше → сбой домена) |
-| `RATE_LIMIT_REACTIONS_PER_MIN` / `RATE_LIMIT_WATCH_PER_MIN` | `60` / `30` | реакции и команды слежений в минуту на пользователя |
-| `HOME_SUMMARY_GAP_MINUTES` / `VISIT_TTL_DAYS` / `HOME_SUMMARY_HOLD_SECONDS` | `30` / `90` / `600` | AT-23: порог «пока вас не было», срок хранения прошлого визита, сколько секунд от начала визита Home повторно отдаёт ту же сводку |
-| `LAST_TRIP_TTL_DAYS` | `30` | хранение последнего расчёта «Поездки» по событию (offer_params слежения, `trip_per_person` ранжирования) |
-| `AI_CONCIERGE_URL` | — (необязательная) | спринт 7: ai-concierge (8118; Railway `http://ai-concierge.railway.internal:8118`). Не задана — `/v1/ai/*` → 503 `FEATURE_UNAVAILABLE {feature: "ai"}` |
-| `CONCIERGE_TIMEOUT_MS` | `75000` | таймаут хода (стрим и запасной JSON) и создания переписки; больше дедлайна хода ai-concierge (60 с) |
-| `AI_RATE_PER_MINUTE` | `6` | ходов консьержа (сообщения + быстрые действия) в минуту на пользователя, сверх суточной квоты |
-| `UPSTREAM_TIMEOUT_MS` / `UPSTREAM_RETRIES` | `3000` / `1` | таймаут и повторы идемпотентных вызовов доменов |
+| `INTERNAL_JWT_PRIVATE_KEY` | — | **stage/prod обязателен**: base64url seed Ed25519 (`infra/scripts/gen_internal_keys.py`) |
+| `INTERNAL_JWT_PUBLIC_KEYS` | `{}` | общая переменная `{issuer: base64url pub}` (BFF только подписывает) |
+| `INTERNAL_JWT_SECRET` | `dev-internal-secret-change-me` | только dev/test: деривация ключа Ed25519 |
+| `REDIS_URL` / `REDIS_KEY_PREFIX` | `redis://127.0.0.1:6379/0` / `bff:` | сессии, лимиты, одноразовость initData |
+| `INIT_DATA_MAX_AGE_SECONDS` / `INIT_DATA_ONE_TIME` | `600` / `true` | срок и одноразовость initData |
+| `ACCESS_TTL_SECONDS` / `REFRESH_TTL_SECONDS` | `900` / `43200` | |
+| `MINIAPP_ORIGIN` | `http://localhost:5173` | CORS, список через запятую |
+| `TELEGRAM_APP_LINK` | `https://t.me/tilhero_dev_bot/app` | прямая ссылка Mini App `https://t.me/<bot>/<app>` (без query) — для ссылки согласия родителя `?startapp=gc_<token>`; в stage/prod обязательна |
+| `IDENTITY_URL`, `LEARNING_PLAN_URL`, `SUPPORT_URL`, `NOTIFICATIONS_URL`, `EXPERIENCE_URL`, `SOCIAL_URL` | `http://127.0.0.1:8101 / 8102 / 8103 / 8104 / 8106 / 8109` | адреса доменов (Railway: `http://<svc>.railway.internal:<port>`) |
+| `UPSTREAM_TIMEOUT_MS` / `UPSTREAM_RETRIES` | `3000` / `1` | таймаут и повторы (GET и команды с `Idempotency-Key`) |
 | `EXPERIENCE_CACHE_SECONDS` | `60` | кэш конфига интерфейса |
-| `HOME_CACHE_SECONDS` / `HOME_STALE_SECONDS` | `60` / `86400` | Home: свежая копия на пользователя / срок жизни stale-копии (AT-34) |
-| `FACETS_CACHE_SECONDS` | `60` | кэш счётчиков `GET /v1/events/facets` по набору фильтров (0 — без кэша) |
-| `RATE_LIMIT_USER_PER_MIN` | `120` | на пользователя, все авторизованные эндпоинты |
-| `RATE_LIMIT_SESSION_IP_PER_MIN` | `10` | `POST /v1/session/telegram` с IP |
-| `RATE_LIMIT_PIN_PER_MIN` | `5` | PIN/биометрия/удаление — на пользователя; ввод кода сброса — отдельный счётчик того же размера (восстановление после блокировки не упирается в лимит, израсходованный неверными PIN) |
-| `RATE_LIMIT_PUBLIC_IP_PER_MIN` | `120` | refresh, config, policy — с IP |
-| `TRUST_PROXY_HOPS` | `1` | число доверенных прокси (Railway edge); `req.ip` нельзя подделать своим `X-Forwarded-For` |
-| `LOG_LEVEL` | `info` | |
-| `SERVICE_VERSION` | версия из package.json (+ `RAILWAY_GIT_COMMIT_SHA`) | |
+| `RATE_LIMIT_USER_PER_MIN` / `RATE_LIMIT_SESSION_IP_PER_MIN` / `RATE_LIMIT_PIN_PER_MIN` / `RATE_LIMIT_PUBLIC_IP_PER_MIN` | `120` / `10` / `5` / `120` | политики `tg.user`, `tg.session_ip`, `tg.pin` (код родителя, в т. ч. при выходе из детского профиля; сброс — отдельный счётчик), `tg.public_ip`; `tg.support_create` — из каталога |
+| `RATE_LIMITS_ENABLED`, `RATE_LIMIT_OVERRIDE_REFRESH_SECONDS` | `true`, `30` | единый лимитер ts-common |
+| `TRUST_PROXY_HOPS` | `1` | доверенные прокси (Railway edge) |
+| `LOG_LEVEL`, `SERVICE_VERSION` | `info`, версия package.json | |
 
 Ошибка конфигурации — процесс не стартует и печатает список всех проблемных переменных.
 
-## Спринт 6: персонализация, Watch, новости
-
-- **Строгая проверка ответов доменов** (`src/personal.ts`, схемы TypeBox в `src/schemas.ts`): строки чистятся от управляющих/bidi-символов, затем проверка по схеме и проекция (лишние поля не уходят). `recommendations:rank` — всё или ничего (score/факторы вне 0..100, событие не из кандидатов, дубль → прежний порядок); причины с неизвестным кодом или параметрами (ключи `^[a-z][a-z0-9_]{0,31}$`, ≤ 8, значения — строка ≤ 120 или число) отбрасываются, ≤ 3. Watch/WatchChange — ссылки только https, деньги — строки-десятичные, перечисления контракта; битый элемент списка отбрасывается, битый одиночный ответ → 503. NewsItem — https-ссылка на `source.domain` или поддомене, `event_ids` ≤ 5.
-- **Сводка AT-23**: Redis-hash `visit:<user>` `{seen, since, started}` (TTL 90 дней), обновляется атомарно (Lua) при каждом `GET /v1/home`. Первый визит или < 30 мин — `summary: null`; иначе `{since, new_events, price_drops, sales_opened, critical}`, сводка хранится `HOME_SUMMARY_HOLD_SECONDS` (перерисовка не теряет её). `new_events` — события каталога по профилю (те же запросы, что у best_for_you; без сигналов — весь каталог) с `first_seen_at > since`: запрос `sort=newest&first_seen_from=<since>&limit=50`; если список не содержит `first_seen_at` (каталог спринта 5), граница находится двоичным поиском по детали (≤ ~7 запросов на список). `price_drops`/`critical` — `watches:summary?since=`; `sales_opened` — слежения с изменением lifecycle → ON_SALE после since + события на слежении в статусе «до продаж» по снимку, у которых в каталоге ON_SALE с `changed_at > since`. Сбой или неподключённый домен — счётчик `null` (не 0); все счётчики `null` → `summary: null`. Два параллельных запроса (StrictMode) не сдвигают since дважды (Lua атомарен, ставит маркер «считается»): запрос того же визита в окне 15 с ждёт сводку первого не дольше 1,5 с; маркера нет (первый не смог сохранить и снял его) или время вышло — считает сам.
-- **Последний расчёт «Поездки»**: каждый успешный `offers:build` пишет `trip:<user>:<event>` (параметры + `per_person` рекомендованного тарифа при полной сумме) — для `offer_params` слежения и `trip_per_person` кандидатов ранжирования.
-
 ## Безопасность
 
-- initData не логируется и не хранится (в Redis — только SHA-256 на срок жизни); обменивается на сессию **один раз** (спринт 9, О-1). Повтор → 401 `INIT_DATA_REPLAYED`. Mini App получает одну строку на весь запуск, поэтому при перезагрузке страницы в том же запуске продолжает сессию refresh-токеном из sessionStorage, а не предъявляет initData заново (`ApiClient.resumeSession`).
-- `user_id` — только из сессии (sub внутреннего JWT); тела запросов валидируются со строгим `additionalProperties: false` (лишние поля, в т. ч. `user_id`, → 422) — дефект FinAdvisor `telegramProxy` (S1) исключён.
-- Ответы identity собираются по белому списку полей, все ответы — сериализация по схеме контракта (ревью T2).
-- PIN проверяется на формат в BFF (`^(\d{4}|\d{6})$` → `422 PIN_FORMAT`), код сброса — 6 цифр: мусор не доходит до identity и не тратит попытку.
-- Перевыпуск и отзыв сессии — атомарные Lua-скрипты Redis: отозванная параллельно сессия не «оживает» после подтверждения PIN (ревью T1).
-- Входящие `x-trace-id`/`x-correlation-id` принимаются только `^[A-Za-z0-9_-]{1,64}$` (иначе генерируется новый).
-- Лимит по IP для IPv6 считается по префиксу /64.
-- **Спринт 9:** initData одноразовый, срок 600 с. После `SESSION_REVOKED` или неудачного refresh Mini App больше не может перелогиниться тем же initData: экран «Закройте приложение и откройте его заново из чата с ботом», новое открытие даёт новый initData.
-- Логи — JSON без PII: redact-пути ts-common + свои, плюс рекурсивная вычистка ключей (`init_data`, `pin`, `*_token`, `text`, `telegram_user_id`, `username`, …); пользователь — только `user_pid` (псевдоним). Access-лог: `route`, `status_code`, `duration_ms`, `outcome`.
-- Ответы с токенами — `Cache-Control: no-store`; везде `X-Content-Type-Options: nosniff`; CORS — только `MINIAPP_ORIGIN`, без credentials.
-- Ответ offers — недоверенный (спринт 5): предел размера, чистка строк, схема `OfferSetView` с https-ссылками и длинами, проекция без лишних полей; значения из ответа в лог не пишутся. Цена (итог пакета) и ссылка в обращении с `offer_id` — только из своего снимка.
-- Сбой Redis → `503` (fail-closed): без проверки отзыва сессии запросы не обслуживаются.
+- initData не логируется и не хранится (в Redis — только SHA-256 подписи на срок жизни), принимается один раз (`INIT_DATA_REPLAYED`).
+- `user_id` — только из сессии; учебный субъект — только `lrn`, выставленный BFF после проверки опекунства в identity и сверяемый с сессией в Redis на каждом запросе. Тела и query — `additionalProperties: false` (лишние поля, в т. ч. `user_id`, → 422).
+- Код родителя проверяется на формат в BFF (`^(\d{4}|\d{6})$` → `422 PIN_FORMAT`), мусор не тратит попытку.
+- Логи — JSON без PII: redact-пути + рекурсивная вычистка ключей (`init_data`, `pin`, `*_token`, `token`, `text`, `display_name`, `teen_display_name`, `inviter_display_name`, `link`, `start_param`, `startapp`, `telegram_user_id`, `username`, …); пользователь — только `user_pid` (псевдоним аккаунта); access-лог пишет шаблон маршрута (`/v1/guardian-consents/:token`), не путь.
+- Ответы с токенами и данными — `Cache-Control: no-store`; `X-Content-Type-Options: nosniff`; CORS — только `MINIAPP_ORIGIN` (разрешены `idempotency-key`, `if-match`, `x-timezone`), без credentials.
+- Сбой Redis → `503` (fail-closed).
+
+## Отклонения от контракта и обходы
+
+- **Биометрия** (`PUT/DELETE /v1/profile/security/biometric`, `POST /v1/session/biometric/verify`) — маршруты aievent; в `bff.ts` нет их типов. Типы объявлены локально в `src/schemas.ts`. Типы кода родителя — из `bff.ts` (сверка `assertSame`).
+- **Заголовок `X-Timezone`** (зона устройства для плана по умолчанию) в `bff.ts` не описан — запрос к контракту; без него поведение прежнее.
+- **Настройки уведомлений ребёнка:** INTERNAL_API не даёт их прочитать (`GET/PATCH /me/learners/{id}` → `LearnerSummary`). BFF берёт `settings` из ответа identity, если оно есть, иначе показывает настройки аккаунта.
+- **`locale` в детском профиле** применяется к аккаунту (у ребёнка своего `locale` в API identity нет; язык интерфейса ученика — `plan.ui_lang`).
+- Детский профиль: `403 ADULT_REQUIRED` для поддержки, кода родителя, удаления, создания детей, решения по согласию подростка, согласий и возраста аккаунта — решение BFF по CONVENTIONS §8 и §10–§11 (возраст — защита в глубину по рекомендации ревью T-5).
+- `TOKEN_EXPIRED {reason: learner_switched}` — access-токен выдан до переключения ученика.
 
 ## Локальная разработка
 
@@ -162,26 +142,18 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 bash infra/dev/stack.sh up                      # Redis/PG/NATS
 cd services/telegram-bff
 npm run dev                                     # tsx watch, порт 8001, dev-секреты
-npx tsx scripts/dev-init-data.ts --user-id 900001 --name Игорь            # строка initData
-npx tsx scripts/dev-init-data.ts --user-id 900001 --name Игорь --json \
+npx tsx scripts/dev-init-data.ts --user-id 900001 --name Игорь --start-param route_home --json \
   | curl -s -XPOST localhost:8001/v1/session/telegram -H 'content-type: application/json' -d @-
 ```
-`dev-init-data` подписывает тем же `BOT_TOKEN`, что и BFF (env или dev-значение); опции: `--username`, `--lang`, `--last-name`, `--start-param`, `--age <сек>`, `--bot-token`. В e2e Mini App строку подставляют в `window.Telegram.WebApp.initData`. При `NODE_ENV=production` скрипт не запускается.
 
-Проверки: `npx tsc -p tsconfig.json --noEmit`, `npx vitest run` (нужен Redis; тесты используют DB 14 — `TEST_REDIS_URL`). Сборка: `npm run build -w @tilhero/ts-common && npm run build -w @tilhero/telegram-bff` (из корня).
+Проверки: `npx tsc -p tsconfig.json --noEmit`, `npx vitest run` (нужен Redis; тесты — DB 14, `TEST_REDIS_URL`; домены — in-memory подделка в `test/helpers.ts`, проверяющая внутренний JWT и берущая субъекта только из `sub`). Сборка: `npm run build -w @tilhero/ts-common && npm run build -w @tilhero/telegram-bff` (из корня).
 
 ## Runbook
 
-> Эксплуатация через браузер (Railway, админка, оповещения ops-monitor): [docs/runbooks/telegram-bff.md](../../docs/runbooks/telegram-bff.md). Ниже — технические детали для разработчика.
-
-- **Деплой (Railway):** см. `docs/DEPLOYMENT.md` — `RAILWAY_DOCKERFILE_PATH=services/telegram-bff/Dockerfile` (контекст — корень репозитория), healthcheck `/health/ready`. Сборка локально: `docker build -f services/telegram-bff/Dockerfile .` (из корня).
-- **`/health/ready` = 503 `redis: down`:** проверить Railway Redis и `REDIS_URL`; пока Redis недоступен, BFF отвечает 503 на авторизованные запросы (сессии нельзя проверить).
-- **Массовые `503 UPSTREAM_UNAVAILABLE {service}`:** смотреть домен из `details.service` и строки лога `domain unavailable` (`upstream`, `upstream_status`, `upstream_code`). `upstream_code=INTERNAL_TOKEN_*|CALLER_NOT_ALLOWED` — у домена нет/неверный открытый ключ `telegram-bff` в `INTERNAL_JWT_PUBLIC_KEYS` (stage/prod), разные `INTERNAL_JWT_SECRET` (dev) или домен не разрешает `telegram-bff`.
-- **Каталог/Home:** `503 EVENTS_UNAVAILABLE` в поиске и детали и строки `home rail unavailable` (`section`, `err_code`) — event-catalog недоступен (или не принимает `telegram-bff`). Home в это время отдаёт stale-копию (до 24 ч), пользователь видит «Показываем сохранённую подборку». Сбросить кэш Home пользователя: `redis-cli del bff:home:<user_id>`.
-- **Предложения: `503 OFFERS_UNAVAILABLE`.** Строки лога `offers unavailable` (`upstream_status`, `upstream_code`: `CALLER_NOT_ALLOWED`/`INTERNAL_TOKEN_*` — offers не пускает `telegram-bff` или нет ключа; `ResponseTooLarge` — ответ больше `OFFERS_MAX_RESPONSE_BYTES`; `UPSTREAM_UNAVAILABLE` — сеть/таймаут/5xx), `offers bad response` (`path`, `rule` — ответ offers не по контракту `OfferSetView`, чинить offers), `offers: preferences unavailable`. Не задан `OFFERS_URL` — 503 без вызовов. Частые `429 RATE_LIMITED` на предложениях — поднять `RATE_LIMIT_OFFERS_PER_MIN` (каждый расчёт тратит суточные квоты поставщиков). `support ticket: offer_id dropped` — снимок чужой/не найден/offers недоступен, обращение создано без `offer_id`.
-- **Ротация ключа внутреннего JWT:** сгенерировать новую пару (`gen_internal_keys.py`), обновить общую `INTERNAL_JWT_PUBLIC_KEYS` у доменов, затем `INTERNAL_JWT_PRIVATE_KEY` у BFF (токены живут 60 с).
-- **Утечка/компрометация `SESSION_JWT_SECRET`:** заменить секрет и удалить сессии: `redis-cli --scan --pattern 'bff:sid:*' | xargs redis-cli del` (и `bff:rt:*`, `bff:usid:*`) — все пользователи войдут заново по initData.
-- **Отозвать сессии одного пользователя:** `redis-cli smembers bff:usid:<user_id>` → `del bff:sid:<sid>` для каждого.
-- **Ложные 429 на входе** (много пользователей за одним NAT мобильного оператора): поднять `RATE_LIMIT_SESSION_IP_PER_MIN`; убедиться, что `TRUST_PROXY_HOPS` соответствует числу прокси перед сервисом.
-- **Всплеск `refresh_token_reuse` в логах:** либо клиент шлёт параллельные refresh (ошибка Mini App), либо кража токенов — сессии уже отозваны автоматически.
-- **Смена `BOT_TOKEN`:** initData, подписанные старым токеном, перестают проверяться — открытые Mini App получат 401 и перезапуск.
+- **Деплой (Railway):** `RAILWAY_DOCKERFILE_PATH=services/telegram-bff/Dockerfile` (контекст — корень репозитория), healthcheck `/health/ready`.
+- **`/health/ready` = 503 `redis: down`:** проверить Redis и `REDIS_URL`; пока Redis недоступен, авторизованные запросы → 503.
+- **Массовые `503 UPSTREAM_UNAVAILABLE {service}`:** строки лога `domain unavailable` (`upstream`, `upstream_status`, `upstream_code`). `INTERNAL_TOKEN_*` / `CALLER_NOT_ALLOWED` — у домена нет открытого ключа `telegram-bff` или домен не разрешает `telegram-bff`.
+- **Вход падает 503 `learning-plan`:** сессия не создаётся (онбординг ученика неизвестен), initData можно предъявить снова после восстановления.
+- **Частые `401 TOKEN_EXPIRED {reason: learner_switched}`:** Mini App продолжает слать старый access-токен после `POST /v1/session/learner` — ошибка клиента (токены надо заменить из ответа).
+- **Отозвать сессии аккаунта:** `redis-cli smembers bff:usid:<user_id>` → `del bff:sid:<sid>` для каждого. Компрометация `SESSION_JWT_SECRET` — заменить секрет и удалить `bff:sid:*`, `bff:rt:*`, `bff:usid:*`.
+- **Всплеск `refresh_token_reuse`:** параллельные refresh в клиенте или кража токенов — сессии уже отозваны.

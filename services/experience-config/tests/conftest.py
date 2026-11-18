@@ -39,6 +39,21 @@ class Env:
     def h(self, actor: Actor | None = None, issuer: str = "admin-bff", **extra: str) -> dict[str, str]:
         return {**internal_headers(self.settings, issuer=issuer, actor=actor), **extra}
 
+    def learner(self, user_id: uuid.UUID | str, issuer: str = "telegram-bff") -> dict[str, str]:
+        """Внутренний токен telegram-bff с sub = активный ученик."""
+        return internal_headers(self.settings, issuer=issuer, subject=str(user_id))
+
+    async def for_me(self, user_id: uuid.UUID | str, onboarded_at: str | None = "2026-11-18T07:00:00Z",
+                     lang: str = "ru", age: str = "adults") -> httpx.Response:
+        params = {"lang": lang, "age": age}
+        if onboarded_at is not None:
+            params["onboarded_at"] = onboarded_at
+        return await self.c.get("/internal/v1/release-notes/for-me", params=params, headers=self.learner(user_id))
+
+    async def seen(self, user_id: uuid.UUID | str, ids: list[str]) -> httpx.Response:
+        return await self.c.post("/internal/v1/release-notes/seen", json={"release_note_ids": ids},
+                                 headers=self.learner(user_id))
+
     async def flush(self) -> None:
         assert self.runtime.relay is not None
         await self.runtime.relay.drain()
@@ -49,7 +64,7 @@ class Env:
     async def current(self, app: str = "miniapp", issuer: str = "telegram-bff") -> httpx.Response:
         return await self.c.get(f"/internal/v1/experience/{app}/current", headers=self.h(issuer=issuer))
 
-    async def seed_payload(self, app: str = "miniapp", version: str = "2.0.3") -> dict[str, Any]:
+    async def seed_payload(self, app: str = "miniapp", version: str = "1.0.0") -> dict[str, Any]:
         r = await self.c.get(f"/admin/v1/experience/{app}/versions/{version}", headers=self.h(READER))
         assert r.status_code == 200, r.text
         return copy.deepcopy(r.json()["payload"])
@@ -69,7 +84,7 @@ async def env():
     async with app.router.lifespan_context(app):
         client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://experience-config")
         e = Env(settings, client, runtime, bus)
-        await e.flush()  # прогрев пула (см. tests preferences)
+        await e.flush()  # прогрев пула
         yield e
         await client.aclose()
         assert runtime.redis is not None

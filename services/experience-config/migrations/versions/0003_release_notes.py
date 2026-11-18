@@ -1,12 +1,15 @@
-"""release_notes — заметки о релизах «Что нового» (доработка 9.4)
+"""release_notes («Что нового»: RU/UZ, аудитории new|existing|all, сегменты), release_note_views, deleted_users
 
 Правится только черновик. У опубликованной меняется лишь статус на archived (+ кто/когда архивировал); содержимое,
-метка, аудитория и время публикации неизменны. Архивная заметка не меняется совсем. Удалить можно только черновик.
-Это закрепляет триггер release_notes_guard: роль сервиса не может его снять (DDL — только у владельца схемы).
+метка, аудитория, сегменты и время публикации неизменны. Архивная заметка не меняется совсем. Удалить можно только
+черновик. Это закрепляет триггер release_notes_guard: роль сервиса не может его снять (DDL — только у владельца схемы).
+
+release_note_views — отметки просмотра ученика (AT-11), удаляются сагой удаления; deleted_users — исполненные
+удаления: после ACK новые отметки этого ученика не принимаются.
 
 Revision ID: 0003
 Revises: 0002
-Create Date: 2026-11-08
+Create Date: 2026-11-18
 """
 import sqlalchemy as sa
 from alembic import op
@@ -27,6 +30,7 @@ def upgrade() -> None:
         sa.Column("title", pg.JSONB(), nullable=False),
         sa.Column("items", pg.JSONB(), nullable=False),
         sa.Column("audience", sa.String(16), nullable=False),
+        sa.Column("segments", pg.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("status", sa.String(16), nullable=False),
         sa.Column("version", sa.Integer(), nullable=False),
         sa.Column("created_by", sa.String(64), nullable=False),
@@ -38,11 +42,12 @@ def upgrade() -> None:
         sa.Column("archived_by", sa.String(64)),
         sa.Column("archived_at", sa.DateTime(timezone=True)),
         sa.CheckConstraint("status IN ('draft', 'published', 'archived')", name="ck_release_notes_status"),
-        sa.CheckConstraint("audience IN ('all', 'existing')", name="ck_release_notes_audience"),
+        sa.CheckConstraint("audience IN ('new', 'existing', 'all')", name="ck_release_notes_audience"),
         sa.CheckConstraint("slug ~ '^[0-9A-Za-z][0-9A-Za-z.-]{0,31}$'", name="ck_release_notes_slug"),
         sa.CheckConstraint("jsonb_typeof(title) = 'object'", name="ck_release_notes_title"),
         sa.CheckConstraint("jsonb_typeof(items) = 'array' AND jsonb_array_length(items) BETWEEN 1 AND 6",
                            name="ck_release_notes_items"),
+        sa.CheckConstraint("jsonb_typeof(segments) = 'object'", name="ck_release_notes_segments"),
         sa.CheckConstraint("status <> 'published' OR published_at IS NOT NULL", name="ck_release_notes_published"),
         sa.CheckConstraint("status <> 'draft' OR published_at IS NULL", name="ck_release_notes_draft"),
         sa.CheckConstraint("version >= 1", name="ck_release_notes_version"),
@@ -68,6 +73,7 @@ def upgrade() -> None:
                NEW.status <> 'archived'
             OR NEW.slug IS DISTINCT FROM OLD.slug OR NEW.title IS DISTINCT FROM OLD.title
             OR NEW.items IS DISTINCT FROM OLD.items OR NEW.audience IS DISTINCT FROM OLD.audience
+            OR NEW.segments IS DISTINCT FROM OLD.segments
             OR NEW.published_at IS DISTINCT FROM OLD.published_at OR NEW.published_by IS DISTINCT FROM OLD.published_by
             OR NEW.created_at IS DISTINCT FROM OLD.created_at OR NEW.created_by IS DISTINCT FROM OLD.created_by) THEN
             RAISE EXCEPTION 'release note % is published: only archiving is allowed', OLD.id
@@ -83,8 +89,27 @@ def upgrade() -> None:
     op.execute("CREATE TRIGGER release_notes_no_truncate BEFORE TRUNCATE ON release_notes "
                "FOR EACH STATEMENT EXECUTE FUNCTION experience_append_only()")
 
+    op.create_table(
+        "release_note_views",
+        sa.Column("user_id", pg.UUID(as_uuid=True), primary_key=True),
+        sa.Column("release_note_id", pg.UUID(as_uuid=True),
+                  sa.ForeignKey("release_notes.id", ondelete="CASCADE", name="fk_release_note_views_note"),
+                  primary_key=True),
+        sa.Column("seen_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+    )
+    op.create_index("ix_release_note_views_note", "release_note_views", ["release_note_id"])
+    op.create_table(
+        "deleted_users",
+        sa.Column("user_id", pg.UUID(as_uuid=True), primary_key=True),
+        sa.Column("request_id", pg.UUID(as_uuid=True), nullable=False),
+        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("deleted_users")
+    op.drop_index("ix_release_note_views_note", table_name="release_note_views")
+    op.drop_table("release_note_views")
     op.execute("DROP TRIGGER IF EXISTS release_notes_no_truncate ON release_notes")
     op.execute("DROP TRIGGER IF EXISTS release_notes_guard ON release_notes")
     op.execute("DROP FUNCTION IF EXISTS release_notes_guard()")

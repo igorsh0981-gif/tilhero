@@ -29,3 +29,6 @@ htmlcov/
 
 # Railway: файлы переменных из infra/railway/setup.py (секреты)
 railway-vars/
+test-results/
+playwright-report/
+apps/telegram-miniapp/e2e/shots/

@@ -1,7 +1,7 @@
 [project]
 name = "tilhero-support"
 version = "0.1.0"
-description = "TilHero support-service: обращения, сообщения, статусы, SLA, контекст события"
+description = "TilHero support-service: обращения, сообщения, статусы, SLA, эскалации"
 requires-python = ">=3.12"
 dependencies = ["tilhero-common"]
 

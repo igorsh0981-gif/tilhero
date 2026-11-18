@@ -1,4 +1,4 @@
-"""Ревью P6/P7: модели = миграции; миграции под ролью-владельцем, сервис — под своей ролью без DDL."""
+"""Модели = миграции (schema_drift); миграции под ролью-владельцем, сервис — под своей ролью без DDL."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ async def test_models_match_migrations_and_runtime_role() -> None:
         SERVICE_DIR, lambda db_schema, **kw: make_settings(db_schema, **kw), "id_roles"
     ) as (settings, roles):
         assert await schema_drift(roles.runtime_url, roles.schema, [Base.metadata, messaging_metadata]) == []
-        for table in ("consents", "users", "outbox"):
+        for table in ("consents", "users", "guardian_links", "guardian_consent_requests", "outbox"):
             assert await ddl_allowed_for(roles.runtime_url, roles.schema, table) == [], table
         bus = InMemoryBus()
         runtime = Runtime(settings, bus=bus)
@@ -36,13 +36,30 @@ async def test_models_match_migrations_and_runtime_role() -> None:
                 assert login.status_code == 200, login.text
                 uid = login.json()["user"]["user_id"]
                 h = internal_headers(settings, subject=uid)
+                assert (await c.put("/internal/v1/me/age", json={"age_band": "18+"}, headers=h)).status_code == 200
                 consent = await c.post(
                     "/internal/v1/me/consent",
-                    json={"policy_version": "1.0", "purposes": ["personalization"], "age_confirmed_18_plus": True},
+                    json={"policy_version": "1.0", "purposes": ["terms", "privacy", "learning"]},
                     headers=h,
                 )
                 assert consent.status_code == 200, consent.text
                 assert (await c.put("/internal/v1/me/pin", json={"pin": "2580"}, headers=h)).status_code == 200
+                child = await c.post("/internal/v1/me/learners", json={"display_name": "Тест", "age_band": "6-9"},
+                                     headers=h)
+                assert child.status_code == 201, child.text
+                teen_login = await c.post(
+                    "/internal/v1/users/telegram-login",
+                    json={"telegram_user_id": random.randint(10**8, 10**10), "first_name": "Тест"},
+                    headers=internal_headers(settings),
+                )
+                th = internal_headers(settings, subject=teen_login.json()["user"]["user_id"])
+                assert (await c.put("/internal/v1/me/age", json={"age_band": "14-17"}, headers=th)).status_code == 200
+                link = await c.post("/internal/v1/me/guardian-consent-requests", headers=th)
+                assert link.status_code == 200, link.text
+                decided = await c.post(f"/internal/v1/guardian-consents/{link.json()['token']}/accept", headers=h)
+                assert decided.status_code == 200, decided.text
+                deletion = await c.post("/internal/v1/me/deletion-request", json={"pin": "2580"}, headers=h)
+                assert deletion.status_code == 202 and deletion.json()["learners"] == 2
             assert runtime.relay is not None
             while await runtime.relay.flush_once():  # SELECT … FOR UPDATE + UPDATE outbox под ролью сервиса
                 pass

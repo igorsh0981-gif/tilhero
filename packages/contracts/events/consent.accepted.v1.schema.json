@@ -46,6 +46,31 @@
           "type": "null"
         }
       ]
+    },
+    "basis": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "self",
+            "guardian"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "granted_by_user_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   }
 }

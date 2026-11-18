@@ -1,105 +1,22 @@
 /* ==========================================================================
-   Telegram layer (ТЗ UI/CSS §2 telegram.css): safe area, viewport, themeParams
-   bridge, bottom navigation, MainButton/SecondaryButton fallback (outside
-   Telegram), dev chrome, showPopup fallback, offline banner, reduced motion.
-   Variables --tg-* are written by apps/telegram-miniapp/src/tg (theme bridge).
+   Telegram layer: safe area and viewport bridge (variables --tg-* are written by apps/telegram-miniapp/src/tg),
+   offline banner, reduced motion.
    ========================================================================== */
 @layer telegram {
   :root {
-    /* viewport & safe area (bridge from WebApp.viewportStableHeight / safeAreaInset / contentSafeAreaInset) */
     --safe-top: calc(var(--tg-safe-top, 0px) + var(--tg-content-safe-top, 0px));
     --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-bottom, 0px));
     --safe-left: max(env(safe-area-inset-left, 0px), var(--tg-safe-left, 0px));
     --safe-right: max(env(safe-area-inset-right, 0px), var(--tg-safe-right, 0px));
-    /* themeParams bridge: Telegram colours stay available to the few places that
-       must look native (popup fallback links). The product theme itself is ours. */
-    --tg-link: var(--tg-theme-link-color, var(--pop-link));
   }
-  .app { padding-left: var(--safe-left); padding-right: var(--safe-right); }
+  .app { padding-top: var(--safe-top); padding-left: var(--safe-left); padding-right: var(--safe-right); }
 
-  /* ---------- bottom navigation (5 tabs) ---------- */
-  .tabbar {
-    flex: 0 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--tabbar); border-top: 1px solid var(--line);
-    padding: 6px 4px calc(6px + var(--safe-bottom)); position: relative; z-index: var(--z-chrome); backdrop-filter: blur(16px);
+  .offline {
+    flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 8px var(--gutter); background: var(--warn-soft); color: var(--warn);
+    font-size: var(--fs-sm); font-weight: 600; border-bottom: 1px solid var(--line);
   }
-  .tab {
-    display: flex; flex-direction: column; align-items: center; gap: 3px; min-height: var(--tap); padding: 4px 0 2px;
-    color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: .01em; position: relative; border-radius: 12px;
-  }
-  .tab .tab-i { width: 46px; height: 28px; border-radius: 14px; display: grid; place-items: center; transition: background var(--dur); }
-  .tab[aria-current="page"], .tab[aria-current="true"] { color: var(--ink); }
-  .tab[aria-current="page"] .tab-i, .tab[aria-current="true"] .tab-i { background: var(--accent-soft); color: var(--accent-tx); }
-  .tab-badge {
-    position: absolute; top: 1px; left: calc(50% + 8px); min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px;
-    background: var(--tab-badge-bg); color: var(--tab-badge-ink); font: 700 10px/17px var(--font-body); text-align: center;
-    box-shadow: 0 0 0 2px var(--tabbar);
-  }
-  .webview.has-tabbar { --toast-b: 74px; }
 
-  /* ---------- MainButton / SecondaryButton fallback (rendered only outside Telegram) ---------- */
-  .mainbar {
-    flex: 0 0 auto; display: flex; gap: 8px; padding: 8px 12px calc(8px + var(--safe-bottom));
-    background: var(--chrome); border-top: 1px solid var(--line); position: relative; z-index: var(--z-chrome);
-  }
-  .mb {
-    flex: 1 1 0; min-width: 0; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 8px;
-    font-weight: 700; font-size: var(--fs-lg); letter-spacing: -.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    padding: 0 12px; transition: opacity var(--dur-fast), transform .1s;
-  }
-  .mb-main { background: var(--btn-bg); color: var(--btn-tx); }
-  .mb-main:active { transform: scale(.985); }
-  .mb-main[aria-disabled="true"] { background: var(--surface-2); color: var(--muted); }
-  .mb-main.danger { background: var(--bad-soft); color: var(--bad); }
-  .mb-sec { background: var(--surface-2); color: var(--ink); flex: 0 1 40%; }
-
-  /* ---------- dev chrome (emulates the native Telegram header outside Telegram) ---------- */
-  .chrome {
-    flex: 0 0 44px; height: 44px; display: grid; grid-template-columns: 96px 1fr 96px; align-items: center; padding: 0 8px;
-    background: var(--chrome); border-bottom: 1px solid var(--line); position: relative; z-index: var(--z-chrome);
-  }
-  .chrome-l { position: relative; justify-self: start; display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 8px 0 4px; border-radius: 10px; color: var(--chrome-link); font-weight: 500; font-size: var(--fs-lg); }
-  .chrome-l::after { content: ""; position: absolute; inset: -4px; }
-  .chrome-c { text-align: center; line-height: 1.1; min-width: 0; }
-  .chrome-c b { display: block; font-size: var(--fs-lg); font-weight: 700; letter-spacing: -.01em; color: var(--ink); }
-  .chrome-c small { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
-  .chrome-dev { justify-self: end; font: 600 10px/1 var(--font-mono); color: var(--muted); padding: 4px 6px; border: 1px dashed var(--line-2); border-radius: 6px; }
-
-  /* ---------- showPopup fallback (in-app; native popup inside Telegram) ---------- */
-  .pop-layer { position: absolute; inset: 0; z-index: var(--z-popup); display: grid; place-items: center; padding: 28px; }
-  .pop { position: relative; width: min(100%, 290px); background: var(--pop-bg); border-radius: 16px; overflow: hidden; box-shadow: var(--sh-3); animation: popIn var(--dur) var(--ease); text-align: center; }
-  .pop:focus { outline: none; }
-  .pop-b { padding: 18px 18px 16px; }
-  .pop-b h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
-  .pop-b p { font-size: var(--fs-md); color: var(--ink-2); line-height: 1.4; }
-  .pop-a { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
-  .pop-a.row { flex-direction: row; }
-  .pop-a button { flex: 1 1 auto; min-height: var(--tap); font-size: var(--fs-lg); color: var(--tg-link); font-weight: 500; text-align: center; }
-  .pop-a:not(.row) button { flex: 0 0 auto; }
-  .pop-a button + button { border-top: 1px solid var(--line); }
-  .pop-a.row button + button { border-top: 0; border-left: 1px solid var(--line); }
-  .pop-a button.def { font-weight: 700; }
-  .pop-a button.destr { color: var(--bad); }
-  .pop-a button:focus-visible { outline-offset: -4px; border-radius: 12px; }
-
-  /* ---------- connectivity banner («Нет связи») ---------- */
-  .net {
-    flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 9px var(--gutter);
-    background: var(--warn-soft); color: var(--ink); font-size: var(--fs-sm); line-height: 1.35; border-bottom: 1px solid var(--line);
-    position: relative; z-index: var(--z-banner);
-  }
-  .net .ic { color: var(--warn); }
-  .net span { flex: 1; min-width: 0; }
-  .net button { position: relative; color: var(--accent-tx); font-weight: 700; font-size: 13px; min-height: 32px; padding: 0 4px; }
-  .net button::after { content: ""; position: absolute; inset: -6px; }
-
-  /* ---------- reduced motion ---------- */
   @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-      animation-duration: .001ms !important; animation-iteration-count: 1 !important;
-      transition-duration: .001ms !important; scroll-behavior: auto !important;
-    }
-  }
-  :root[data-reduced-motion="true"] *, :root[data-reduced-motion="true"] *::before, :root[data-reduced-motion="true"] *::after {
-    animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important;
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
   }
 }

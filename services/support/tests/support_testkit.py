@@ -30,14 +30,10 @@ MANAGER = Actor(
 )
 OUTSIDER = Actor(id="ops.01", role="operations", permissions=frozenset({"usage.read"}))
 
+# Контекст обращения TilHero (bff.ts TicketContext): экран Mini App, откуда написали, и версия клиента
 CONTEXT = {
-    "event_id": "evt_f1_auh_2026",
-    "offer_id": "off_987",
-    "provider_id": "ticket_provider_x",
-    "deeplink": "https://www.abudhabigp.com/en/tickets",
-    "price_snapshot": {"amount": "850.00", "currency": "USD", "fetched_at": "2026-10-07T13:42:00Z"},
-    "event_title": "Formula 1 Abu Dhabi Grand Prix",
-    "client_version": "telegram-miniapp-2.0",
+    "deeplink": "https://t.me/tilhero_bot/app?startapp=route_schedule",
+    "client_version": "telegram-miniapp-1.0",
 }
 
 

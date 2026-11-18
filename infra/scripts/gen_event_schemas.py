@@ -40,11 +40,15 @@ CATALOG = {
     "user.status.changed.v1": ({"user_id": UUID, "status": enum("ACTIVE", "DISABLED", "DELETION_REQUESTED", "DELETED"),
                                 "previous_status": STR, "reason_code": STR}, ["user_id", "status", "previous_status"]),
     "user.security.changed.v1": ({"user_id": UUID, "change": enum("pin_set", "pin_changed", "pin_removed", "pin_reset",
+                                                                   "pin_reset_requested", "pin_reset_cancelled",
                                                                    "pin_locked", "biometric_enabled", "biometric_disabled")},
                                  ["user_id", "change"]),
+    # basis: self — сам ученик; guardian — родитель за ребёнка 6–13 или подростка 14–17 (granted_by_user_id — родитель)
     "consent.accepted.v1": ({"user_id": UUID, "consent_id": UUID, "policy_version": STR, "purposes": arr(STR),
-                             "age_band": AGE_BAND}, ["user_id", "consent_id", "policy_version", "purposes"]),
-    "consent.revoked.v1": ({"user_id": UUID, "consent_id": UUID, "policy_version": STR}, ["user_id", "consent_id"]),
+                             "age_band": AGE_BAND, "basis": enum("self", "guardian"), "granted_by_user_id": UUID},
+                            ["user_id", "consent_id", "policy_version", "purposes"]),
+    "consent.revoked.v1": ({"user_id": UUID, "consent_id": UUID, "policy_version": STR,
+                            "basis": enum("self", "guardian"), "revoked_by_user_id": UUID}, ["user_id", "consent_id"]),
     # настройки уведомлений: категории и тихие часы (сброс кэша адресации в notifications)
     "user.notification_settings.changed.v1": ({"user_id": UUID, "enabled": BOOL, "categories": arr(STR, 10)},
                                               ["user_id", "enabled", "categories"]),
@@ -96,8 +100,9 @@ CATALOG = {
     "social.invite.reminder_due.v1": ({"invite_id": UUID, "inviter_user_id": UUID, "invitee_user_id": UUID,
                                        "kind": enum("family", "friend", "referral")},
                                       ["invite_id", "inviter_user_id", "invitee_user_id", "kind"]),
-    "social.family.member_added.v1": ({"family_id": UUID, "user_id": UUID, "role": enum("owner", "adult", "teen", "child"),
-                                       "added_at": TS}, ["family_id", "user_id", "role", "added_at"]),
+    "social.family.member_added.v1": ({"family_id": UUID, "owner_user_id": UUID, "user_id": UUID,
+                                       "role": enum("owner", "adult", "teen", "child"), "added_at": TS},
+                                      ["family_id", "owner_user_id", "user_id", "role", "added_at"]),
     # ------------------------------------------------------------ notifications
     "notification.requested.v1": ({
         "notification_id": UUID, "user_id": UUID,
@@ -128,7 +133,12 @@ CATALOG = {
                                         "activation_id": UUID}, ["app", "version", "activation_id"]),
     "experience.release_note.published.v1": ({"release_note_id": UUID, "slug": STR,
                                               "audience": enum("new", "existing", "all"),
-                                              "segments": {"type": "object"}, "published_at": TS},
+                                              "segments": {"type": "object", "additionalProperties": False, "properties": {
+                                                  "age": {"type": "array", "uniqueItems": True,
+                                                          "items": enum("kids", "teens", "adults")},
+                                                  "ui_lang": {"type": "array", "uniqueItems": True,
+                                                              "items": enum("ru", "uz")}}},
+                                              "published_at": TS},
                                              ["release_note_id", "slug", "audience", "published_at"]),
     # ------------------------------------------------------------ audit (payload = запись журнала)
     "admin.audit.recorded.v1": ({"record_id": UUID, "occurred_at": TS, "actor_type": enum("staff", "user", "system", "service"),

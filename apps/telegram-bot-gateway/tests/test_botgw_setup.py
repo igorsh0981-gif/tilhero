@@ -1,4 +1,4 @@
-"""python -m tilhero_botgw.setup: webhook, команды RU/EN, кнопка меню, описания; валидация настроек."""
+"""python -m tilhero_botgw.setup: webhook, команда /start RU/UZ, кнопка меню, описания RU/UZ; валидация настроек."""
 
 from __future__ import annotations
 
@@ -22,14 +22,14 @@ async def test_setup_configures_bot() -> None:
         "setWebhook",
         "setMyCommands",
         "setMyCommands[ru]",
-        "setMyCommands[en]",
+        "setMyCommands[uz]",
         "setChatMenuButton",
         "setMyDescription",
         "setMyShortDescription",
         "setMyDescription[ru]",
         "setMyShortDescription[ru]",
-        "setMyDescription[en]",
-        "setMyShortDescription[en]",
+        "setMyDescription[uz]",
+        "setMyShortDescription[uz]",
     ]
     calls = dict(tg.calls[:1])
     assert calls["setWebhook"] == {
@@ -39,14 +39,20 @@ async def test_setup_configures_bot() -> None:
         "allowed_updates": ["message", "callback_query", "my_chat_member"],
         "max_connections": 40,
     }
-    ru_commands = tg.calls[2][1]
-    assert ru_commands["language_code"] == "ru"
-    assert [c["command"] for c in ru_commands["commands"]] == ["start", "events", "watch", "support", "help"]
-    assert ru_commands["commands"][1]["description"] == "Каталог событий"
+    assert tg.calls[1][1] == {"commands": [{"command": "start", "description": "Открыть TilHero"}]}  # по умолчанию RU
+    ru_commands, uz_commands = tg.calls[2][1], tg.calls[3][1]
+    assert ru_commands == {"commands": [{"command": "start", "description": "Открыть TilHero"}], "language_code": "ru"}
+    assert uz_commands == {
+        "commands": [{"command": "start", "description": "TilHeroʼni ochish"}],
+        "language_code": "uz",
+    }
     menu = tg.calls[4][1]["menu_button"]
     assert menu == {"type": "web_app", "text": "TilHero", "web_app": {"url": MINIAPP}}
-    ru_desc = tg.calls[7][1]
+    ru_desc, uz_desc = tg.calls[7][1], tg.calls[9][1]
     assert ru_desc["language_code"] == "ru" and "мини-приложении" in ru_desc["description"]
+    assert uz_desc["language_code"] == "uz" and "mini-ilovada" in uz_desc["description"]
+    for _, body in tg.calls:  # ничего туристического
+        assert not any(w in str(body).lower() for w in ("событи", "поездк", "билет", "отель", "event", "trip"))
     assert all(len(body.get("short_description", "")) <= 120 for _, body in tg.calls)
     assert all(len(body.get("description", "")) <= 512 for _, body in tg.calls)
     assert tg.tokens_seen == {TOKEN}
@@ -152,3 +158,27 @@ def test_auto_setup_times_out(monkeypatch) -> None:
     monkeypatch.setattr(botgw_setup, "run_setup", slow)
     monkeypatch.setattr(botgw_setup, "AUTO_SETUP_TIMEOUT_SECONDS", 0.05)
     assert botgw_setup.auto_setup(make_settings("t_setup", telegram_webhook_url=WEBHOOK)) is False
+
+
+def test_miniapp_url_required_and_not_local_in_secure_env(monkeypatch) -> None:
+    """P-12: забытый MINIAPP_URL в stage/prod не подменяется localhost — сервис не стартует; localhost и петлевые
+    адреса запрещены; в dev/test по умолчанию — локальный Vite."""
+    monkeypatch.delenv("MINIAPP_URL", raising=False)
+    prod = {"internal_jwt_secret": "p" * 40, "internal_jwt_private_key": "A" * 43, "bot_token": TOKEN,
+            "telegram_webhook_secret": SECRET, "redis_url": "redis://r"}
+    for env_name in ("stage", "prod"):
+        with pytest.raises(ValidationError, match="MINIAPP_URL must be set"):
+            Settings(env=env_name, **prod)
+        with pytest.raises(ValidationError, match="MINIAPP_URL must be set"):
+            Settings(env=env_name, miniapp_url="  ", **prod)
+        for local in ("https://localhost:5173", "https://LOCALHOST/app", "https://app.localhost/",
+                      "https://127.0.0.1:5173", "https://127.1.2.3/", "https://[::1]:5173/", "https://0.0.0.0/"):
+            with pytest.raises(ValidationError, match="localhost"):
+                Settings(env=env_name, miniapp_url=local, **prod)
+        with pytest.raises(ValidationError, match="https"):
+            Settings(env=env_name, miniapp_url="http://app.tilhero.test", **prod)
+        assert Settings(env=env_name, miniapp_url=MINIAPP, **prod).miniapp_url == MINIAPP
+    for env_name in ("dev", "test"):
+        assert Settings(env=env_name).miniapp_url == "https://localhost:5173"
+    monkeypatch.setenv("MINIAPP_URL", "https://app.tilhero.uz/")
+    assert Settings(env="prod", **prod).miniapp_url == "https://app.tilhero.uz/"

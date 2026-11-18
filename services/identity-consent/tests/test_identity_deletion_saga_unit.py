@@ -1,4 +1,4 @@
-"""Юнит-тесты чистых правил саги удаления (deletion/saga.py) и переменных DELETION_* (спринт 9)."""
+"""Юнит-тесты чистых правил саги удаления (deletion/saga.py) и переменных DELETION_*."""
 
 from __future__ import annotations
 
@@ -31,20 +31,20 @@ def test_parse_schedule() -> None:
 
 def test_settings_defaults_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
     s = make_settings("x")
-    assert s.deletion_retry_schedule == DEFAULT
-    assert (s.deletion_stuck_hours, s.deletion_manual_retry_min_seconds) == (24, 300)
+    assert s.deletion_retry_schedule == DEFAULT and s.deletion_stuck_hours == 24
+    assert s.deletion_domains == ["learning-plan", "social", "notifications", "support", "experience-config"]
     monkeypatch.setenv("DELETION_RETRY_SCHEDULE_MINUTES", "1, 2,3")
     monkeypatch.setenv("DELETION_STUCK_HOURS", "0.5")
     monkeypatch.setenv("DELETION_SWEEP_SECONDS", "5")
-    monkeypatch.setenv("DELETION_MANUAL_RETRY_MIN_SECONDS", "0")
+    monkeypatch.setenv("DELETION_DOMAINS", '["learning-plan","memory"]')
     from tilhero_identity.settings import Settings
 
     env = Settings(env="test", internal_jwt_secret="y" * 40)
     assert env.deletion_retry_schedule == (1, 2, 3) and env.deletion_retry_schedule_minutes == "1,2,3"
-    assert (env.deletion_stuck_hours, env.deletion_sweep_seconds, env.deletion_manual_retry_min_seconds) == (
-        0.5, 5, 0)
+    assert (env.deletion_stuck_hours, env.deletion_sweep_seconds) == (0.5, 5)
+    assert env.deletion_domains == ["learning-plan", "memory"]
     for name, value in (("DELETION_RETRY_SCHEDULE_MINUTES", "60,15"), ("DELETION_STUCK_HOURS", "0"),
-                        ("DELETION_SWEEP_SECONDS", "-1"), ("DELETION_MANUAL_RETRY_MIN_SECONDS", "-1")):
+                        ("DELETION_SWEEP_SECONDS", "-1")):
         monkeypatch.setenv(name, value)
         with pytest.raises(ValidationError):
             Settings(env="test", internal_jwt_secret="y" * 40)
@@ -106,26 +106,18 @@ def test_pending_and_all_acked() -> None:
     assert saga.all_acked([], []) is True
 
 
-def test_manual_retry_wait() -> None:
-    assert saga.manual_retry_wait(None, T0, 300) == 0
-    assert saga.manual_retry_wait(T0, T0, 300) == 300
-    assert saga.manual_retry_wait(T0, T0 + timedelta(seconds=299.2), 300) == 1  # округление вверх
-    assert saga.manual_retry_wait(T0, T0 + timedelta(seconds=300), 300) == 0
-    assert saga.manual_retry_wait(T0, T0, 0) == 0
-
-
-def test_can_retry_and_filters() -> None:
+def test_can_retry() -> None:
     assert [saga.can_retry(s) for s in saga.STATUSES] == [True, True, False]
-    assert saga.LIST_FILTERS == {"open": ("REQUESTED", "STUCK"), "stuck": ("STUCK",), "completed": ("COMPLETED",)}
 
 
 def test_no_forced_completion_in_module() -> None:
     """Правило спринта: принудительного завершения без ACK нет — ни функции, ни маршрута."""
     import inspect
 
-    from tilhero_identity.deletion import api, store, sweeper
+    from tilhero_identity import service
+    from tilhero_identity.deletion import store, sweeper
 
-    for module in (saga, store, sweeper, api):
+    for module in (saga, store, sweeper, service):
         source = inspect.getsource(module)
         assert "force" not in source.replace("Принудительного", "").lower(), module.__name__
     completes = [name for name, _ in inspect.getmembers(store, inspect.isfunction) if "complet" in name]

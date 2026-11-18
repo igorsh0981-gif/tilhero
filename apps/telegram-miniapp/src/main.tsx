@@ -1,11 +1,4 @@
 import "@tilhero/ui-tokens/index.css";
-import "./styles/events.css";
-import "./styles/trip.css";
-import "./styles/prefs.css";
-import "./styles/s6.css";
-import "./styles/s7.css";
-import "./styles/s9.css";
-import "./styles/s94.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
@@ -25,7 +18,7 @@ const boot = resolveBoot({
 // brand fonts off the critical path (fallback faces paint the first frame)
 loadBrandFonts();
 
-// language before the profile arrives: initData language_code → ru (profile locale wins later)
+// language before the profile arrives: initData language_code → ru (the profile locale wins later)
 const initialLang = resolveLang(null, boot.languageCode);
 
 createRoot(document.getElementById("root")!).render(

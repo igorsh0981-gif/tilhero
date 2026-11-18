@@ -406,34 +406,3 @@ async def test_ops_outbox_router(db: Database) -> None:
 
 
 # ---------------------------------------------------------------- схемы событий спринта 8
-
-def test_ops_alert_and_quota_refund_schemas() -> None:
-    import jsonschema
-
-    from tilhero_common.testing import assert_event_conforms
-
-    now = "2026-10-15T10:00:00Z"
-    alert = {"alert_id": str(uuid.uuid4()), "subject_type": "provider", "subject": "aviasales", "kind": "status",
-             "severity": "critical", "state": "open", "state_seq": 1,
-             "params": {"status_from": "ok", "status_to": "down", "error_rate": 0.62, "p95_ms": 8100, "calls": 13,
-                        "by_class": {"server": 7, "timeout": 1}, "route_top": [{"location": "FRU", "count": 12}]},
-             "opened_at": now, "occurred_at": now}
-    assert_event_conforms(make_envelope("ops.alert.raised.v1", alert, producer="ops-monitor"))
-    for bad in ({**alert, "params": {"text": "user@example.com"}},  # свободный текст в params — нельзя
-                {**alert, "subject": "user@example.com"},
-                {**alert, "state": "closed"},
-                {**alert, "params": {"route_top": [{"location": "Tashkent", "count": 1}]}}):
-        with pytest.raises(jsonschema.ValidationError):
-            assert_event_conforms(make_envelope("ops.alert.raised.v1", bad, producer="ops-monitor"))
-    # ai.request.* — quota_refund_reason необязательное: старый ai-concierge его не шлёт
-    import json
-
-    from tilhero_common.testing import _contracts_dir
-
-    schema = json.loads((_contracts_dir() / "ai.request.completed.v1.schema.json").read_text())
-    assert "quota_refund_reason" in schema["properties"] and "quota_refund_reason" not in schema["required"]
-    prop = schema["properties"]["quota_refund_reason"]
-    jsonschema.validate("no_change", prop)
-    jsonschema.validate(None, prop)
-    with pytest.raises(jsonschema.ValidationError):
-        jsonschema.validate("free", prop)

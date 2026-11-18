@@ -51,7 +51,7 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "notes": "Источник — infra/n8n/workflows/plan-tick.json (импортируется при каждом старте, правки в UI перезаписываются). Спринт 1: каждые 5 минут learning-plan проходит окно (last_tick_at, now] и выпускает learning.reminder.due.v1 (за 15 минут до занятия) и learning.session.missed.v1 (слот прошёл без занятия). Повтор безопасен: slot_marks (user_id, local_date, kind) — одно событие на слот. Ответ — {plans_checked, reminders, missed}. Секрет — переменная окружения SCHEDULER_TOKEN, не credential n8n. Без LEARNING_PLAN_URL workflow не включается (entrypoint.sh).",
+      "notes": "Источник — infra/n8n/workflows/plan-tick.json (импортируется при каждом старте, правки в UI перезаписываются). Спринт 1: каждые 5 минут learning-plan проходит окно (last_tick_at, now] и выпускает learning.reminder.due.v1 (в момент слота по местному времени) и learning.session.missed.v1 (слот прошёл без занятия). Повтор безопасен: slot_marks (user_id, local_date, kind) — одно событие на слот. Ответ — {plans_checked, reminders, missed}. Секрет — переменная окружения SCHEDULER_TOKEN, не credential n8n. Без LEARNING_PLAN_URL workflow не включается (entrypoint.sh).",
       "notesInFlow": false
     }
   ],

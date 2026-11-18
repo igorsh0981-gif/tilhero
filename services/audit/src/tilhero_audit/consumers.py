@@ -1,8 +1,8 @@
 """Потребители событий: всё, что относится к аудиту, попадает в журнал ровно один раз (inbox).
 
-Приём только от известных издателей (ревью P4): записи admin.audit.recorded.v1 — от сервисов, выполняющих
-команды сотрудников (actor в них взят из токена admin-bff на стороне издателя); события безопасности —
-только от identity-consent. Прочее отбрасывается с предупреждением (inbox отмечает событие обработанным).
+Приём только от известных издателей (ревью P4 «Бот турист»): записи `admin.audit.recorded.v1` — от доменных
+сервисов TilHero, которые пишут аудит через outbox (INTERNAL_API спринта 1, §7); события безопасности, согласий и
+удаления — только от identity-consent. Прочее отбрасывается с предупреждением (inbox отмечает событие обработанным).
 """
 
 from __future__ import annotations
@@ -17,10 +17,10 @@ from tilhero_audit.schemas import RecordIn
 from tilhero_common.messaging import Envelope
 
 AUDIT_EVENT = "admin.audit.recorded.v1"
-# Спринт 4: source-registry (изменения allowlist источников), events (решения очереди проверки).
-# Спринт 6: news (news.source.created|updated|deleted, news.item.hidden|unhidden — команды сотрудников с news.manage).
-AUDIT_EVENT_PRODUCERS = frozenset({"admin-bff", "support", "experience-config", "admin-identity", "user-admin",
-                                   "source-registry", "events", "news"})
+# Спринт 1 (INTERNAL_API §7): писатели через шину. admin-bff и сервисы админ-контура добавятся в спринте 2.
+AUDIT_EVENT_PRODUCERS = frozenset({
+    "identity-consent", "learning-plan", "social", "experience-config", "support", "notifications",
+})
 SECURITY_EVENT_PRODUCERS = frozenset({"identity-consent"})
 
 log = logging.getLogger("tilhero.audit.consumers")
@@ -36,7 +36,8 @@ def _rejected(env: Envelope) -> None:
 
 
 async def on_admin_audit(session: AsyncSession, env: Envelope) -> None:
-    """Payload события = RecordIn (admin-bff и доменные сервисы публикуют записи асинхронно)."""
+    """Payload события = RecordIn: издатель сам определяет актора (сотрудник — из токена admin-bff, ученик — из sub,
+    иначе сервис) и кладёт запись в outbox в транзакции изменения."""
     if env.producer not in AUDIT_EVENT_PRODUCERS:
         _rejected(env)
         return
@@ -50,11 +51,12 @@ async def on_security_event(session: AsyncSession, env: Envelope) -> None:
     action, object_type = EVENT_ACTIONS[env.event_type]
     p = env.payload
     if env.event_type == "user.deletion.requested.v1" and _attempt(p.get("attempt")) > 1:
-        # спринт 9: повтор рассылки сагой (тот же request_id) — не новый запрос пользователя; ручной повтор сотрудником
-        # уже записан синхронно как user.deletion.retry
+        # повтор рассылки сагой (тот же request_id) — не новый запрос пользователя
         return
     user_id = p.get("user_id")
-    after = {k: v for k, v in p.items() if k in {"status", "policy_version", "purposes", "change", "reason_code"}}
+    # только коды и идентификаторы; возраст (age_band) в журнал не попадает — его хранит только identity-consent
+    after = {k: v for k, v in p.items()
+             if k in {"status", "policy_version", "purposes", "change", "reason_code", "request_id"}}
     await append(
         session,
         RecordIn(

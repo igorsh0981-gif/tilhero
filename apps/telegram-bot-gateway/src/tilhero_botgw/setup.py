@@ -1,9 +1,9 @@
 """Настройка бота в Telegram. В prod — автоматически при каждом запуске (BOT_AUTO_SETUP=true, см. auto_setup);
 вручную — `python -m tilhero_botgw.setup` (со сбросом ожидающих обновлений).
 
-setWebhook (url, secret_token, allowed_updates, drop_pending_updates) → setMyCommands RU/EN
-(+ по умолчанию EN) → setChatMenuButton (web_app на MINIAPP_URL) →
-setMyDescription / setMyShortDescription RU/EN.
+setWebhook (url, secret_token, allowed_updates, drop_pending_updates) → setMyCommands: только /start, RU/UZ
+(+ по умолчанию RU) → setChatMenuButton (web_app на MINIAPP_URL) → setMyDescription / setMyShortDescription RU/UZ
+(+ по умолчанию RU).
 Нужны BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, TELEGRAM_WEBHOOK_URL (https …/telegram/webhook),
 MINIAPP_URL (https).
 """
@@ -18,9 +18,11 @@ import httpx
 
 from tilhero_botgw.settings import Settings, _is_https, get_settings
 from tilhero_botgw.telegram import TelegramClient, TelegramError, silence_http_logging
-from tilhero_botgw.texts import BOT_COMMANDS, DESCRIPTIONS
+from tilhero_botgw.texts import BOT_COMMANDS, DESCRIPTIONS, Lang
 
 ALLOWED_UPDATES = ["message", "callback_query", "my_chat_member"]
+DEFAULT_LANG: Lang = "ru"  # язык по умолчанию (клиент Telegram без ru/uz)
+LANGS: tuple[Lang, ...] = ("ru", "uz")
 
 
 def plan(settings: Settings, *, drop_pending_updates: bool = True) -> list[tuple[str, dict[str, Any]]]:
@@ -43,9 +45,9 @@ def plan(settings: Settings, *, drop_pending_updates: bool = True) -> list[tuple
                 "max_connections": 40,
             },
         ),
-        ("setMyCommands", {"commands": BOT_COMMANDS["en"]}),
+        ("setMyCommands", {"commands": BOT_COMMANDS[DEFAULT_LANG]}),
     ]
-    for lang in ("ru", "en"):
+    for lang in LANGS:
         calls.append(("setMyCommands", {"commands": BOT_COMMANDS[lang], "language_code": lang}))
     calls.append(
         (
@@ -59,9 +61,9 @@ def plan(settings: Settings, *, drop_pending_updates: bool = True) -> list[tuple
             },
         )
     )
-    calls.append(("setMyDescription", {"description": DESCRIPTIONS["en"]["description"]}))
-    calls.append(("setMyShortDescription", {"short_description": DESCRIPTIONS["en"]["short"]}))
-    for lang in ("ru", "en"):
+    calls.append(("setMyDescription", {"description": DESCRIPTIONS[DEFAULT_LANG]["description"]}))
+    calls.append(("setMyShortDescription", {"short_description": DESCRIPTIONS[DEFAULT_LANG]["short"]}))
+    for lang in LANGS:
         calls.append(
             ("setMyDescription", {"description": DESCRIPTIONS[lang]["description"], "language_code": lang})
         )

@@ -1,23 +1,28 @@
 /**
  * Тестовая обвязка: реальный Redis (DB 14, уникальный префикс ключей на приложение), домены — in-memory
  * подделка, подключённая через fetchImpl. Подделка проверяет внутренний JWT (aud = домен, iss = telegram-bff)
- * и берёт user_id ТОЛЬКО из sub — как настоящие домены.
+ * и берёт субъекта ТОЛЬКО из sub — как настоящие домены. Каждый вызов записывается (сервис, путь, sub, тело,
+ * заголовки) — тесты проверяют, от чьего имени BFF ходит в домен (аккаунт или ученик).
  */
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
 import { verifyInternalToken } from "@tilhero/ts-common";
 import type {
+  AgeBand,
   ConsentState,
-  EventDetailView,
   ExperienceConfig,
+  Family,
+  InboxItem,
+  Invite,
+  LearnerSummary,
+  LearningPlan,
   NotificationSettings,
-  Offer,
-  OfferSetView,
-  OfferTier,
-  Preferences,
   SecurityState,
   Ticket,
+  TodayPlan,
   UserSummary,
+  WhatsNew,
+  WhatsNewNote,
 } from "@tilhero/contracts/bff";
 import { buildApp } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
@@ -29,24 +34,27 @@ export const BOT_TOKEN = "7000000001:AAtest-bot-token-for-unit-tests-only-xx";
 export const INTERNAL_SECRET = "internal-test-secret-" + "z".repeat(32);
 export const SESSION_SECRET = "session-test-secret-" + "s".repeat(32);
 export const ORIGIN = "https://miniapp.tilhero.test";
+export const APP_LINK = "https://t.me/tilhero_test_bot/app";
 
 const URLS = {
   identity: "http://identity.test",
-  preferences: "http://preferences.test",
+  learningPlan: "http://learning-plan.test",
   support: "http://support.test",
+  notifications: "http://notifications.test",
   experience: "http://experience.test",
-  events: "http://events.test",
-  offers: "http://offers.test",
-  recommendations: "http://recommendations.test",
-  watch: "http://watch.test",
-  news: "http://news.test",
-  aiConcierge: "http://ai-concierge.test",
+  social: "http://social.test",
 } as const;
 
-/** Спринт 6: домены recommendations/watch/news подключены (по умолчанию в тестах — нет, как без URL в окружении). */
-/** Спринт 7: ai-concierge подключён (обработчик — FakeDomains.aiHandler, см. test/aiFake.ts). */
-export const SPRINT7_ENV = { AI_CONCIERGE_URL: "http://ai-concierge.test" };
-export const SPRINT6_ENV = { RECOMMENDATIONS_URL: URLS.recommendations, WATCH_URL: URLS.watch, NEWS_URL: URLS.news };
+export type Service = keyof typeof URLS;
+
+const DOMAIN_AUD: Record<Service, string> = {
+  identity: "identity-consent",
+  learningPlan: "learning-plan",
+  support: "support",
+  notifications: "notifications",
+  experience: "experience-config",
+  social: "social",
+};
 
 export function testConfig(env: Record<string, string> = {}): Config {
   const prefix = `bfftest:${randomUUID().slice(0, 8)}:`;
@@ -57,14 +65,15 @@ export function testConfig(env: Record<string, string> = {}): Config {
     INTERNAL_JWT_SECRET: INTERNAL_SECRET,
     REDIS_URL: TEST_REDIS_URL,
     REDIS_KEY_PREFIX: prefix,
-    RATE_LIMIT_KEY_PREFIX: prefix, // спринт 9: ключи лимитера — тоже с префиксом приложения
+    RATE_LIMIT_KEY_PREFIX: prefix,
     MINIAPP_ORIGIN: ORIGIN,
+    TELEGRAM_APP_LINK: APP_LINK,
     IDENTITY_URL: URLS.identity,
-    PREFERENCES_URL: URLS.preferences,
+    LEARNING_PLAN_URL: URLS.learningPlan,
     SUPPORT_URL: URLS.support,
+    NOTIFICATIONS_URL: URLS.notifications,
     EXPERIENCE_URL: URLS.experience,
-    EVENTS_URL: URLS.events,
-    OFFERS_URL: URLS.offers,
+    SOCIAL_URL: URLS.social,
     UPSTREAM_RETRIES: "0",
     UPSTREAM_TIMEOUT_MS: "2000",
     LOG_LEVEL: "info",
@@ -89,8 +98,6 @@ export class LogCapture {
 
 // ---------------------------------------------------------------- fake domains
 
-type Service = keyof typeof URLS;
-
 export interface Call {
   service: Service;
   method: string;
@@ -99,7 +106,6 @@ export interface Call {
   subject: string | undefined;
   body: unknown;
   headers: Record<string, string>;
-  startedAt: number;
 }
 
 export interface Req {
@@ -109,13 +115,11 @@ export interface Req {
   subject: string | undefined;
   body: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   headers: Record<string, string>;
-  /** сигнал вызывающего (отмена потока) */
-  signal?: AbortSignal | undefined;
 }
 
 export type Handler = (r: Req) => Response | Promise<Response>;
 
-interface FakeUser {
+export interface FakeAccount {
   summary: UserSummary;
   telegramId: number;
   security: SecurityState;
@@ -124,6 +128,18 @@ interface FakeUser {
   consent: ConsentState;
   settings: NotificationSettings;
   failedPins: number;
+  children: string[];
+  /** Ожидающий сброс кода (ревью T-8): новый код и признак «срок наступил» (тест переводит часы флагом). */
+  pendingPin: string | null;
+  resetDue: boolean;
+}
+
+export interface FakeChild {
+  learner_id: string;
+  display_name: string;
+  age_band: AgeBand;
+  guardian: string;
+  settings: NotificationSettings;
 }
 
 export const json = (status: number, body: unknown) =>
@@ -134,53 +150,77 @@ export const domainError = (status: number, code: string, details: Record<string
 
 export const DEFAULT_EXPERIENCE: ExperienceConfig = {
   app: "miniapp",
-  version: "2.0.3",
-  theme: { id: "dark-premium", version: "2.0.3", tokens: { "--color-bg": "#0b0d12" } },
+  version: "1.0.0",
+  theme: { id: "notebook", version: "1.0.0", tokens: { "--color-paper": "#fbf7ee" } },
   home: {
-    welcome_mode: "first_visit_only",
     sections: [
-      { type: "event_carousel", key: "best_for_you", variant: "large", enabled: true },
-      { type: "watch_changes", key: "watch", variant: "compact", enabled: true },
-      { type: "event_carousel", key: "sales_soon", variant: "compact", enabled: false },
-      { type: "news_carousel", key: "news", variant: "compact", enabled: true },
+      { type: "today_plan", key: "today", variant: "large", enabled: true },
+      { type: "whats_new", key: "whats_new", variant: "compact", enabled: true },
     ],
   },
-  flags: { ai_summary: false },
-  hotel_rating_min: 8.5,
+  flags: { voice: false },
 };
 
-function defaultPrefs(): Preferences {
+const DEFAULT_SETTINGS = (): NotificationSettings => ({
+  enabled: true,
+  categories: { reminders: false, missed: false, social: false, support: true, product: false },
+  quiet_hours: { start: "22:00", end: "08:00" },
+  timezone: "Asia/Tashkent",
+});
+
+/** Срок ожидающего сброса в подделке identity (now + 24 ч условно). */
+export const RESET_EFFECTIVE_AT = "2026-11-19T17:30:00.000Z";
+
+export const GOALS = ["work", "career", "travel", "daily", "study", "exam"];
+export const TOPICS = ["food", "travel", "work", "family", "hobby", "shopping", "health", "city", "school", "games", "music", "sport"];
+
+export function noteFixture(o: Partial<WhatsNewNote> = {}): WhatsNewNote {
   return {
-    interests: { categories: [], entities: [] },
-    geographies: [],
-    strong_events_outside_geo: false,
-    event_formats: ["offline"],
-    budget: { currency: "USD", preset: null, min: null, max: null, custom_amount: null },
-    search_horizon_months: 12,
-    notification_points_months: [3, 6],
-    departures: [],
-    flight_prefs: { direct: true, connecting: true, alternative_departure: true },
-    hotel_prefs: { rating_min: null, max_distance_km: null, min_stars: null },
-    onboarding_completed_at: null,
-    updated_at: "2026-10-08T10:00:00Z",
-    version: 1,
+    release_note_id: randomUUID(),
+    slug: "2026.11",
+    title: "Что нового",
+    items: [{ title: "График занятий", text: "Выберите дни и время", link: "schedule", icon: "calendar" }],
+    audience: "existing",
+    published_at: "2026-11-18T08:00:00Z",
+    ...o,
   };
+}
+
+interface InviteRec {
+  invite: Invite;
+  inviter: string;
+  token: string;
+  opened: Set<string>;
+  acceptedBy: Set<string>;
 }
 
 export class FakeDomains {
   readonly calls: Call[] = [];
-  readonly usersByTg = new Map<number, FakeUser>();
-  readonly usersById = new Map<string, FakeUser>();
-  readonly prefs = new Map<string, Preferences>();
+  readonly usersByTg = new Map<number, FakeAccount>();
+  readonly accounts = new Map<string, FakeAccount>();
+  readonly children = new Map<string, FakeChild>();
+  readonly plans = new Map<string, LearningPlan>();
+  readonly activities = new Map<string, number>(); // `${learner}:${key}` → minutes
+  readonly minutesToday = new Map<string, number>();
+  readonly inbox = new Map<string, InboxItem[]>();
+  readonly invites = new Map<string, InviteRec>();
+  readonly inviteIdem = new Map<string, string>();
+  readonly families = new Map<string, Family>(); // owner → family
+  readonly guardianRequests = new Map<string, { teen: string; status: "pending" | "granted" | "declined" | "expired"; expires_at: string }>();
+  /** Решения родителей по подросткам (INTERNAL_API §11): teen → последнее решение. */
+  readonly grants = new Map<string, { guardian: string; status: "granted" | "declined" | "revoked"; decided_at: string }>();
   readonly tickets = new Map<string, Ticket & { owner: string }>();
   readonly ticketIdem = new Map<string, string>();
+  readonly childIdem = new Map<string, string>();
+  /** experience-config for-me: ответ (по умолчанию updates с одной заметкой) и лента. */
+  forMe: WhatsNew = { mode: "updates", notes: [noteFixture()] };
+  feed: WhatsNewNote[] = [noteFixture({ slug: "welcome-1", audience: "new" })];
+  readonly seen = new Map<string, Set<string>>();
   experience: ExperienceConfig = structuredClone(DEFAULT_EXPERIENCE);
-  /** event-catalog: EventDetail с «внутренними» полями каталога (BFF не должен пропускать их наружу). */
-  readonly catalog: CatalogEvent[] = [];
+  /** identity отдаёт настройки уведомлений ребёнка в GET/PATCH /me/learners/{id} (запрос к общему коду). */
+  childSettingsInDetail = true;
   /** Домены, «лежащие» на сетевом уровне (fetch бросает). */
   readonly down = new Set<Service>();
-  /** Искусственная задержка ответа домена, мс. */
-  readonly delays = new Map<Service, number>();
   private readonly overrides = new Map<string, Handler>();
   private ticketSeq = 3000;
 
@@ -189,17 +229,68 @@ export class FakeDomains {
     this.overrides.set(`${service} ${method} ${path}`, h);
   }
 
-  user(userId: string): FakeUser {
-    const u = this.usersById.get(userId);
-    if (!u) throw new Error(`no fake user ${userId}`);
+  account(userId: string): FakeAccount {
+    const u = this.accounts.get(userId);
+    if (!u) throw new Error(`no fake account ${userId}`);
     return u;
   }
 
-  /** Включить PIN пользователю напрямую (как будто задан ранее). */
+  /** Срок ожидающего сброса наступил: состояние показывает новый код (запись — при следующей проверке кода). */
+  makeResetDue(userId: string): void {
+    const u = this.account(userId);
+    u.resetDue = true;
+    u.security = { ...u.security, pin_length: (u.pendingPin?.length ?? 4) as 4 | 6, pin_reset_effective_at: null };
+  }
+
+  /** Проверка кода как в identity: наступивший сброс применяется, ненаступивший отменяется верным прежним кодом.
+   *  → null (верно; applied — сброс введён в действие) или ответ-ошибка. */
+  private checkPin(u: FakeAccount, pin: string | undefined): { applied: boolean } | Response {
+    let applied = false;
+    let pinNow = u.pin;
+    if (u.pendingPin && u.resetDue) pinNow = u.pendingPin;
+    if (pin !== pinNow) {
+      u.failedPins += 1;
+      if (u.failedPins >= 5) return domainError(423, "PIN_LOCKED", { retry_after: 300 });
+      return domainError(401, "PIN_INVALID", { remaining: 5 - u.failedPins });
+    }
+    u.failedPins = 0;
+    if (u.pendingPin && u.resetDue) {
+      u.pin = u.pendingPin;
+      applied = true;
+      u.biometricToken = null;
+      u.security = { ...u.security, biometric_enabled: false };
+    }
+    u.pendingPin = null;
+    u.resetDue = false;
+    u.security = { ...u.security, pin_length: (u.pin?.length ?? null) as 4 | 6 | null, pin_reset_effective_at: null };
+    return { applied };
+  }
+
+  /** Включить код родителя напрямую (как будто задан ранее). */
   enablePin(userId: string, pin: string): void {
-    const u = this.user(userId);
+    const u = this.account(userId);
     u.pin = pin;
     u.security = { ...u.security, pin_enabled: true, pin_length: pin.length as 4 | 6 };
+  }
+
+  setAge(userId: string, band: AgeBand): void {
+    const u = this.account(userId);
+    u.summary = { ...u.summary, age_band: band, guardian_consent: band === "14-17" ? "pending" : "not_required" };
+  }
+
+  /** Детский профиль напрямую. */
+  addChild(guardian: string, name = "Мадина", band: AgeBand = "6-9"): string {
+    const id = randomUUID();
+    this.children.set(id, { learner_id: id, display_name: name, age_band: band, guardian, settings: DEFAULT_SETTINGS() });
+    this.account(guardian).children.push(id);
+    return id;
+  }
+
+  /** План напрямую (онбординг завершён). */
+  onboard(learnerId: string, o: Partial<LearningPlan> = {}): LearningPlan {
+    const p = { ...this.defaultPlan(learnerId), goal: "daily" as const, level_self: "beginner" as const, onboarding_completed_at: "2026-11-10T09:00:00Z", ...o };
+    this.plans.set(learnerId, p);
+    return p;
   }
 
   callsTo(service: Service, method?: string, path?: string): Call[] {
@@ -210,18 +301,6 @@ export class FakeDomains {
     const url = new URL(input instanceof Request ? input.url : String(input));
     const service = (Object.keys(URLS) as Service[]).find((k) => URLS[k] === url.origin);
     if (!service) throw new TypeError(`unknown upstream ${url.origin}`);
-    const delay = this.delays.get(service);
-    const startedAt = performance.now();
-    // задержка прерывается сигналом вызывающего (таймаут ServiceClient), как у настоящего fetch
-    if (delay) {
-      await new Promise<void>((resolve, reject) => {
-        const t = setTimeout(resolve, delay);
-        init?.signal?.addEventListener("abort", () => {
-          clearTimeout(t);
-          reject(init.signal?.reason ?? new Error("aborted"));
-        });
-      });
-    }
     if (this.down.has(service)) throw new TypeError("fetch failed: ECONNREFUSED");
 
     const headers: Record<string, string> = {};
@@ -239,8 +318,9 @@ export class FakeDomains {
       return domainError(e.status ?? 401, e.code ?? "INTERNAL_TOKEN_INVALID");
     }
     const query = Object.fromEntries(url.searchParams);
-    this.calls.push({ service, method, path: url.pathname, query, subject, body, headers, startedAt });
-    const req: Req = { method, path: url.pathname, query, subject, body, headers, signal: init?.signal ?? undefined };
+    this.calls.push({ service, method, path: url.pathname, query, subject, body, headers });
+    const req: Req = { method, path: url.pathname, query, subject, body, headers };
+    if (this.failAll && !this.failAll.except.has(service)) return domainError(this.failAll.status, this.failAll.code, { from: service });
     const ov = this.overrides.get(`${service} ${method} ${url.pathname}`);
     const res = ov ? await ov(req) : await this.route(service, req);
     if (!this.decorate || res.status >= 300 || res.status === 204) return res;
@@ -248,263 +328,100 @@ export class FakeDomains {
     return json(res.status, this.decorate(parsed));
   };
 
+  /** Все домены (кроме except) отвечают этой ошибкой — проверка проброса 4xx в ErrorBody на каждом маршруте. */
+  failAll: { status: number; code: string; except: Set<Service> } | null = null;
+
   /** Пост-обработка успешных JSON-ответов доменов (тест «домен вернул лишние поля»). */
   decorate: ((body: unknown) => unknown) | null = null;
-
-  private me(u: FakeUser) {
-    return { user: u.summary, security: u.security, consent: u.consent, settings: u.settings };
-  }
-
-  private requireUser(r: Req): FakeUser | Response {
-    if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
-    const u = this.usersById.get(r.subject);
-    return u ?? domainError(404, "USER_NOT_FOUND");
-  }
 
   private route(service: Service, r: Req): Response | Promise<Response> {
     switch (service) {
       case "identity":
         return this.identity(r);
-      case "preferences":
-        return this.preferencesRoute(r);
+      case "learningPlan":
+        return this.learningPlan(r);
+      case "notifications":
+        return this.notificationsRoute(r);
+      case "social":
+        return this.social(r);
       case "support":
         return this.support(r);
       case "experience":
-        if (r.method === "GET" && r.path === "/internal/v1/experience/miniapp/current") return json(200, this.experience);
-        return domainError(404, "NOT_FOUND");
-      case "events":
-        return this.events(r);
-      case "offers":
-        return this.offersRoute(r);
-      case "recommendations":
-        return this.recommendationsRoute(r);
-      case "watch":
-        return this.watchRoute(r);
-      case "news":
-        return this.newsRoute(r);
-      case "aiConcierge":
-        return this.aiHandler ? this.aiHandler(r) : json(404, { detail: "Not Found" });
+        return this.experienceRoute(r);
     }
   }
 
-  /** Спринт 7: обработчик ai-concierge (test/aiFake.ts). */
-  aiHandler: Handler | null = null;
+  // ---------------------------------------------------------------- identity-consent
 
-  // ---------------------------------------------------------------- спринт 6: recommendations / watch / news
+  private learnerOf(u: FakeAccount): LearnerSummary & Record<string, unknown> {
+    return {
+      learner_id: u.summary.user_id,
+      kind: "self",
+      display_name: u.summary.display_name,
+      age_band: u.summary.age_band,
+      is_active: false,
+      onboarding_completed: false,
+      telegram_user_id: u.telegramId, // внутреннее поле — BFF не должен его пропустить наружу
+    };
+  }
 
-  /** Реакции: `${user}:${event}` → {reaction, categories}. */
-  readonly reactions = new Map<string, { reaction: string; categories: string[] }>();
-  /** Подмена ответа rank: получает тело запроса и «честный» ответ. */
-  rankHook: ((body: any, honest: { items: any[] }) => unknown) | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any
+  private childView(c: FakeChild, withSettings: boolean): Record<string, unknown> {
+    return {
+      learner_id: c.learner_id,
+      kind: "child",
+      display_name: c.display_name,
+      age_band: c.age_band,
+      is_active: false,
+      onboarding_completed: false,
+      guardian_user_id: c.guardian, // внутреннее поле
+      ...(withSettings ? { settings: c.settings } : {}),
+    };
+  }
 
-  private recommendationsRoute(r: Req): Response {
+  private learners(u: FakeAccount) {
+    return [this.learnerOf(u), ...u.children.map((id) => this.childView(this.children.get(id)!, false))];
+  }
+
+  private me(u: FakeAccount) {
+    return {
+      user: { ...u.summary, is_new: false, telegram_user_id: u.telegramId },
+      security: u.security,
+      consent: u.consent,
+      settings: u.settings,
+      learners: this.learners(u),
+    };
+  }
+
+  private requireAccount(r: Req): FakeAccount | Response {
     if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
-    if (r.method === "POST" && r.path === "/internal/v1/recommendations:rank") {
-      const b = r.body as { candidates: Array<{ event_id: string; quality_score: number; categories: string[]; trip_per_person: string | null }>; limit: number };
-      const items = b.candidates
-        .filter((c) => this.reactions.get(`${r.subject}:${c.event_id}`)?.reaction !== "less")
-        .map((c) => {
-          // «рекомендация» — обратный quality (чтобы порядок отличался от прежнего)
-          const score = Math.max(0, Math.min(100, 100 - c.quality_score + (this.reactions.get(`${r.subject}:${c.event_id}`)?.reaction === "more" ? 5 : 0)));
-          return {
-            event_id: c.event_id,
-            score,
-            bucket: (c.categories[0] ?? "other").split(".")[0],
-            reasons: [
-              { code: "INTEREST_MATCH", params: { category: c.categories[0] ?? "other" }, kind: "fact" },
-              c.trip_per_person
-                ? { code: "FITS_BUDGET", params: { amount: c.trip_per_person }, kind: "estimate" }
-                : { code: "HIGH_SIGNIFICANCE", params: {}, kind: "recommendation" },
-            ],
-            factors: { interests: 80, geography: 50, budget: null, significance: c.quality_score, freshness: 40, feedback: 0 },
-            internal_weight: 0.42, // лишнее поле — BFF не должен его пропустить
-          };
-        })
-        .sort((a, b2) => b2.score - a.score || (a.event_id < b2.event_id ? -1 : 1))
-        .slice(0, b.limit);
-      const honest = { items };
-      return json(200, this.rankHook ? this.rankHook(r.body, honest) : honest);
-    }
-    const rm = /^\/internal\/v1\/reactions\/([^/]+)$/.exec(r.path);
-    if (r.method === "GET" && rm) {
-      const cur = this.reactions.get(`${r.subject}:${rm[1]}`);
-      return json(200, {
-        event_id: rm[1],
-        reaction: cur ? (cur.reaction === "less" ? "not_interested" : "more_like_this") : null,
-        created_at: cur ? "2026-10-11T07:00:00.000Z" : null,
-      });
-    }
-    if (r.method === "POST" && r.path === "/internal/v1/reactions") {
-      const b = r.body as { event_id: string; categories: string[]; reaction: string; undo: boolean };
-      const key = `${r.subject}:${b.event_id}`;
-      if (b.undo) this.reactions.delete(key);
-      else this.reactions.set(key, { reaction: b.reaction, categories: b.categories });
-      return new Response(null, { status: 204 });
-    }
-    return domainError(404, "NOT_FOUND");
+    // identity /me/* — только аккаунт: ученик-ребёнок аккаунтом не является
+    return this.accounts.get(r.subject) ?? domainError(404, "USER_NOT_FOUND");
   }
 
-  readonly watches = new Map<string, { owner: string; w: Record<string, any>; changes: unknown[] }>(); // eslint-disable-line @typescript-eslint/no-explicit-any
-  private readonly watchIdem = new Map<string, string>();
-  watchLimit = 20;
-
-  /** Слежение напрямую (как будто создано раньше). */
-  addWatch(owner: string, eventId: string, o: Record<string, unknown> = {}, changes: unknown[] = []): string {
-    const id = randomUUID();
-    const e = this.catalog.find((x) => x.event_id === eventId);
-    this.watches.set(id, { owner, w: watchFixture(id, eventId, e?.title ?? "Event", o), changes });
-    return id;
+  private applyNotifications(s: NotificationSettings, patch: Record<string, unknown>): NotificationSettings | Response {
+    const allowed = ["enabled", "quiet_hours", "timezone", "categories"];
+    if (Object.keys(patch).some((k) => !allowed.includes(k))) return domainError(422, "VALIDATION_ERROR");
+    const qh = patch.quiet_hours as { start: string; end: string } | null | undefined;
+    if (qh && qh.start === qh.end) return domainError(422, "QUIET_HOURS_INVALID");
+    if (patch.timezone === "Mars/Base") return domainError(422, "TIMEZONE_INVALID");
+    return {
+      ...s,
+      ...(patch.enabled !== undefined ? { enabled: patch.enabled as boolean } : {}),
+      ...(patch.quiet_hours !== undefined ? { quiet_hours: qh ?? null } : {}),
+      ...(patch.timezone !== undefined ? { timezone: patch.timezone as string } : {}),
+      categories: { ...s.categories, ...((patch.categories as object) ?? {}) },
+    };
   }
 
-  private watchRoute(r: Req): Response {
-    if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
-    const owner = r.subject;
-    const mine = [...this.watches.values()].filter((x) => x.owner === owner);
-    const withLast = (x: { w: Record<string, unknown>; changes: unknown[] }) => ({ ...x.w, last_change: x.changes[0] ?? x.w.last_change ?? null, user_id: owner });
-    if (r.method === "POST" && r.path === "/internal/v1/watches") {
-      const guarded = this.watchCreateGuard?.(r.body);
-      if (guarded) return guarded;
-      const idem = r.headers["idempotency-key"];
-      if (!idem) return domainError(422, "IDEMPOTENCY_KEY_REQUIRED");
-      const b = r.body as { event_id: string; offer_params: Record<string, unknown>; dimensions?: Record<string, boolean>; threshold_pct?: number };
-      const prevId = this.watchIdem.get(`${owner}:${idem}`);
-      if (prevId) return json(201, withLast(this.watches.get(prevId)!));
-      const existing = mine.find((x) => x.w.event_id === b.event_id && x.w.status !== "ended");
-      if (existing) return json(200, withLast(existing));
-      const e = this.catalog.find((x) => x.event_id === b.event_id && !x.hidden);
-      if (!e) return domainError(404, "EVENT_NOT_FOUND");
-      if (e.is_past) return domainError(422, "EVENT_PAST");
-      if (mine.filter((x) => x.w.status !== "ended").length >= this.watchLimit) return domainError(409, "WATCH_LIMIT", { limit: this.watchLimit });
-      const id = randomUUID();
-      const w = watchFixture(id, b.event_id, e.title, {
-        offer_params: b.offer_params,
-        ...(b.dimensions ? { dimensions: { ...watchFixture(id, b.event_id, "").dimensions, ...b.dimensions } } : {}),
-        ...(b.threshold_pct ? { threshold_pct: b.threshold_pct } : {}),
-      });
-      this.watches.set(id, { owner, w, changes: [] });
-      this.watchIdem.set(`${owner}:${idem}`, id);
-      return json(201, withLast(this.watches.get(id)!));
-    }
-    if (r.method === "GET" && r.path === "/internal/v1/watches") {
-      const items = mine.filter((x) => !r.query.status || x.w.status === r.query.status).slice(0, Number(r.query.limit ?? 20));
-      return json(200, { items: items.map(withLast), next_cursor: null });
-    }
-    if (r.method === "GET" && r.path === "/internal/v1/watches:summary") {
-      const since = Date.parse(r.query.since ?? "");
-      const changes = mine.flatMap((x) => x.changes as Array<{ type: string; severity: string; detected_at: string }>).filter((c) => Date.parse(c.detected_at) > since);
-      return json(200, {
-        active: mine.filter((x) => x.w.status === "active").length,
-        critical: changes.filter((c) => c.severity === "critical").length,
-        price_drops_since: changes.filter((c) => c.type === "price_drop").length,
-        next_check_at: "2026-10-11T18:00:00Z",
-      });
-    }
-    if (r.method === "GET" && r.path === "/internal/v1/watches:by-events") {
-      const ids = (r.query.ids ?? "").split(",");
-      return json(200, { items: mine.filter((x) => ids.includes(String(x.w.event_id))).map((x) => ({ event_id: x.w.event_id, watch_id: x.w.watch_id, status: x.w.status })) });
-    }
-    const m = /^\/internal\/v1\/watches\/([^/]+)(\/changes)?$/.exec(r.path);
-    if (m) {
-      const x = this.watches.get(m[1]!);
-      if (!x || x.owner !== owner) return domainError(404, "WATCH_NOT_FOUND");
-      if (m[2] && r.method === "GET") return json(200, { items: x.changes, next_cursor: null });
-      if (!m[2] && r.method === "GET") return json(200, { ...withLast(x), history: [] });
-      if (!m[2] && r.method === "PATCH") {
-        const b = r.body as { expected_version: number; status?: string; threshold_pct?: number; dimensions?: Record<string, boolean> };
-        if (b.expected_version !== x.w.version) return domainError(409, "VERSION_CONFLICT", { current_version: x.w.version });
-        x.w = {
-          ...x.w,
-          ...(b.status ? { status: b.status } : {}),
-          ...(b.threshold_pct ? { threshold_pct: b.threshold_pct } : {}),
-          ...(b.dimensions ? { dimensions: { ...x.w.dimensions, ...b.dimensions } } : {}),
-          version: x.w.version + 1,
-        };
-        return json(200, withLast(x));
-      }
-      if (!m[2] && r.method === "DELETE") {
-        this.watches.delete(m[1]!);
-        return new Response(null, { status: 204 });
-      }
-    }
-    return domainError(404, "NOT_FOUND");
-  }
-
-  /** Лента новостей (сырые элементы — тесты кладут и «плохие»). */
-  readonly newsItems: unknown[] = [];
-  readonly newsPrefs = new Map<string, Record<string, boolean>>();
-  newsCursor: string | null = null;
-  /** 6.1: ответ news:topics; null — старый news без маршрута (FastAPI 404 {detail}). */
-  newsTopics: unknown = null;
-
-  private newsRoute(r: Req): Response {
-    if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
-    if (r.method === "POST" && r.path === "/internal/v1/news:topics") {
-      return this.newsTopics === null ? json(404, { detail: "Not Found" }) : json(200, this.newsTopics);
-    }
-    const prefs = () => this.newsPrefs.get(r.subject!) ?? { from_watch: true, by_interests: true, only_significant: false, digest: true };
-    if (r.method === "POST" && r.path === "/internal/v1/news:feed") {
-      const b = r.body as { limit: number };
-      return json(200, { items: this.newsItems.slice(0, b.limit + 5), next_cursor: this.newsCursor });
-    }
-    if (r.method === "GET" && r.path === "/internal/v1/news/preferences") return json(200, { ...prefs(), user_id: r.subject });
-    if (r.method === "PUT" && r.path === "/internal/v1/news/preferences") {
-      this.newsPrefs.set(r.subject, r.body as Record<string, boolean>);
-      return json(200, prefs());
-    }
-    return domainError(404, "NOT_FOUND");
-  }
-
-  /** offers: снимки {offer_id → владелец, событие, Offer}; сборка ведёт себя как §2.1 (упрощённо). */
-  readonly offerSnapshots = new Map<string, { owner: string; event_id: string; offer: Offer; created_at: string }>();
-  /** Пост-обработка ответа offers:build (тесты «недоверенный ответ»). */
-  offersBuild: ((set: OfferSetView, body: any) => unknown) | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-  /** Предобработка запроса offers:build: вернула Response — он и уходит (например, 422 старого offers). */
-  offersBuildGuard: ((body: any) => Response | null) | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any
-  /** ревью 6.3: ответ watch на POST /internal/v1/watches до обработки (старый watch отвергает поле) */
-  watchCreateGuard: ((body: any) => Response | null) | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-  private offersRoute(r: Req): Response {
-    if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
-    if (r.method === "POST" && r.path === "/internal/v1/offers:build") {
-      const guarded = this.offersBuildGuard?.(r.body);
-      if (guarded) return guarded;
-      const b = r.body as { event_id: string; travellers: number; departures: Array<{ airport_iata: string }>; overrides?: { departure_iata: string | null } };
-      const e = this.catalog.find((x) => x.event_id === b.event_id && !x.hidden);
-      if (!e) return domainError(404, "EVENT_NOT_FOUND");
-      const dep = b.overrides?.departure_iata ?? null;
-      if (dep && !b.departures.some((d) => d.airport_iata === dep) && !["TAS", "ALA"].includes(dep)) {
-        return domainError(422, "OFFER_DEPARTURE_INVALID", { departure_iata: dep });
-      }
-      const set = offerSetFixture(e.event_id, { travellers: b.travellers, departure: dep ?? b.departures[0]?.airport_iata ?? null });
-      // 5.1: offers считает по присланному бюджету и выбранному отелю
-      const bb = r.body as { budget?: OfferSetView["budget"]; overrides?: { hotel_id?: string | null } };
-      set.budget = bb.budget ?? null;
-      set.hotel_chosen_by = bb.overrides?.hotel_id ? "user" : "rules";
-      for (const tier of Object.values(set.tiers ?? {})) {
-        this.offerSnapshots.set(tier.offer_id, { owner: r.subject, event_id: e.event_id, offer: tier, created_at: set.generated_at });
-      }
-      return json(200, this.offersBuild ? this.offersBuild(set, b) : set);
-    }
-    const m = /^\/internal\/v1\/offers\/([^/]+)$/.exec(r.path);
-    if (r.method === "GET" && m) {
-      const snap = this.offerSnapshots.get(m[1]!);
-      if (!snap || snap.owner !== r.subject) return domainError(404, "OFFER_NOT_FOUND");
-      return json(200, {
-        offer_id: m[1],
-        event_id: snap.event_id,
-        tier: snap.offer.tier,
-        travellers: 2,
-        created_at: snap.created_at,
-        expires_at: snap.offer.expires_at,
-        offer: snap.offer,
-        trip: null,
-        departure: null,
-        notes: [],
-        user_id: snap.owner, // внутреннее поле — BFF не должен его использовать/пропускать
-      });
-    }
-    return domainError(404, "NOT_FOUND");
+  private grantView(teenId: string, g: { status: string; decided_at: string }) {
+    return {
+      teen_user_id: teenId,
+      teen_display_name: this.accounts.get(teenId)?.summary.display_name ?? "?",
+      status: g.status,
+      decided_at: g.decided_at,
+      guardian_user_id: "internal", // внутреннее поле — BFF не должен его пропустить
+      telegram_user_id: 1,
+    };
   }
 
   private identity(r: Req): Response {
@@ -512,7 +429,7 @@ export class FakeDomains {
     if (key === "POST /internal/v1/users/telegram-login") {
       const b = r.body as { telegram_user_id: number; first_name: string; username?: string; language_code?: string };
       let u = this.usersByTg.get(b.telegram_user_id);
-      const isNew = !u || u.summary.status === ("DELETED" as never);
+      const isNew = !u;
       if (!u) {
         const userId = randomUUID();
         u = {
@@ -521,80 +438,178 @@ export class FakeDomains {
             user_id: userId,
             display_name: b.first_name,
             username: b.username ?? null,
-            locale: b.language_code?.startsWith("en") ? "en" : "ru",
+            locale: b.language_code?.startsWith("uz") ? "uz" : "ru",
             status: "ACTIVE",
             is_new: true,
+            age_band: null,
+            guardian_consent: "not_required",
           },
-          security: { pin_enabled: false, pin_length: null, biometric_enabled: false, pin_required: false, locked_until: null },
+          security: { pin_enabled: false, pin_length: null, biometric_enabled: false, pin_required: false, locked_until: null, pin_reset_effective_at: null },
           pin: null,
           biometricToken: null,
-          consent: {
-            accepted: false,
-            policy_version: null,
-            current_policy_version: "2026-10-01",
-            accepted_at: null,
-            evidence_hash: null,
-            age_confirmed_18_plus: false,
-          },
-          settings: { enabled: true, quiet_hours: null, digest_time: "09:00", timezone: "Asia/Tashkent" },
+          consent: { accepted: false, policy_version: null, current_policy_version: "2026-11-18", accepted_at: null, evidence_hash: null, purposes: [] },
+          settings: DEFAULT_SETTINGS(),
           failedPins: 0,
+          pendingPin: null,
+          resetDue: false,
+          children: [],
         };
         this.usersByTg.set(b.telegram_user_id, u);
-        this.usersById.set(userId, u);
+        this.accounts.set(userId, u);
       }
-      // домен «по ошибке» отдаёт внутреннее поле — BFF не должен его пропустить наружу
-      return json(200, {
-        ...this.me(u),
-        user: { ...u.summary, is_new: isNew, telegram_user_id: u.telegramId },
-        onboarding_completed: null,
-      });
+      const { settings: _s, ...login } = this.me(u);
+      return json(200, { ...login, user: { ...login.user, is_new: isNew } });
     }
     if (key === "GET /internal/v1/legal/policy") {
-      return json(200, { version: "2026-10-01", purposes: [{ code: "core", required: true, title: "Сервис", description: "…" }], text: `# Policy ${r.query.lang}` });
+      return json(200, {
+        version: "2026-11-18",
+        purposes: [{ code: "terms", required: true, title: "Условия", description: "…" }],
+        text: `# Policy ${r.query.lang}`,
+      });
     }
-    const u = this.requireUser(r);
+    const gc = /^\/internal\/v1\/guardian-consents\/([^/]+)(?:\/(accept|decline))?$/.exec(r.path);
+    if (gc) {
+      const req = this.guardianRequests.get(gc[1]!);
+      if (!req) return domainError(404, "GUARDIAN_CONSENT_NOT_FOUND");
+      const teen = this.accounts.get(req.teen)!;
+      const preview = () => json(200, { teen_display_name: teen.summary.display_name, status: req.status, expires_at: req.expires_at, teen_user_id: req.teen });
+      if (r.method === "GET" && !gc[2]) return preview();
+      if (r.method === "POST" && gc[2]) {
+        if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
+        if (r.subject === req.teen) return domainError(409, "GUARDIAN_CONSENT_SELF");
+        const parent = this.accounts.get(r.subject);
+        if (!parent || parent.summary.age_band !== "18+") return domainError(403, "ADULT_REQUIRED");
+        if (req.status === "expired") return domainError(410, "GUARDIAN_CONSENT_EXPIRED");
+        req.status = gc[2] === "accept" ? "granted" : "declined";
+        teen.summary = { ...teen.summary, guardian_consent: req.status };
+        this.grants.set(req.teen, { guardian: r.subject, status: req.status, decided_at: "2026-11-18T11:00:00Z" });
+        return preview();
+      }
+    }
+    const u = this.requireAccount(r);
     if (u instanceof Response) return u;
+    // §11: решения родителя по подросткам (sub = родитель); отзыв — только тем, кто дал согласие
+    if (key === "GET /internal/v1/me/guardian-consents") {
+      const items = [...this.grants.entries()]
+        .filter(([, g]) => g.guardian === u.summary.user_id)
+        .map(([teen, g]) => this.grantView(teen, g));
+      return json(200, { items });
+    }
+    const gr = /^\/internal\/v1\/me\/guardian-consents\/([^/:]+):revoke$/.exec(r.path);
+    if (gr && r.method === "POST") {
+      const teenId = gr[1]!;
+      const g = this.grants.get(teenId);
+      if (!g || g.guardian !== u.summary.user_id || g.status !== "granted") return domainError(404, "GUARDIAN_CONSENT_NOT_FOUND");
+      g.status = "revoked";
+      g.decided_at = "2026-11-18T12:00:00Z";
+      const teen = this.accounts.get(teenId)!;
+      teen.summary = { ...teen.summary, guardian_consent: "declined" };
+      teen.consent = { ...teen.consent, purposes: teen.consent.purposes.filter((p) => ["terms", "privacy", "learning"].includes(p)) };
+      return json(200, this.grantView(teenId, { ...g, status: "declined" }));
+    }
+    const lm = /^\/internal\/v1\/me\/learners\/([^/]+)$/.exec(r.path);
+    if (lm) {
+      const id = lm[1]!;
+      if (id === u.summary.user_id && r.method === "GET") return json(200, this.learnerOf(u));
+      const c = this.children.get(id);
+      if (!c || c.guardian !== u.summary.user_id) return domainError(404, "LEARNER_NOT_FOUND");
+      if (r.method === "GET") return json(200, this.childView(c, this.childSettingsInDetail));
+      if (r.method === "PATCH") {
+        const b = r.body as { display_name?: string; settings?: Record<string, unknown> };
+        if (Object.keys(b).some((k) => !["display_name", "settings"].includes(k))) return domainError(422, "VALIDATION_ERROR");
+        if (b.settings) {
+          const next = this.applyNotifications(c.settings, b.settings);
+          if (next instanceof Response) return next;
+          c.settings = next;
+        }
+        if (b.display_name) c.display_name = b.display_name;
+        return json(200, this.childView(c, this.childSettingsInDetail));
+      }
+    }
     switch (key) {
       case "GET /internal/v1/me":
-        return json(200, { ...this.me(u), user: { ...u.summary, is_new: false, telegram_user_id: u.telegramId } });
-      case "PATCH /internal/v1/me/settings": {
-        const b = r.body as { locale?: "ru" | "en"; notifications?: Partial<NotificationSettings> };
-        if (b.locale) u.summary = { ...u.summary, locale: b.locale };
-        if (b.notifications) u.settings = { ...u.settings, ...b.notifications };
         return json(200, this.me(u));
+      case "PATCH /internal/v1/me/settings": {
+        const b = r.body as { locale?: "ru" | "uz"; notifications?: Record<string, unknown> };
+        if (Object.keys(b).some((k) => !["locale", "notifications"].includes(k))) return domainError(422, "VALIDATION_ERROR");
+        if (b.notifications) {
+          const next = this.applyNotifications(u.settings, b.notifications);
+          if (next instanceof Response) return next;
+          u.settings = next;
+        }
+        if (b.locale) u.summary = { ...u.summary, locale: b.locale };
+        return json(200, this.me(u));
+      }
+      case "PUT /internal/v1/me/age": {
+        const b = r.body as { age_band: AgeBand };
+        if (u.summary.age_band) return domainError(409, "AGE_ALREADY_SET");
+        this.setAge(u.summary.user_id, b.age_band);
+        return json(200, this.me(u));
+      }
+      case "GET /internal/v1/me/learners":
+        return json(200, { items: this.learners(u) });
+      case "POST /internal/v1/me/learners": {
+        if (u.summary.age_band !== "18+") return domainError(403, "ADULT_REQUIRED");
+        const idem = r.headers["idempotency-key"];
+        const prev = idem ? this.childIdem.get(`${u.summary.user_id}:${idem}`) : undefined;
+        if (prev) return json(201, this.childView(this.children.get(prev)!, false));
+        if (u.children.length >= 5) return domainError(409, "CHILDREN_LIMIT");
+        const b = r.body as { display_name: string; age_band: AgeBand };
+        const id = this.addChild(u.summary.user_id, b.display_name, b.age_band);
+        if (idem) this.childIdem.set(`${u.summary.user_id}:${idem}`, id);
+        return json(201, this.childView(this.children.get(id)!, false));
+      }
+      case "POST /internal/v1/me/guardian-consent-requests": {
+        if (u.summary.age_band !== "14-17" || u.summary.guardian_consent === "granted") return domainError(409, "GUARDIAN_CONSENT_NOT_REQUIRED");
+        const token = randomBytes(32).toString("base64url");
+        for (const g of this.guardianRequests.values()) if (g.teen === u.summary.user_id && g.status === "pending") g.status = "expired";
+        const expires_at = "2026-11-25T10:00:00Z";
+        this.guardianRequests.set(token, { teen: u.summary.user_id, status: "pending", expires_at });
+        return json(200, { token, expires_at });
       }
       case "PUT /internal/v1/me/pin": {
         const b = r.body as { pin: string; current_pin?: string };
-        if (u.pin && b.current_pin !== u.pin) return domainError(401, "PIN_INVALID", { remaining: 4 });
-        if (!/^(\d{4}|\d{6})$/.test(b.pin) || b.pin === "1234") return domainError(422, "PIN_FORMAT");
+        if (u.pin) {
+          const checked = this.checkPin(u, b.current_pin);
+          if (checked instanceof Response) return checked;
+        }
         u.pin = b.pin;
         u.security = { ...u.security, pin_enabled: true, pin_length: b.pin.length as 4 | 6 };
         return json(200, u.security);
       }
       case "DELETE /internal/v1/me/pin": {
         const b = r.body as { current_pin: string };
-        if (b.current_pin !== u.pin) return domainError(401, "PIN_INVALID", { remaining: 4 });
+        const checked = this.checkPin(u, b.current_pin);
+        if (checked instanceof Response) return checked;
         u.pin = null;
         u.security = { ...u.security, pin_enabled: false, pin_length: null, biometric_enabled: false };
         return json(200, u.security);
       }
       case "POST /internal/v1/me/pin/verify": {
         const b = r.body as { pin: string };
-        if (b.pin !== u.pin) {
-          u.failedPins += 1;
-          if (u.failedPins >= 5) return domainError(423, "PIN_LOCKED", { retry_after: 300 });
-          return domainError(401, "PIN_INVALID", { remaining: 5 - u.failedPins });
-        }
-        u.failedPins = 0;
-        return json(200, { ok: true });
+        if (!u.pin) return domainError(409, "PIN_NOT_SET");
+        const checked = this.checkPin(u, b.pin);
+        if (checked instanceof Response) return checked;
+        return json(200, { ok: true, pin_reset_applied: checked.applied });
       }
       case "POST /internal/v1/me/pin/reset-request":
         return json(200, { expires_in: 600 });
       case "POST /internal/v1/me/pin/reset-confirm": {
         const b = r.body as { code: string; new_pin: string };
         if (b.code !== "246810") return domainError(401, "RESET_CODE_INVALID", { remaining: 4 });
-        u.pin = b.new_pin;
-        u.security = { ...u.security, pin_enabled: true, pin_length: b.new_pin.length as 4 | 6 };
+        // ревью T-8: новый код ждёт 24 ч, прежний действует до срока
+        u.pendingPin = b.new_pin;
+        u.resetDue = false;
+        u.security = { ...u.security, pin_length: (u.pin?.length ?? 4) as 4 | 6, pin_reset_effective_at: RESET_EFFECTIVE_AT };
+        return json(200, u.security);
+      }
+      case "POST /internal/v1/me/pin/reset-cancel": {
+        const b = r.body as { current_pin: string };
+        if (!u.pin) return domainError(409, "PIN_NOT_SET");
+        if (u.pendingPin && !u.resetDue) {
+          const checked = this.checkPin(u, b.current_pin);
+          if (checked instanceof Response) return checked;
+        }
         return json(200, u.security);
       }
       case "PUT /internal/v1/me/biometric":
@@ -612,79 +627,311 @@ export class FakeDomains {
         return json(200, { ok: true });
       }
       case "POST /internal/v1/me/consent": {
-        const b = r.body as { policy_version: string };
+        const b = r.body as { policy_version: string; purposes: string[] };
         if (b.policy_version !== u.consent.current_policy_version) return domainError(409, "POLICY_VERSION_OUTDATED");
-        u.consent = { ...u.consent, accepted: true, policy_version: b.policy_version, accepted_at: "2026-10-08T10:00:00Z", evidence_hash: "sha256:abc", age_confirmed_18_plus: true };
-        return json(200, u.consent);
+        const missing = ["terms", "privacy", "learning"].filter((p) => !b.purposes.includes(p));
+        if (missing.length) return domainError(422, "CONSENT_REQUIRED_PURPOSES", { missing });
+        const optional = b.purposes.filter((p) => !["terms", "privacy", "learning"].includes(p));
+        if (optional.length && u.summary.age_band === "14-17" && u.summary.guardian_consent !== "granted") {
+          return domainError(403, "GUARDIAN_CONSENT_REQUIRED");
+        }
+        u.consent = { ...u.consent, accepted: true, policy_version: b.policy_version, accepted_at: "2026-11-18T10:00:00Z", evidence_hash: "sha256:abc", purposes: b.purposes };
+        return json(200, { ...u.consent, user_id: u.summary.user_id });
       }
       case "DELETE /internal/v1/me/consent":
-        u.consent = { ...u.consent, accepted: false };
+        u.consent = { ...u.consent, accepted: false, purposes: [] };
         return json(200, u.consent);
-      case "POST /internal/v1/me/disable":
-        u.summary = { ...u.summary, status: "DISABLED" };
-        u.settings = { ...u.settings, enabled: false };
-        return json(200, this.me(u));
-      case "POST /internal/v1/me/enable":
-        u.summary = { ...u.summary, status: "ACTIVE" };
-        return json(200, this.me(u));
       case "POST /internal/v1/me/deletion-request": {
         const b = r.body as { pin?: string; confirm_word?: string };
-        if (u.pin ? b.pin !== u.pin : !["УДАЛИТЬ", "DELETE"].includes(b.confirm_word ?? "")) {
-          return u.pin ? domainError(401, "PIN_INVALID", { remaining: 4 }) : domainError(422, "CONFIRM_WORD_REQUIRED");
+        if (u.pin) {
+          const checked = this.checkPin(u, b.pin);
+          if (checked instanceof Response) return checked.status === 401 ? domainError(401, "PIN_INVALID", { remaining: 4 }) : checked;
+        } else if (!["УДАЛИТЬ", "OʻCHIRISH"].includes(b.confirm_word ?? "")) {
+          return domainError(422, "CONFIRM_WORD_REQUIRED");
         }
         u.summary = { ...u.summary, status: "DELETION_REQUESTED" };
-        return json(202, { request_id: randomUUID(), status: "REQUESTED", domains: ["identity", "preferences", "support", "notifications"] });
+        return json(202, {
+          request_id: randomUUID(),
+          status: "REQUESTED",
+          domains: ["learning-plan", "social", "notifications", "support", "experience-config"],
+          learners: 1 + u.children.length,
+          user_id: u.summary.user_id,
+        });
       }
     }
     return domainError(404, "NOT_FOUND");
   }
 
-  private preferencesRoute(r: Req): Response {
-    if (r.method === "GET" && r.path === "/internal/v1/directory/airports") {
-      return json(200, { items: [{ iata: "TAS", city: "Tashkent", country: "Uzbekistan", country_code: "UZ", name: "Islam Karimov Tashkent International" }].filter((a) => !r.query.q || a.city.toLowerCase().includes(r.query.q.toLowerCase())) });
-    }
-    if (r.method === "GET" && r.path === "/internal/v1/directory/interests") {
-      return json(200, { items: [{ code: "sport.motorsport", parent: "sport", label: { ru: "Автоспорт", en: "Motorsport" }, icon: "flag" }] });
-    }
-    if (r.method === "GET" && r.path === "/internal/v1/directory/geographies") {
-      return json(200, { items: [{ level: "world", code: null, label: { ru: "Весь мир", en: "World" } }] });
-    }
-    if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
-    let p = this.prefs.get(r.subject);
+  // ---------------------------------------------------------------- learning-plan
+
+  defaultPlan(learnerId: string): LearningPlan {
+    return {
+      learner_id: learnerId,
+      goal: null,
+      level_self: null,
+      topics: [],
+      ui_lang: "ru",
+      explain_lang: "ru",
+      course_pair: "ru-en",
+      schedule: { preset: "daily", days: [1, 2, 3, 4, 5, 6, 7], preferred_time: "19:00", duration_min: 20, reminders_enabled: false, timezone: "Asia/Tashkent" },
+      onboarding_completed_at: null,
+      updated_at: "2026-11-18T10:00:00Z",
+      version: 1,
+    };
+  }
+
+  /** Как learning-plan: план по умолчанию создаётся при первом обращении в зоне ?tz= (неизвестная → Asia/Tashkent). */
+  private plan(id: string, tz?: string): LearningPlan {
+    let p = this.plans.get(id);
     if (!p) {
-      p = defaultPrefs();
-      this.prefs.set(r.subject, p);
+      p = this.defaultPlan(id);
+      if (tz && tz !== "Mars/Base") p = { ...p, schedule: { ...p.schedule, timezone: tz } };
+      this.plans.set(id, p);
     }
+    return p;
+  }
+
+  private today(id: string): TodayPlan {
+    const p = this.plan(id);
+    const minutes = this.minutesToday.get(id) ?? 0;
+    return {
+      local_date: "2026-11-18",
+      is_scheduled_today: p.schedule.days.includes(3),
+      slot_time: p.schedule.preferred_time,
+      duration_min: p.schedule.duration_min,
+      minutes_today: minutes,
+      done_today: minutes >= p.schedule.duration_min,
+      next_slot: { local_date: "2026-11-18", time: p.schedule.preferred_time },
+      streak_days: minutes > 0 ? 1 : 0,
+      week: [{ local_date: "2026-11-16", scheduled: true, done: false, missed: true }],
+    };
+  }
+
+  private learningPlan(r: Req): Response {
+    if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
+    const id = r.subject;
     const key = `${r.method} ${r.path}`;
     switch (key) {
-      case "GET /internal/v1/me/preferences":
-        return json(200, p);
-      case "PATCH /internal/v1/me/preferences": {
-        const { version, ...patch } = r.body as Partial<Preferences>;
-        if (version !== undefined && version !== p.version) return domainError(409, "PREFERENCES_VERSION_CONFLICT", { current_version: p.version });
-        p = { ...p, ...patch, version: p.version + 1 };
-        this.prefs.set(r.subject, p);
-        return json(200, p);
+      case "GET /internal/v1/me/plan":
+        return json(200, { ...this.plan(id, r.query.tz), user_id: id, internal_note: "x" });
+      case "PATCH /internal/v1/me/plan": {
+        const p = this.plan(id);
+        const ifMatch = r.headers["if-match"];
+        if (ifMatch !== undefined && Number(ifMatch) !== p.version) return domainError(409, "PLAN_VERSION_CONFLICT", { current_version: p.version });
+        const b = r.body as Partial<LearningPlan> & { schedule?: Partial<LearningPlan["schedule"]> };
+        if (b.topics?.some((t) => !TOPICS.includes(t))) return domainError(422, "PLAN_INVALID", { field: "topics", reason: "unknown_topic" });
+        if (b.schedule?.timezone === "Mars/Base") return domainError(422, "PLAN_INVALID", { field: "schedule.timezone", reason: "unknown_timezone" });
+        const next: LearningPlan = { ...p, ...b, schedule: { ...p.schedule, ...(b.schedule ?? {}) }, version: p.version + 1 } as LearningPlan;
+        this.plans.set(id, next);
+        return json(200, next);
       }
-      case "PUT /internal/v1/me/departures": {
-        const airports = (r.body as { airports: string[] }).airports;
-        const unknown = airports.find((a) => a !== "TAS" && a !== "SKD");
-        if (unknown) return domainError(422, "AIRPORT_UNKNOWN", { iata: unknown });
-        p = { ...p, departures: airports.map((a) => ({ airport_iata: a, city: a === "TAS" ? "Tashkent" : "Samarkand", country_code: "UZ" })) };
-        this.prefs.set(r.subject, p);
-        return json(200, p);
+      case "POST /internal/v1/me/plan/onboarding/complete": {
+        const p = this.plan(id);
+        const missing = [...(p.goal ? [] : ["goal"]), ...(p.level_self ? [] : ["level_self"])];
+        if (missing.length) return domainError(409, "PLAN_INCOMPLETE", { missing });
+        if (!p.onboarding_completed_at) this.plans.set(id, { ...p, onboarding_completed_at: "2026-11-18T10:05:00Z" });
+        return json(200, this.plans.get(id));
       }
-      case "POST /internal/v1/me/onboarding/complete":
-        p = { ...p, onboarding_completed_at: "2026-10-08T10:05:00Z" };
-        this.prefs.set(r.subject, p);
-        return json(200, p);
+      case "GET /internal/v1/me/plan/today":
+        return json(200, this.today(id));
+      case "POST /internal/v1/me/activities": {
+        const idem = r.headers["idempotency-key"];
+        if (!idem) return domainError(422, "IDEMPOTENCY_KEY_REQUIRED");
+        const k = `${id}:${idem}`;
+        if (!this.activities.has(k)) {
+          const b = r.body as { minutes: number };
+          this.activities.set(k, b.minutes);
+          this.minutesToday.set(id, (this.minutesToday.get(id) ?? 0) + b.minutes);
+        }
+        return json(200, this.today(id));
+      }
+      case "GET /internal/v1/directory/goals":
+        return json(200, { items: GOALS.map((code) => ({ code, label: { ru: `цель ${code}`, uz: `maqsad ${code}` }, icon: null })) });
+      case "GET /internal/v1/directory/topics":
+        return json(200, { items: TOPICS.map((code) => ({ code, label: { ru: code, uz: code }, icon: "book" })) });
     }
     return domainError(404, "NOT_FOUND");
+  }
+
+  // ---------------------------------------------------------------- notifications
+
+  addInbox(learnerId: string, o: Partial<InboxItem> = {}): InboxItem {
+    const item: InboxItem = {
+      notification_id: randomUUID(),
+      category: "reminders",
+      title: "Время занятия",
+      body: "Пора заниматься",
+      startapp: "route_home",
+      created_at: "2026-11-18T14:00:00Z",
+      read_at: null,
+      telegram: "sent",
+      ...o,
+    };
+    const list = this.inbox.get(learnerId) ?? [];
+    list.unshift(item);
+    this.inbox.set(learnerId, list);
+    return item;
+  }
+
+  private notificationsRoute(r: Req): Response {
+    if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
+    const list = this.inbox.get(r.subject) ?? [];
+    const key = `${r.method} ${r.path}`;
+    switch (key) {
+      case "GET /internal/v1/me/inbox":
+        return json(200, { items: list.slice(0, Number(r.query.limit ?? 20)).map((i) => ({ ...i, user_id: r.subject })), next_cursor: null });
+      case "GET /internal/v1/me/inbox/unread-count":
+        return json(200, { unread: list.filter((i) => !i.read_at).length });
+      case "POST /internal/v1/me/inbox:read": {
+        const b = r.body as { ids?: string[]; all?: boolean };
+        for (const i of list) if (b.all || b.ids?.includes(i.notification_id)) i.read_at ??= "2026-11-18T15:00:00Z";
+        return json(200, { unread: list.filter((i) => !i.read_at).length });
+      }
+    }
+    return domainError(404, "NOT_FOUND");
+  }
+
+  // ---------------------------------------------------------------- social
+
+  private socialInvite(rec: InviteRec): Invite & Record<string, unknown> {
+    return { ...rec.invite, token_hash: createHash("sha256").update(rec.token).digest("hex"), inviter_user_id: rec.inviter };
+  }
+
+  private preview(rec: InviteRec, viewer: string) {
+    const inviter = this.accounts.get(rec.inviter)!;
+    const reason = viewer === rec.inviter ? "self" : rec.acceptedBy.has(viewer) ? "already_member" : null;
+    return {
+      invite_id: rec.invite.invite_id,
+      kind: rec.invite.kind,
+      inviter_display_name: inviter.summary.display_name,
+      status: rec.invite.status,
+      can_accept: reason === null && rec.invite.status === "active",
+      reason,
+      inviter_user_id: rec.inviter, // внутреннее поле
+    };
+  }
+
+  private familyOf(userId: string): Family | null {
+    for (const f of this.families.values()) if (f.members.some((m) => m.user_id === userId)) return f;
+    return null;
+  }
+
+  private social(r: Req): Response {
+    if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
+    const me = r.subject;
+    const key = `${r.method} ${r.path}`;
+    if (key === "POST /internal/v1/me/invites") {
+      const idem = r.headers["idempotency-key"];
+      if (!idem) return domainError(422, "IDEMPOTENCY_KEY_REQUIRED");
+      const prev = this.inviteIdem.get(`${me}:${idem}`);
+      if (prev) return json(201, this.socialInvite(this.invites.get(prev)!));
+      const u = this.accounts.get(me);
+      const b = r.body as { kind: Invite["kind"] };
+      if (b.kind === "family" && u?.summary.age_band !== "18+") return domainError(403, "ADULT_REQUIRED");
+      if (u?.summary.age_band === "14-17" && u.summary.guardian_consent !== "granted") return domainError(403, "INVITES_NOT_ALLOWED");
+      const active = [...this.invites.values()].filter((x) => x.inviter === me && x.invite.status === "active");
+      if (active.length >= 10) return domainError(409, "INVITES_LIMIT");
+      const id = randomUUID();
+      const token = randomBytes(24).toString("base64url").slice(0, 32);
+      const rec: InviteRec = {
+        invite: { invite_id: id, kind: b.kind, link: `${APP_LINK}?startapp=inv_${token}`, status: "active", expires_at: b.kind === "referral" ? null : "2026-11-25T10:00:00Z", created_at: "2026-11-18T10:00:00Z", accepted_count: 0 },
+        inviter: me,
+        token,
+        opened: new Set(),
+        acceptedBy: new Set(),
+      };
+      this.invites.set(id, rec);
+      this.inviteIdem.set(`${me}:${idem}`, id);
+      return json(201, this.socialInvite(rec));
+    }
+    if (key === "GET /internal/v1/me/invites") {
+      const items = [...this.invites.values()].filter((x) => x.inviter === me).map((x) => this.socialInvite(x));
+      return json(200, { items: items.slice(0, Number(r.query.limit ?? 20)), next_cursor: null });
+    }
+    if (key === "GET /internal/v1/me/family") {
+      const f = this.familyOf(me);
+      return f ? json(200, { ...f, members: f.members.map((m) => ({ ...m, is_me: m.user_id === me, telegram_user_id: 1 })) }) : domainError(404, "FAMILY_NOT_FOUND");
+    }
+    if (key === "POST /internal/v1/invites:open") {
+      const rec = [...this.invites.values()].find((x) => x.token === (r.body as { token: string }).token);
+      if (!rec) return domainError(404, "INVITE_NOT_FOUND");
+      rec.opened.add(me);
+      return json(200, this.preview(rec, me));
+    }
+    const dm = /^\/internal\/v1\/me\/invites\/([^/]+)$/.exec(r.path);
+    if (dm && r.method === "DELETE") {
+      const rec = this.invites.get(dm[1]!);
+      if (!rec || rec.inviter !== me) return domainError(404, "INVITE_NOT_FOUND");
+      rec.invite = { ...rec.invite, status: "revoked" };
+      return json(200, this.socialInvite(rec));
+    }
+    const im = /^\/internal\/v1\/invites\/([^/]+)\/(preview|accept|decline)$/.exec(r.path);
+    if (im) {
+      const rec = this.invites.get(im[1]!);
+      if (!rec || !rec.opened.has(me)) return domainError(404, "INVITE_NOT_FOUND");
+      if (im[2] === "preview" && r.method === "GET") return json(200, this.preview(rec, me));
+      if (im[2] === "decline" && r.method === "POST") return json(200, this.preview(rec, me));
+      if (im[2] === "accept" && r.method === "POST") {
+        if (rec.inviter === me) return domainError(409, "INVITE_SELF");
+        if (rec.invite.status === "revoked") return domainError(409, "INVITE_REVOKED");
+        let family: Family | null = null;
+        if (rec.invite.kind === "family") {
+          if (!rec.acceptedBy.has(me) && rec.invite.status !== "active") return domainError(409, "INVITE_ALREADY_USED");
+          const inviter = this.accounts.get(rec.inviter)!;
+          let f = this.families.get(rec.inviter);
+          if (!f) {
+            f = {
+              family_id: randomUUID(),
+              members: [
+                { user_id: rec.inviter, display_name: inviter.summary.display_name, role: "owner", is_me: false },
+                ...inviter.children.map((c) => ({ user_id: c, display_name: this.children.get(c)!.display_name, role: "child" as const, is_me: false })),
+              ],
+            };
+            this.families.set(rec.inviter, f);
+          }
+          if (!f.members.some((m) => m.user_id === me)) {
+            f.members.push({ user_id: me, display_name: this.accounts.get(me)?.summary.display_name ?? "?", role: "adult", is_me: false });
+          }
+          rec.invite = { ...rec.invite, status: "accepted", accepted_count: 1 };
+          family = { ...f, members: f.members.map((m) => ({ ...m, is_me: m.user_id === me })) };
+        }
+        rec.acceptedBy.add(me);
+        return json(200, { invite_id: rec.invite.invite_id, kind: rec.invite.kind, family });
+      }
+    }
+    return domainError(404, "NOT_FOUND");
+  }
+
+  // ---------------------------------------------------------------- experience-config
+
+  private experienceRoute(r: Req): Response {
+    const key = `${r.method} ${r.path}`;
+    if (key === "GET /internal/v1/experience/miniapp/current") return json(200, this.experience);
+    if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
+    switch (key) {
+      case "GET /internal/v1/release-notes/for-me":
+        return json(200, this.forMe);
+      case "POST /internal/v1/release-notes/seen": {
+        const set = this.seen.get(r.subject) ?? new Set<string>();
+        for (const id of (r.body as { release_note_ids: string[] }).release_note_ids) set.add(id);
+        this.seen.set(r.subject, set);
+        return new Response(null, { status: 204 });
+      }
+      case "GET /internal/v1/release-notes/feed":
+        return json(200, { items: this.feed, next_cursor: null });
+    }
+    return domainError(404, "NOT_FOUND");
+  }
+
+  // ---------------------------------------------------------------- support
+
+  private publicTicket(t: Ticket & { owner: string }): Ticket & { owner: string; assignee_id: string } {
+    return { ...t, assignee_id: "internal" };
   }
 
   private support(r: Req): Response {
     if (r.method === "GET" && r.path === "/internal/v1/support/categories") {
-      return json(200, { items: [{ code: "BUG", label: { ru: "Ошибка", en: "Bug" }, available: true }] });
+      return json(200, { items: [{ code: "SCHEDULE_REMINDERS", label: { ru: "График и напоминания", uz: "Jadval va eslatmalar" }, available: true }] });
     }
     if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
     const owner = r.subject;
@@ -695,7 +942,7 @@ export class FakeDomains {
       if (prev) return json(200, this.publicTicket(this.tickets.get(prev)!));
       const b = r.body as { category: Ticket["category"]; subject: string; message: string; context?: Ticket["context"] };
       const id = randomUUID();
-      const now = "2026-10-08T10:00:00Z";
+      const now = "2026-11-18T10:00:00Z";
       const t: Ticket & { owner: string } = {
         owner,
         ticket_id: id,
@@ -708,7 +955,7 @@ export class FakeDomains {
         last_message_at: now,
         unread_operator_replies: 0,
         context: b.context ?? null,
-        sla_first_response_at: "2026-10-08T12:00:00Z",
+        sla_first_response_at: "2026-11-18T12:00:00Z",
         messages: [{ message_id: randomUUID(), sender_type: "user", author_name: null, text: b.message, created_at: now }],
         status_history: [{ status: "NEW", at: now }],
       };
@@ -718,7 +965,7 @@ export class FakeDomains {
     }
     if (r.method === "GET" && r.path === "/internal/v1/me/tickets") {
       const items = [...this.tickets.values()].filter((t) => t.owner === owner).map((t) => {
-        const { context: _c, messages: _m, status_history: _s, sla_first_response_at: _f, owner: _o, ...summary } = t;
+        const { context: _c, messages: _m, status_history: _s, sla_first_response_at: _f, ...summary } = t;
         return summary;
       });
       return json(200, { items: items.slice(0, Number(r.query.limit ?? 20)), next_cursor: null });
@@ -731,430 +978,18 @@ export class FakeDomains {
       if (!m[2] && r.method === "GET") return json(200, this.publicTicket(t));
       if (m[2] === "messages" && r.method === "POST") {
         if (t.status === "CLOSED") return domainError(409, "SUPPORT_TICKET_CLOSED");
-        t.messages.push({ message_id: randomUUID(), sender_type: "user", author_name: null, text: (r.body as { text: string }).text, created_at: "2026-10-08T10:01:00Z" });
+        t.messages.push({ message_id: randomUUID(), sender_type: "user", author_name: null, text: (r.body as { text: string }).text, created_at: "2026-11-18T10:01:00Z" });
         return json(200, this.publicTicket(t));
       }
       if (m[2] === "close" && r.method === "POST") {
         t.status = "CLOSED";
-        t.status_history.push({ status: "CLOSED", at: "2026-10-08T10:02:00Z" });
+        t.status_history.push({ status: "CLOSED", at: "2026-11-18T10:02:00Z" });
         return json(200, this.publicTicket(t));
       }
     }
     return domainError(404, "NOT_FOUND");
   }
-
-  /** Фильтр каталога; skip — измерение, которое не применяется (счётчики facets). */
-  private matches(e: CatalogEvent, q: Record<string, string>, skip: "date" | "has_tickets" | "online" | "category" | "country" | null = null): boolean {
-    if (e.hidden) return false;
-    const st = e.lifecycle.status;
-    const life = q.lifecycle ? q.lifecycle.split(",") : null;
-    if (life ? !life.includes(st) : ["COMPLETED", "CANCELLED"].includes(st)) return false;
-    if (q.q && !`${e.title} ${e.venue?.name ?? ""} ${e.venue?.city ?? ""}`.toLowerCase().includes(q.q.toLowerCase())) return false;
-    if (skip !== "category" && q.category) {
-      if (q.category === "other" ? e.categories.length > 0 : !e.categories.some((c) => c === q.category || c.startsWith(`${q.category}.`))) return false;
-    }
-    if (skip !== "country" && q.country && !q.country.split(",").includes(e.venue?.country_code ?? "")) return false;
-    if (q.city && e.venue?.city !== q.city) return false;
-    if (skip !== "date" && q.date_from && e.start.local_date < q.date_from) return false;
-    if (skip !== "date" && q.date_to && e.start.local_date > q.date_to) return false;
-    if (skip !== "has_tickets" && q.has_tickets === "true" && !["ON_SALE", "LOW_INVENTORY", "RESALE"].includes(st)) return false;
-    if (skip !== "online" && q.online && String(e.online) !== q.online) return false;
-    return true;
-  }
-
-  /** Поиск event-catalog: q, category (с потомками, other — без категории), country (список через запятую), city,
-   *  даты, lifecycle, has_tickets, online, sort, cursor; :facets — счётчики (каждый без своего измерения). */
-  private events(r: Req): Response {
-    if (r.method !== "GET") return domainError(404, "NOT_FOUND");
-    const q = r.query;
-    if (r.path === "/internal/v1/events:facets") {
-      const month = new Date().toISOString().slice(0, 7);
-      const count = (skip: Parameters<FakeDomains["matches"]>[2], extra: (e: CatalogEvent) => boolean = () => true) =>
-        this.catalog.filter((e) => this.matches(e, q, skip) && extra(e)).length;
-      const categories: Record<string, number> = {};
-      const countries: Record<string, number> = {};
-      for (const e of this.catalog) {
-        if (this.matches(e, q, "category")) {
-          const roots = e.categories.length ? [...new Set(e.categories.map((c) => c.split(".")[0]!))] : ["other"];
-          for (const c of roots) categories[c] = (categories[c] ?? 0) + 1;
-        }
-        if (this.matches(e, q, "country") && e.venue) countries[e.venue.country_code] = (countries[e.venue.country_code] ?? 0) + 1;
-      }
-      return json(200, {
-        total: count(null),
-        // окно чипа от вызывающего (month_from/month_to) или текущий месяц по UTC
-        this_month: count("date", (e) =>
-          q.month_from && q.month_to ? e.start.local_date >= q.month_from && e.start.local_date <= q.month_to : e.start.local_date.startsWith(month),
-        ),
-        has_tickets: count("has_tickets", (e) => ["ON_SALE", "LOW_INVENTORY", "RESALE"].includes(e.lifecycle.status)),
-        online: count("online", (e) => e.online),
-        categories,
-        countries,
-      });
-    }
-    const m = /^\/internal\/v1\/events\/([^/]+)$/.exec(r.path);
-    if (m) {
-      const e = this.catalog.find((x) => x.event_id === m[1] && !x.hidden);
-      return e ? json(200, e) : domainError(404, "EVENT_NOT_FOUND");
-    }
-    if (r.path !== "/internal/v1/events") return domainError(404, "NOT_FOUND");
-    let items = this.catalog.filter((e) => this.matches(e, q));
-    const sort = q.sort ?? "soonest";
-    items = items.sort((a, b) =>
-      sort === "quality" ? b.quality_score - a.quality_score : sort === "newest" ? (a.first_seen_at < b.first_seen_at ? 1 : -1) : a.start.local_date < b.start.local_date ? -1 : 1,
-    );
-    const offset = q.cursor ? Number(Buffer.from(q.cursor, "base64url").toString()) : 0;
-    const limit = Number(q.limit ?? 20);
-    const page = items.slice(offset, offset + limit);
-    const next = offset + limit < items.length ? Buffer.from(String(offset + limit)).toString("base64url") : null;
-    return json(200, { items: page.map(toSummary), next_cursor: next });
-  }
-
-  private publicTicket(t: Ticket & { owner: string }): Ticket {
-    const { owner: _o, ...rest } = t;
-    return structuredClone(rest);
-  }
 }
-
-// ---------------------------------------------------------------- offers fixtures
-
-const MAP = (lat: string, lon: string) => ({
-  yandex: `https://yandex.ru/maps/?pt=${lon},${lat}&z=16&l=map`,
-  google: `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`,
-  osm: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=17/${lat}/${lon}`,
-  dgis: `https://2gis.ru/geo/${lon},${lat}`,
-});
-
-/** OfferSetView по контракту (§2.1): полный trip, три тарифа, отели и места рядом. */
-export function offerSetFixture(eventId: string, o: { travellers?: number; departure?: string | null } = {}): OfferSetView {
-  const travellers = o.travellers ?? 2;
-  const fetched = "2026-10-11T07:00:00Z";
-  const expires = "2026-10-11T08:00:00Z";
-  const tier = (t: OfferTier, flightPP: number, hotelTotal: number): Offer => {
-    const flightTotal = flightPP * travellers;
-    const total = (85 + flightPP) * travellers + hotelTotal;
-    return {
-      offer_id: randomUUID(),
-      tier: t,
-      status: o.departure === null ? "partial" : "complete",
-      ticket: { status: "ok", price_per_person: "85.00", currency: "USD", in_total: true, provider: "ticketmaster", deeplink: "https://www.ticketmaster.com/event/abc", fetched_at: fetched, fx: null },
-      flight:
-        o.departure === null
-          ? { status: "unavailable", reason: "NO_DEPARTURE" }
-          : {
-              status: "ok",
-              provider: "aviasales",
-              origin: o.departure ?? "TAS",
-              destination: "AUH",
-              depart_at: "2026-12-03T07:40:00+05:00",
-              return_at: "2026-12-07T19:05:00+04:00",
-              airline: "HY",
-              flight_number: "763",
-              transfers: 0,
-              return_transfers: 0,
-              duration_minutes: 215,
-              duration_back_minutes: 200,
-              price_per_person: `${flightPP}.00`,
-              total: `${flightTotal}.00`,
-              deeplink: "https://www.aviasales.com/search/TAS0312AUH07121?t=abc&marker=12345",
-              fetched_at: fetched,
-              dates_shifted: false,
-            },
-      hotel: {
-        status: "ok",
-        provider: "liteapi",
-        hotel_id: "lp1beec",
-        name: "Yas Hotel",
-        stars: 5,
-        rating: "9.1",
-        review_count: 1840,
-        distance_m: 1200,
-        lat: "24.4670",
-        lon: "54.6040",
-        photo_url: "https://static.cupid.travel/hotels/1.jpg",
-        nights: 4,
-        rooms: Math.ceil(travellers / 2),
-        total: `${hotelTotal}.00`,
-        refundable: true,
-        board: "Breakfast included",
-        deeplink: "https://book.tilhero.test/hotels/lp1beec?checkin=2026-12-03&checkout=2026-12-07",
-        map: MAP("24.4670", "54.6040"),
-        fetched_at: fetched,
-      },
-      totals: { total: `${total}.00`, per_person: (total / travellers).toFixed(2), currency: "USD", missing: o.departure === null ? ["flight"] : [] },
-      expires_at: expires,
-      budget_fit: "unknown",
-      over_by: null,
-      budget_excludes: [],
-    };
-  };
-  return {
-    event_id: eventId,
-    generated_at: fetched,
-    expires_at: expires,
-    trip: {
-      kind: "trip",
-      reason: null,
-      destination: {
-        city: "Abu Dhabi",
-        country_code: "AE",
-        iata: "AUH",
-        venue: { name: "Yas Marina Circuit", lat: "24.4672", lon: "54.6031", precision: "venue", map: MAP("24.4672", "54.6031") },
-      },
-      out_date: "2026-12-03",
-      back_date: "2026-12-07",
-      nights: 4,
-    },
-    travellers,
-    rooms: Math.ceil(travellers / 2),
-    departure: o.departure === null ? null : { iata: o.departure ?? "TAS", city: "Ташкент", chosen_by: o.departure ? "user" : "cheapest" },
-    tiers: { economy: tier("economy", 142, 390), comfort: tier("comfort", 180, 520), premium: tier("premium", 260, 900) },
-    alternative: null,
-    hotels_nearby: [
-      {
-        provider: "liteapi",
-        hotel_id: "lp2",
-        name: "W Abu Dhabi",
-        stars: 5,
-        rating: "9.0",
-        review_count: 900,
-        distance_m: 300,
-        lat: "24.4680",
-        lon: "54.6030",
-        photo_url: null,
-        refundable: null,
-        board: null,
-        deeplink: "https://book.tilhero.test/hotels/lp2?checkin=2026-12-03&checkout=2026-12-07",
-        map: MAP("24.4680", "54.6030"),
-        fetched_at: fetched,
-        price_total: "1200.00",
-        per_person_share: (1200 / travellers).toFixed(2),
-        budget_fit: "unknown",
-        over_by: null,
-        budget_excludes: [],
-      },
-    ],
-    poi: [
-      {
-        provider: "osm",
-        osm_type: "node",
-        osm_id: 123456,
-        name: "Ferrari World",
-        kind: "attraction",
-        lat: "24.4838",
-        lon: "54.6074",
-        distance_m: 1800,
-        url: "https://www.openstreetmap.org/node/123456",
-        website: "https://www.ferrariworldabudhabi.com",
-        map: MAP("24.4838", "54.6074"),
-      },
-    ],
-    rating_min: "8.5",
-    notes: [],
-    budget: null,
-    recommended_tier: "comfort",
-    hotel_chosen_by: "rules",
-    hotel_search: { radius_m: 5000, rating_min: "8.5", base_radius_m: 5000, base_rating_min: "8.5", widened: false, found: 3, min_stars: null, base_min_stars: null, from_prefs: false },
-  };
-}
-
-// ---------------------------------------------------------------- спринт 6 fixtures
-
-/** Watch сервиса watch (INTERNAL_API §2.1). */
-export function watchFixture(watchId: string, eventId: string, title: string, o: Record<string, unknown> = {}): Record<string, any> { // eslint-disable-line @typescript-eslint/no-explicit-any
-  return {
-    watch_id: watchId,
-    event_id: eventId,
-    event_title: title,
-    status: "active",
-    ended_reason: null,
-    dimensions: { tickets: true, price: true, flight: true, hotel: true, status: true, news: true },
-    threshold_pct: 10,
-    offer_params: { tier: "comfort", travellers: 1, departure_iata: null, direct_only: false, near_venue: false, extra_nights: 0, hotel_id: null, budget: null, departures: [], flight_prefs: { direct: true, connecting: true, alternative_departure: true } },
-    last_snapshot: {
-      taken_at: "2026-10-11T06:00:00Z",
-      lifecycle_status: "ON_SALE",
-      per_person_usd: "844.00",
-      total_usd: "844.00",
-      flight_usd: "180.00",
-      hotel_usd: "520.00",
-      ticket_status: "on_sale",
-      offer_id: null,
-    },
-    last_change: null,
-    next_check_at: "2026-10-11T12:00:00Z",
-    created_at: "2026-10-10T06:00:00Z",
-    version: 1,
-    ...o,
-  };
-}
-
-let changeSeq = 0;
-/** WatchChange (§2.1). */
-export function changeFixture(o: Record<string, unknown> = {}): Record<string, unknown> {
-  changeSeq += 1;
-  return {
-    change_id: randomUUID(),
-    type: "price_drop",
-    severity: "normal",
-    before: "900.00",
-    after: "844.00",
-    delta_usd: "-56.00",
-    delta_pct: "-6.2",
-    source: { provider: "offers", url: null, observed_at: "2026-10-11T06:00:00Z" },
-    detected_at: `2026-10-11T06:${String(changeSeq % 60).padStart(2, "0")}:00Z`,
-    notified: "digest",
-    ...o,
-  };
-}
-
-/** NewsItem (§3.3). */
-export function newsFixture(o: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    news_id: randomUUID(),
-    kind: "article",
-    title: "Formula 1: Abu Dhabi schedule announced",
-    summary: "Расписание этапа опубликовано",
-    source: { name: "Formula 1", domain: "formula1.com", url: "https://www.formula1.com/en/latest/article/abu-dhabi.html" },
-    published_at: "2026-10-11T05:00:00Z",
-    significance: "high",
-    interests: ["sport.motorsport"],
-    event_ids: [],
-    link: { type: "interest", label: "Автоспорт" },
-    ...o,
-  };
-}
-
-// ---------------------------------------------------------------- event-catalog fixtures
-
-/** EventDetail каталога + служебные поля, которых нет в контракте bff.ts (не должны уйти в Mini App). */
-export type CatalogEvent = Omit<EventDetailView, "recommendation" | "watch" | "reaction"> & {
-  hidden?: boolean;
-  dedup_keys: string[];
-  external_ids: string[];
-  verdict: { status: string; confidence: number };
-  internal_note: string;
-};
-
-let evSeq = 0;
-export function catalogEvent(o: Partial<CatalogEvent> = {}): CatalogEvent {
-  evSeq += 1;
-  const id = o.event_id ?? `0b7c3a52-1d2e-4f60-8a9b-${String(evSeq).padStart(12, "0")}`;
-  return {
-    event_id: id,
-    title: `Event ${evSeq}`,
-    categories: ["sport.motorsport", "sport"],
-    start: { local_date: "2026-12-04", local_time: "17:00:00", utc: "2026-12-04T13:00:00Z", timezone: "Asia/Dubai" },
-    end: { local_date: "2026-12-06", local_time: null, utc: null, timezone: "Asia/Dubai" },
-    venue: {
-      name: "Yas Marina Circuit",
-      city: "Abu Dhabi",
-      country_code: "AE",
-      address: "Yas Island",
-      lat: "24.4672",
-      lon: "54.6031",
-      map_url: "https://www.google.com/maps/search/?api=1&query=24.4672,54.6031",
-    },
-    online: false,
-    lifecycle: {
-      status: "ON_SALE",
-      changed_at: "2026-10-09T08:00:00Z",
-      basis: { fact: "provider_status_onsale", source_url: "https://www.ticketmaster.com/event/abc", provider: "ticketmaster", observed_at: "2026-10-09T08:00:00Z" },
-    },
-    lifecycle_track: [
-      { status: "ANNOUNCED", reached: true, current: false },
-      { status: "SALES_SOON", reached: true, current: false },
-      { status: "ON_SALE", reached: true, current: true },
-      { status: "LOW_INVENTORY", reached: false, current: false },
-    ],
-    quality_score: 80,
-    price_range: { min: "120.00", max: "950.00", currency: "USD", fetched_at: "2026-10-10T08:00:00Z", source: { provider: "ticketmaster", url: "https://www.ticketmaster.com/event/abc" } },
-    media: {
-      url: "https://s1.ticketm.net/dam/a/1d1/f1_RETINA_LANDSCAPE_16_9.jpg",
-      width: 2048,
-      height: 1152,
-      ratio: "16_9",
-      provenance: { provider: "ticketmaster", source_url: "https://www.ticketmaster.com/event/abc", fetched_at: "2026-10-10T08:00:00Z", rights: "provider_api" },
-    },
-    media_all: [],
-    official_url: "https://www.ticketmaster.com/event/abc",
-    sources: [{ provider: "ticketmaster", name: "Ticketmaster", tier: "OFFICIAL_TICKET_PROVIDER", url: "https://www.ticketmaster.com/event/abc", fetched_at: "2026-10-10T08:00:00Z" }],
-    first_seen_at: "2026-10-01T08:00:00Z",
-    updated_at: "2026-10-10T08:00:00Z",
-    is_past: false,
-    dedup_keys: [`src:ticketmaster:${evSeq}`],
-    external_ids: [`tm-${evSeq}`],
-    verdict: { status: "VERIFIED", confidence: 0.93 },
-    internal_note: "reviewer: ok",
-    ...o,
-  };
-}
-
-/** Событие AI-источника (спринт 4): provider `aiweb.<slug>`, имя источника из реестра, медиа с rights `official_site`. */
-export const AIWEB_URL = "https://www.iticket.uz/events/concerts/yulduz-usmonova-2026";
-export function aiwebEvent(o: Partial<CatalogEvent> = {}): CatalogEvent {
-  const fetched = "2026-10-10T06:00:00Z";
-  return catalogEvent({
-    title: "Yulduz Usmonova. Concert",
-    categories: ["music.concerts", "music"],
-    start: { local_date: "2026-11-21", local_time: "19:00:00", utc: "2026-11-21T14:00:00Z", timezone: "Asia/Tashkent" },
-    end: null,
-    venue: {
-      name: "Istiqlol Palace",
-      city: "Tashkent",
-      country_code: "UZ",
-      address: null,
-      lat: null,
-      lon: null,
-      map_url: "https://www.google.com/maps/search/?api=1&query=Istiqlol%20Palace%2C%20Tashkent",
-    },
-    lifecycle: {
-      status: "ANNOUNCED",
-      changed_at: fetched,
-      basis: { fact: "listed_on_official_site", source_url: AIWEB_URL, provider: "aiweb.iticket-uz", observed_at: fetched },
-    },
-    lifecycle_track: [
-      { status: "ANNOUNCED", reached: true, current: true },
-      { status: "SALES_SOON", reached: false, current: false },
-      { status: "ON_SALE", reached: false, current: false },
-    ],
-    quality_score: 64,
-    price_range: { min: "250000.00", max: "900000.00", currency: "UZS", fetched_at: fetched, source: { provider: "aiweb.iticket-uz", url: AIWEB_URL } },
-    media: {
-      url: "https://cdn.iticket.az/event/poster/yulduz-usmonova.jpg",
-      width: null,
-      height: null,
-      ratio: null,
-      provenance: { provider: "aiweb.iticket-uz", source_url: AIWEB_URL, fetched_at: fetched, rights: "official_site" },
-    },
-    official_url: AIWEB_URL,
-    sources: [{ provider: "aiweb.iticket-uz", name: "iTicket.uz", tier: "OFFICIAL_TICKET_PROVIDER", url: AIWEB_URL, fetched_at: fetched }],
-    ...o,
-  });
-}
-
-/** EventSummary — как отдаёт список каталога (+ служебные поля, BFF их отбрасывает). */
-export function toSummary(e: CatalogEvent): Record<string, unknown> {
-  const { official_url: _o, sources: _s, lifecycle_track: _t, media_all: _m, first_seen_at: _f, venue, lifecycle, ...rest } = e;
-  return {
-    ...rest,
-    venue: venue ? { name: venue.name, city: venue.city, country_code: venue.country_code } : null,
-    lifecycle: { status: lifecycle.status, changed_at: lifecycle.changed_at },
-  };
-}
-
-const DOMAIN_AUD: Record<Service, string> = {
-  identity: "identity-consent",
-  preferences: "preferences",
-  support: "support",
-  experience: "experience-config",
-  events: "events",
-  offers: "offers",
-  recommendations: "recommendations",
-  watch: "watch",
-  news: "news",
-  aiConcierge: "ai-concierge",
-};
 
 // ---------------------------------------------------------------- app harness
 
@@ -1193,7 +1028,6 @@ export async function makeHarness(env: Record<string, string> = {}): Promise<Har
     config,
     async close() {
       await app.close();
-      // чистим ключи этого приложения
       let cursor = "0";
       do {
         const [next, keys] = await redis.scan(cursor, "MATCH", `${config.redisKeyPrefix}*`, "COUNT", 500);
@@ -1213,13 +1047,15 @@ export interface TgUser {
 }
 
 export const TG_USER: TgUser = { id: 900001, first_name: "Игорь", username: "test_user_1", language_code: "ru" };
+export const TG_OTHER: TgUser = { id: 900002, first_name: "Анна", username: "test_user_2", language_code: "uz" };
 
-export function initDataFor(user: TgUser | null = TG_USER, opts: { authDate?: number; token?: string } = {}): string {
+export function initDataFor(user: TgUser | null = TG_USER, opts: { authDate?: number; token?: string; startParam?: string } = {}): string {
   return signInitData(opts.token ?? BOT_TOKEN, {
     user,
-    // каждый запуск Mini App — свой initData (query_id): initData одноразовый (О-1, спринт 9)
+    // каждый запуск Mini App — свой initData (query_id): initData одноразовый
     queryId: `AAH${randomBytes(12).toString("hex")}`,
     ...(opts.authDate !== undefined ? { authDate: opts.authDate } : {}),
+    ...(opts.startParam !== undefined ? { startParam: opts.startParam } : {}),
   });
 }
 
@@ -1230,16 +1066,30 @@ export interface LoggedIn {
   body: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
-export async function login(h: Harness, user: TgUser = TG_USER, ip = "203.0.113.10"): Promise<LoggedIn> {
+export async function login(h: Harness, user: TgUser = TG_USER, ip = "203.0.113.10", startParam?: string): Promise<LoggedIn> {
   const res = await h.app.inject({
     method: "POST",
     url: "/v1/session/telegram",
-    payload: { init_data: initDataFor(user) },
+    payload: { init_data: initDataFor(user, startParam !== undefined ? { startParam } : {}) },
     remoteAddress: ip,
   });
   if (res.statusCode !== 200) throw new Error(`login failed: ${res.statusCode} ${res.body}`);
   const body = res.json();
-  return { access: body.access_token, refresh: body.refresh_token, userId: body.user.user_id, body };
+  return { access: body.access_token, refresh: body.refresh_token, userId: body.account.user_id, body };
+}
+
+/** Переключиться на ученика (детский профиль или обратно) → новые токены. */
+export async function switchTo(h: Harness, s: LoggedIn, learnerId: string, pin?: string): Promise<LoggedIn> {
+  const res = await h.app.inject({
+    method: "POST",
+    url: "/v1/session/learner",
+    headers: bearer(s.access),
+    payload: { learner_id: learnerId, ...(pin ? { pin } : {}) },
+  });
+  if (res.statusCode !== 200) throw new Error(`switch failed: ${res.statusCode} ${res.body}`);
+  const body = res.json();
+  return { access: body.access_token, refresh: body.refresh_token, userId: body.account.user_id, body };
 }
 
 export const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+export const idem = () => ({ "idempotency-key": randomUUID() });

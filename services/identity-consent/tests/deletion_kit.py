@@ -1,27 +1,23 @@
-"""Общие помощники тестов саги удаления (спринт 9)."""
+"""Общие помощники тестов саги удаления."""
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
+from conftest import DOMAINS
 from sqlalchemy import select
 
-from tilhero_common.internal_auth import Actor
 from tilhero_common.messaging import Envelope, make_envelope
-from tilhero_common.testing import internal_headers
 from tilhero_identity.deletion.models import DeletionAttempt, DeletionDomainAck, DeletionRequest
 from tilhero_identity.deletion.sweeper import SweepResult, sweep_once
 from tilhero_identity.models import User
 
-DOMAINS = ["preferences", "support", "notifications", "offers", "recommendations", "watch", "news",
-           "ai-concierge", "ai-control"]
 ACK_CONSUMER = "identity-consent.deletion_acks"
-READER = Actor(id=str(uuid.uuid4()), role="support", permissions=frozenset({"users.read"}))
-OPERATOR = Actor(id=str(uuid.uuid4()), role="operations",
-                 permissions=frozenset({"users.read", "ops.queues.manage"}))
-REASON = "Домен не ответил, сервис поднят — повторяем запрос"
+CONFIRM = {"confirm_word": "УДАЛИТЬ"}
+
+__all__ = ["ACK_CONSUMER", "CONFIRM", "DOMAINS"]
 
 
 def ack(user_id: str, request_id: str, domain: str, mode: str = "deleted") -> Envelope:
@@ -32,23 +28,9 @@ def ack(user_id: str, request_id: str, domain: str, mode: str = "deleted") -> En
     )
 
 
-def bff(env: Any, actor: Actor | None = OPERATOR) -> dict[str, str]:
-    return internal_headers(env.settings, issuer="admin-bff", actor=actor)
-
-
-def ops(env: Any, issuer: str = "ops-monitor", **kw: Any) -> dict[str, str]:
-    return internal_headers(env.settings, issuer=issuer, **kw)
-
-
-def cmd(env: Any, key: str | None = None, actor: Actor | None = OPERATOR) -> dict[str, str]:
-    h = bff(env, actor)
-    h["Idempotency-Key"] = key or f"retry-{uuid.uuid4().hex}"
-    return h
-
-
 async def request_deletion(env: Any, **login: Any) -> tuple[str, str]:
     uid = await env.new_user(**login)
-    r = await env.call("POST", "/internal/v1/me/deletion-request", uid, {"confirm_word": "DELETE"})
+    r = await env.call("POST", "/internal/v1/me/deletion-request", uid, CONFIRM)
     assert r.status_code == 202, r.text
     return uid, r.json()["request_id"]
 
@@ -57,6 +39,13 @@ async def load(env: Any, request_id: str) -> DeletionRequest:
     async with env.runtime.transaction() as s:
         return (await s.execute(
             select(DeletionRequest).where(DeletionRequest.request_id == uuid.UUID(request_id))
+        )).scalar_one()
+
+
+async def request_of(env: Any, user_id: str) -> DeletionRequest:
+    async with env.runtime.transaction() as s:
+        return (await s.execute(
+            select(DeletionRequest).where(DeletionRequest.user_id == uuid.UUID(user_id))
         )).scalar_one()
 
 
@@ -94,14 +83,3 @@ async def ack_all(env: Any, uid: str, request_id: str, domains: list[str] | None
     for d in domains if domains is not None else DOMAINS:
         await env.bus.publish(ack(uid, request_id, d))
     await env.flush()
-
-
-async def backdate_last_sent(env: Any, request_id: str, seconds: int) -> datetime:
-    """Сдвигает last_sent_at в прошлое (ручной повтор не чаще раза в 5 мин)."""
-    async with env.runtime.transaction() as s:
-        req = (await s.execute(
-            select(DeletionRequest).where(DeletionRequest.request_id == uuid.UUID(request_id)).with_for_update()
-        )).scalar_one()
-        assert req.last_sent_at is not None
-        req.last_sent_at = req.last_sent_at - timedelta(seconds=seconds)
-        return req.last_sent_at

@@ -48,9 +48,7 @@ async def env():
     )
     async with app.router.lifespan_context(app):
         client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://notifications")
-        yield NotifEnv(
-            settings, client, runtime, bus, identity, gateway, app.state.dispatcher, digest=app.state.digest
-        )
+        yield NotifEnv(settings, client, runtime, bus, identity, gateway, app.state.dispatcher, app.state.accept)
         await client.aclose()
         assert runtime.redis is not None
         keys = [k async for k in runtime.redis.scan_iter(match=f"{prefix}:*")]

@@ -1,9 +1,9 @@
 """Pydantic-модели API.
 
-Ответы повторяют типы packages/contracts/src/bff.ts (BFF проксирует без перекладывания).
+Ответы повторяют типы packages/contracts/src/bff.ts (BFF проксирует без перекладывания) и INTERNAL_API §1.
 
-Вход — extra="forbid". Формат PIN намеренно НЕ проверяется схемой: доменная проверка возвращает бизнес-код
-PIN_FORMAT (контракт), а не общий VALIDATION_ERROR.
+Вход — extra="forbid". Формат PIN и тихих часов намеренно НЕ проверяется схемой: доменная проверка возвращает
+бизнес-коды PIN_FORMAT / QUIET_HOURS_INVALID (контракт), а не общий VALIDATION_ERROR.
 """
 
 from __future__ import annotations
@@ -12,21 +12,18 @@ import re
 import uuid
 import zoneinfo
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictBool, field_validator
 
-Locale = Literal["ru", "en"]
+Locale = Literal["ru", "uz"]
+AgeBand = Literal["6-9", "10-13", "14-17", "18+"]
+GuardianConsent = Literal["not_required", "pending", "granted", "declined"]
 PublicStatus = Literal["ACTIVE", "DISABLED", "DELETION_REQUESTED"]
+UserKind = Literal["account", "child"]
 
-HHMM_RE = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 _TZ_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_+\-]*(/[A-Za-z0-9_+\-]+){0,2}$")
-
-
-def _check_hhmm(value: str) -> str:
-    if not HHMM_RE.match(value):
-        raise ValueError("ожидается время HH:MM (00:00–23:59)")
-    return value
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f​-‏‪-‮⁦-⁩]")
 
 
 def _check_timezone(value: str) -> str:
@@ -37,6 +34,16 @@ def _check_timezone(value: str) -> str:
     except (zoneinfo.ZoneInfoNotFoundError, ValueError) as exc:
         raise ValueError("неизвестная IANA-зона") from exc
     return value
+
+
+def _check_name(value: str) -> str:
+    if _CONTROL_RE.search(value):
+        raise ValueError("недопустимые управляющие символы")
+    return value
+
+
+# Имя ребёнка: 1..40 символов после обрезки пробелов, без управляющих и невидимых символов направления текста
+ChildName = Annotated[str, Field(min_length=1, max_length=40), AfterValidator(_check_name)]
 
 
 class _In(BaseModel):
@@ -59,28 +66,22 @@ class QuietHoursIn(_In):
     start: str = Field(max_length=5)
     end: str = Field(max_length=5)
 
-    @field_validator("start", "end")
-    @classmethod
-    def _hhmm(cls, v: str) -> str:
-        return _check_hhmm(v)
 
-    @model_validator(mode="after")
-    def _distinct(self) -> QuietHoursIn:
-        if self.start == self.end:
-            raise ValueError("начало и конец тихих часов совпадают")
-        return self
+class NotificationCategoriesPatch(_In):
+    reminders: StrictBool | None = None
+    missed: StrictBool | None = None
+    social: StrictBool | None = None
+    support: StrictBool | None = None
+    product: StrictBool | None = None
 
 
 class NotificationSettingsPatch(_In):
-    enabled: bool | None = None
-    quiet_hours: QuietHoursIn | None = None  # явный null — выключить тихие часы
-    digest_time: str | None = Field(default=None, max_length=5)
-    timezone: str | None = Field(default=None, max_length=64)
+    """bff.ts SettingsPatch.notifications: Partial<NotificationSettings> + categories?: Partial<...>."""
 
-    @field_validator("digest_time")
-    @classmethod
-    def _digest(cls, v: str | None) -> str | None:
-        return None if v is None else _check_hhmm(v)
+    enabled: StrictBool | None = None
+    quiet_hours: QuietHoursIn | None = None  # явный null — выключить тихие часы
+    timezone: str | None = Field(default=None, max_length=64)
+    categories: NotificationCategoriesPatch | None = None
 
     @field_validator("timezone")
     @classmethod
@@ -89,8 +90,28 @@ class NotificationSettingsPatch(_In):
 
 
 class SettingsPatch(_In):
+    """bff.ts SettingsPatch без display_name (имя аккаунта приходит из Telegram; имя ребёнка — PATCH learners)."""
+
     locale: Locale | None = None
     notifications: NotificationSettingsPatch | None = None
+
+
+class AgeRequest(_In):
+    """Аккаунт может быть только 14-17 или 18+ (ребёнок 6–13 — детский профиль у родителя)."""
+
+    age_band: Literal["14-17", "18+"]
+
+
+class CreateChildRequest(_In):
+    display_name: ChildName
+    age_band: Literal["6-9", "10-13"]
+
+
+class LearnerPatch(_In):
+    """PATCH /me/learners/{id} — только детский профиль: имя и настройки уведомлений ребёнка."""
+
+    display_name: ChildName | None = None
+    settings: NotificationSettingsPatch | None = None
 
 
 class PinSetRequest(_In):
@@ -111,15 +132,20 @@ class PinResetConfirmRequest(_In):
     new_pin: str = Field(max_length=16)
 
 
+class PinResetCancelRequest(_In):
+    current_pin: str = Field(max_length=16)
+
+
 class BiometricVerifyRequest(_In):
     biometric_token: str = Field(min_length=1, max_length=128)
 
 
 class ConsentRequest(_In):
+    """bff.ts ConsentRequest: обязательные terms, privacy, learning; необязательные voice_recording, social,
+    product_news."""
+
     policy_version: str = Field(min_length=1, max_length=20)
     purposes: list[str] = Field(max_length=10)
-    # Контракт: `true`. Отсутствие/false → 422 AGE_CONFIRMATION_REQUIRED (бизнес-код, а не VALIDATION_ERROR).
-    age_confirmed_18_plus: bool = False
 
     @field_validator("purposes")
     @classmethod
@@ -147,6 +173,24 @@ class UserSummary(BaseModel):
     locale: Locale
     status: PublicStatus
     is_new: bool
+    age_band: AgeBand | None
+    guardian_consent: GuardianConsent
+
+
+class LearnerSummary(BaseModel):
+    """`is_active` и `onboarding_completed` уточняет BFF (сессия и learning-plan); домен отдаёт: сам аккаунт —
+    активный по умолчанию, онбординг — false."""
+
+    learner_id: uuid.UUID
+    kind: Literal["self", "child"]
+    display_name: str
+    age_band: AgeBand | None
+    is_active: bool
+    onboarding_completed: bool
+
+
+class LearnerList(BaseModel):
+    items: list[LearnerSummary]
 
 
 class SecurityState(BaseModel):
@@ -155,6 +199,8 @@ class SecurityState(BaseModel):
     biometric_enabled: bool
     pin_required: bool
     locked_until: datetime | None
+    # Ожидающий сброс кода (ревью T-8): с этого времени действует новый код; null — сброса нет (или уже действует).
+    pin_reset_effective_at: datetime | None = None
 
 
 class ConsentState(BaseModel):
@@ -163,7 +209,7 @@ class ConsentState(BaseModel):
     current_policy_version: str
     accepted_at: datetime | None
     evidence_hash: str | None
-    age_confirmed_18_plus: bool
+    purposes: list[str]
 
 
 class QuietHours(BaseModel):
@@ -171,11 +217,26 @@ class QuietHours(BaseModel):
     end: str
 
 
+class NotificationCategories(BaseModel):
+    reminders: bool
+    missed: bool
+    social: bool
+    support: bool
+    product: bool
+
+
 class NotificationSettings(BaseModel):
     enabled: bool
+    categories: NotificationCategories
     quiet_hours: QuietHours | None
-    digest_time: str
     timezone: str
+
+
+class LearnerDetail(LearnerSummary):
+    """GET/PATCH /me/learners/{id}: LearnerSummary + настройки уведомлений этого ученика (дополнение к контракту:
+    BFF собирает Profile.notifications активного ученика, в т.ч. детского профиля, — иначе их негде прочитать)."""
+
+    settings: NotificationSettings
 
 
 class MeResponse(BaseModel):
@@ -183,15 +244,49 @@ class MeResponse(BaseModel):
     security: SecurityState
     consent: ConsentState
     settings: NotificationSettings
+    learners: list[LearnerSummary]
 
 
 class LoginResponse(MeResponse):
-    # Заполняет BFF из preferences; домен identity не владеет онбордингом.
-    onboarding_completed: None = None
+    """INTERNAL_API §1: {user, security, consent, learners} (+ settings — как GET /me, BFF не делает второй вызов)."""
+
+
+class GuardianConsentRequestOut(BaseModel):
+    """Ссылку `https://t.me/<bot>/<app>?startapp=gc_<token>` собирает BFF (bff.ts GuardianConsentLink)."""
+
+    token: str
+    expires_at: datetime
+
+
+class GuardianConsentPreview(BaseModel):
+    teen_display_name: str
+    status: Literal["pending", "granted", "declined", "expired"]
+    expires_at: datetime
+
+
+class GuardianConsentGrant(BaseModel):
+    """bff.ts GuardianConsentGrant: последнее решение этого родителя по подростку; `decided_at` — время решения или
+    отзыва."""
+
+    teen_user_id: uuid.UUID
+    teen_display_name: str
+    status: Literal["granted", "declined"]
+    decided_at: datetime
+
+
+class GuardianConsentGrantList(BaseModel):
+    items: list[GuardianConsentGrant]
 
 
 class OkResponse(BaseModel):
     ok: Literal[True] = True
+
+
+class PinVerifyResponse(OkResponse):
+    """`{ok: true}` + `pin_reset_applied`: эта проверка ввела в действие ожидающий сброс кода (срок наступил) —
+    BFF отзывает прежние сессии аккаунта (ревью T-8). BFF событий не потребляет, поэтому признак — в ответе."""
+
+    pin_reset_applied: bool = False
 
 
 class PinResetRequestResponse(BaseModel):
@@ -220,72 +315,39 @@ class DeletionResponse(BaseModel):
     request_id: uuid.UUID
     status: Literal["REQUESTED"]
     domains: list[str]
+    learners: int  # сколько профилей удаляется (аккаунт + дети)
 
 
 class DeliveryInfo(BaseModel):
-    telegram_user_id: int
+    """Адресация notifications. Для детского профиля адресат — опекун: его Telegram ID, его блокировка бота и язык;
+    категории, тихие часы и часовой пояс — ребёнка."""
+
+    user_id: uuid.UUID
+    kind: UserKind
+    recipient_telegram_user_id: int
+    recipient_is_guardian: bool
+    learner_display_name: str
     locale: Locale
+    age_band: AgeBand | None
+    is_minor: bool
     notifications_enabled: bool
+    categories: list[str]
     quiet_hours: QuietHours | None
-    digest_time: str  # "HH:MM" в timezone пользователя — дайджест notifications (спринт 6, §5)
     timezone: str
     status: PublicStatus
 
 
-# ---------- админ-контур (спринт 2, docs/sprint2/INTERNAL_API.md) ----------
-
-AdminStatus = Literal["ACTIVE", "DISABLED", "DELETION_REQUESTED", "DELETED"]
-
-
-class RevealRequest(_In):
-    """admin.ts RevealRequest. Причина обязательна (≥ 5 символов) — попадает в журнал аудита."""
-
-    field: Literal["telegram_user_id"]
-    reason: str = Field(min_length=5, max_length=500)
-
-    @field_validator("reason")
-    @classmethod
-    def _reason(cls, v: str) -> str:
-        if re.search(r"[\x00-\x1f\x7f]", v):
-            raise ValueError("недопустимые управляющие символы")
-        return v
-
-
-class RevealResult(BaseModel):
-    field: Literal["telegram_user_id"]
-    value: str
-    expires_in: int
-
-
-class AdminConsent(BaseModel):
-    policy_version: str | None
-    purposes: list[str]
-    accepted_at: datetime | None
-    age_confirmed_18_plus: bool
-    revoked_at: datetime | None
-
-
-class AdminSecurity(BaseModel):
-    pin_enabled: bool
-    biometric_enabled: bool
-
-
-class AdminIdentityUser(BaseModel):
-    """Снимок профиля для read-модели user-admin. Полного Telegram ID нет — только маска."""
+class PublicProfile(BaseModel):
+    """Для social и notifications: имя без username и Telegram ID; guardian_consent — чтобы social решал, может ли
+    подросток 14–17 приглашать и принимать приглашения. `consent_accepted` — действующее согласие с terms и privacy
+    (у детского профиля — согласие родителя с основанием guardian), `purposes` — его цели; необязательные — только
+    если они сейчас разрешены (18+ или 14–17 с согласием родителя), INTERNAL_API §11."""
 
     user_id: uuid.UUID
-    username: str | None
-    display_name: str | None
-    telegram_id_masked: str
-    locale: Locale
-    status: AdminStatus
-    created_at: datetime
-    updated_at: datetime
-    last_seen_at: datetime | None
-    consent: AdminConsent
-    security: AdminSecurity
-
-
-class AdminIdentityUserPage(BaseModel):
-    items: list[AdminIdentityUser]
-    next_cursor: str | None
+    display_name: str
+    kind: UserKind
+    age_band: AgeBand | None
+    guardian_consent: GuardianConsent
+    status: PublicStatus
+    consent_accepted: bool
+    purposes: list[str]

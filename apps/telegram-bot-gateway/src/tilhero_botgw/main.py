@@ -1,8 +1,8 @@
 """telegram-bot-gateway: два ASGI-приложения в одном процессе (ревью спринта 1, P1).
 
 - публичное (`PORT`, домен Railway) — только `POST /telegram/webhook` и `/health/*`;
-- внутреннее (`INTERNAL_PORT`, 8108, только приватная сеть) — `POST /internal/v1/messages`,
-  `POST /internal/v1/ops-messages` (спринт 8) и `/health/*`.
+- внутреннее (`INTERNAL_PORT`, 8108, только приватная сеть) — `POST /internal/v1/messages` (только notifications)
+  и `/health/*`.
 
 Оба приложения разделяют один Runtime (Redis, клиенты): его жизненным циклом управляет публичное приложение.
 Запуск обоих портов — `python -m tilhero_botgw` (tilhero_botgw.serve): один uvicorn-сервер на двух сокетах,
@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 from fastapi import FastAPI
 
-from tilhero_botgw.api import internal, ops, webhook
+from tilhero_botgw.api import internal, webhook
 from tilhero_botgw.settings import Settings, get_settings
 from tilhero_botgw.telegram import TelegramClient, silence_http_logging
 from tilhero_common.app import Runtime, create_app
@@ -56,7 +56,7 @@ def build_apps(
     )
     private = create_app(
         settings,
-        routers=[internal.router, ops.router],
+        routers=[internal.router],
         runtime=runtime,
         manage_runtime=False,
         title="TilHero telegram-bot-gateway (internal)",

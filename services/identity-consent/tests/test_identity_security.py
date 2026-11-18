@@ -1,5 +1,5 @@
-"""Безопасность: PIN (Argon2id, смена/снятие с текущим PIN), блокировка 5→5 мин, общий счётчик с биометрией
-и PIN при удалении, сброс PIN кодом из бота, биометрия; события user.security.changed.v1 по схеме."""
+"""Безопасность: код родителя (PIN, Argon2id, смена/снятие с текущим кодом), блокировка 5→5 мин, общий счётчик
+с биометрией и кодом при удалении, сброс кода из бота, биометрия; события user.security.changed.v1 по схеме."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import asyncio
 import io
 import logging
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -51,11 +52,12 @@ async def test_set_change_remove_pin(env) -> None:
         "biometric_enabled": False,
         "pin_required": True,
         "locked_until": None,
+        "pin_reset_effective_at": None,
     }
     row = await _pin_row(env, uid)
     assert row and row.pin_hash.startswith("$argon2id$") and PIN not in row.pin_hash
 
-    # Дефект FinAdvisor S6: повторная установка без текущего PIN не перезаписывает его.
+    # Повторная установка без текущего кода не перезаписывает его.
     again = await env.call("PUT", "/internal/v1/me/pin", uid, {"pin": PIN6})
     assert again.status_code == 409 and again.json()["code"] == "PIN_ALREADY_SET"
     wrong = await env.call("PUT", "/internal/v1/me/pin", uid, {"pin": PIN6, "current_pin": WRONG})
@@ -63,7 +65,7 @@ async def test_set_change_remove_pin(env) -> None:
     assert wrong.json()["details"] == {"remaining": 4}
     changed = await env.call("PUT", "/internal/v1/me/pin", uid, {"pin": PIN6, "current_pin": PIN})
     assert changed.status_code == 200 and changed.json()["pin_length"] == 6
-    assert (await _verify(env, uid, PIN6)).json() == {"ok": True}
+    assert (await _verify(env, uid, PIN6)).json() == {"ok": True, "pin_reset_applied": False}
     assert (await _verify(env, uid, PIN)).status_code == 401
     # успешная проверка обнуляет счётчик
     assert (await _verify(env, uid, PIN6)).status_code == 200
@@ -81,6 +83,7 @@ async def test_set_change_remove_pin(env) -> None:
         "biometric_enabled": False,
         "pin_required": False,
         "locked_until": None,
+        "pin_reset_effective_at": None,
     }
     assert await _pin_row(env, uid) is None
     again_removed = await env.call("DELETE", "/internal/v1/me/pin", uid, {"current_pin": PIN6})
@@ -245,7 +248,7 @@ async def test_pin_reset_flow(env) -> None:
     await env.call("PUT", "/internal/v1/me/biometric", uid)
 
     code = await _request_code(env, uid)
-    # Ревью P2: код уходит синхронно в notifications (iss=identity-consent), в событиях и outbox его нет
+    # Код уходит синхронно в notifications (iss=identity-consent), в событиях и outbox его нет
     p = env.notifications.calls[-1]
     assert p["template"] == "pin.reset_code" and p["params"] == {"code": code, "ttl_minutes": 10}
     assert set(p) == {"notification_id", "user_id", "template", "params", "dedup_key"}
@@ -281,16 +284,15 @@ async def test_pin_reset_flow(env) -> None:
 
     ok = await env.call("POST", "/internal/v1/me/pin/reset-confirm", uid, {"code": code, "new_pin": PIN6})
     assert ok.status_code == 200, ok.text
-    assert (
-        ok.json()["pin_enabled"] and ok.json()["pin_length"] == 6 and ok.json()["biometric_enabled"] is False
-    )
-    assert (await _verify(env, uid, PIN6)).status_code == 200
-    assert (await _verify(env, uid, PIN)).status_code == 401
+    # ревью T-8: новый код ждёт 24 ч, до этого действуют прежний код и биометрия
+    body = ok.json()
+    assert body["pin_enabled"] and body["pin_length"] == 4 and body["biometric_enabled"] is True
+    effective_at = datetime.fromisoformat(body["pin_reset_effective_at"])
+    assert timedelta(hours=23, minutes=59) < effective_at - datetime.now(UTC) <= timedelta(hours=24)
     # код одноразовый
     reuse = await env.call("POST", "/internal/v1/me/pin/reset-confirm", uid, {"code": code, "new_pin": PIN})
     assert reuse.status_code == 410 and reuse.json()["code"] == "RESET_CODE_EXPIRED"
-    # одна транзакция — порядок публикации между событиями не гарантирован (одинаковый created_at в outbox)
-    assert sorted((await env.security_changes(uid))[-2:]) == ["biometric_disabled", "pin_reset"]
+    assert await env.security_changes(uid) == ["pin_set", "biometric_enabled", "pin_reset_requested"]
 
 
 async def test_pin_reset_code_attempts_and_expiry(env) -> None:
@@ -348,7 +350,8 @@ async def test_pin_reset_rate_limits(env) -> None:
     await _request_code(env, other)
 
 
-async def test_pin_reset_unlocks_lockout(env) -> None:
+async def test_pin_reset_does_not_unlock_lockout(env) -> None:
+    """Ревью T-8: сброс не даёт лишних попыток подбора прежнего кода — блокировка и счётчик остаются."""
     uid = await env.new_user()
     await env.set_pin(uid)
     for _ in range(5):
@@ -356,9 +359,12 @@ async def test_pin_reset_unlocks_lockout(env) -> None:
     assert (await _verify(env, uid, PIN)).status_code == 423
     code = await _request_code(env, uid)
     r = await env.call("POST", "/internal/v1/me/pin/reset-confirm", uid, {"code": code, "new_pin": PIN6})
-    assert r.status_code == 200 and r.json()["locked_until"] is None
-    assert (await _verify(env, uid, PIN6)).status_code == 200
-    assert (await _verify(env, uid, WRONG)).json()["details"] == {"remaining": 4}
+    assert r.status_code == 200 and r.json()["locked_until"] is not None
+    for pin in (PIN, PIN6):
+        assert (await _verify(env, uid, pin)).status_code == 423
+    cancel = await env.call("POST", "/internal/v1/me/pin/reset-cancel", uid, {"current_pin": PIN})
+    assert cancel.status_code == 423 and cancel.json()["code"] == "PIN_LOCKED"
+    assert (await _pin_row(env, uid)).reset_pin_hash is not None  # сброс по-прежнему ждёт срока
 
 
 async def test_pin_reset_requires_reachable_bot(env) -> None:
@@ -397,6 +403,9 @@ async def test_secrets_never_leak_to_logs_responses_or_events(env) -> None:
             "POST", "/internal/v1/me/pin/reset-confirm", uid, {"code": code, "new_pin": secret_pin2}
         )
         assert code not in r.text and secret_pin2 not in r.text
+        # сообщение о запрошенном сбросе — без кода и без нового PIN
+        notice = env.notifications.of(uid, "pin.reset_scheduled")[-1]
+        assert code not in str(notice) and secret_pin2 not in str(notice)
         await env.flush()
     finally:
         root.removeHandler(handler)
@@ -407,7 +416,7 @@ async def test_secrets_never_leak_to_logs_responses_or_events(env) -> None:
     outbox = await env.outbox_dump()
     for secret in (secret_pin, secret_pin2, token):
         assert secret not in outbox
-    # код не попадает ни в одно событие и ни в outbox (ревью P2) — только в синхронный вызов notifications
+    # код не попадает ни в одно событие и ни в outbox — только в синхронный вызов notifications
     assert [e.event_type for e in env.bus.published if code in e.model_dump_json()] == []
     assert code not in outbox
 
@@ -423,7 +432,7 @@ async def test_concurrent_wrong_pins_cannot_exceed_attempt_limit(env) -> None:
 
 
 async def test_pin_reset_when_notifications_unavailable_does_not_consume_limit(env) -> None:
-    """Ревью P2: notifications недоступен → 503 UPSTREAM_UNAVAILABLE, код не действует, лимит не расходуется."""
+    """notifications недоступен → 503 UPSTREAM_UNAVAILABLE, код не действует, лимит не расходуется."""
     uid = await env.new_user()
     await env.set_pin(uid)
     import httpx
@@ -459,7 +468,7 @@ async def test_pin_reset_when_notifications_unavailable_does_not_consume_limit(e
 
 
 async def test_lockouts_do_not_need_second_connection_under_row_lock() -> None:
-    """Ревью #13: событие pin_locked пишется после отката основной транзакции, а не во втором соединении,
+    """Событие pin_locked пишется после отката основной транзакции, а не во втором соединении,
     пока первое держит FOR UPDATE: параллельные блокировки не исчерпывают пул (pool 1 + overflow 1)."""
     import random
 

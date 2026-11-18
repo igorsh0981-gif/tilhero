@@ -1,7 +1,7 @@
 [project]
 name = "tilhero-experience"
 version = "0.1.0"
-description = "TilHero experience-config-service: версии темы, секций Home и флагов с откатом"
+description = "TilHero experience-config-service: версии темы, секций главной и флагов с откатом; «Что нового»"
 requires-python = ">=3.12"
 dependencies = ["tilhero-common"]
 

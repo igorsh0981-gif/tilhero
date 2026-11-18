@@ -8,7 +8,7 @@ export interface DraftKey {
 
 /**
  * Same content → same key (a retry after a lost response never creates a duplicate); any edit → a new key
- * (otherwise the server would return the first version and the edit would be silently lost — review 🟡-10).
+ * (otherwise the server would return the first version and the edit would be silently lost).
  */
 export function keyForDraft(prev: DraftKey | null, content: unknown, make: () => string = newIdempotencyKey): DraftKey {
   const fingerprint = JSON.stringify(content);

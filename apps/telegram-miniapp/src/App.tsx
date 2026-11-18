@@ -1,420 +1,446 @@
-import type { DeletionResponse, ExperienceConfig, Profile, SecurityState, SessionResponse } from "@tilhero/contracts/bff";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
-import { ApiClient } from "./api/client";
-import { createApi } from "./api/endpoints";
-import { ApiError, errorText } from "./api/errors";
-import { applyTheme, fetchExperience, FALLBACK_CONFIG, type ConfigSource } from "./config/experience";
+import type { DeletionResponse, ExperienceConfig, LearningPlan, Profile, SessionResponse, WhatsNew } from "@tilhero/contracts/bff";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createBff } from "./api/bff";
+import { ApiClient, type ClientOptions } from "./api/client";
+import { ApiError, displayCode } from "./api/errors";
+import { applyTheme, fetchExperience, FALLBACK_CONFIG, flag } from "./config/experience";
+import { deviceTimeZone } from "./domain/schedule";
+import { consentIsCurrent } from "./domain/onboarding";
+import { hasWhatsNew } from "./domain/whatsNew";
 import { env } from "./env";
-import { resolveLang, useI18n, type Lang, type MessageKey } from "./i18n";
+import { resolveLang, useI18n } from "./i18n";
+import { AppProvider, useApp, type AppCtx } from "./state/app";
+import { useNav, type Pushed, type Tab } from "./state/nav";
+import { bindTelegramEnvironment, needsOnboarding, parseStartParam, syncNativeChrome, tgReady, type BootMode, type DeepLink } from "./tg";
+import { cx } from "./ui/kit";
+import { PopupHost, ToastHost } from "./ui/overlays";
+import { Bar, Tabs } from "./ui/shell";
+import { BootError, Loading, Outside, type BootErrorKind } from "./screens/boot/BootScreens";
+import { GuardianSheet } from "./screens/deeplink/GuardianSheet";
+import { InviteSheet, type InviteTarget } from "./screens/deeplink/InviteSheet";
 import { Home } from "./screens/home/Home";
-import { Lock } from "./screens/lock/Lock";
-import { Onboarding } from "./screens/onboarding/Onboarding";
-import { Profile as ProfileScreen } from "./screens/profile/Profile";
-import { resetCatalogMemory } from "./events/memory";
-import { forgetSavedFilters } from "./events/saved";
-import { Catalog } from "./screens/events/Catalog";
-import { EventDetail } from "./screens/events/EventDetail";
+import { Inbox } from "./screens/inbox/Inbox";
+import { LockScreen } from "./screens/lock/LockScreen";
 import { News } from "./screens/news/News";
-import { Watch } from "./screens/watch/Watch";
-import { SupportDone, SupportList, SupportNew, SupportThread } from "./screens/support/Support";
-import { Boot, DeletionAccepted, Fatal, OpenInTelegram } from "./screens/system/System";
-import { AppContext, type AppCtx } from "./state/app";
-import { initialNav, navReducer, rootTab, topRoute, type Route } from "./state/nav";
-import {
-  bindTelegramEnvironment,
-  isInsideTelegram,
-  mainButtonStore,
-  nativeMainButton,
-  parseStartParam,
-  resyncNativeButtons,
-  syncNativeChrome,
-  tgReady,
-  useBackButton,
-  useNativeButtonsWiring,
-  useStoreTop,
-  type BootMode,
-  type DeepLink,
-} from "./tg";
-import { Icon } from "./ui/Icon";
-import { LAYERS_ID, PopupHost, showToast, ToastHost } from "./ui/overlays";
-import { DevChrome, MainBar, NetBanner, TabBar } from "./ui/shell";
-import { useCriticalCount, watchStore } from "./watch/store";
-import { aiStore } from "./ai/store";
-import { rateLimits } from "./api/rateLimit";
-import { AiChatHost } from "./screens/ai/AiChat";
+import { Onboarding } from "./screens/onboarding/Onboarding";
+import { DeleteScreen, DeletionDone } from "./screens/profile/DeleteScreen";
+import { Family } from "./screens/profile/Family";
+import { Guardian } from "./screens/profile/Guardian";
+import { LanguageScreen } from "./screens/profile/LanguageScreen";
+import { NotifSettings } from "./screens/profile/NotifSettings";
+import { ParentCode } from "./screens/profile/ParentCode";
+import { Privacy } from "./screens/profile/Privacy";
+import { Profile as ProfileScreen } from "./screens/profile/Profile";
+import { ScheduleScreen } from "./screens/profile/ScheduleScreen";
+import { Soon } from "./screens/soon/Soon";
+import { Support, TicketScreen } from "./screens/support/Support";
+import { WhatsNewSheet } from "./screens/whatsnew/WhatsNewSheet";
 
 type Phase =
-  | { k: "boot" }
-  | { k: "outside" }
-  | { k: "fatal"; title: MessageKey; text: string }
-  | { k: "locked" }
-  | { k: "onboarding" }
-  | { k: "main" }
-  | { k: "deleted"; r: DeletionResponse | null };
+  | { kind: "boot" }
+  | { kind: "outside" }
+  | { kind: "error"; err: BootErrorKind; code: string }
+  | { kind: "locked" }
+  | { kind: "ready" }
+  | { kind: "deleted"; res: DeletionResponse };
 
-const FATAL_TITLE: Record<string, MessageKey> = {
-  INIT_DATA_EXPIRED: "sys.expired.h",
-  // sprint 9 (O-1): initData is single-use — a fresh one comes only with a new launch from the bot chat
-  INIT_DATA_REPLAYED: "sys.expired.h",
-  REFRESH_INVALID: "sys.expired.h",
-  USER_DELETED: "sys.deleted.h",
-};
+type Overlay = { kind: "invite"; target: InviteTarget } | { kind: "guardian"; token: string } | { kind: "wn"; data: WhatsNew };
 
-/**
- * Resolve a `ticket_TCK-NNNN` deep link to the ticket UUID. telegram-bff addresses a ticket by UUID or by
- * number; if a backend only knows UUIDs (404), fall back to scanning the paginated list.
- */
-async function findTicketId(api: ReturnType<typeof createApi>, number: string): Promise<string | null> {
-  try {
-    return (await api.support.get(number)).ticket_id;
-  } catch (e) {
-    if (!(e instanceof ApiError) || (e.status !== 404 && e.status !== 422)) throw e;
+export function bootErrorPhase(e: unknown): Phase {
+  if (e instanceof ApiError) {
+    if (e.status === 410 || e.code === "USER_DELETED") return { kind: "error", err: "deleted", code: "USER_DELETED" };
+    if (e.status === 401 || e.status === 403) return { kind: "error", err: "reopen", code: e.code.startsWith("INIT_DATA_") ? e.code : "SESSION_REVOKED" };
+    if (e.code === "RATE_LIMITED") return { kind: "error", err: "network", code: "RATE_LIMITED" };
+    return { kind: "error", err: "network", code: e.status === 0 ? "NETWORK" : "SERVICE_UNAVAILABLE" };
   }
-  let cursor: string | null = null;
-  for (let page = 0; page < 5; page++) {
-    const r = await api.support.list(cursor, 100);
-    const hit = r.items.find((x) => x.number.toUpperCase() === number);
-    if (hit) return hit.ticket_id;
-    if (!r.next_cursor) return null;
-    cursor = r.next_cursor;
-  }
-  return null;
+  return { kind: "error", err: "network", code: "UNKNOWN" };
 }
 
-export function App({ boot }: { boot: BootMode }) {
+/**
+ * The shell: session by initData (AT-01) → parent code if required → onboarding or the main screens; deep links
+ * (inv_ / invite_ / gc_ / ticket_ / route_), «Что нового» after onboarding and at every next login (AT-11), the
+ * unread counter of the notification center (AT-12).
+ */
+export function App({ boot, client: injected }: { boot: BootMode; client?: Partial<ClientOptions> }) {
   const i18n = useI18n();
-  const { t, setLang, fmt } = i18n;
-  const inTelegram = isInsideTelegram();
-  const [phase, setPhase] = useState<Phase>(boot.kind === "outside" ? { k: "outside" } : { k: "boot" });
+  const deviceTz = useMemo(deviceTimeZone, []);
+  const [phase, setPhase] = useState<Phase>(boot.kind === "outside" ? { kind: "outside" } : { kind: "boot" });
   const [session, setSession] = useState<SessionResponse | null>(null);
-  const [profile, setProfileState] = useState<Profile | null>(null);
+  const [plan, setPlan] = useState<LearningPlan | null>(null);
   const [config, setConfig] = useState<ExperienceConfig>(FALLBACK_CONFIG);
-  const [configSource, setConfigSource] = useState<ConfigSource>("local");
   const [online, setOnline] = useState(true);
-  const [nav, navigate] = useReducer(navReducer, undefined, () => initialNav("home"));
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [firstVisit, setFirstVisit] = useState(false);
-  const deepLink = useRef<DeepLink | null>(boot.kind === "outside" ? null : parseStartParam(boot.startParam));
-  const phaseRef = useRef(phase);
-  phaseRef.current = phase;
+  const [unread, setUnread] = useState(0);
+  const [overlay, setOverlayState] = useState<Overlay | null>(null);
+  const overlayRef = useRef<Overlay | null>(null);
+  const queue = useRef<Overlay[]>([]);
+  const pending = useRef<DeepLink | null>(null);
+  const wnChecked = useRef(new Set<string>());
+  const firstDone = useRef(false);
+  const started = useRef(false);
+  const nav = useNav();
+  const configRef = useRef<ExperienceConfig>(FALLBACK_CONFIG);
+  configRef.current = config;
+  const langRef = useRef(i18n.lang);
+  langRef.current = i18n.lang;
 
-  const client = useMemo(() => new ApiClient({ baseUrl: env.bffUrl, lang: () => document.documentElement.lang || "ru" }), []);
-  const api = useMemo(() => createApi(client), [client]);
+  // one client for the life of the app (tests may inject fetch / storage)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const client = useMemo(() => new ApiClient({ baseUrl: env.bffUrl, lang: () => langRef.current, timezone: () => deviceTz, ...injected }), []);
+  const bff = useMemo(() => createBff(client), [client]);
+  // the session flag (set at login from the plan, and by «Открыть главную» after the done step) — not the plan itself:
+  // completing the plan must still show the done step of onboarding
+  const onboarded = !!session?.onboarding_completed;
+  const onboardedRef = useRef(onboarded);
+  onboardedRef.current = onboarded;
 
-  /* ---------- client hooks: 423 → lock, lost session → fatal, connectivity → banner ---------- */
-  useEffect(() => {
-    client.hooks = {
-      onPinRequired: () => {
-        const k = phaseRef.current.k;
-        if (k === "main" || k === "onboarding") setPhase({ k: "locked" });
-      },
-      onSessionLost: (e) => {
-        resetCatalogMemory();
-        setPhase({ k: "fatal", title: FATAL_TITLE[e.code] ?? "sys.expired.h", text: errorText(e, t, fmt.mmss) });
-      },
-      onConnectivity: (ok) => setOnline(ok),
-      onSession: (s) => setSession(s),
-    };
-  }, [client, t, fmt]);
-
-  /* ---------- Telegram environment ---------- */
-  useNativeButtonsWiring();
-  useEffect(() => {
-    tgReady();
-    return bindTelegramEnvironment(() => resyncNativeButtons());
+  /* ---------- overlays: one at a time, the rest wait ---------- */
+  const showOverlay = useCallback((o: Overlay) => {
+    if (overlayRef.current) {
+      queue.current.push(o);
+      return;
+    }
+    overlayRef.current = o;
+    setOverlayState(o);
+  }, []);
+  const closeOverlay = useCallback(() => {
+    const next = queue.current.shift() ?? null;
+    overlayRef.current = next;
+    setOverlayState(next);
   }, []);
 
-  /* ---------- Remote Experience Config (public, with bundled fallback) ---------- */
-  const loadConfig = useCallback(() => {
-    void fetchExperience((signal) => api.experience.config(signal)).then(({ config: c, source }) => {
-      applyTheme(c);
-      setConfig(c);
-      setConfigSource(source);
-      syncNativeChrome();
-      resyncNativeButtons();
-    });
-  }, [api]);
-  useEffect(() => {
-    applyTheme(FALLBACK_CONFIG);
-    loadConfig();
-  }, [loadConfig]);
+  /* ---------- deep links ---------- */
+  const handleLink = useCallback(
+    (link: DeepLink) => {
+      switch (link.kind) {
+        case "invite":
+          return showOverlay({ kind: "invite", target: { token: link.token } });
+        case "invitePreview":
+          return showOverlay({ kind: "invite", target: { inviteId: link.inviteId } });
+        case "guardian":
+          return showOverlay({ kind: "guardian", token: link.token });
+        case "ticket":
+        case "route":
+          if (needsOnboarding(link) && !onboardedRef.current) {
+            pending.current = link;
+            return;
+          }
+          if (link.kind === "route") return nav.route(link.route);
+          nav.goTab("profile");
+          return nav.push({ name: "support", number: link.number });
+      }
+    },
+    [nav, showOverlay],
+  );
+  const openLink = useCallback((raw: string | null) => {
+    const link = parseStartParam(raw);
+    if (link) handleLink(link);
+  }, [handleLink]);
 
   /* ---------- session ---------- */
-  const reloadProfile = useCallback(async (): Promise<Profile | null> => {
-    try {
-      const p = await api.profile.get();
-      setProfileState(p);
-      setSession((s) => (s ? { ...s, user: p.user, security: p.security, consent: p.consent } : s));
-      return p;
-    } catch {
-      return null;
-    }
-  }, [api]);
-
-  const enter = useCallback(
+  const loadAfterSession = useCallback(
     async (s: SessionResponse) => {
-      if (s.user.status === "DELETION_REQUESTED") return setPhase({ k: "deleted", r: null });
-      if (s.security.pin_required) return setPhase({ k: "locked" });
-      if (!s.onboarding_completed) {
-        const p = await reloadProfile();
-        if (!p) return setPhase({ k: "fatal", title: "sys.err.h", text: t("err.SERVICE_UNAVAILABLE") });
-        resetCatalogMemory(); // (re)onboarding: results of an earlier profile state must not survive
-        return setPhase({ k: "onboarding" });
+      setSession(s);
+      i18n.setLang(resolveLang(s.account.locale, boot.kind === "outside" ? null : boot.languageCode));
+      if (s.security.pin_required) {
+        setPhase({ kind: "locked" });
+        return;
       }
-      setPhase({ k: "main" });
+      const p = await bff.plan(deviceTz);
+      setPlan(p);
+      setSession({ ...s, onboarding_completed: s.onboarding_completed || !!p.onboarding_completed_at });
+      setPhase({ kind: "ready" });
+      if (!firstDone.current) {
+        firstDone.current = true;
+        const link = parseStartParam(s.start_param ?? (boot.kind === "outside" ? null : boot.startParam));
+        if (link) {
+          onboardedRef.current = !!p.onboarding_completed_at || s.onboarding_completed;
+          handleLink(link);
+        }
+      }
     },
-    [reloadProfile, t],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bff, boot, deviceTz, handleLink],
   );
 
   const start = useCallback(async () => {
     if (boot.kind === "outside") return;
-    setPhase({ k: "boot" });
+    setPhase({ kind: "boot" });
     try {
-      const s = await client.resumeSession(boot.initData);
-      setSession(s);
-      setFirstVisit(s.user.is_new || !s.onboarding_completed);
-      setLang(resolveLang(s.user.locale, boot.languageCode));
-      await enter(s);
+      await loadAfterSession(await client.resumeSession(boot.initData));
     } catch (e) {
-      const err = e instanceof ApiError ? e : new ApiError(0, "UNKNOWN", "");
-      setPhase({ k: "fatal", title: FATAL_TITLE[err.code] ?? "sys.err.h", text: errorText(err, t, fmt.mmss) });
+      setPhase(bootErrorPhase(e));
     }
-    // boot exactly once
+  }, [boot, client, loadAfterSession]);
+
+  useEffect(() => {
+    client.hooks = {
+      onPinRequired: () => setPhase({ kind: "locked" }),
+      onSessionLost: (e) => setPhase(e.status === 410 ? { kind: "error", err: "deleted", code: "USER_DELETED" } : { kind: "error", err: "reopen", code: displayCode(e) }),
+      onConnectivity: setOnline,
+      onSession: (s) => setSession((prev) => (prev ? { ...s, start_param: prev.start_param } : s)),
+    };
+  }, [client]);
+
+  useEffect(() => {
+    const off = bindTelegramEnvironment(() => syncNativeChrome());
+    tgReady();
+    if (started.current) return off;
+    started.current = true;
+    void fetchExperience((signal) => bff.experience(signal)).then(({ config: c }) => {
+      setConfig(c);
+      applyTheme(c);
+      syncNativeChrome();
+    });
+    void start();
+    return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => {
-    void start();
-  }, [start]);
 
-  /* ---------- deep link (start_param) once the main app is reachable ---------- */
+  /* ---------- after onboarding (and the consents): deferred deep link, then «Что нового» ---------- */
+  const consentOk = !!session && consentIsCurrent(session.consent);
   useEffect(() => {
-    if (phase.k !== "main" || !deepLink.current) return;
-    const dl = deepLink.current;
-    deepLink.current = null;
-    if (dl.kind === "tab") navigate({ type: "tab", tab: dl.tab });
-    // startapp=event_<uuid> (shared from the Mini App, bot notifications): the detail over the catalogue
-    else if (dl.kind === "event") navigate({ type: "reset", stack: [{ name: "catalog" }, { name: "event", id: dl.id }] });
-    else if (dl.kind === "supportList") navigate({ type: "reset", stack: [{ name: "profile" }, { name: "supportList" }] });
-    else {
-      void findTicketId(api, dl.number).then(
-        (id) => {
-          const stack: Route[] = [{ name: "profile" }, { name: "supportList" }];
-          if (id) stack.push({ name: "supportThread", id });
-          else showToast(t("tk.notfound", { n: dl.number }), "info");
-          navigate({ type: "reset", stack });
-        },
-        () => navigate({ type: "reset", stack: [{ name: "profile" }, { name: "supportList" }] }),
-      );
-    }
-  }, [phase.k, api, t]);
+    const link = pending.current;
+    if (phase.kind !== "ready" || !onboarded || !link) return;
+    // the server opens invitations only after the policy is accepted (INTERNAL_API §11)
+    if ((link.kind === "invite" || link.kind === "invitePreview") && !consentOk) return;
+    pending.current = null;
+    handleLink(link);
+  }, [phase.kind, onboarded, consentOk, handleLink]);
 
-  /* ---------- sprint 7: is the AI concierge there (GET /v1/ai/quota once the main app is reachable) ---------- */
+  const learnerId = session?.learner.learner_id ?? null;
   useEffect(() => {
-    if (phase.k === "main") void aiStore.load(() => api.ai.quota());
-    else aiStore.close();
-  }, [phase.k, api]);
-  // a chat belongs to the screen it was opened on: another tab or screen closes it
-  useEffect(() => {
-    aiStore.close();
-  }, [nav.seq]);
+    if (phase.kind !== "ready" || !onboarded || !learnerId || wnChecked.current.has(learnerId)) return;
+    wnChecked.current.add(learnerId);
+    bff.whatsNew().then(
+      (w) => {
+        // the operator may switch the sheet at login off (flag whats_new_on_login); the welcome tour stays
+        if (hasWhatsNew(w) && (w.mode === "welcome" || flag(configRef.current, "whats_new_on_login"))) showOverlay({ kind: "wn", data: w });
+      },
+      () => undefined,
+    );
+  }, [phase.kind, onboarded, learnerId, bff, showOverlay]);
 
-  /* ---------- --ph / data-h: the measured app viewport drives no-scroll sizing ---------- */
-  const appRef = useRef<HTMLDivElement>(null);
-  const vpRef = useRef<HTMLElement>(null);
-  useLayoutEffect(() => {
-    const app = appRef.current;
-    const vp = vpRef.current;
-    if (!app || !vp) return;
-    const sync = () => {
-      const h = vp.clientHeight;
-      if (h) {
-        app.style.setProperty("--ph", `${h}px`);
-        app.dataset.h = h < 500 ? "xs" : h < 600 ? "s" : h < 700 ? "m" : "l";
+  const refreshUnread = useCallback(() => {
+    bff.unreadCount().then(
+      (r) => setUnread(r.unread),
+      () => undefined,
+    );
+  }, [bff]);
+  useEffect(() => {
+    if (phase.kind !== "ready" || !onboarded) return;
+    refreshUnread();
+    const id = setInterval(refreshUnread, 60_000);
+    return () => clearInterval(id);
+  }, [phase.kind, onboarded, learnerId, refreshUnread]);
+
+  /* ---------- context ---------- */
+  const applySession = useCallback(
+    async (s: SessionResponse) => {
+      setSession((prev) => ({ ...s, start_param: prev?.start_param ?? s.start_param }));
+      if (s.security.pin_required) {
+        setPhase({ kind: "locked" });
+        return;
       }
-      const w = app.clientWidth;
-      if (w) app.dataset.w = w < 390 ? "s" : "l";
-    };
-    sync();
-    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(sync) : null;
-    ro?.observe(vp);
-    window.addEventListener("resize", sync);
-    return () => {
-      ro?.disconnect();
-      window.removeEventListener("resize", sync);
-    };
-  }, [phase.k]);
-
-  // scroll to top on navigation
-  useLayoutEffect(() => {
-    vpRef.current?.scrollTo({ top: 0 });
-  }, [nav.seq, phase.k]);
-
-  /* ---------- BackButton ↔ navigation stack ---------- */
-  useBackButton(phase.k === "main" && nav.stack.length > 1 ? () => navigate({ type: "pop" }) : null);
-
-  const mainTop = useStoreTop(mainButtonStore);
-  const critical = useCriticalCount();
-  const showMainBar = !nativeMainButton();
-
-  const ctx: AppCtx | null = useMemo(() => {
-    if (!session) return null;
-    return {
-      api,
-      client,
-      inTelegram,
-      session,
-      profile,
-      setProfile: (p: Profile) => {
-        setProfileState(p);
-        setSession((s) => (s ? { ...s, user: p.user, security: p.security, consent: p.consent } : s));
-      },
-      reloadProfile,
-      setSecurity: (sec: SecurityState) => {
-        setSession((s) => (s ? { ...s, security: sec } : s));
-        setProfileState((p) => (p ? { ...p, security: sec } : p));
-      },
-      applySession: (s: SessionResponse) => {
-        setSession(s);
-        setProfileState((p) => (p ? { ...p, user: s.user, security: s.security, consent: s.consent } : p));
-      },
-      config,
-      configSource,
-      online,
-      firstVisit,
-      nav,
-      navigate,
-      lock: () => setPhase({ k: "locked" }),
-      onboardingDone: () => {
-        setSession((s) => (s ? { ...s, onboarding_completed: true } : s));
-        deepLink.current = null;
-        navigate({ type: "reset", stack: [{ name: "home" }] });
-        setPhase({ k: "main" });
-      },
-      deletionAccepted: (r: DeletionResponse) => {
-        resetCatalogMemory();
-        watchStore.reset();
-        aiStore.reset();
-        rateLimits.reset();
-        forgetSavedFilters(); // a deleted profile leaves no saved catalogue filters behind
-        client.clear();
-        client.forgetInitData();
-        setPhase({ k: "deleted", r });
-      },
-    };
-  }, [api, client, inTelegram, session, profile, reloadProfile, config, configSource, online, firstVisit, nav]);
-
-  const onUnlocked = useCallback(
-    (s: SessionResponse, message?: string) => {
-      setSession(s);
-      showToast(message ?? t("unlock"), message ? "key" : "lock");
-      void enter({ ...s, security: { ...s.security, pin_required: false } });
+      const p = await bff.plan(deviceTz);
+      setPlan(p);
+      if (p.onboarding_completed_at && !s.onboarding_completed) setSession((prev) => (prev ? { ...prev, onboarding_completed: true } : prev));
     },
-    [enter, t],
+    [bff, deviceTz],
+  );
+  const syncProfile = useCallback((p: Profile) => {
+    setSession((prev) => (prev ? { ...prev, account: p.account, learner: p.learner, learners: p.learners, security: p.security, consent: p.consent } : prev));
+  }, []);
+  const patchSession = useCallback((patch: Partial<SessionResponse>) => setSession((prev) => (prev ? { ...prev, ...patch } : prev)), []);
+  const reloadPlan = useCallback(async () => {
+    try {
+      const p = await bff.plan(deviceTz);
+      setPlan(p);
+      return p;
+    } catch {
+      return null;
+    }
+  }, [bff, deviceTz]);
+  const finishOnboarding = useCallback(
+    (p: LearningPlan) => {
+      setPlan(p);
+      setSession((prev) => {
+        if (!prev) return prev;
+        const me = prev.learner.learner_id;
+        return {
+          ...prev,
+          onboarding_completed: true,
+          learner: { ...prev.learner, onboarding_completed: true },
+          learners: prev.learners.map((l) => (l.learner_id === me ? { ...l, onboarding_completed: true } : l)),
+        };
+      });
+      nav.reset();
+    },
+    [nav],
   );
 
-  const changeLang = useCallback(
-    (l: Lang) => {
-      setLang(l);
-      void api.profile.settings({ locale: l }).catch(() => undefined);
-    },
-    [api, setLang],
+  const ctx: AppCtx | null = useMemo(
+    () =>
+      session
+        ? {
+            bff,
+            session,
+            applySession,
+            syncProfile,
+            patchSession,
+            plan,
+            setPlan,
+            reloadPlan,
+            config,
+            nav,
+            unread,
+            setUnread,
+            refreshUnread,
+            openLink,
+            endSession: (_kind, res) => {
+              client.clear();
+              client.forgetInitData();
+              setPhase({ kind: "deleted", res });
+            },
+            deviceTz,
+            online,
+          }
+        : null,
+    [session, bff, applySession, syncProfile, patchSession, plan, reloadPlan, config, nav, unread, refreshUnread, openLink, client, deviceTz, online],
   );
 
-  /* ---------- screen ---------- */
-  let screen: React.ReactNode;
-  let noScroll = false;
-  let tabbar = false;
-  switch (phase.k) {
-    case "boot":
-      screen = <Boot />;
-      break;
-    case "outside":
-      screen = <OpenInTelegram dev={env.isDev} />;
-      break;
-    case "fatal":
-      screen = <Fatal title={phase.title} text={phase.text} />;
-      break;
-    case "locked":
-      noScroll = true;
-      screen = <Lock onUnlocked={onUnlocked} />;
-      break;
-    case "onboarding":
-      noScroll = true;
-      screen = profile ? <Onboarding profile={profile} onLang={changeLang} /> : <Boot />;
-      break;
-    case "deleted":
-      screen = <DeletionAccepted r={phase.r} />;
-      break;
-    default:
-      screen = renderRoute(topRoute(nav));
-      tabbar = !mainTop;
+  /* ---------- render ---------- */
+  if (phase.kind === "outside") return <Frame><Outside /></Frame>;
+  if (phase.kind === "error") return <Frame><BootError kind={phase.err} code={phase.code} onRetry={() => void start()} /></Frame>;
+  if (phase.kind === "deleted") return <Frame><DeletionDone res={phase.res} /></Frame>;
+  if (phase.kind === "locked" && session) {
+    return (
+      <Frame>
+        <LockScreen
+          length={session.security.pin_length ?? 4}
+          pendingAt={session.security.pin_reset_effective_at}
+          verify={async (pin) => {
+            const s = await bff.verifyPin(pin);
+            await loadAfterSession(s);
+            return s;
+          }}
+          reset={{
+            request: () => bff.pinResetRequest(),
+            // review T-8: the reset waits 24 h — the session stays locked, the lock screen shows the pending reset
+            confirm: async (code, pin) => {
+              const security = await bff.pinResetConfirm(code, pin);
+              setSession((prev) => (prev ? { ...prev, security } : prev));
+              return security;
+            },
+          }}
+        />
+      </Frame>
+    );
   }
+  if (phase.kind !== "ready" || !ctx || !plan) return <Frame><Loading /></Frame>;
 
-  const body = (
-    <div className="app" ref={appRef}>
-      {!inTelegram && phase.k !== "outside" && <DevChrome />}
-      <div className={tabbar ? "webview has-tabbar" : "webview"}>
-        {!online && phase.k !== "outside" && (
-          <NetBanner
-            onRetry={() => {
-              setOnline(true);
-              loadConfig();
-              if (phase.k === "fatal" || phase.k === "boot") void start();
-              else setRefreshKey((n) => n + 1);
-            }}
-          />
-        )}
-        <main className={noScroll ? "vp locked" : "vp"} ref={vpRef} id="main">
-          <div className={`scr enter-${nav.anim ?? "fade"}`} key={`${phase.k}-${nav.seq}-${refreshKey}`}>
-            {screen}
+  const tabsVisible = onboarded && !nav.top;
+  return (
+    <AppProvider value={ctx}>
+      <div className={cx("app", tabsVisible && "has-tabs")} data-learner={session?.learner.kind}>
+        {!online ? (
+          <div className="offline" role="status" data-testid="offline">
+            {i18n.t("c.offline")}
           </div>
-        </main>
-        {tabbar && (
-          <TabBar
-            current={rootTab(nav)}
-            atRoot={nav.stack.length === 1}
-            critical={critical}
-            onTab={(tab) => {
-              if (nav.stack.length === 1 && nav.stack[0]!.name === tab) vpRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-              else navigate({ type: "tab", tab });
+        ) : null}
+        {onboarded ? <MainShell /> : <Onboarding onFinished={finishOnboarding} />}
+        {overlay?.kind === "invite" ? (
+          <InviteSheet
+            target={overlay.target}
+            onClose={closeOverlay}
+            onAccepted={(r) => {
+              closeOverlay();
+              if (onboardedRef.current && r.family) nav.route("family");
+            }}
+            onDefer={(target) => {
+              pending.current = "token" in target ? { kind: "invite", token: target.token } : { kind: "invitePreview", inviteId: target.inviteId };
+              closeOverlay();
             }}
           />
-        )}
-        <div id={LAYERS_ID} />
-        {phase.k === "main" && ctx && <AiChatHost />}
+        ) : null}
+        {overlay?.kind === "guardian" ? <GuardianSheet token={overlay.token} onClose={closeOverlay} /> : null}
+        {overlay?.kind === "wn" ? (
+          <WhatsNewSheet
+            data={overlay.data}
+            onClose={(ids, route) => {
+              if (ids.length) void bff.whatsNewSeen(ids).catch(() => undefined);
+              closeOverlay();
+              if (route) nav.route(route);
+            }}
+          />
+        ) : null}
         <PopupHost />
         <ToastHost />
       </div>
-      {showMainBar && <MainBar />}
-    </div>
+    </AppProvider>
   );
-
-  return ctx ? <AppContext.Provider value={ctx}>{body}</AppContext.Provider> : body;
 }
 
-function renderRoute(r: Route): React.ReactNode {
-  switch (r.name) {
+function Frame({ children }: { children: ReactNode }) {
+  return (
+    <div className="app">
+      {children}
+      <PopupHost />
+      <ToastHost />
+    </div>
+  );
+}
+
+function MainShell() {
+  const { nav, unread } = useApp();
+  const { t } = useI18n();
+  const top = nav.top;
+  if (top) return <PushedScreen p={top} />;
+  const bell = { unread, onClick: () => nav.push({ name: "inbox" }) };
+  return (
+    <>
+      {nav.tab === "home" ? <Bar logo bell={bell} /> : <Bar title={t(`tab.${nav.tab}`)} bell={bell} />}
+      <TabScreen tab={nav.tab} />
+      <Tabs current={nav.tab} onTab={nav.goTab} />
+    </>
+  );
+}
+
+function TabScreen({ tab }: { tab: Tab }) {
+  switch (tab) {
     case "home":
       return <Home />;
-    case "catalog":
-      return <Catalog />;
-    case "watch":
-      return <Watch />;
-    case "news":
-      return <News />;
     case "profile":
       return <ProfileScreen />;
-    case "event":
-      return <EventDetail id={r.id} />;
-    case "supportNew":
-      return <SupportNew ctx={r.ctx} />;
-    case "supportList":
-      return <SupportList />;
-    case "supportThread":
-      return <SupportThread id={r.id} />;
-    case "supportDone":
-      return <SupportDone id={r.id} number={r.number} />;
     default:
-      return <Icon name="alert" />;
+      return <Soon what={tab} />;
+  }
+}
+
+function PushedScreen({ p }: { p: Pushed }) {
+  switch (p.name) {
+    case "inbox":
+      return <Inbox />;
+    case "news":
+      return <News />;
+    case "schedule":
+      return <ScheduleScreen />;
+    case "notifSettings":
+      return <NotifSettings />;
+    case "language":
+      return <LanguageScreen />;
+    case "family":
+      return <Family />;
+    case "guardian":
+      return <Guardian />;
+    case "privacy":
+      return <Privacy />;
+    case "parentCode":
+      return <ParentCode cancel={p.cancel} />;
+    case "delete":
+      return <DeleteScreen />;
+    case "support":
+      return <Support number={p.number} />;
+    case "ticket":
+      return <TicketScreen id={p.id} />;
   }
 }

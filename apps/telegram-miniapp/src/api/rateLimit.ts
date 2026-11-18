@@ -1,8 +1,8 @@
 /**
- * Sprint 9 (INTERNAL_API §2.2): one 429 everywhere. telegram-bff answers 429 RATE_LIMITED {policy, retry_after} +
+ * One 429 everywhere: telegram-bff answers 429 RATE_LIMITED {policy, retry_after} +
  * Retry-After; the Mini App says «Слишком много запросов — повторите через ⌈N⌉ с» and never repeats by itself. Where an
- * action would only hit the limit again (concierge «Отправить», «Пересчитать поездку», PIN) it is inactive until the
- * time is up. The waits live here by policy (tg.ai, tg.offers, tg.pin…; tg.user — every request of the user).
+ * action would only hit the limit again (PIN, sending a support message) it is inactive until the time is up. The waits
+ * live here by policy (tg.pin…; tg.user — every request of the user).
  */
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { ApiError } from "./errors";

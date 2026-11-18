@@ -1,4 +1,4 @@
-"""Удаление пользователя (TG-FR-006, AT-35): обезличивание обращений и ACK user.domain.deleted.v1."""
+"""Удаление ученика (AT-14, TG-FR-006): обезличивание обращений и ACK user.domain.deleted.v1."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ async def test_deletion_anonymizes_tickets(env) -> None:
     user, other = uuid.uuid4(), uuid.uuid4()
     open_t = await env.create(
         user,
-        category="TICKET_SOURCE",
+        category="SCHEDULE_REMINDERS",
         subject="Мой телефон +998901234567",
         message="Позвоните мне, я Игорь",
         context=CONTEXT,
@@ -103,6 +103,19 @@ async def test_deletion_is_deduplicated_and_acks_without_tickets(env) -> None:
     await spec.handler(event)  # повторная доставка той же записи → inbox отбрасывает
     acks = await env.events("user.domain.deleted.v1")
     assert len(acks) == 1 and acks[0].payload["mode"] == "anonymized"
+
+
+async def test_deletion_only_from_identity_consent(env) -> None:
+    """Сагу удаления ведёт identity-consent: запрос от другого издателя игнорируется, данные и ACK не трогаются."""
+    user = uuid.uuid4()
+    t = await env.create(user)
+    for producer in ("telegram-bff", "social", "notifications"):
+        rogue = make_envelope("user.deletion.requested.v1",
+                              {**deletion_event(user).payload, "request_id": str(uuid.uuid4())}, producer=producer)
+        await env.bus.publish(rogue)
+    own = await env.client.get(f"/internal/v1/me/tickets/{t['ticket_id']}", headers=env.user(user))
+    assert own.status_code == 200 and own.json()["subject"] == "Не приходят уведомления"
+    assert await env.events("user.domain.deleted.v1") == []
 
 
 async def test_anonymized_ticket_cannot_be_reopened(env) -> None:

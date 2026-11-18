@@ -1,4 +1,4 @@
-"""POST /telegram/webhook — вход Telegram (единственный публичный эндпоинт сервиса).
+"""POST /telegram/webhook — вход Telegram (единственный публичный эндпоинт сервиса, INTERNAL_API §8).
 
 Порядок: секрет (hmac.compare_digest, иначе 401) → размер/JSON → идемпотентность update_id
 (Redis SET NX 48 ч) → маршрутизация → ответ методом Bot API в теле ответа.
@@ -86,10 +86,7 @@ async def webhook(
     if not fresh:
         return JSONResponse({"ok": True})
 
-    action = route_update(update, settings.miniapp_url)
-    if action.ops_chat_candidate is not None:
-        # Так заказчик узнаёт id группы для OPS_ALERT_CHAT_ID (§6). Id группы — не данные пользователя.
-        log.info(f"ops chat candidate chat_id={action.ops_chat_candidate} title={action.ops_chat_title!r}")
+    action = route_update(update, settings.miniapp_url, settings.telegram_app_link)
     if action.bot_status is not None:
         telegram_user_id, blocked = action.bot_status
         background.add_task(report_bot_status, rt, telegram_user_id, blocked)

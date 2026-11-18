@@ -1,7 +1,7 @@
 [project]
 name = "tilhero-notifications"
 version = "0.1.0"
-description = "TilHero notification-service: политика и доставка уведомлений в Telegram"
+description = "TilHero notifications: политика доставки, шаблоны RU/UZ, центр уведомлений, доставка в Telegram"
 requires-python = ">=3.12"
 dependencies = ["tilhero-common"]
 

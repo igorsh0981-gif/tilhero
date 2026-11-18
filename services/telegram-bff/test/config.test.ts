@@ -8,11 +8,13 @@ const PROD_OK = {
   INTERNAL_JWT_PRIVATE_KEY: Buffer.alloc(32, 7).toString("base64url"),
   REDIS_URL: "redis://default:pw@redis.railway.internal:6379",
   MINIAPP_ORIGIN: "https://miniapp.tilhero.app, https://staging-miniapp.tilhero.app",
+  TELEGRAM_APP_LINK: "https://t.me/tilhero_bot/app/",
   IDENTITY_URL: "http://identity-consent.railway.internal:8101",
-  PREFERENCES_URL: "http://preferences.railway.internal:8102",
+  LEARNING_PLAN_URL: "http://learning-plan.railway.internal:8102",
   SUPPORT_URL: "http://support.railway.internal:8103",
+  NOTIFICATIONS_URL: "http://notifications.railway.internal:8104",
   EXPERIENCE_URL: "http://experience-config.railway.internal:8106/",
-  EVENTS_URL: "http://events.railway.internal:8110",
+  SOCIAL_URL: "http://social.railway.internal:8109",
 };
 
 function problems(env: Record<string, string>): string[] {
@@ -38,11 +40,16 @@ describe("loadConfig", () => {
     expect(c.refreshTtlSeconds).toBe(43_200);
     expect(c.botToken).toBe(DEV_DEFAULTS.BOT_TOKEN);
     expect(c.miniappOrigins).toEqual(["http://localhost:5173"]);
-    expect(c.rateLimits).toEqual({ userPerMinute: 120, sessionPerIpPerMinute: 10, pinPerMinute: 5, publicPerIpPerMinute: 120, offersPerMinute: 20, reactionsPerMinute: 60, watchCommandsPerMinute: 30, aiTurnsPerMinute: 6 });
-    expect([c.aiConciergeUrl, c.conciergeTimeoutMs]).toEqual([undefined, 75_000]); // спринт 7: без URL — /v1/ai/* → 503 FEATURE_UNAVAILABLE
-    // спринт 6: необязательные домены — без них Home деградирует, эндпоинты → 503 FEATURE_UNAVAILABLE
-    expect([c.recommendationsUrl, c.watchUrl, c.newsUrl]).toEqual([undefined, undefined, undefined]);
-    expect(c.offersUrl).toBeUndefined(); // спринт 5: необязательная, без неё предложения → 503 OFFERS_UNAVAILABLE
+    expect(c.rateLimits).toEqual({ userPerMinute: 120, sessionPerIpPerMinute: 10, pinPerMinute: 5, publicPerIpPerMinute: 120 });
+    expect(c.telegramAppLink).toBe(DEV_DEFAULTS.TELEGRAM_APP_LINK);
+    expect([c.identityUrl, c.learningPlanUrl, c.supportUrl, c.notificationsUrl, c.experienceUrl, c.socialUrl]).toEqual([
+      "http://127.0.0.1:8101",
+      "http://127.0.0.1:8102",
+      "http://127.0.0.1:8103",
+      "http://127.0.0.1:8104",
+      "http://127.0.0.1:8106",
+      "http://127.0.0.1:8109",
+    ]);
   });
 
   it("production: accepts a complete env, parses origin list and trims URLs", () => {
@@ -51,13 +58,16 @@ describe("loadConfig", () => {
     expect(c.env).toBe("prod");
     expect(c.miniappOrigins).toEqual(["https://miniapp.tilhero.app", "https://staging-miniapp.tilhero.app"]);
     expect(c.experienceUrl).toBe("http://experience-config.railway.internal:8106");
-    expect(c.eventsUrl).toBe("http://events.railway.internal:8110");
-    expect([c.homeFreshSeconds, c.homeStaleSeconds]).toEqual([60, 86_400]);
+    expect(c.socialUrl).toBe("http://social.railway.internal:8109");
+    expect(c.telegramAppLink).toBe("https://t.me/tilhero_bot/app");
   });
 
   it("production: lists every missing variable in one error", () => {
     const p = problems({ NODE_ENV: "production" });
-    for (const name of ["BOT_TOKEN", "SESSION_JWT_SECRET", "INTERNAL_JWT_PRIVATE_KEY", "REDIS_URL", "MINIAPP_ORIGIN", "IDENTITY_URL", "PREFERENCES_URL", "SUPPORT_URL", "EXPERIENCE_URL", "EVENTS_URL"]) {
+    for (const name of [
+      "BOT_TOKEN", "SESSION_JWT_SECRET", "INTERNAL_JWT_PRIVATE_KEY", "REDIS_URL", "MINIAPP_ORIGIN", "TELEGRAM_APP_LINK",
+      "IDENTITY_URL", "LEARNING_PLAN_URL", "SUPPORT_URL", "NOTIFICATIONS_URL", "EXPERIENCE_URL", "SOCIAL_URL",
+    ]) {
       expect(p.some((x) => x.startsWith(name))).toBe(true);
     }
     expect(() => loadConfig({ NODE_ENV: "production" })).toThrow(/некорректная конфигурация/);
@@ -103,6 +113,9 @@ describe("loadConfig", () => {
     expect(problems({ IDENTITY_URL: "ftp://x" })[0]).toMatch(/IDENTITY_URL/);
     expect(problems({ REDIS_URL: "http://x" })[0]).toMatch(/REDIS_URL/);
     expect(problems({ MINIAPP_ORIGIN: "https://a.app/path" })[0]).toMatch(/MINIAPP_ORIGIN/);
+    for (const bad of ["http://t.me/bot_name/app", "https://evil.example/bot_name/app", "https://t.me/bot_name", "https://t.me/bot_name/app?x=1"]) {
+      expect(problems({ TELEGRAM_APP_LINK: bad })[0], bad).toMatch(/TELEGRAM_APP_LINK/);
+    }
     expect(problems({ LOG_LEVEL: "verbose" })[0]).toMatch(/LOG_LEVEL/);
     expect(loadConfig({ LOG_LEVEL: "INFO" }).logLevel).toBe("info"); // общая переменная Railway с Python-сервисами
     expect(loadConfig({ LOG_LEVEL: "WARNING" }).logLevel).toBe("warn");

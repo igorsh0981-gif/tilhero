@@ -1,19 +1,25 @@
+import type { UiLang } from "@tilhero/contracts/bff";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import { en } from "./en";
 import { ru, type MessageKey } from "./ru";
+import { uz } from "./uz";
 
-export type Lang = "ru" | "en";
+/**
+ * Interface languages RU and UZ (Latin script). Every text goes through these dictionaries; the two are never mixed
+ * on one screen (test/i18n.test.ts checks parity and the absence of Cyrillic in UZ). The interface language never
+ * changes the course (ru → en, AT-05).
+ */
+export type Lang = UiLang;
 export type { MessageKey };
 export type Vars = Record<string, string | number>;
 
-export const DICTS: Record<Lang, Record<MessageKey, string>> = { ru, en };
+export const DICTS: Record<Lang, Record<MessageKey, string>> = { ru, uz };
 
-/** Telegram language_code → supported UI language (same mapping as the bot gateway for CIS locales). */
+/** Telegram language_code / profile locale → supported UI language; Russian for everything else. */
 export function normLang(code: string | null | undefined): Lang | null {
   if (!code) return null;
   const c = String(code).trim().toLowerCase().split(/[-_]/)[0] ?? "";
-  if (c === "en") return "en";
-  if (["ru", "uz", "kk", "ky", "tg", "be", "uk"].includes(c)) return "ru";
+  if (c === "uz") return "uz";
+  if (c === "ru") return "ru";
   return null;
 }
 
@@ -32,59 +38,60 @@ export function translate(lang: Lang, key: MessageKey, vars?: Vars): string {
   return interpolate(s, vars);
 }
 
-/** Plural form from a "one|few|many" (ru) or "one|other" (en) entry. */
+/** Plural form from "one|few|many" (ru). Uzbek nouns do not change after numerals: the first form is used. */
 export function pluralForm(lang: Lang, n: number, forms: string): string {
   const f = forms.split("|");
+  if (lang !== "ru") return f[0] ?? forms;
   const abs = Math.abs(n);
-  if (lang === "ru") {
-    const a = abs % 10;
-    const b = abs % 100;
-    const i = a === 1 && b !== 11 ? 0 : a >= 2 && a <= 4 && (b < 10 || b >= 20) ? 1 : 2;
-    return f[Math.min(i, f.length - 1)] ?? forms;
-  }
-  return (abs === 1 ? f[0] : f[1] ?? f[0]) ?? forms;
+  const a = abs % 10;
+  const b = abs % 100;
+  const i = a === 1 && b !== 11 ? 0 : a >= 2 && a <= 4 && (b < 10 || b >= 20) ? 1 : 2;
+  return f[Math.min(i, f.length - 1)] ?? forms;
 }
 
+const MONTHS: Record<Lang, string[]> = {
+  ru: ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"],
+  uz: ["yanvar", "fevral", "mart", "aprel", "may", "iyun", "iyul", "avgust", "sentabr", "oktabr", "noyabr", "dekabr"],
+};
+
 export interface Formatters {
-  locale: string;
-  num(n: number): string;
-  usd(n: number): string;
-  /** decimal-string money from the contract ("850.00", ≤ 2 decimals) → "$850" / "$850.50"; "" if malformed */
-  usdDecimal(amount: string): string;
+  /** "18 ноября" / "18-noyabr" (local time of the device) */
   date(iso: string): string;
+  /** "18 ноября, 19:05" / "18-noyabr, 19:05" */
   dateTime(iso: string): string;
-  time(iso: string): string;
+  /** a plan date "YYYY-MM-DD" (no time zone conversion) */
+  localDate(ymd: string): string;
   mmss(seconds: number): string;
 }
 
+function two(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
 export function makeFormatters(lang: Lang): Formatters {
-  const locale = lang === "ru" ? "ru-RU" : "en-US";
-  const nf = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
-  const df = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "2-digit", year: "numeric" });
-  const dtf = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
-  const tf = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
-  const safe = (f: Intl.DateTimeFormat, iso: string) => {
+  const dm = (day: number, month: number) => (lang === "ru" ? `${day} ${MONTHS.ru[month]}` : `${day}-${MONTHS.uz[month]}`);
+  const parse = (iso: string): Date | null => {
     const d = new Date(iso);
-    return Number.isNaN(d.getTime()) ? "" : f.format(d).replace(",", "");
+    return Number.isNaN(d.getTime()) ? null : d;
   };
   return {
-    locale,
-    num: (n) => nf.format(n),
-    usd: (n) => `$${nf.format(Math.round(n))}`,
-    usdDecimal: (amount) => {
-      // no float arithmetic: integer part and cents are formatted separately
-      const m = /^(\d{1,12})(?:\.(\d{1,2}))?$/.exec(typeof amount === "string" ? amount.trim() : "");
-      if (!m) return "";
-      const cents = (m[2] ?? "").padEnd(2, "0");
-      const whole = `$${nf.format(Number(m[1]))}`;
-      return cents === "00" ? whole : `${whole}${lang === "ru" ? "," : "."}${cents}`;
+    date: (iso) => {
+      const d = parse(iso);
+      return d ? dm(d.getDate(), d.getMonth()) : "";
     },
-    date: (iso) => safe(df, iso),
-    dateTime: (iso) => safe(dtf, iso),
-    time: (iso) => safe(tf, iso),
+    dateTime: (iso) => {
+      const d = parse(iso);
+      return d ? `${dm(d.getDate(), d.getMonth())}, ${two(d.getHours())}:${two(d.getMinutes())}` : "";
+    },
+    localDate: (ymd) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+      if (!m) return "";
+      const month = Number(m[2]) - 1;
+      return month >= 0 && month < 12 ? dm(Number(m[3]), month) : "";
+    },
     mmss: (sec) => {
       const s = Math.max(0, Math.ceil(sec));
-      return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+      return `${two(Math.floor(s / 60))}:${two(s % 60)}`;
     },
   };
 }
@@ -95,12 +102,23 @@ export interface I18n {
   t(key: MessageKey, vars?: Vars): string;
   /** plural word for n (without the number) */
   tp(key: MessageKey, n: number): string;
-  /** label in the current language from a {ru, en} object (directory data from the BFF) */
-  l(label: { ru: string; en: string } | null | undefined): string;
+  /** label in the current language from a {ru, uz} object (directory data from the BFF) */
+  l(label: { ru: string; uz: string } | null | undefined): string;
   fmt: Formatters;
 }
 
 const Ctx = createContext<I18n | null>(null);
+
+export function makeI18n(lang: Lang, setLang: (l: Lang) => void = () => undefined): I18n {
+  return {
+    lang,
+    setLang,
+    t: (key, vars) => translate(lang, key, vars),
+    tp: (key, n) => pluralForm(lang, n, translate(lang, key)),
+    l: (label) => (label ? label[lang] || label.ru || "" : ""),
+    fmt: makeFormatters(lang),
+  };
+}
 
 export function I18nProvider({ initial, children }: { initial: Lang; children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(initial);
@@ -110,14 +128,7 @@ export function I18nProvider({ initial, children }: { initial: Lang; children: R
   }, []);
   const value = useMemo<I18n>(() => {
     document.documentElement.lang = lang;
-    return {
-      lang,
-      setLang,
-      t: (key, vars) => translate(lang, key, vars),
-      tp: (key, n) => pluralForm(lang, n, translate(lang, key)),
-      l: (label) => (label ? label[lang] || label.ru || label.en || "" : ""),
-      fmt: makeFormatters(lang),
-    };
+    return makeI18n(lang, setLang);
   }, [lang, setLang]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

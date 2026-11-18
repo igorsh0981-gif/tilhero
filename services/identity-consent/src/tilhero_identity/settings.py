@@ -4,11 +4,14 @@ from pydantic import Field, field_validator, model_validator
 
 from tilhero_common.settings import ServiceSettings
 
+# Домены спринта 1, которые обязаны подтвердить удаление (user.domain.deleted.v1) до обезличивания профиля
+# (INTERNAL_API §1, ARCHITECTURE «Данные ученика и удаление»). Новый домен с данными ученика добавляется сюда.
+DEFAULT_DELETION_DOMAINS = ("learning-plan", "social", "notifications", "support", "experience-config")
+
 
 class Settings(ServiceSettings):
     service_name: str = "identity-consent"
-    # спринт 9 (Q10): пул Postgres по нагрузке сервиса; сумма максимумов всех сервисов — infra/railway/setup.py
-    # DB_POOLS (≤ 80 при max_connections 100 вместе с миграциями)
+    # пул Postgres по нагрузке сервиса; сумма максимумов всех сервисов — infra/railway/setup.py
     db_pool_size: int = 2
     db_max_overflow: int | None = 2
     db_schema: str | None = "identity_consent"
@@ -18,7 +21,12 @@ class Settings(ServiceSettings):
     current_policy_version: str = "1.0"
     default_timezone: str = "Asia/Tashkent"
 
-    # PIN / биометрия: общий счётчик попыток (ТЗ TG-FR-003, решение заказчика №4).
+    # Дети и подростки (CONVENTIONS §8): не больше N детских профилей на аккаунт; ссылка согласия родителя
+    # для 14–17 действует N секунд (bff.ts: 7 дней).
+    max_children: int = Field(default=5, ge=1, le=20)
+    guardian_consent_ttl_seconds: int = Field(default=7 * 24 * 3600, ge=3600, le=30 * 24 * 3600)
+
+    # Код родителя (PIN) / биометрия: общий счётчик попыток (5 → блок 5 минут).
     pin_max_attempts: int = Field(default=5, ge=1)
     pin_lock_seconds: int = Field(default=300, ge=1)
 
@@ -27,33 +35,23 @@ class Settings(ServiceSettings):
     pin_reset_code_max_attempts: int = Field(default=5, ge=1)
     pin_reset_min_interval_seconds: int = Field(default=60, ge=1)
     pin_reset_daily_limit: int = Field(default=5, ge=1)
+    # Новый код из сброса начинает действовать через N часов (ревью T-8: телефон с Telegram может быть у ребёнка);
+    # до этого действует прежний код, любой его верный ввод сброс отменяет.
+    pin_reset_delay_hours: float = Field(default=24, gt=0, le=7 * 24)
 
     # notifications: синхронная доставка кода сброса PIN (POST /internal/v1/notifications/transactional)
     notifications_url: str = "http://127.0.0.1:8104"
     notifications_timeout_seconds: float = Field(default=8.0, gt=0)
 
-    # audit: синхронная запись просмотра чувствительного поля (reveal) — без записи значение не выдаётся
-    audit_url: str = "http://127.0.0.1:8105"
-    audit_timeout_seconds: float = Field(default=3.0, gt=0)
-    reveal_expires_in_seconds: int = Field(default=60, ge=10, le=300)
-    # Квота раскрытий на сотрудника (защита от массовой выгрузки Telegram ID): N за окно, Redis
-    reveal_limit_per_window: int = Field(default=20, ge=1)
-    reveal_window_seconds: int = Field(default=3600, ge=60)
-
     # Домены, которые обязаны подтвердить удаление (user.domain.deleted.v1) до обезличивания профиля.
-    # offers — спринт 5; recommendations (реакции), watch (слежения), news (настройки и отметки) — спринт 6;
-    # ai-concierge (переписки, ходы, квоты) и ai-control (назначения уровня доступа, обезличивание usage) — спринт 7.
-    deletion_domains: list[str] = Field(default_factory=lambda: [
-        "preferences", "support", "notifications", "offers", "recommendations", "watch", "news",
-        "ai-concierge", "ai-control"])
+    deletion_domains: list[str] = Field(default_factory=lambda: list(DEFAULT_DELETION_DOMAINS))
 
-    # Сага удаления (спринт 9, ADR-009, INTERNAL_API §1.3): повторы запроса неответившим доменам — через N минут от
-    # запроса (дальше каждые 1440 мин, пока запрос открыт); «зависло» — через DELETION_STUCK_HOURS; таймер опрашивает
-    # раз в DELETION_SWEEP_SECONDS (0 — таймер выключен); ручной повтор сотрудником — не чаще раза в N секунд.
+    # Сага удаления: повторы запроса неответившим доменам — через N минут от запроса (дальше каждые 1440 мин, пока
+    # запрос открыт); «зависло» — через DELETION_STUCK_HOURS; таймер опрашивает раз в DELETION_SWEEP_SECONDS
+    # (0 — таймер выключен).
     deletion_retry_schedule_minutes: str = "15,60,240,720,1440"
     deletion_stuck_hours: float = Field(default=24, gt=0)
     deletion_sweep_seconds: float = Field(default=60, ge=0)
-    deletion_manual_retry_min_seconds: int = Field(default=300, ge=0)
 
     @field_validator("deletion_retry_schedule_minutes")
     @classmethod

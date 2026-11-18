@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,9 @@ SERVICE_DIR = str(Path(__file__).resolve().parents[1])
 SECRET = "identity-consent-test-secret-" + "x" * 24
 VALID_PIN = "2580"
 VALID_PIN6 = "402913"
+REQUIRED = ["terms", "privacy", "learning"]
+ALL_PURPOSES = [*REQUIRED, "voice_recording", "social", "product_news"]
+DOMAINS = ["learning-plan", "social", "notifications", "support", "experience-config"]
 
 
 def make_settings(schema: str, **kw: Any) -> Settings:
@@ -77,40 +81,10 @@ class FakeNotifications:
         return httpx.Response(200, json=item or {"notification_id": body["notification_id"], "status": "sent"})
 
     def codes(self, user_id: str) -> list[str]:
-        return [c["params"]["code"] for c in self.calls if c["user_id"] == user_id]
+        return [c["params"]["code"] for c in self.of(user_id, "pin.reset_code")]
 
-
-@dataclass
-class FakeAudit:
-    """audit POST /internal/v1/records (httpx.MockTransport). responses — очередь: int (HTTP-статус ошибки) или
-    Exception; по умолчанию — 201 с эхо записи."""
-
-    calls: list[dict[str, Any]] = field(default_factory=list)
-    issuers: list[str] = field(default_factory=list)
-    responses: list[Any] = field(default_factory=list)
-    # детерминированные гонки: ответ audit задерживается, пока не придут `gate` вызовов (все команды — в одной фазе)
-    gate: int = 0
-    _arrived: int = 0
-    _open: asyncio.Event = field(default_factory=asyncio.Event)
-
-    async def handler(self, request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/internal/v1/records"
-        if self.gate:
-            self._arrived += 1
-            if self._arrived >= self.gate:
-                self._open.set()
-            await asyncio.wait_for(self._open.wait(), timeout=10)
-        import jwt
-
-        self.issuers.append(jwt.decode(request.headers["x-internal-token"], options={"verify_signature": False})["iss"])
-        body = json.loads(request.content)
-        item = self.responses.pop(0) if self.responses else None
-        if isinstance(item, Exception):
-            raise item
-        if isinstance(item, int):
-            return httpx.Response(item, json={"code": "X", "message": "x", "trace_id": "t", "details": {}})
-        self.calls.append(body)
-        return httpx.Response(201, json={**body, "seq": len(self.calls)})
+    def of(self, user_id: str, template: str) -> list[dict[str, Any]]:
+        return [c for c in self.calls if c["user_id"] == user_id and c["template"] == template]
 
 
 @dataclass
@@ -121,7 +95,11 @@ class Env:
     bus: InMemoryBus
     schema: str
     notifications: FakeNotifications
-    audit: FakeAudit = field(default_factory=FakeAudit)
+    app: Any = None
+
+    # ---------- часы сервиса (app.state.clock): None — реальное время ----------
+    def set_clock(self, now: Any) -> None:
+        self.app.state.clock = (lambda: now) if now is not None else None
 
     # ---------- заголовки ----------
     def h(self, user_id: str | None = None, *, issuer: str = "telegram-bff") -> dict[str, str]:
@@ -148,9 +126,42 @@ class Env:
         return (await self.login(**kw))["user"]["user_id"]
 
     async def call(
-        self, method: str, path: str, user_id: str | None, json: Any = None, issuer: str = "telegram-bff"
+        self, method: str, path: str, user_id: str | None, json: Any = None, issuer: str = "telegram-bff",
+        headers: dict[str, str] | None = None,
     ) -> httpx.Response:
-        return await self.client.request(method, path, json=json, headers=self.h(user_id, issuer=issuer))
+        return await self.client.request(
+            method, path, json=json, headers={**self.h(user_id, issuer=issuer), **(headers or {})}
+        )
+
+    async def set_age(self, user_id: str, age_band: str) -> dict[str, Any]:
+        r = await self.call("PUT", "/internal/v1/me/age", user_id, {"age_band": age_band})
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    async def adult(self, **kw: Any) -> str:
+        uid = await self.new_user(**kw)
+        await self.set_age(uid, "18+")
+        return uid
+
+    async def parent(self, **kw: Any) -> str:
+        """Взрослый с действующим своим согласием (terms, privacy) — может решать за подростка по ссылке."""
+        uid = await self.adult(**kw)
+        r = await self.consent(uid)
+        assert r.status_code == 200, r.text
+        return uid
+
+    async def teen(self, **kw: Any) -> str:
+        uid = await self.new_user(**kw)
+        await self.set_age(uid, "14-17")
+        return uid
+
+    async def child(self, guardian: str, name: str = "Мадина", age_band: str = "6-9",
+                    key: str | None = None) -> dict[str, Any]:
+        headers = {"Idempotency-Key": key} if key else None
+        r = await self.call("POST", "/internal/v1/me/learners", guardian,
+                            {"display_name": name, "age_band": age_band}, headers=headers)
+        assert r.status_code == 201, r.text
+        return r.json()
 
     async def set_pin(self, user_id: str, pin: str = VALID_PIN) -> None:
         r = await self.call("PUT", "/internal/v1/me/pin", user_id, {"pin": pin})
@@ -163,10 +174,19 @@ class Env:
             user_id,
             {
                 "policy_version": self.settings.current_policy_version,
-                "purposes": purposes if purposes is not None else ["personalization", "notifications"],
-                "age_confirmed_18_plus": True,
+                "purposes": purposes if purposes is not None else list(REQUIRED),
             },
         )
+
+    async def delivery(self, user_id: str) -> httpx.Response:
+        return await self.call("GET", f"/internal/v1/users/{user_id}/delivery", None, issuer="notifications")
+
+    async def public(self, user_id: str, issuer: str = "social") -> httpx.Response:
+        return await self.call("GET", f"/internal/v1/users/{user_id}/public", None, issuer=issuer)
+
+    async def user_row(self, user_id: str) -> User:
+        async with self.runtime.transaction() as s:
+            return (await s.execute(select(User).where(User.user_id == uuid.UUID(user_id)))).scalar_one()
 
     # ---------- события ----------
     async def flush(self) -> None:
@@ -214,14 +234,12 @@ async def env():
     bus = InMemoryBus()
     runtime = Runtime(settings, bus=bus)
     notifications = FakeNotifications()
-    audit = FakeAudit()
-    app = build_app(settings, runtime, notifications_transport=httpx.MockTransport(notifications.handler),
-                    audit_transport=httpx.MockTransport(audit.handler))
+    app = build_app(settings, runtime, notifications_transport=httpx.MockTransport(notifications.handler))
     async with app.router.lifespan_context(app):
         client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://identity-consent")
         environment = Env(
             settings=settings, client=client, runtime=runtime, bus=bus, schema=schema, notifications=notifications,
-            audit=audit,
+            app=app,
         )
         yield environment
         await client.aclose()

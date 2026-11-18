@@ -125,3 +125,78 @@
 
 ## 9. telegram-bff (8001)
 Маршруты — `bff.ts`. Сессия: `sub` = аккаунт, `lrn` = активный ученик (по умолчанию сам аккаунт). Для каждого запроса к учебным доменам BFF выпускает внутренний JWT с `sub = lrn`; к identity-consent `/me/*` и social — `sub = аккаунт`. `start_param` из initData возвращается в `SessionResponse`. `onboarding_completed` ученика — из learning-plan. `GET /v1/whats-new`: BFF берёт `onboarded_at` из плана ученика, `lang` — язык интерфейса плана, `age` — kids (6-9, 10-13), teens (14-17), adults (18+, и если возраст не выбран); режим выбирает experience-config. `GET /v1/invites/{invite_id}/preview` → social preview.
+
+## 10. Уточнения по итогам реализации (18.11.2026, приняты координатором)
+Пункты ниже — часть контракта; при расхождении с разделами 1–9 действует этот раздел.
+
+**identity-consent**
+- `GET/PATCH /me/learners/{id}` → `LearnerDetail` = `LearnerSummary` + `settings: NotificationSettings` ребёнка; `LoginResponse` тоже содержит `settings`.
+- `/users/{id}/public` дополнительно отдаёт `guardian_consent` (social решает по нему, может ли подросток 14–17 приглашать и принимать приглашения).
+- `DeliveryInfo.locale` ребёнка — язык опекуна. `user.notification_settings.changed.v1` выпускается при любом изменении настроек, при первом согласии и при блокировке/разблокировке бота; `enabled` в нём — итоговая доставка. Блокировка бота не меняет настройки, а выключает доставку аккаунту и его детям до разблокировки.
+- Детский профиль создаётся с `guardian_consent=granted` и записью согласия с основанием `guardian` и id родителя.
+- `POST /me/guardian-consent-requests` → 200; токен = HMAC(ключ сервиса, request_id) — повтор с тем же `Idempotency-Key` даёт ту же ссылку; хранится sha256. Срок — 7 дней.
+- Новые коды: 404 `GUARDIAN_CONSENT_NOT_FOUND`, 422 `CONSENT_PURPOSES_INVALID {unknown}`, 422 `IDEMPOTENCY_KEY_REUSED` / `IDEMPOTENCY_KEY_INVALID`; родитель без выбранного возраста → 403 `ADULT_REQUIRED {age_band: null}`. Админ-API aievent (снимки, раскрытие Telegram ID, статистика саги) вернутся по контракту спринта 2.
+
+**learning-plan**
+- `plans.schedule_set_at` — новый график действует со следующего слота; `deleted_users` → после удаления `/me/*` отвечает 410 `USER_DELETED`.
+- Напоминание — в момент слота. `consecutive_missed` считается по выпущенным пропускам после последнего дня с занятием.
+- Новые коды: `ACTIVITY_INVALID` (`occurred_at` вне −7 дней…+5 мин), `IDEMPOTENCY_KEY_REQUIRED|INVALID|REUSED`; ошибки формы PATCH → `PLAN_INVALID`. `GET /me/plan?tz=<IANA>` создаёт план с этой зоной (неизвестная → Asia/Tashkent).
+
+**social**
+- `social.family.member_added.v1` содержит обязательный `owner_user_id`.
+- Лимиты: 10 активных приглашений, 20 созданий за 24 ч (`INVITES_LIMIT {window: active|24h}`), семья — до 10 участников (409 `FAMILY_FULL`); 409 `ALREADY_FRIENDS`; реферальное приглашение каждый получатель принимает один раз за всё время; подросток без согласия родителя не принимает никакие приглашения. Напоминание — по открытиям не старше 7 дней. При удалении владельца семья переходит к самому раннему взрослому участнику, без взрослых — распускается.
+
+**notifications**
+- Выключенная категория → запись `skipped`, в центр не попадает (в центр попадает только при выключенном общем выключателе, тихих часах, лимите, блокировке бота).
+- `lesson.comeback.kid` — мягкий вариант для родителя. Пропуск, который не успели отправить до 22:00 следующего дня, — только центр.
+- «Что нового» в центре создаётся при первом чтении центра учеником (адресатов в событии нет), заметки `audience=new` в центр не попадают; кнопка — `route_news`.
+- Бот заблокирован → `in_app_only` + `telegram.delivery.failed.v1 {reason: blocked}`.
+
+**telegram-bot-gateway**: белый список payload `/start` — `inv_`, `gc_`, `route_`, `invite_<uuid>`, `ticket_TCK-`, до 64 символов; при заданной `TELEGRAM_APP_LINK` бот присылает кнопку-ссылку `t.me/<bot>/<app>?startapp=…`, иначе `web_app` на `MINIAPP_URL?startapp=…`.
+
+**experience-config**: оба перевода обязательны уже в черновике; `lang` и `age` в `for-me`/`feed` обязательны; после удаления ученика `for-me` и `seen` → 410 `USER_DELETED`; секция каждого типа — не больше одной; токены темы `notebook` — светлая палитра.
+
+**telegram-bff**
+- Сессия хранит `lrn` в Redis; после переключения ученика прежний access-токен → 401 `TOKEN_EXPIRED {reason: learner_switched}` (клиент делает refresh). Выход из детского профиля при заданном коде родителя требует `pin`.
+- В детском профиле: приглашения → 403 `INVITES_NOT_ALLOWED`; создание детей, решение по согласию подростка, код родителя, биометрия, удаление аккаунта и обращения в поддержку → 403 `ADULT_REQUIRED`.
+- Маршруты кода родителя и биометрии — как в aievent (`/v1/profile/security/pin*`, `/biometric`, `/v1/session/biometric/verify`); `/v1/profile/disable|enable` удалены. `GET /v1/plan?tz=` передаётся в learning-plan.
+
+**Общий код**: каталог лимитов без туристических политик; `gw.llm.user` закреплена за ai-gateway (спринт 4). Вынести проверку `SCHEDULER_TOKEN` и `Idempotency-Key` в `tilhero_common` — техдолг спринта 2.
+
+## 11. Исправления по ревью и QA (18.11.2026)
+Источник: `docs/qa/sprint1-review-python.md`, `docs/qa/sprint1-review-ts.md`, `docs/qa/sprint1-qa-report.md`. Решения координатора:
+
+**Необязательные цели согласия работают как выключатели функций (P-3).**
+- identity-consent `/users/{id}/public` дополнительно: `consent_accepted: bool` (действующее согласие с terms и privacy; у ребёнка — согласие родителя с основанием guardian) и `purposes: string[]` (цели действующего согласия).
+- `DeliveryInfo.categories`: `social` учитывается только при цели `social`, `product` — только при цели `product_news` (identity-consent фильтрует сам; notifications ничего не меняет).
+- social: создать приглашение и принять приглашение — только при `consent_accepted` и цели `social` (403 `CONSENT_REQUIRED {purpose: "social"}`); открыть и посмотреть — при `consent_accepted` (иначе 403 `CONSENT_REQUIRED {purpose: "terms"}`). Детские профили — по-прежнему `INVITES_NOT_ALLOWED`.
+- Mini App: при `CONSENT_REQUIRED {purpose: "social"}` — шторка «Разрешить приглашения и семью» → повторный `POST /v1/profile/consent` с добавленной целью → повтор действия.
+
+**Согласие родителя за подростка 14–17 (P-4).**
+- Решать может взрослый с действующим своим согласием (terms, privacy), иначе 403 `CONSENT_REQUIRED {purpose: "terms"}`.
+- accept → запись `consents` подростка: основание `guardian`, `granted_by_user_id` = родитель, версия политики, хеш текста, evidence, locale; событие `consent.accepted.v1 {basis: guardian, granted_by_user_id}`. decline → только статус.
+- `GET /internal/v1/me/guardian-consents` (sub = родитель) → `{items: GuardianConsentGrant[]}` — подростки, за которых решал этот родитель (последнее решение по каждому).
+- `POST /internal/v1/me/guardian-consents/{teen_user_id}:revoke` → `GuardianConsentGrant`; только родитель, который дал согласие (иначе 404 `GUARDIAN_CONSENT_NOT_FOUND`); у подростка `guardian_consent=declined`, необязательные цели сняты; события `consent.revoked.v1 {basis: guardian, revoked_by_user_id}`, `user.profile.updated.v1`, `user.notification_settings.changed.v1`.
+- BFF: `GET /v1/family/guardian-consents`, `POST /v1/family/guardian-consents/{teen_user_id}/revoke` (bff.ts).
+
+**Прочее.**
+- learning-plan `plan:tick` (P-1): обработка пачками со своей транзакцией, `last_tick_at` — после всех пачек; повтор, пока идёт предыдущий tick, не ждёт блокировку: 200 `{skipped: true}` (`pg_try_advisory_xact_lock`); пакетные запросы вместо поштучных внутри пачки.
+- social `invites:tick` (QA D-02, P-5): напоминание только тому, кто сейчас может принять приглашение (те же правила, что `can_accept` в preview).
+- social (P-2): `TELEGRAM_APP_LINK` обязателен в stage/prod, значение по умолчанию только для dev/test и совпадает с BFF. (P-6): проекция `profiles` без `age_band` и `guardian_user_id`, если они не используются.
+- Потребители `user.deletion.requested.v1` принимают событие только от identity-consent (P-7). `SCHEDULER_TOKEN` в stage/prod — не короче 32 символов (P-8). bot-gateway: `MINIAPP_URL` в stage/prod обязателен и не localhost (P-12).
+- BFF: `GET /v1/plan?tz=` передаётся в learning-plan, план при входе не создаётся без зоны клиента (QA D-03, T-2); в детском профиле `POST/DELETE /v1/profile/consent` → 403 `ADULT_REQUIRED` (T-5); 401 доменов не выдаются клиенту как 401 сессии (T-4).
+- Mini App: экран «Код родителя» в профиле взрослого и предложение задать код при создании первого детского профиля (T-1); время занятия детского профиля — только в окне 08:00–19:30 с пояснением (QA D-04); перевод кодов ошибок доменов (T-3); текст `already_member` (T-7).
+
+**Уточнения после исправлений.**
+- identity-consent: действующее согласие — одно на ученика и основание (`self` | `guardian`); у подростка одновременно своё согласие и согласие родителя. `guardian_consent_requests` дополнительно хранит `consent_id` и `revoked_at`. Отзыв родителем снимает у подростка только необязательные цели — обучение и напоминания продолжаются. Список решений родителя — до 100 записей.
+- learning-plan: ответ `plan:tick` — `{plans_checked, reminders, missed, skipped}`; блокировка повторов — сессионная `pg_try_advisory_lock` на выделенном соединении.
+- social: create/accept без согласия с политикой → `CONSENT_REQUIRED {purpose: "terms"}`, без цели social → `{purpose: "social"}`; open/preview/decline требуют согласия с политикой; `can_accept` в карточке цель social не учитывает (кнопка ведёт к шторке разрешения). Напоминание о приглашении — только при `consent_accepted` и возможности принять.
+- telegram-bff: язык «Что нового» и ленты — `locale` аккаунта; заголовок `X-Timezone` (bff.ts); 401 доменов (кроме `PIN_INVALID`, `BIOMETRIC_INVALID`, `RESET_CODE_INVALID`) → 503; в детском профиле `PUT /v1/profile/age` → 403 `ADULT_REQUIRED`.
+- Техдолг спринта 2 (`tilhero_common`): пакетная запись outbox, проверка издателя удаления, проверка `SCHEDULER_TOKEN`, `Idempotency-Key`; learning-plan — чтение плана без создания; типы биометрии в bff.ts.
+
+**Сброс кода родителя через бота — с задержкой 24 ч (ревью T-8).** Телефон с Telegram может быть у ребёнка, поэтому код из бота не даёт права родителя сразу:
+- identity-consent `POST /me/pin/reset-confirm {code, new_pin}` → `SecurityState` с `pin_reset_effective_at = now + PIN_RESET_DELAY_HOURS (24)`; новый код хранится как ожидающий (Argon2id), прежний действует до срока. Transactional-сообщение аккаунту: сброс запрошен, когда вступит в силу, как отменить.
+- Любой верный ввод прежнего кода (verify, переключение ученика, удаление, отмена) отменяет ожидающий сброс; `POST /me/pin/reset-cancel {current_pin}` — явная отмена.
+- Когда срок наступил, ожидающий код становится действующим при следующей проверке кода; прежние сессии отзываются (`user.security.changed.v1`).
+- BFF: `POST /v1/profile/security/pin/reset-confirm` → `SecurityState`, `POST /v1/profile/security/pin/reset-cancel`. Mini App: после сброса — «Новый код заработает через 24 часа», в профиле взрослого — плашка с датой и кнопкой «Отменить сброс».
+- Реализация: `POST /internal/v1/me/pin/verify` → `{ok, pin_reset_applied}` — BFF по `pin_reset_applied=true` отзывает остальные сессии аккаунта (сессии хранит BFF). События `user.security.changed.v1`: `pin_reset_requested` (запрос), `pin_reset_cancelled` (верный прежний код до срока), `pin_reset` (вступил в силу). Сброс не снимает блокировку и не обнуляет счётчик попыток. Биометрия до срока работает и сброс не отменяет. notifications: шаблон `pin.reset_scheduled` (время — по поясу аккаунта, без кода, кнопка `route_profile`); в `pin.reset_code` добавлено «новый код заработает через 24 часа».

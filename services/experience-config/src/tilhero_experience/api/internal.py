@@ -1,8 +1,8 @@
-"""Чтение текущей конфигурации сервисами (telegram-bff — для Mini App, admin-bff — для Admin UI)."""
+"""Чтение текущей конфигурации сервисами (telegram-bff — для Mini App, admin-bff — для админки, спринт 2)."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Response
 
 from tilhero_common.app import Runtime, get_runtime
 from tilhero_common.internal_auth import InternalAuth, Principal
@@ -12,18 +12,11 @@ from tilhero_experience.schemas import AdminExperienceConfig, MiniAppExperienceC
 
 router = APIRouter(prefix="/internal/v1/experience", tags=["internal"])
 readers = InternalAuth({"telegram-bff", "admin-bff"})
-# offers (спринт 5) читает только конфигурацию Mini App — порог рейтинга отеля; конфигурация админки ему не нужна.
-miniapp_readers = InternalAuth({"telegram-bff", "admin-bff", "offers"})
-
-
-async def current_reader(request: Request, app: str = Depends(app_param)) -> Principal:
-    """Читатели текущей конфигурации: `miniapp` — + offers, `admin` — только прежние (telegram-bff, admin-bff)."""
-    return await (miniapp_readers if app == "miniapp" else readers)(request)
 
 
 @router.get("/{app}/current", response_model=MiniAppExperienceConfig | AdminExperienceConfig,
             responses={404: {"description": "EXPERIENCE_CONFIG_NOT_FOUND | EXPERIENCE_APP_UNKNOWN"}})
-async def get_current(_: Principal = Depends(current_reader), app: str = Depends(app_param),
+async def get_current(_: Principal = Depends(readers), app: str = Depends(app_param),
                       rt: Runtime = Depends(get_runtime)) -> Response:
     cache = cache_of(rt)
     cached = await cache.get(app)

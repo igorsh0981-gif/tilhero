@@ -32,7 +32,7 @@ async def categories(_: Principal = Depends(any_bff)) -> CategoryList:
         items=[
             CategoryOut(
                 code=code,
-                label=CategoryLabel(ru=str(meta["ru"]), en=str(meta["en"])),
+                label=CategoryLabel(ru=str(meta["ru"]), uz=str(meta["uz"])),
                 available=bool(meta["available"]),
                 default_priority=default_priority(code),
             )

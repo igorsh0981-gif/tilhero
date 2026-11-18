@@ -2,8 +2,8 @@
 
 Инварианты:
 - клиент видит только свои обращения (user_id из токена) и только публичные сообщения;
-- внутренние заметки не попадают ни в клиентский API, ни в события, ни в уведомления (TG-FR-044, A-AT-42);
-- support не делает refund/override — только эскалации (BR-TG-011);
+- внутренние заметки не попадают ни в клиентский API, ни в события, ни в уведомления;
+- support не делает возвраты, смену тарифа и правку оценок — только эскалации;
 - команды одного пользователя сериализуются advisory-lock'ом: лимиты и Idempotency-Key без гонок.
 """
 
@@ -12,7 +12,6 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from typing import Any, cast
 
 from sqlalchemy import ColumnElement, DateTime, Integer, func, literal, select, text, tuple_, update
@@ -189,13 +188,7 @@ async def _check_message_rate(session: AsyncSession, user_id: uuid.UUID, now: da
 def _context_for_storage(body: CreateTicketIn) -> dict[str, Any] | None:
     if body.context is None:
         return None
-    data = body.context.model_dump(exclude_none=True)
-    snap = data.get("price_snapshot")
-    if snap is not None:
-        # Деньги — строкой с 2 знаками (Decimal без потери точности), время — ISO-8601 UTC
-        snap["amount"] = str(Decimal(snap["amount"]).quantize(Decimal("0.01")))
-        snap["fetched_at"] = events.iso(snap["fetched_at"])
-    return data
+    return body.context.model_dump(exclude_none=True)
 
 
 # ================================================================ client commands
@@ -464,7 +457,7 @@ def staff_summary(ticket: Ticket, now: datetime, soon_minutes: int) -> StaffTick
         status=ticket.status,
         priority=ticket.priority,
         assignee_id=ticket.assignee_id,
-        has_event_context=ticket.context is not None,
+        has_context=ticket.context is not None,
         anonymized=ticket.anonymized_at is not None,
         created_at=ticket.created_at,
         updated_at=ticket.updated_at,

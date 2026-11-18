@@ -49,10 +49,6 @@ export const RATE_LIMIT_POLICIES: readonly PolicySpec[] = [
   P("tg.session_ip", "telegram-bff", "ip", 10, 60, "closed", "RATE_LIMIT_SESSION_IP_PER_MIN", "Вход по initData (POST /v1/session/telegram) — с одного IP"),
   P("tg.pin", "telegram-bff", "user", 5, 60, "closed", "RATE_LIMIT_PIN_PER_MIN", "Проверка и сброс PIN / биометрии — на пользователя (сброс — отдельный счётчик reset:<user_id>)"),
   P("tg.public_ip", "telegram-bff", "ip", 120, 60, "open", "RATE_LIMIT_PUBLIC_IP_PER_MIN", "Публичные эндпоинты Mini App (refresh, config, policy) — с одного IP"),
-  P("tg.offers", "telegram-bff", "user", 20, 60, "open", "RATE_LIMIT_OFFERS_PER_MIN", "Расчёт предложений поездки — на пользователя"),
-  P("tg.reactions", "telegram-bff", "user", 60, 60, "open", "RATE_LIMIT_REACTIONS_PER_MIN", "Реакции «Больше такого» / «Не интересно» — на пользователя"),
-  P("tg.watch", "telegram-bff", "user", 30, 60, "open", "RATE_LIMIT_WATCH_PER_MIN", "Команды слежений — на пользователя"),
-  P("tg.ai", "telegram-bff", "user", 6, 60, "open", "AI_RATE_PER_MINUTE", "Ходы AI-консьержа — на пользователя (сверх суточной квоты)"),
   P("tg.support_create", "telegram-bff", "user", 10, 3600, "open", null, "Создание обращения в поддержку — на пользователя в час (новая)"),
   P("adm.login_ip", "admin-bff", "ip", 10, 60, "closed", "RATE_LIMIT_LOGIN_IP_PER_MIN", "Вход сотрудника (POST /admin/v1/auth/login) — с одного IP"),
   P("adm.login_email", "admin-bff", "email", 5, 60, "closed", "RATE_LIMIT_LOGIN_EMAIL_PER_MIN", "Вход сотрудника — на один e-mail (в ключе только хеш с суточной солью)"),
@@ -62,7 +58,7 @@ export const RATE_LIMIT_POLICIES: readonly PolicySpec[] = [
   P("adm.command", "admin-bff", "staff", 60, 60, "closed", null, "Команды сотрудника (POST / PUT / PATCH / DELETE) (новая)"),
   P("adm.dlq", "admin-bff", "staff", 10, 60, "closed", null, "Команды DLQ и повтор удаления профиля (новая)"),
   P("int.caller", "*", "caller", 10000, 60, "open", null, "Внутренние вызовы Python-сервисов — на пару (вызывающий, сервис): защита от зацикливания (новая)"),
-  P("gw.llm.user", "provider-gateway", "user", 40, 60, "open", null, "Потоковый Claude (llm/messages:stream) — на пользователя (новая)"),
+  P("gw.llm.user", "ai-gateway", "user", 40, 60, "open", null, "Потоковый LLM (ai-gateway, спринт 4) — на пользователя"),
 ];
 
 export const GCRA_LUA = `-- TilHero: единый лимитер запросов (спринт 9, INTERNAL_API §2.1) — GCRA на одном ключе субъекта.

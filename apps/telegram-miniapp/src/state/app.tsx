@@ -1,47 +1,45 @@
-import type { DeletionResponse, ExperienceConfig, Profile, SecurityState, SessionResponse } from "@tilhero/contracts/bff";
-import { createContext, useCallback, useContext, type Dispatch } from "react";
-import type { ApiClient } from "../api/client";
-import type { Api } from "../api/endpoints";
-import { errorText } from "../api/errors";
-import type { ConfigSource } from "../config/experience";
-import { useI18n } from "../i18n";
-import type { NavAction, NavState } from "./nav";
+import type { DeletionResponse, ExperienceConfig, LearningPlan, Profile, SessionResponse } from "@tilhero/contracts/bff";
+import { createContext, useContext } from "react";
+import type { Bff } from "../api/bff";
+import type { Nav } from "./nav";
 
+/** Everything a screen needs from the shell. Created in App.tsx once the session is ready. */
 export interface AppCtx {
-  api: Api;
-  client: ApiClient;
-  inTelegram: boolean;
+  bff: Bff;
   session: SessionResponse;
-  profile: Profile | null;
-  setProfile(p: Profile): void;
-  reloadProfile(): Promise<Profile | null>;
-  setSecurity(s: SecurityState): void;
-  applySession(s: SessionResponse): void;
+  /** a new SessionResponse (PIN verify, learner switch): tokens are already accepted by the client */
+  applySession(s: SessionResponse): Promise<void>;
+  /** merge a fresh Profile into the session (account, learners, consent, security) */
+  syncProfile(p: Profile): void;
+  patchSession(patch: Partial<SessionResponse>): void;
+  plan: LearningPlan | null;
+  setPlan(p: LearningPlan): void;
+  reloadPlan(): Promise<LearningPlan | null>;
   config: ExperienceConfig;
-  configSource: ConfigSource;
+  nav: Nav;
+  unread: number;
+  setUnread(n: number): void;
+  refreshUnread(): void;
+  /** startapp of a notification / route of «Что нового» → the right screen or sheet */
+  openLink(raw: string | null): void;
+  /** the session ended (deletion requested: 202, sessions revoked) */
+  endSession(kind: "deleted", res: DeletionResponse): void;
+  deviceTz: string;
   online: boolean;
-  /** first visit: a brand-new profile or onboarding finished during this launch (big welcome on Home) */
-  firstVisit: boolean;
-  nav: NavState;
-  navigate: Dispatch<NavAction>;
-  /** server says the PIN is needed (423) or the user locked manually */
-  lock(): void;
-  /** onboarding finished → main app */
-  onboardingDone(): void;
-  /** deletion requested → «Запрос принят» */
-  deletionAccepted(r: DeletionResponse): void;
 }
 
-export const AppContext = createContext<AppCtx | null>(null);
+const Ctx = createContext<AppCtx | null>(null);
+export const AppProvider = Ctx.Provider;
 
 export function useApp(): AppCtx {
-  const v = useContext(AppContext);
-  if (!v) throw new Error("useApp outside AppContext");
+  const v = useContext(Ctx);
+  if (!v) throw new Error("useApp outside AppProvider");
   return v;
 }
 
-/** Localised text for any thrown error. */
-export function useErrorText(): (e: unknown) => string {
-  const { t, fmt } = useI18n();
-  return useCallback((e: unknown) => errorText(e, t, fmt.mmss), [t, fmt]);
+/** The plan is loaded before any screen that uses it renders. */
+export function usePlan(): LearningPlan {
+  const { plan } = useApp();
+  if (!plan) throw new Error("plan is not loaded");
+  return plan;
 }

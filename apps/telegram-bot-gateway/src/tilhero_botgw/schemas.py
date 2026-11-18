@@ -47,24 +47,3 @@ class SendMessageIn(BaseModel):
 
 class SendMessageOut(BaseModel):
     message_id: int
-
-
-class OpsButtonIn(BaseModel):
-    """Кнопка-ссылка ops-сообщения; домен (ADMIN_WEB_URL) проверяет обработчик — он знает настройки."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    text: Annotated[str, Field(min_length=1, max_length=40)]
-    url: Annotated[str, Field(min_length=9, max_length=2048), AfterValidator(_https)]
-
-
-class OpsMessageIn(BaseModel):
-    """POST /internal/v1/ops-messages (спринт 8, §6): обычный текст без разметки, чат — только из OPS_ALERT_CHAT_ID."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    text: Annotated[str, Field(min_length=1, max_length=3500)]
-    button: OpsButtonIn | None = None
-    # спринт 9 (INTERNAL_API §6.2): кнопка «Runbook» — только раздел runbook'ов репозитория (RUNBOOK_BASE_URL)
-    runbook_button: OpsButtonIn | None = None
-    dedup_key: Annotated[str, Field(pattern=r"^[A-Za-z0-9._:\-]{8,128}$")]

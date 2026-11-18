@@ -26,16 +26,8 @@ export interface RateLimits {
   sessionPerIpPerMinute: number;
   /** Проверка PIN/биометрии и прочие операции с PIN/кодом — на пользователя в минуту. */
   pinPerMinute: number;
-  /** Публичные эндпоинты (refresh, config, policy) — с одного IP в минуту. */
+  /** Публичные эндпоинты (refresh, config, policy, просмотр согласия родителя) — с одного IP в минуту. */
   publicPerIpPerMinute: number;
-  /** Расчёт предложений (GET /v1/events/{id}/offers и …/recalculate) — на пользователя в минуту (спринт 5). */
-  offersPerMinute: number;
-  /** Реакции «Больше такого» / «Не интересно» — на пользователя в минуту (спринт 6). */
-  reactionsPerMinute: number;
-  /** Команды слежений (создание, изменение, удаление) — на пользователя в минуту (спринт 6). */
-  watchCommandsPerMinute: number;
-  /** Ходы AI-консьержа (сообщения и быстрые действия) — на пользователя в минуту (спринт 7, сверх суточной квоты). */
-  aiTurnsPerMinute: number;
 }
 
 export type AppEnv = "dev" | "test" | "stage" | "prod";
@@ -71,48 +63,24 @@ export interface Config {
   refreshTtlSeconds: number;
 
   miniappOrigins: string[];
+  /** Прямая ссылка Mini App https://t.me/<bot>/<app> — из неё строится ссылка согласия родителя (?startapp=gc_<token>). */
+  telegramAppLink: string;
 
+  /** identity-consent (8101): аккаунт, ученики, возраст, согласия, PIN, удаление. */
   identityUrl: string;
-  preferencesUrl: string;
+  /** learning-plan (8102): план, график, занятия, справочники целей и тем. */
+  learningPlanUrl: string;
+  /** support (8103): обращения. */
   supportUrl: string;
+  /** notifications (8104): центр уведомлений. */
+  notificationsUrl: string;
+  /** experience-config (8106): конфигурация Mini App, «Что нового», лента новостей. */
   experienceUrl: string;
-  /** event-catalog (services/events): каталог событий, деталь, рельсы Home. */
-  eventsUrl: string;
+  /** social (8109): приглашения и семья. */
+  socialUrl: string;
   upstreamTimeoutMs: number;
   upstreamRetries: number;
   experienceCacheSeconds: number;
-  /** Home: «свежая» копия на пользователя (по умолчанию 60 с) — в течение этого времени каталог не вызывается. */
-  homeFreshSeconds: number;
-  /** Home: stale-копия (по умолчанию 24 ч) — отдаётся с state "stale", если каталог недоступен (AT-34). */
-  homeStaleSeconds: number;
-  /** Счётчики быстрых фильтров (GET /v1/events/facets): общий кэш в Redis по набору фильтров, по умолчанию 60 с; 0 — без кэша. */
-  facetsCacheSeconds: number;
-  /** offers (спринт 5): необязательная — без неё эндпоинты предложений отвечают 503 OFFERS_UNAVAILABLE,
-   *  а offer_id в обращении в поддержку не принимается (убирается из контекста). */
-  offersUrl: string | undefined;
-  /** Таймаут сборки предложения (offers сам укладывается в OFFERS_BUILD_DEADLINE_SECONDS = 20 с). */
-  offersTimeoutMs: number;
-  /** Предел размера ответа offers (байт): больше — ответ отбрасывается, 503 OFFERS_UNAVAILABLE. */
-  offersMaxResponseBytes: number;
-
-  /** Спринт 6 — необязательные домены (без URL: Home работает без секции/баллов, эндпоинты → 503 FEATURE_UNAVAILABLE). */
-  recommendationsUrl: string | undefined;
-  watchUrl: string | undefined;
-  newsUrl: string | undefined;
-  /** Спринт 7: ai-concierge (8118); не задан — /v1/ai/* → 503 FEATURE_UNAVAILABLE {feature: "ai"}. */
-  aiConciergeUrl: string | undefined;
-  /** Таймаут хода консьержа (стрим и запасной JSON-путь) и создания переписки, мс — больше дедлайна хода (60 с). */
-  conciergeTimeoutMs: number;
-  /** Предел размера ответов recommendations/watch/news (байт): больше — ответ отбрасывается как сбой домена. */
-  personalMaxResponseBytes: number;
-  /** AT-23: сводка «Пока вас не было», если прошлый визит был не раньше чем столько минут назад (30). */
-  summaryGapMinutes: number;
-  /** Сколько хранится время прошлого визита (дней, 90). */
-  visitTtlDays: number;
-  /** Сколько секунд после начала визита повторный запрос Home отдаёт ту же сводку (перерисовка, pull-to-refresh). */
-  summaryHoldSeconds: number;
-  /** Последний расчёт поездки по событию (для offer_params слежения и trip_per_person ранжирования), дней. */
-  lastTripTtlDays: number;
 
   rateLimits: RateLimits;
   rateLimiting: RateLimiting;
@@ -126,11 +94,13 @@ export const DEV_DEFAULTS = {
   INTERNAL_JWT_SECRET: "dev-internal-secret-change-me",
   REDIS_URL: "redis://127.0.0.1:6379/0",
   MINIAPP_ORIGIN: "http://localhost:5173",
+  TELEGRAM_APP_LINK: "https://t.me/tilhero_dev_bot/app",
   IDENTITY_URL: "http://127.0.0.1:8101",
-  PREFERENCES_URL: "http://127.0.0.1:8102",
+  LEARNING_PLAN_URL: "http://127.0.0.1:8102",
   SUPPORT_URL: "http://127.0.0.1:8103",
+  NOTIFICATIONS_URL: "http://127.0.0.1:8104",
   EXPERIENCE_URL: "http://127.0.0.1:8106",
-  EVENTS_URL: "http://127.0.0.1:8110",
+  SOCIAL_URL: "http://127.0.0.1:8109",
 } as const;
 
 export class ConfigError extends Error {
@@ -207,20 +177,6 @@ export function loadConfig(env: Env = process.env): Config {
     return v.replace(/\/+$/, "");
   };
 
-  /** Необязательный http(s) URL (без значения — функция выключена). */
-  const optionalUrl = (name: string): string | undefined => {
-    const v = raw(name);
-    if (v === undefined) return undefined;
-    try {
-      const u = new URL(v);
-      if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("protocol");
-    } catch {
-      problems.push(`${name}=${JSON.stringify(v)}: ожидается http(s) URL`);
-      return undefined;
-    }
-    return v.replace(/\/+$/, "");
-  };
-
   // ---- секреты
   const botToken = required("BOT_TOKEN");
   const sessionJwtSecret = required("SESSION_JWT_SECRET");
@@ -289,6 +245,12 @@ export function loadConfig(env: Env = process.env): Config {
     problems.push("MINIAPP_ORIGIN: пустой список");
   }
 
+  // ---- ссылка Mini App (https://t.me/<bot>/<app>, без query): к ней добавляется ?startapp=gc_<token>
+  const telegramAppLink = required("TELEGRAM_APP_LINK").replace(/\/+$/, "");
+  if (telegramAppLink && !/^https:\/\/t\.me\/[A-Za-z0-9_]{5,64}\/[A-Za-z0-9_]{3,64}$/.test(telegramAppLink)) {
+    problems.push(`TELEGRAM_APP_LINK=${JSON.stringify(telegramAppLink)}: ожидается https://t.me/<bot>/<app>`);
+  }
+
   // ---- сроки
   const initDataMaxAgeSeconds = int("INIT_DATA_MAX_AGE_SECONDS", 600, 60, 86_400);
   const oneTimeRaw = raw("INIT_DATA_ONE_TIME")?.toLowerCase();
@@ -332,39 +294,21 @@ export function loadConfig(env: Env = process.env): Config {
     accessTtlSeconds,
     refreshTtlSeconds,
     miniappOrigins,
+    telegramAppLink,
     identityUrl: url("IDENTITY_URL"),
-    preferencesUrl: url("PREFERENCES_URL"),
+    learningPlanUrl: url("LEARNING_PLAN_URL"),
     supportUrl: url("SUPPORT_URL"),
+    notificationsUrl: url("NOTIFICATIONS_URL"),
     experienceUrl: url("EXPERIENCE_URL"),
-    eventsUrl: url("EVENTS_URL"),
+    socialUrl: url("SOCIAL_URL"),
     upstreamTimeoutMs: int("UPSTREAM_TIMEOUT_MS", 3000, 100, 60_000),
     upstreamRetries: int("UPSTREAM_RETRIES", 1, 0, 5),
     experienceCacheSeconds: int("EXPERIENCE_CACHE_SECONDS", 60, 0, 3600),
-    homeFreshSeconds: int("HOME_CACHE_SECONDS", 60, 0, 3600),
-    homeStaleSeconds: int("HOME_STALE_SECONDS", 86_400, 60, 7 * 86_400),
-    facetsCacheSeconds: int("FACETS_CACHE_SECONDS", 60, 0, 3600),
-    offersUrl: optionalUrl("OFFERS_URL"),
-    offersTimeoutMs: int("OFFERS_TIMEOUT_MS", 25_000, 1000, 120_000),
-    offersMaxResponseBytes: int("OFFERS_MAX_RESPONSE_BYTES", 1_048_576, 16_384, 16_777_216),
-    recommendationsUrl: optionalUrl("RECOMMENDATIONS_URL"),
-    watchUrl: optionalUrl("WATCH_URL"),
-    newsUrl: optionalUrl("NEWS_URL"),
-    aiConciergeUrl: optionalUrl("AI_CONCIERGE_URL"),
-    conciergeTimeoutMs: int("CONCIERGE_TIMEOUT_MS", 75_000, 5_000, 600_000),
-    personalMaxResponseBytes: int("PERSONAL_MAX_RESPONSE_BYTES", 524_288, 16_384, 16_777_216),
-    summaryGapMinutes: int("HOME_SUMMARY_GAP_MINUTES", 30, 1, 1440),
-    visitTtlDays: int("VISIT_TTL_DAYS", 90, 1, 365),
-    summaryHoldSeconds: int("HOME_SUMMARY_HOLD_SECONDS", 600, 0, 3600),
-    lastTripTtlDays: int("LAST_TRIP_TTL_DAYS", 30, 1, 365),
     rateLimits: {
       userPerMinute: int("RATE_LIMIT_USER_PER_MIN", 120, 1, 100_000),
       sessionPerIpPerMinute: int("RATE_LIMIT_SESSION_IP_PER_MIN", 10, 1, 100_000),
       pinPerMinute: int("RATE_LIMIT_PIN_PER_MIN", 5, 1, 1000),
       publicPerIpPerMinute: int("RATE_LIMIT_PUBLIC_IP_PER_MIN", 120, 1, 100_000),
-      offersPerMinute: int("RATE_LIMIT_OFFERS_PER_MIN", 20, 1, 10_000),
-      reactionsPerMinute: int("RATE_LIMIT_REACTIONS_PER_MIN", 60, 1, 10_000),
-      watchCommandsPerMinute: int("RATE_LIMIT_WATCH_PER_MIN", 30, 1, 10_000),
-      aiTurnsPerMinute: int("AI_RATE_PER_MINUTE", 6, 1, 1_000),
     },
     rateLimiting: {
       enabled: rlEnabledRaw === undefined || rlEnabledRaw === "true" || rlEnabledRaw === "1",

@@ -1,36 +1,33 @@
-"""Шаблоны уведомлений RU/EN (тексты — из прототипа Mini App v9: 90-bot-console.js, 80-profile.js).
+"""Шаблоны уведомлений TilHero RU/UZ (узбекская латиница, oʻ/gʻ — U+02BB, тутук — U+02BC).
 
-Правила:
-- текст — HTML (parse_mode=HTML у bot-gateway); КАЖДЫЙ параметр экранируется html.escape;
-- параметры проверяются строгой моделью ещё при приёме (неизвестное поле/формат → failed params_invalid);
-- текст ответа оператора в уведомление не кладём — только номер обращения и кнопку «Открыть обращение»;
-- watch.critical — сразу; watch.price_drop и news.digest с kind=digest копятся и уходят одним digest.daily
-  в digest_time пользователя (спринт 6, docs/sprint6/INTERNAL_API.md §5);
-- deep link события — `event_<uuid>` (Mini App tg/deeplink.ts), вкладки — `watch`, `news`;
-- у новости всегда источник: https-URL на домене источника.
+Правила (INTERNAL_API §4, CONVENTIONS §8):
+- каждый шаблон даёт title/body (обычный текст — для центра уведомлений, на языке ученика) и текст Telegram
+  (HTML: `<b>title</b>` + body; КАЖДОЕ значение экранируется html.escape);
+- детские варианты (`*.kid`) адресованы родителю, с именем ребёнка, мягкие: без «потери серии», «провала»,
+  давления; прочих PII нет (только имя ребёнка родителю и имя пригласившего/принявшего);
+- текст ответа оператора в уведомление не кладём — только номер обращения;
+- кнопка «Открыть» (startapp): напоминание и пропуск → route_home; приглашение принято / новый участник
+  семьи / отклонено → route_family; неотвеченное приглашение → invite_<invite_id>; поддержка → ticket_<number>;
+  «Что нового» → route_news;
+- параметры проверяются строгой моделью при приёме (неизвестное поле/формат → failed params_invalid).
 """
 
 from __future__ import annotations
 
 import html
-import re
 import unicodedata
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from datetime import date as datetime_date
-from decimal import Decimal
+from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+Lang = Literal["ru", "uz"]
 Button = dict[str, str]
-STARTAPP_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
-Title = Annotated[str, Field(min_length=1, max_length=200)]
-Money = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=2)]
-Delta = Annotated[Decimal, Field(max_digits=12, decimal_places=2)]
-Pct = Annotated[Decimal, Field(ge=0, le=100, max_digits=5, decimal_places=2)]
+NAME_MAX = 40
 MAX_TEXT = 4000  # bot-gateway: text ≤ 4096
 
 
@@ -38,46 +35,30 @@ class TemplateError(ValueError):
     pass
 
 
-@dataclass(frozen=True)
-class Rendered:
-    text: str
-    buttons: list[list[Button]] = field(default_factory=list)
+def lang_of(locale: str | None) -> Lang:
+    """Интерфейс TilHero — RU и UZ; всё, кроме uz, — RU."""
+    return "uz" if (locale or "").strip().lower().split("-", 1)[0] == "uz" else "ru"
 
 
 def esc(value: object) -> str:
     return html.escape(str(value), quote=False)
 
 
-def lang_of(locale: str | None) -> str:
-    return "ru" if (locale or "").lower().startswith("ru") else "en"
+def clean_name(value: object) -> str | None:
+    """Имя для текста: без управляющих и форматирующих символов (в т.ч. bidi), пробелы схлопнуты, ≤ 40."""
+    if not isinstance(value, str):
+        return None
+    kept = "".join(" " if ch.isspace() else ch for ch in value if unicodedata.category(ch)[0] != "C")
+    name = " ".join(kept.split())[:NAME_MAX].strip()
+    return name or None
 
 
-def usd(amount: Decimal, lang: str) -> str:
-    q = (
-        amount.quantize(Decimal("1"))
-        if amount == amount.to_integral_value()
-        else amount.quantize(Decimal("0.01"))
-    )
-    text = f"{q:,}"
-    if lang == "ru":
-        text = text.replace(",", " ").replace(".", ",")
-    return f"${text}"
-
-
-def signed_usd(delta: Decimal, lang: str) -> str:
-    return ("−" if delta < 0 else "+") + usd(abs(delta), lang)
-
-
-class Params(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-
-# ---------------------------------------------------------------- pin.reset_code (transactional)
-
-
-class PinResetParams(Params):
-    code: Annotated[str, Field(pattern=r"^\d{6}$")]
-    ttl_minutes: Annotated[int, Field(ge=1, le=60)] = 10  # срок кода — из настроек identity-consent
+def _days_ru(n: int) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return f"{n} день"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return f"{n} дня"
+    return f"{n} дней"
 
 
 def _minutes_ru(n: int) -> str:
@@ -88,17 +69,215 @@ def _minutes_ru(n: int) -> str:
     return f"{n} минут"
 
 
-def _pin_reset(lang: str, p: PinResetParams) -> Rendered:
+def _ddmm(d: date) -> str:
+    return d.strftime("%d.%m")
+
+
+@dataclass(frozen=True)
+class Context:
+    """Имена, известные только в момент отрисовки (identity-consent)."""
+
+    learner_name: str | None = None  # имя ребёнка — в сообщении родителю
+    other_name: str | None = None  # пригласивший / принявший / новый участник семьи
+    timezone: str | None = None  # часовой пояс адресата (DeliveryInfo.timezone) — даты в тексте по местному времени
+
+
+@dataclass(frozen=True)
+class Rendered:
+    title: str
+    body: str
+    button: str
+    startapp: str | None
+    html: str | None = None  # особый текст Telegram (код PIN), иначе <b>title</b>\nbody
+
+    def telegram_text(self) -> str:
+        return self.html if self.html is not None else f"<b>{esc(self.title)}</b>\n{esc(self.body)}"
+
+    def buttons(self) -> list[list[Button]]:
+        return [[{"text": self.button, "startapp": self.startapp}]] if self.startapp else []
+
+
+class Params(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+OPEN = {"ru": "Открыть TilHero", "uz": "TilHeroʼni ochish"}
+START = {"ru": "Начать занятие", "uz": "Mashgʻulotni boshlash"}
+
+# ---------------------------------------------------------------- lesson.* (learning-plan)
+
+
+class ReminderParams(Params):
+    local_date: date
+    slot_time: Annotated[str, Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
+    duration_min: Literal[10, 15, 20, 30]
+    streak_days: Annotated[int, Field(ge=0, le=100_000)] | None = None
+
+
+def _reminder(lang: Lang, p: ReminderParams, ctx: Context) -> Rendered:
+    if lang == "ru":
+        body = f"По графику — {_minutes_ru(p.duration_min)} английского. Начнём?"
+        if p.streak_days and p.streak_days >= 2:
+            body += f" Вы занимаетесь {_days_ru(p.streak_days)} подряд — отлично!"
+        return Rendered("Время занятия", body, START[lang], "route_home")
+    body = f"Jadval boʻyicha — {p.duration_min} daqiqa ingliz tili. Boshlaymizmi?"
+    if p.streak_days and p.streak_days >= 2:
+        body += f" Ketma-ket {p.streak_days} kun shugʻullanyapsiz — ajoyib!"
+    return Rendered("Mashgʻulot vaqti", body, START[lang], "route_home")
+
+
+def _reminder_kid(lang: Lang, p: ReminderParams, ctx: Context) -> Rendered:
+    name = ctx.learner_name
+    if lang == "ru":
+        title = f"{name}: время занятия" if name else "Время занятия ребёнка"
+        body = f"По графику — {_minutes_ru(p.duration_min)} английского. Позанимайтесь вместе — будет интересно!"
+        return Rendered(title, body, START[lang], "route_home")
+    title = f"{name}: mashgʻulot vaqti" if name else "Farzandingizning mashgʻulot vaqti"
+    body = f"Jadval boʻyicha — {p.duration_min} daqiqa ingliz tili. Birga shugʻullaning — qiziqarli boʻladi!"
+    return Rendered(title, body, START[lang], "route_home")
+
+
+class MissedParams(Params):
+    local_date: date
+    consecutive_missed: Annotated[int, Field(ge=1, le=100_000)]
+    next_slot_date: date | None = None
+
+
+def _missed(lang: Lang, p: MissedParams, ctx: Context) -> Rendered:
+    if lang == "ru":
+        body = "Ничего страшного: сегодня хватит и 10 минут, чтобы не забыть пройденное."
+        if p.next_slot_date:
+            body += f" Следующее занятие по графику — {_ddmm(p.next_slot_date)}."
+        return Rendered("Вчера занятия не было", body, START[lang], "route_home")
+    body = "Hechqisi yoʻq: oʻtilganlarni unutmaslik uchun bugun 10 daqiqa ham yetadi."
+    if p.next_slot_date:
+        body += f" Jadval boʻyicha keyingi mashgʻulot — {_ddmm(p.next_slot_date)}."
+    return Rendered("Kecha mashgʻulot boʻlmadi", body, START[lang], "route_home")
+
+
+def _missed_kid(lang: Lang, p: MissedParams, ctx: Context) -> Rendered:
+    name = ctx.learner_name
+    if lang == "ru":
+        title = f"{name}: продолжим заниматься?" if name else "Продолжим заниматься?"
+        body = "Вчера занятия не было — это нормально. Сегодня можно вместе пройти короткое занятие на 10 минут."
+        return Rendered(title, body, START[lang], "route_home")
+    title = f"{name}: mashgʻulotni davom ettiramizmi?" if name else "Mashgʻulotni davom ettiramizmi?"
+    body = "Kecha mashgʻulot boʻlmadi — bu tabiiy. Bugun birga 10 daqiqalik qisqa mashgʻulot qilish mumkin."
+    return Rendered(title, body, START[lang], "route_home")
+
+
+class ComebackParams(Params):
+    local_date: date
+    consecutive_missed: Annotated[int, Field(ge=1, le=100_000)]
+
+
+def _comeback(lang: Lang, p: ComebackParams, ctx: Context) -> Rendered:
     if lang == "ru":
         return Rendered(
-            f"Код для сброса PIN в TilHero: <b>{esc(p.code)}</b>. Никому не сообщайте его. "
-            f"Действует {_minutes_ru(p.ttl_minutes)}."
+            "Возвращайтесь к занятиям",
+            "Ваш план сохранён. Начните с короткого занятия на 10 минут — так легче вернуться в ритм.",
+            START[lang],
+            "route_home",
         )
-    unit = "minute" if p.ttl_minutes == 1 else "minutes"
     return Rendered(
-        f"TilHero PIN reset code: <b>{esc(p.code)}</b>. Do not share it with anyone. "
-        f"It is valid for {p.ttl_minutes} {unit}."
+        "Mashgʻulotlarga qayting",
+        "Rejangiz saqlangan. 10 daqiqalik qisqa mashgʻulotdan boshlang — ritmga qaytish osonroq boʻladi.",
+        START[lang],
+        "route_home",
     )
+
+
+def _comeback_kid(lang: Lang, p: ComebackParams, ctx: Context) -> Rendered:
+    name = ctx.learner_name
+    if lang == "ru":
+        title = f"{name}: вернёмся к английскому?" if name else "Вернёмся к английскому?"
+        body = "План занятий сохранён. Попробуйте вместе короткое занятие на 10 минут — это весело!"
+        return Rendered(title, body, START[lang], "route_home")
+    title = f"{name}: ingliz tiliga qaytamizmi?" if name else "Ingliz tiliga qaytamizmi?"
+    body = "Mashgʻulotlar rejasi saqlangan. Birga 10 daqiqalik qisqa mashgʻulotni sinab koʻring — bu qiziqarli!"
+    return Rendered(title, body, START[lang], "route_home")
+
+
+# ---------------------------------------------------------------- invite.* / family.* (social)
+
+
+class InviteParams(Params):
+    invite_id: uuid.UUID
+    kind: Literal["family", "friend", "referral"]
+
+
+def _invite_accepted(lang: Lang, p: InviteParams, ctx: Context) -> Rendered:
+    n = ctx.other_name
+    if p.kind == "family":
+        if lang == "ru":
+            title = f"{n} теперь в вашей семье" if n else "Новый участник семьи"
+            body = f"{n} принял(а) приглашение в семью TilHero." if n else "Ваше приглашение в семью TilHero приняли."
+        else:
+            title = f"{n} endi oilangizda" if n else "Oilada yangi aʼzo"
+            body = (
+                f"{n} TilHero oilasiga taklifingizni qabul qildi."
+                if n
+                else "TilHero oilasiga taklifingizni qabul qilishdi."
+            )
+    elif lang == "ru":
+        title = "Приглашение принято"
+        body = f"{n} принял(а) ваше приглашение в TilHero." if n else "Ваше приглашение в TilHero приняли."
+    else:
+        title = "Taklif qabul qilindi"
+        body = f"{n} TilHeroʼga taklifingizni qabul qildi." if n else "TilHeroʼga taklifingizni qabul qilishdi."
+    return Rendered(title, body, OPEN[lang], "route_family")
+
+
+def _invite_declined(lang: Lang, p: InviteParams, ctx: Context) -> Rendered:
+    if lang == "ru":
+        return Rendered(
+            "Приглашение отклонено",
+            "Приглашение не приняли. Можно пригласить кого-нибудь ещё.",
+            OPEN[lang],
+            "route_family",
+        )
+    return Rendered(
+        "Taklif rad etildi",
+        "Taklif qabul qilinmadi. Boshqa birovni taklif qilishingiz mumkin.",
+        OPEN[lang],
+        "route_family",
+    )
+
+
+def _invite_pending(lang: Lang, p: InviteParams, ctx: Context) -> Rendered:
+    n = ctx.other_name
+    startapp = f"invite_{p.invite_id}"
+    if lang == "ru":
+        button = "Открыть приглашение"
+        if p.kind == "family":
+            title = "Вас пригласили в семью"
+            lead = f"{n} приглашает вас в семью TilHero." if n else "Вас пригласили в семью TilHero."
+        else:
+            title = "Вас ждёт приглашение"
+            lead = f"{n} приглашает вас в TilHero." if n else "Вас пригласили в TilHero."
+        return Rendered(title, f"{lead} Откройте, чтобы принять или отклонить.", button, startapp)
+    button = "Taklifni ochish"
+    if p.kind == "family":
+        title = "Sizni oilaga taklif qilishdi"
+        lead = f"{n} sizni TilHero oilasiga taklif qilmoqda." if n else "Sizni TilHero oilasiga taklif qilishdi."
+    else:
+        title = "Sizni taklif kutmoqda"
+        lead = f"{n} sizni TilHeroʼga taklif qilmoqda." if n else "Sizni TilHeroʼga taklif qilishdi."
+    return Rendered(title, f"{lead} Qabul qilish yoki rad etish uchun oching.", button, startapp)
+
+
+class FamilyParams(Params):
+    family_id: uuid.UUID
+    role: Literal["adult", "teen"]
+
+
+def _family_joined(lang: Lang, p: FamilyParams, ctx: Context) -> Rendered:
+    n = ctx.other_name
+    if lang == "ru":
+        body = f"{n} теперь в вашей семье TilHero." if n else "В вашей семье TilHero новый участник."
+        return Rendered("Новый участник семьи", body, OPEN[lang], "route_family")
+    body = f"{n} endi TilHero oilangizda." if n else "TilHero oilangizda yangi aʼzo bor."
+    return Rendered("Oilada yangi aʼzo", body, OPEN[lang], "route_family")
 
 
 # ---------------------------------------------------------------- support.*
@@ -108,347 +287,120 @@ class TicketParams(Params):
     number: Annotated[str, Field(pattern=r"^TCK-\d{1,12}$")]
 
 
-def _ticket_button(lang: str, number: str) -> list[list[Button]]:
-    return [
-        [{"text": "Открыть обращение" if lang == "ru" else "Open request", "startapp": f"ticket_{number}"}]
-    ]
+TICKET_BUTTON = {"ru": "Открыть обращение", "uz": "Murojaatni ochish"}
 
 
-def _support_reply(lang: str, p: TicketParams) -> Rendered:
+def _support_reply(lang: Lang, p: TicketParams, ctx: Context) -> Rendered:
     if lang == "ru":
-        text = f"Поддержка ответила на обращение {esc(p.number)}. Откройте, чтобы прочитать."
+        title, body = "Ответ поддержки", f"Поддержка ответила на обращение {p.number}. Откройте, чтобы прочитать."
     else:
-        text = f"Support replied to your request {esc(p.number)}. Open it to read the reply."
-    return Rendered(text, _ticket_button(lang, p.number))
+        title = "Qoʻllab-quvvatlash javobi"
+        body = f"Qoʻllab-quvvatlash {p.number} murojaatiga javob berdi. Oʻqish uchun oching."
+    return Rendered(title, body, TICKET_BUTTON[lang], f"ticket_{p.number}")
 
 
-def _support_resolved(lang: str, p: TicketParams) -> Rendered:
+def _support_resolved(lang: Lang, p: TicketParams, ctx: Context) -> Rendered:
     if lang == "ru":
-        text = (
-            f"Обращение {esc(p.number)} решено. Если вопрос остался — ответьте в обращении, и мы продолжим."
-        )
+        title = "Обращение решено"
+        body = f"Обращение {p.number} решено. Если вопрос остался — ответьте в обращении, и мы продолжим."
     else:
-        text = (
-            f"Request {esc(p.number)} is resolved. If you still have a question, "
-            "reply in the request and we will continue."
+        title = "Murojaat hal qilindi"
+        body = f"{p.number} murojaati hal qilindi. Savol qolgan boʻlsa, murojaatda javob yozing — davom etamiz."
+    return Rendered(title, body, TICKET_BUTTON[lang], f"ticket_{p.number}")
+
+
+# ---------------------------------------------------------------- release_note (experience-config, только центр)
+
+
+class ReleaseNoteParams(Params):
+    release_note_id: uuid.UUID
+    slug: Annotated[str, Field(min_length=1, max_length=200)]
+
+
+def _release_note(lang: Lang, p: ReleaseNoteParams, ctx: Context) -> Rendered:
+    if lang == "ru":
+        return Rendered(
+            "Что нового в TilHero",
+            "В приложении появились обновления — посмотрите, что изменилось.",
+            "Посмотреть",
+            "route_news",
         )
-    return Rendered(text, _ticket_button(lang, p.number))
+    return Rendered(
+        "TilHeroʼda yangiliklar", "Ilovada yangilanishlar bor — nimalar oʻzgarganini koʻring.", "Koʻrish", "route_news"
+    )
 
 
-# ---------------------------------------------------------------- watch.* (спринт 6, INTERNAL_API §2.3, §5)
-
-TIERS = {"economy": "Economy", "comfort": "Comfort", "premium": "Premium"}
+# ---------------------------------------------------------------- pin.reset_code (transactional, не в центре)
 
 
-def event_startapp(event_id: uuid.UUID) -> str:
-    """Deep link на событие: Mini App (apps/telegram-miniapp/src/tg/deeplink.ts) ждёт `event_<uuid>`."""
-    return f"event_{str(event_id).lower()}"
+class PinResetParams(Params):
+    code: Annotated[str, Field(pattern=r"^\d{6}$")]
+    ttl_minutes: Annotated[int, Field(ge=1, le=60)] = 10  # срок кода — из настроек identity-consent
 
 
-class PriceDropParams(Params):
-    """watch.price_drop (kind digest) — WatchChange type=price_drop: after → price_usd, |delta_usd| → drop_usd."""
-
-    watch_id: uuid.UUID | None = None
-    event_id: uuid.UUID
-    event_title: Title
-    tier: Literal["economy", "comfort", "premium"]
-    price_usd: Money  # итог на человека после снижения
-    drop_usd: Money  # на сколько подешевело
-    drop_pct: Pct | None = None
-    flight_delta_usd: Delta | None = None
-    hotel_delta_usd: Delta | None = None
-
-
-def _event_buttons(lang: str, event_id: uuid.UUID, *, changes: bool) -> list[list[Button]]:
-    row = [{"text": "Открыть событие" if lang == "ru" else "Open event", "startapp": event_startapp(event_id)}]
-    if changes:
-        row.append({"text": "Все изменения" if lang == "ru" else "All changes", "startapp": "watch"})
-    return [row]
-
-
-def _price_drop(lang: str, p: PriceDropParams) -> Rendered:
-    parts = []
-    if p.flight_delta_usd is not None:
-        parts.append(("перелёт " if lang == "ru" else "flight ") + signed_usd(p.flight_delta_usd, lang))
-    if p.hotel_delta_usd is not None:
-        parts.append(("отель " if lang == "ru" else "hotel ") + signed_usd(p.hotel_delta_usd, lang))
-    detail = f" ({', '.join(parts)})" if parts else ""
-    title, tier = esc(p.event_title), TIERS[p.tier]
+def _pin_reset(lang: Lang, p: PinResetParams, ctx: Context) -> Rendered:
     if lang == "ru":
         text = (
-            f"<b>{title}</b>: поездка подешевела на {usd(p.drop_usd, lang)}{detail}. "
-            f"{tier} сейчас {usd(p.price_usd, lang)} на человека."
+            f"Код для сброса PIN-кода родителя в TilHero: <b>{esc(p.code)}</b>. Никому не сообщайте его. "
+            f"Действует {_minutes_ru(p.ttl_minutes)}. Новый PIN-код заработает через 24 часа."
         )
-    else:
-        text = (
-            f"<b>{title}</b>: the trip got {usd(p.drop_usd, lang)} cheaper{detail}. "
-            f"{tier} is now {usd(p.price_usd, lang)} per person."
-        )
-    return Rendered(text, _event_buttons(lang, p.event_id, changes=True))
-
-
-CRITICAL_CHANGES = {
-    "postponed": (
-        "событие перенесено, новые даты пока не объявлены",
-        "the event is postponed, new dates are not announced yet",
-    ),
-    "cancelled": ("событие отменено", "the event is cancelled"),
-    "sold_out": ("билеты распроданы", "tickets are sold out"),
-    "low_inventory": ("билетов осталось мало", "few tickets are left"),
-    "sales_open": ("продажи билетов открыты", "ticket sales are open"),
-    "venue_changed": ("изменилась площадка", "the venue has changed"),
-}
-
-
-class CriticalParams(Params):
-    """watch.critical (kind critical) — критичный переход lifecycle (§2.2): POSTPONED, CANCELLED, SOLD_OUT,
-    LOW_INVENTORY, ON_SALE из SALES_SOON/ANNOUNCED (sales_open), смена площадки (venue_changed)."""
-
-    watch_id: uuid.UUID | None = None
-    event_id: uuid.UUID
-    event_title: Title
-    change: Literal["postponed", "cancelled", "sold_out", "low_inventory", "sales_open", "venue_changed"]
-
-
-def _critical(lang: str, p: CriticalParams) -> Rendered:
-    ru, en = CRITICAL_CHANGES[p.change]
-    title = esc(p.event_title)
+        return Rendered("Код для сброса PIN-кода", "", OPEN[lang], None, html=text)
     text = (
-        f"<b>{title}</b>: {ru}. Откройте событие, чтобы узнать подробности."
-        if lang == "ru"
-        else f"<b>{title}</b>: {en}. Open the event for details."
+        f"TilHero ota-ona PIN-kodini tiklash kodi: <b>{esc(p.code)}</b>. Uni hech kimga aytmang. "
+        f"{p.ttl_minutes} daqiqa amal qiladi. Yangi PIN-kod 24 soatdan keyin ishlaydi."
     )
-    return Rendered(text, _event_buttons(lang, p.event_id, changes=False))
+    return Rendered("PIN-kodni tiklash kodi", "", OPEN[lang], None, html=text)
 
 
-# ---------------------------------------------------------------- news.digest (спринт 6, §3.3)
-
-_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-# Метки — буквы/цифры/дефис (в т.ч. punycode xn--…); TLD — то же, но не из одних цифр (не IP), напр. xn--p1ai
-_DOMAIN_RE = re.compile(rf"^(?:{_LABEL}\.)+({_LABEL})$")
-DOMAIN_DISPLAY_MAX = 60
+class PinResetScheduledParams(Params):
+    effective_at: datetime
 
 
-def normalize_domain(value: object) -> str | None:
-    """Домен → ASCII-форма (IDNA/punycode, нижний регистр) или None, если домен невалиден. Никогда не падает:
-    кириллица (пример.рф) кодируется в xn--…, мусор → None (домен пропускается, новость остаётся)."""
-    if not isinstance(value, str):
-        return None
-    d = value.strip().lower().rstrip(".")
-    if not d or len(d) > 253:
-        return None
-    if not d.isascii():
-        try:
-            d = d.encode("idna").decode("ascii").lower()
-        except (UnicodeError, ValueError):
-            return None
-    m = _DOMAIN_RE.match(d)
-    if m is None or m.group(1).isdigit() or len(d) > 253:
-        return None
-    return d
-
-
-def _label_script(label: str) -> str | None:
-    """Алфавит метки: latin | cyrillic | "" (только цифры/дефис); смешанная или другой алфавит → None."""
-    scripts = set()
-    for ch in label:
-        if ch.isdigit() or ch == "-":
-            continue
-        name = unicodedata.name(ch, "")
-        if name.startswith("LATIN"):
-            scripts.add("latin")
-        elif name.startswith("CYRILLIC"):
-            scripts.add("cyrillic")
-        else:
-            return None
-    if len(scripts) > 1:
-        return None
-    return scripts.pop() if scripts else ""
-
-
-def display_domain(ascii_domain: str) -> str:
-    """Для показа: punycode → Unicode (xn--p1ai → рф), только если каждая метка целиком латиница или целиком
-    кириллица; смешение алфавитов в метке (аpple.com с кириллической «а») и прочие алфавиты — punycode
-    (защита от подмены похожими буквами). Ошибка декодирования → исходная строка."""
+def _local(dt: datetime, tz: str | None) -> datetime:
     try:
-        shown = ascii_domain.encode("ascii").decode("idna")
-    except (UnicodeError, ValueError):
-        return ascii_domain
-    if not shown or any(_label_script(label) is None for label in shown.split(".")):
-        return ascii_domain
-    return shown
+        zone = ZoneInfo(tz or "Asia/Tashkent")
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = ZoneInfo("Asia/Tashkent")
+    return dt.astimezone(zone)
 
 
-class NewsSource(Params):
-    """Источник новости обязателен (TG-FR-033, AT-33): имя, https-URL и домен; URL — на домене источника или его
-    поддомене. Невалидный домен → источник невалиден (новость в выдачу/дайджест не попадает, AT-33)."""
-
-    name: Annotated[str, Field(min_length=1, max_length=100)]
-    domain: str
-    url: Annotated[str, Field(min_length=12, max_length=500, pattern=r"^https://[^\s<>\"']+$")]
-
-    @field_validator("domain", mode="before")
-    @classmethod
-    def _domain(cls, v: object) -> str:
-        normalized = normalize_domain(v)
-        if normalized is None:
-            raise ValueError("невалидный домен источника")
-        return normalized
-
-    @model_validator(mode="after")
-    def _url_on_domain(self) -> NewsSource:
-        host = normalize_domain(urlsplit(self.url).hostname or "")
-        if host is None or (host != self.domain and not host.endswith("." + self.domain)):
-            raise ValueError("URL источника не на его домене")
-        return self
-
-
-class NewsEntry(Params):
-    news_id: uuid.UUID | None = None
-    title: Title
-    source: NewsSource
-    event_id: uuid.UUID | None = None  # первая привязка (NewsItem.event_ids[0]), если есть
-
-
-class NewsDigestParams(Params):
-    """Новости с невалидным источником (домен, URL не на домене, нет источника) отбрасываются по одной, а не
-    роняют весь пакет; если не осталось ни одной — пакет невалиден (пустое не отправляется)."""
-
-    items: Annotated[list[NewsEntry], Field(min_length=1, max_length=10)]
-
-    @model_validator(mode="before")
-    @classmethod
-    def _drop_unverifiable(cls, data: Any) -> Any:
-        if not isinstance(data, dict) or not isinstance(data.get("items"), list):
-            return data
-        kept = []
-        for raw in data["items"]:
-            try:
-                NewsEntry.model_validate(raw)
-            except ValidationError:
-                continue
-            kept.append(raw)
-        return {**data, "items": kept}
-
-
-def _source_link(source: NewsSource, *, links: bool) -> str:
-    name = esc(source.name)
-    if links:
-        name = f'<a href="{html.escape(source.url, quote=True)}">{name}</a>'
-    shown = display_domain(source.domain)
-    if len(shown) > DOMAIN_DISPLAY_MAX or shown.lower() == source.name.strip().lower():
-        return name
-    return f"{name} ({esc(shown)})"
-
-
-def _news_digest(lang: str, p: NewsDigestParams) -> Rendered:
-    head = (
-        f"Новости по вашим событиям и интересам — {len(p.items)}:"
-        if lang == "ru"
-        else f"News on your events and interests — {len(p.items)}:"
-    )
-
-    def build(links: bool) -> str:
-        lines = [f"• {esc(i.title)} — {_source_link(i.source, links=links)}" for i in p.items]
-        return "\n".join([head, *lines])
-
-    text = build(True)
-    if len(text) > MAX_TEXT:
-        text = build(False)
-    button = [[{"text": "Все новости" if lang == "ru" else "All news", "startapp": "news"}]]
-    return Rendered(text, button)
-
-
-# ---------------------------------------------------------------- digest.daily (спринт 6, §5)
-
-DIGEST_MAX_ITEMS = 10
-DIGEST_TITLE_MAX = 120
-
-
-class DigestWatchItem(Params):
-    event_id: uuid.UUID
-    event_title: Title
-    tier: Literal["economy", "comfort", "premium"]
-    price_usd: Money
-    drop_usd: Money
-
-
-class DigestDailyParams(Params):
-    """Собирается сервисом (digest.py) из digest_queue: снижения цен (watch.price_drop) и новости (news.digest)."""
-
-    date: datetime_date  # локальная дата пользователя (идемпотентность «один дайджест в день»)
-    watch: Annotated[list[DigestWatchItem], Field(max_length=DIGEST_MAX_ITEMS)] = []
-    news: Annotated[list[NewsEntry], Field(max_length=DIGEST_MAX_ITEMS)] = []
-    more: Annotated[int, Field(ge=0, le=10_000)] = 0  # сверх 10 пунктов — «Ещё N — в приложении»
-
-    @model_validator(mode="after")
-    def _not_empty(self) -> DigestDailyParams:
-        total = len(self.watch) + len(self.news)
-        if total == 0:
-            raise ValueError("пустой дайджест не отправляется")
-        if total > DIGEST_MAX_ITEMS:
-            raise ValueError("не больше 10 пунктов")
-        return self
-
-
-def _short(title: str) -> str:
-    return title if len(title) <= DIGEST_TITLE_MAX else title[: DIGEST_TITLE_MAX - 1].rstrip() + "…"
-
-
-def _digest_daily(lang: str, p: DigestDailyParams) -> Rendered:
-    ru = lang == "ru"
-
-    def build(links: bool) -> str:
-        out = ["<b>Дайджест TilHero</b>" if ru else "<b>TilHero digest</b>"]
-        if p.watch:
-            out += ["", "<b>Слежения</b>" if ru else "<b>Watching</b>"]
-            for w in p.watch:
-                per = "на человека" if ru else "per person"
-                out.append(
-                    f"• <b>{esc(_short(w.event_title))}</b>: −{usd(w.drop_usd, lang)} → "
-                    f"{TIERS[w.tier]} {usd(w.price_usd, lang)} {per}"
-                )
-        if p.news:
-            out += ["", "<b>Новости</b>" if ru else "<b>News</b>"]
-            out += [f"• {esc(_short(n.title))} — {_source_link(n.source, links=links)}" for n in p.news]
-        if p.more:
-            out += ["", f"Ещё {p.more} — в приложении." if ru else f"{p.more} more in the app."]
-        return "\n".join(out)
-
-    text = build(True)
-    if len(text) > MAX_TEXT:  # длинные URL источников: имя источника без ссылки (лимит Telegram 4096)
-        text = build(False)
-    buttons: list[list[Button]] = []
-    if len(p.watch) == 1 and not p.news:
-        buttons.append(
-            [{"text": "Открыть событие" if ru else "Open event", "startapp": event_startapp(p.watch[0].event_id)}]
+def _pin_reset_scheduled(lang: Lang, p: PinResetScheduledParams, ctx: Context) -> Rendered:
+    """Ревью T-8: сброс кода родителя через бота вступает в силу через 24 ч; без кода и без PII."""
+    at = _local(p.effective_at, ctx.timezone).strftime("%d.%m %H:%M")
+    if lang == "ru":
+        text = (
+            f"<b>Запрошен сброс кода родителя</b>\nНовый код начнёт действовать {at}. Если это не вы — откройте "
+            "TilHero и введите прежний код: сброс отменится."
         )
-    row: list[Button] = []
-    if p.watch:
-        row.append({"text": "Слежения" if ru else "Watch", "startapp": "watch"})
-    if p.news:
-        row.append({"text": "Все новости" if ru else "All news", "startapp": "news"})
-    buttons.append(row)
-    return Rendered(text, buttons)
+        return Rendered("Запрошен сброс кода родителя", "", OPEN[lang], "route_profile", html=text)
+    text = (
+        f"<b>Ota-ona kodini tiklash soʻraldi</b>\nYangi kod {at} dan amal qiladi. Agar bu siz boʻlmasangiz — "
+        "TilHeroʼni oching va avvalgi kodni kiriting: tiklash bekor qilinadi."
+    )
+    return Rendered("Ota-ona kodini tiklash soʻraldi", "", OPEN[lang], "route_profile", html=text)
 
 
 # ---------------------------------------------------------------- реестр
+
+Category = Literal["reminders", "missed", "social", "support", "product", "service"]
 
 
 @dataclass(frozen=True)
 class TemplateSpec:
     name: str
+    category: Category
     params: type[Params]
-    renderer: Callable[[str, Any], Rendered]
-    # Отправлять даже при выключенных уведомлениях/неактивном статусе (только kind=transactional)
-    bypass_preferences: bool = False
-    # Секрет в параметрах: принимается только синхронным POST /internal/v1/notifications/transactional,
-    # никогда через шину (код не должен лежать в outbox издателя и в JetStream — ревью P2)
+    renderer: Callable[[Lang, Any, Context], Rendered]
+    # Детский вариант (адресат — опекун, имя ребёнка): выбирается при отрисовке, если ученик 6–13
+    kid_variant: str | None = None
+    # Запись видна в центре уведомлений (код PIN — нет)
+    in_app: bool = True
+    # Проверять категорию у ученика (у отклонённого приглашения категория «—», §4)
+    gated: bool = True
+    # Отправлять сразу и мимо настроек/тихих часов/статуса (только kind=transactional)
+    transactional: bool = False
+    # Секрет в параметрах: только синхронный POST /internal/v1/notifications/transactional, никогда через шину
     direct_only: bool = False
-    # kind=digest: пункт копится в digest_queue и уходит в digest.daily (секция «Слежения» / «Новости»)
-    digest_section: Literal["watch", "news"] | None = None
-    # Собирается только самим сервисом (digest.daily) — по шине не принимается
-    internal_only: bool = False
 
     def validate(self, params: dict[str, Any] | None) -> Params:
         try:
@@ -456,30 +408,49 @@ class TemplateSpec:
         except ValidationError as exc:
             raise TemplateError(f"invalid params for {self.name}") from exc
 
-    def render(
-        self, locale: str | None, params: dict[str, Any] | None, startapp: str | None = None
-    ) -> Rendered:
-        lang = lang_of(locale)
-        rendered = self.renderer(lang, self.validate(params))
-        if not rendered.buttons and startapp:
-            return Rendered(
-                rendered.text,
-                [[{"text": "Открыть TilHero" if lang == "ru" else "Open TilHero", "startapp": startapp}]],
-            )
+    def render(self, locale: str | None, params: dict[str, Any] | None, ctx: Context | None = None) -> Rendered:
+        rendered = self.renderer(lang_of(locale), self.validate(params), ctx or Context())
+        if len(rendered.telegram_text()) > MAX_TEXT:
+            raise TemplateError(f"text too long for {self.name}")
         return rendered
 
 
 TEMPLATES: dict[str, TemplateSpec] = {
     spec.name: spec
     for spec in (
-        TemplateSpec("pin.reset_code", PinResetParams, _pin_reset, bypass_preferences=True, direct_only=True),
-        TemplateSpec("support.reply", TicketParams, _support_reply),
-        TemplateSpec("support.resolved", TicketParams, _support_resolved),
-        TemplateSpec("watch.price_drop", PriceDropParams, _price_drop, digest_section="watch"),
-        TemplateSpec("watch.critical", CriticalParams, _critical),
-        TemplateSpec("news.digest", NewsDigestParams, _news_digest, digest_section="news"),
-        TemplateSpec("digest.daily", DigestDailyParams, _digest_daily, internal_only=True),
+        TemplateSpec("lesson.reminder", "reminders", ReminderParams, _reminder, kid_variant="lesson.reminder.kid"),
+        TemplateSpec("lesson.reminder.kid", "reminders", ReminderParams, _reminder_kid),
+        TemplateSpec("lesson.missed", "missed", MissedParams, _missed, kid_variant="lesson.missed.kid"),
+        TemplateSpec("lesson.missed.kid", "missed", MissedParams, _missed_kid),
+        TemplateSpec("lesson.comeback", "missed", ComebackParams, _comeback, kid_variant="lesson.comeback.kid"),
+        TemplateSpec("lesson.comeback.kid", "missed", ComebackParams, _comeback_kid),
+        TemplateSpec("invite.accepted", "social", InviteParams, _invite_accepted),
+        TemplateSpec("invite.declined", "social", InviteParams, _invite_declined, gated=False),
+        TemplateSpec("invite.pending", "social", InviteParams, _invite_pending),
+        TemplateSpec("family.joined", "social", FamilyParams, _family_joined),
+        TemplateSpec("support.reply", "support", TicketParams, _support_reply),
+        TemplateSpec("support.resolved", "support", TicketParams, _support_resolved),
+        TemplateSpec("release_note.published", "product", ReleaseNoteParams, _release_note),
+        TemplateSpec(
+            "pin.reset_scheduled",
+            "service",
+            PinResetScheduledParams,
+            _pin_reset_scheduled,
+            in_app=False,
+            transactional=True,
+            direct_only=True,
+        ),
+        TemplateSpec(
+            "pin.reset_code",
+            "service",
+            PinResetParams,
+            _pin_reset,
+            in_app=False,
+            transactional=True,
+            direct_only=True,
+        ),
     )
 }
 
+KID_TEMPLATES = frozenset(spec.kid_variant for spec in TEMPLATES.values() if spec.kid_variant)
 DIRECT_TEMPLATES = frozenset(name for name, spec in TEMPLATES.items() if spec.direct_only)

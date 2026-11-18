@@ -1,0 +1,37 @@
+/* ==========================================================================
+   Theme «notebook_dark» — the same notebook at night (prototype .app.dark).
+   Applied when Telegram reports colorScheme = "dark" (html[data-scheme="dark"]) or when Remote Experience Config
+   pins theme.id = "notebook_dark" (html[data-theme="notebook_dark"]).
+   ========================================================================== */
+@layer themes {
+  :root[data-scheme="dark"],
+  :root[data-theme="notebook_dark"] {
+    color-scheme: dark;
+    --theme-id: "notebook_dark";
+
+    --paper: #11152B;
+    --grid: #181D3A;
+    --ink: #EEF1FA;
+    --ink2: #B1B8D3;
+    --line: #2A3157;
+    --card: #191E3B;
+    --pen: #8A9DFF;
+    --pen-ink: #0E1330;
+    --pen-soft: #252D5E;
+    --mark: #6E5F0E;
+    --margin: #6E3B4E;
+    --err: #FF8F8F;
+    --err-soft: #3B1F2A;
+    --ok: #63D6A0;
+    --ok-soft: #163427;
+    --warn: #FFC466;
+    --warn-soft: #3A2D12;
+    --scrim: rgba(0, 0, 0, .62);
+
+    --on-err: #2A0D12;
+    --flame: #FF8A3D;
+    --seg-shadow: 0 1px 3px rgba(0, 0, 0, .4);
+    --lift-shadow: 0 1px 0 var(--line), 0 8px 24px rgba(0, 0, 0, .35);
+    --sheet-shadow: 0 -12px 40px rgba(0, 0, 0, .5);
+  }
+}

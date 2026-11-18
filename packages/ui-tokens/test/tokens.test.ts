@@ -11,9 +11,11 @@ const stripComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, 
 const TOKEN_FILES = ["tokens.css", ...readdirSync(join(styles, "themes")).map((f) => `themes/${f}`)];
 const LAYER_FILES = ["base.css", "layout.css", "components.css", "telegram.css"];
 /** Variables written at runtime by the Telegram bridge / app shell, not by CSS. */
-const RUNTIME_VARS = /^--(tg-|u$|ph$|toast-b$)/;
+const RUNTIME_VARS = /^--(tg-|toast-b$)/;
 
 const COLOR_LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla)\(|\b(?:white|black|red|blue|green|yellow|orange|purple|gray|grey)\b(?![-\w])/;
+
+const names = JSON.parse(readFileSync(join(root, "token-names.json"), "utf8")) as { fonts: string[]; tokens: Record<string, string> };
 
 function definedVars(): Set<string> {
   const out = new Set<string>();
@@ -23,12 +25,20 @@ function definedVars(): Set<string> {
   return out;
 }
 
+/** custom properties declared inside the first rule block that matches `selector` */
+function block(css: string, selector: string): string {
+  const i = css.indexOf(selector);
+  if (i < 0) return "";
+  const open = css.indexOf("{", i);
+  const close = css.indexOf("}", open);
+  return css.slice(open + 1, close);
+}
+
 describe("ui-tokens", () => {
   it("has no colour literals outside tokens.css and themes/*", () => {
     for (const f of LAYER_FILES) {
       const lines = stripComments(read(f)).split("\n");
       lines.forEach((line, i) => {
-        // custom-property names such as --c-white are not literals
         const probe = line.replace(/--[a-z0-9-]+/gi, "");
         expect(COLOR_LITERAL.test(probe), `${f}:${i + 1} → ${line.trim()}`).toBe(false);
       });
@@ -52,17 +62,27 @@ describe("ui-tokens", () => {
     for (const f of [...TOKEN_FILES, ...LAYER_FILES]) expect(index).toContain(`@import "./${f}"`);
   });
 
-  it("allowlists only tokens that the default theme or tokens.css defines", () => {
-    const names = JSON.parse(readFileSync(join(root, "token-names.json"), "utf8")) as { tokens: Record<string, string> };
-    const base = stripComments(read("tokens.css") + read("themes/default.css"));
+  it("defines every allow-listed token in the light notebook theme or tokens.css", () => {
+    const base = stripComments(read("tokens.css") + read("themes/notebook.css"));
     for (const [name, kind] of Object.entries(names.tokens)) {
-      expect(["color", "length", "number", "font"]).toContain(kind);
-      expect(base.includes(`${name}:`), `${name} missing from tokens/default theme`).toBe(true);
+      expect(["color", "length", "font"]).toContain(kind);
+      expect(base.includes(`${name}:`), `${name} missing from tokens/notebook theme`).toBe(true);
     }
   });
 
-  it("gives the light scheme and bank theme their own selectors", () => {
-    expect(read("themes/light.css")).toContain(':root[data-scheme="light"]');
-    expect(read("themes/bank.css")).toContain(':root[data-theme="bank"]');
+  it("gives the dark notebook every colour token of the light one", () => {
+    const light = block(stripComments(read("themes/notebook.css")), ":root");
+    const dark = block(stripComments(read("themes/notebook-dark.css")), ':root[data-scheme="dark"]');
+    expect(read("themes/notebook-dark.css")).toContain(':root[data-theme="notebook_dark"]');
+    for (const [name, kind] of Object.entries(names.tokens)) {
+      if (kind !== "color") continue;
+      expect(light.includes(`${name}:`), `${name} in light`).toBe(true);
+      expect(dark.includes(`${name}:`), `${name} in dark`).toBe(true);
+    }
+  });
+
+  it("uses the brand fonts from token-names.json", () => {
+    const tokens = read("tokens.css");
+    for (const f of names.fonts) expect(tokens).toContain(`"${f}"`);
   });
 });

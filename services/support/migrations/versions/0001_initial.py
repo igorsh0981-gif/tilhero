@@ -1,5 +1,7 @@
 """tickets, messages, status_history, escalations, sla_policies (+ seed) + outbox/inbox
 
+Категории — TicketCategory TilHero (bff.ts), типы эскалаций — domain/constants.py ESCALATION_TYPES.
+
 Revision ID: 0001
 Revises:
 Create Date: 2026-10-08
@@ -19,8 +21,8 @@ depends_on = None
 STATUSES = "('NEW','IN_PROGRESS','WAITING_CUSTOMER','RESOLVED','CLOSED')"
 PRIORITIES = "('low','normal','high','urgent')"
 CATEGORIES = (
-    "('EVENT_RECOMMENDATION','TICKET_SOURCE','FLIGHT','HOTEL','PRICE','SUBSCRIPTION_PAYMENT',"
-    "'ACCOUNT','PERSONAL_DATA','BUG','OTHER')"
+    "('LESSON','ASSESSMENT','SCHEDULE_REMINDERS','CHILD_PROFILE','ACCOUNT','SUBSCRIPTION_PAYMENT',"
+    "'PERSONAL_DATA','BUG','OTHER')"
 )
 
 
@@ -132,7 +134,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("ticket_id", "idempotency_key", name="uq_escalations_idempotency"),
         sa.CheckConstraint(
-            "type IN ('billing_review','provider_issue','content_review','security_privacy')",
+            "type IN ('billing_review','assessment_review','content_review','tech_issue','security_privacy')",
             name="ck_escalations_type",
         ),
         sa.CheckConstraint("status IN ('OPEN','DONE')", name="ck_escalations_status"),
@@ -153,8 +155,8 @@ def upgrade() -> None:
             name="ck_sla_minutes",
         ),
     )
-    # Сид: SLA по приоритету для любой категории ('*'). Приоритет по умолчанию: ACCOUNT и PERSONAL_DATA — high,
-    # остальные — normal (код domain/constants.py). urgent — для ручного повышения оператором.
+    # Сид: SLA по приоритету для любой категории ('*'). Приоритет по умолчанию: ACCOUNT, PERSONAL_DATA,
+    # CHILD_PROFILE — high, остальные — normal (код domain/constants.py). urgent — для ручного повышения оператором.
     op.bulk_insert(
         sla,
         [

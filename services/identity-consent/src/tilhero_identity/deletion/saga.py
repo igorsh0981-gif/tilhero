@@ -1,4 +1,4 @@
-"""Чистые правила саги удаления (ADR-009, INTERNAL_API §1.3): статусы, расписание повторов, «зависло», ручной повтор.
+"""Чистые правила саги удаления: статусы, расписание повторов, «зависло».
 
 Без БД, FastAPI и часов: время передаётся параметром, поэтому правила проверяются юнит-тестами.
 
@@ -6,9 +6,9 @@
 только COMPLETED — и только когда подтвердили все домены. Принудительного завершения без ACK нет.
 
 Расписание: точки повтора P_k = requested_at + offset(k), offset — `schedule` минут (15, 60, 240, 720, 1440), дальше —
-каждые TAIL_MINUTES. После любой рассылки (таймер или сотрудник) в момент t следующий повтор — первая точка P_k > t:
-ручной повтор не вызывает «догоняющий» повтор таймера сразу за ним, а простой таймера (рестарт, сбой БД) даёт один
-повтор, а не пачку пропущенных.
+каждые TAIL_MINUTES. После любой рассылки в момент t следующий повтор — первая точка P_k > t:
+повтор не вызывает «догоняющий» повтор сразу за ним, а простой таймера (рестарт, сбой БД) даёт один
+повтор, а не пачку пропущенных. Ручной повтор сотрудником — спринт 2 (админка).
 """
 
 from __future__ import annotations
@@ -29,13 +29,6 @@ MAX_SCHEDULE_MINUTES = 7 * 1440
 
 BY_USER = "user"  # первичная рассылка — запрос пользователя
 BY_SYSTEM = "system"  # повтор по таймеру
-
-# фильтр админ-списка → статусы
-LIST_FILTERS: dict[str, tuple[str, ...]] = {
-    "open": OPEN_STATUSES,
-    "stuck": (STUCK,),
-    "completed": (COMPLETED,),
-}
 
 
 def parse_schedule(raw: str | Iterable[int]) -> tuple[int, ...]:
@@ -98,14 +91,7 @@ def all_acked(expected: Sequence[str], acked: Iterable[str]) -> bool:
     return not pending_domains(expected, acked)
 
 
-def manual_retry_wait(last_sent_at: datetime | None, now: datetime, min_seconds: int) -> int:
-    """Сколько секунд ждать до ручного повтора (0 — можно сейчас). Округление вверх: «повторите через N с»."""
-    if last_sent_at is None or min_seconds <= 0:
-        return 0
-    left = (last_sent_at + timedelta(seconds=min_seconds) - now).total_seconds()
-    return max(0, math.ceil(left))
-
 
 def can_retry(status: str) -> bool:
-    """Повтор (таймер или сотрудник) — только для открытого запроса."""
+    """Повтор — только для открытого запроса."""
     return status in OPEN_STATUSES

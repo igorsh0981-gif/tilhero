@@ -7,5 +7,5 @@ export const env = {
   /** Dev fallback outside Telegram. Production builds never read it (see tg/boot.ts). */
   devInitData: import.meta.env.DEV ? (import.meta.env.VITE_DEV_INIT_DATA ?? "") : "",
   isDev: import.meta.env.DEV,
-  clientVersion: "telegram-miniapp-2.0",
+  clientVersion: "telegram-miniapp-1.0",
 } as const;

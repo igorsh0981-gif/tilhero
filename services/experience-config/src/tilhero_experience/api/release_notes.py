@@ -1,29 +1,32 @@
-"""«Что нового» (доработка 9.4): staff API заметок о релизах (admin-bff) и лента опубликованных (telegram-bff).
+"""«Что нового»: staff API заметок (admin-bff, спринт 2) и ученический API (telegram-bff): for-me, seen, feed.
 
-Права — те же, что у конфигурации интерфейса: config.read — список и карточка, config.edit — черновик (создать,
-изменить), config.publish — опубликовать и архивировать. Команды принимают Idempotency-Key (как активация версии).
+Права сотрудника — те же, что у конфигурации интерфейса: config.read — список и карточка, config.edit — черновик
+(создать, изменить), config.publish — опубликовать и снять (архив). Команды принимают Idempotency-Key.
+Ученик — только из `sub` внутреннего токена (активный ученик, CONVENTIONS §8): чужие отметки недоступны по построению.
 """
 
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from tilhero_common.app import Runtime, get_runtime
-from tilhero_common.errors import bad_request
+from tilhero_common.errors import bad_request, unauthorized
 from tilhero_common.internal_auth import InternalAuth, Principal
 from tilhero_experience.api.common import idempotent
 from tilhero_experience.domain import release_notes as rn
 from tilhero_experience.models import ReleaseNote
+from tilhero_experience.schemas import SeenIn, WhatsNewOut, WhatsNewPage
 
 staff_router = APIRouter(prefix="/admin/v1/release-notes", tags=["staff"])
 internal_router = APIRouter(prefix="/internal/v1/release-notes", tags=["internal"])
 staff = InternalAuth({"admin-bff"})
-readers = InternalAuth({"telegram-bff"})
+learners = InternalAuth({"telegram-bff"})
 
 READ, EDIT, PUBLISH = "config.read", "config.edit", "config.publish"
 IdempotencyKey = Header(default=None, alias="Idempotency-Key", min_length=8, max_length=128,
@@ -55,6 +58,14 @@ def _cursor(cursor: str | None) -> int | None:
         return rn.decode_cursor(cursor)
     except Exception as exc:
         raise bad_request("INVALID_CURSOR", "Некорректный курсор") from exc
+
+
+def learner_id(principal: Principal) -> uuid.UUID:
+    """Ученик — только из sub токена (защита от IDOR)."""
+    try:
+        return uuid.UUID(principal.user_id)
+    except ValueError as exc:
+        raise unauthorized("USER_CONTEXT_INVALID", "Некорректный контекст пользователя") from exc
 
 
 async def _load(rt: Runtime, note_id: uuid.UUID) -> ReleaseNote:
@@ -93,7 +104,9 @@ async def get_note(note_id: uuid.UUID, principal: Principal = Depends(staff),
     return rn.staff_view(await _load(rt, note_id))
 
 
-@staff_router.post("", status_code=201, responses={409: {"description": "RELEASE_NOTE_SLUG_EXISTS"}})
+@staff_router.post("", status_code=201,
+                   responses={409: {"description": "RELEASE_NOTE_SLUG_EXISTS"},
+                              422: {"description": "RELEASE_NOTE_TRANSLATION_MISSING {missing}"}})
 async def create_note(body: rn.NoteContent, principal: Principal = Depends(staff),
                       rt: Runtime = Depends(get_runtime),
                       idempotency_key: str | None = IdempotencyKey) -> JSONResponse:
@@ -121,7 +134,8 @@ async def update_note(note_id: uuid.UUID, body: UpdateIn, principal: Principal =
 
 @staff_router.post("/{note_id}/publish", status_code=201,
                    responses={200: {"description": "уже опубликована — no-op"},
-                              409: {"description": "RELEASE_NOTE_NOT_DRAFT | RELEASE_NOTE_VERSION_CONFLICT"}})
+                              409: {"description": "RELEASE_NOTE_NOT_DRAFT | RELEASE_NOTE_VERSION_CONFLICT"},
+                              422: {"description": "RELEASE_NOTE_TRANSLATION_MISSING {missing}"}})
 async def publish_note(note_id: uuid.UUID, body: PublishIn, principal: Principal = Depends(staff),
                        rt: Runtime = Depends(get_runtime),
                        idempotency_key: str | None = IdempotencyKey) -> JSONResponse:
@@ -153,15 +167,35 @@ async def archive_note(note_id: uuid.UUID, body: ArchiveIn, principal: Principal
                             request=body.model_dump(), run=run)
 
 
-# ---------------------------------------------------------------- internal (telegram-bff)
+# ---------------------------------------------------------------- ученик (telegram-bff)
 
 
-@internal_router.get("/published")
-async def published(_: Principal = Depends(readers), rt: Runtime = Depends(get_runtime),
-                    limit: int = Query(default=10, ge=1, le=rn.PUBLISHED_FEED_MAX)) -> dict:
-    """Опубликованные заметки, новые первыми (без сотрудников и черновиков). Отбор «непросмотренных» делает BFF."""
-    stmt = (select(ReleaseNote).where(ReleaseNote.status == "published")
-            .order_by(ReleaseNote.published_at.desc(), ReleaseNote.seq.desc()).limit(limit))
+@internal_router.get("/for-me", response_model=WhatsNewOut, responses={410: {"description": "USER_DELETED"}})
+async def for_me(principal: Principal = Depends(learners), rt: Runtime = Depends(get_runtime),
+                 onboarded_at: datetime | None = Query(default=None, description="ISO-8601; нет — онбординг не прошёл"),
+                 lang: rn.UiLang = Query(), age: rn.AgeSegment = Query()) -> dict:
+    """WhatsNew: welcome (знакомство после первой регистрации) | updates (непросмотренное) | none."""
+    user_id = learner_id(principal)
+    if onboarded_at is not None and onboarded_at.tzinfo is None:
+        onboarded_at = onboarded_at.replace(tzinfo=UTC)
     async with rt.transaction() as session:
-        rows = (await session.execute(stmt)).scalars().all()
-    return {"items": [rn.public_view(n) for n in rows]}
+        return await rn.for_me(session, user_id, onboarded_at=onboarded_at, lang=lang, age=age)
+
+
+@internal_router.post("/seen", status_code=204, responses={410: {"description": "USER_DELETED"}})
+async def seen(body: SeenIn, principal: Principal = Depends(learners), rt: Runtime = Depends(get_runtime)) -> Response:
+    """Отметить показанные заметки просмотренными: идемпотентно, неизвестный id игнорируется."""
+    user_id = learner_id(principal)
+    async with rt.transaction() as session:
+        await rn.mark_seen(session, user_id, body.release_note_ids)
+    return Response(status_code=204)
+
+
+@internal_router.get("/feed", response_model=WhatsNewPage)
+async def feed(_: Principal = Depends(learners), rt: Runtime = Depends(get_runtime),
+               lang: rn.UiLang = Query(), age: rn.AgeSegment = Query(),
+               limit: int = Query(default=20, ge=1, le=100),
+               cursor: str | None = Query(default=None, max_length=200)) -> dict:
+    """Лента «Новости»: все опубликованные заметки для сегмента ученика (Page<WhatsNewNote>)."""
+    async with rt.transaction() as session:
+        return await rn.feed(session, lang=lang, age=age, limit=limit, cursor=cursor)

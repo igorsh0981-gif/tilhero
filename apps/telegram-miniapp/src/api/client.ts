@@ -3,7 +3,7 @@ import { ApiError, BUSINESS_401 } from "./errors";
 import { parseRetryAfter, rateLimits } from "./rateLimit";
 
 export interface ClientHooks {
-  /** 423 PIN_REQUIRED: the session is limited until the PIN / biometrics are confirmed → lock screen. */
+  /** 423 PIN_REQUIRED: the session is limited until the parent PIN is confirmed → lock screen. */
   onPinRequired?(err: ApiError): void;
   /** Refresh and re-login failed: the user must reopen the Mini App. */
   onSessionLost?(err: ApiError): void;
@@ -19,10 +19,12 @@ export interface RequestOptions {
   /** default true: send the bearer token and refresh it on 401 */
   auth?: boolean;
   idempotencyKey?: string;
+  /** extra request headers (If-Match for the learning plan) */
+  headers?: Record<string, string>;
   signal?: AbortSignal;
   /** internal: this request is itself a session-issuing call (must not wait for itself) */
   issuing?: boolean;
-  /** 9.4: background request (e.g. «Что нового») — its failure never toggles the «Нет связи» banner */
+  /** background request (e.g. «Что нового», unread counter) — its failure never toggles the «Нет связи» banner */
   quiet?: boolean;
 }
 
@@ -31,7 +33,7 @@ type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 const RT_KEY = "tilhero.rt";
 /** The launch the stored refresh token belongs to: `hash` of that launch's initData (lower case). A reload of the same
  *  launch brings the same initData; a new launch — Telegram Web / Desktop may keep the tab's sessionStorage — brings a
- *  new one, and then the stored session must not be continued (it would skip the PIN; review of sprint 9, FRONT-2). */
+ *  new one, and then the stored session must not be continued (it would skip the parent PIN). */
 const RT_LAUNCH_KEY = "tilhero.rt.launch";
 
 function launchId(initData: string | null): string | null {
@@ -59,6 +61,8 @@ export interface ClientOptions {
   storage?: StorageLike | null;
   hooks?: ClientHooks;
   lang?: () => string;
+  /** IANA zone of the device → X-Timezone on every request: the BFF creates a default plan in this zone (QA D-03) */
+  timezone?: () => string;
   now?: () => number;
 }
 
@@ -74,7 +78,7 @@ export class ApiClient {
   private refreshing: Promise<ApiError | null> | null = null;
   /** Bumped on every accepted session: a refresh that started before a PIN verify must not override it. */
   private generation = 0;
-  /** Session-issuing calls in flight (PIN / biometric verify, PIN reset): proactive refresh waits. */
+  /** Session-issuing calls in flight (PIN verify, learner switch): proactive refresh waits. */
   private issuing = 0;
   private issuingP: Promise<unknown> | null = null;
   private readonly fetchImpl: typeof fetch;
@@ -93,7 +97,7 @@ export class ApiClient {
     return !!this.access;
   }
 
-  /** POST /v1/session/telegram — initData is validated only on the server (TG-FR-001). */
+  /** POST /v1/session/telegram — initData is validated only on the server (APP-AUTH-01). */
   async startSession(initData: string): Promise<SessionResponse> {
     this.initData = initData;
     const s = await this.raw<SessionResponse>("POST", "/v1/session/telegram", { body: { init_data: initData }, auth: false });
@@ -102,7 +106,7 @@ export class ApiClient {
   }
 
   /**
-   * Boot. Sprint 9: initData is one-time on the server (401 INIT_DATA_REPLAYED). A reload of the same launch (Telegram
+   * Boot. initData is one-time on the server (401 INIT_DATA_REPLAYED). A reload of the same launch (Telegram
    * «Reload page», the webview restoring the page) brings the same initData, so the session of this launch is continued
    * with its refresh token (sessionStorage survives a reload). Only when the stored token belongs to this very launch
    * (the same initData `hash`): a new launch in a tab that kept sessionStorage (Telegram Web / Desktop) signs in with
@@ -114,6 +118,10 @@ export class ApiClient {
     if (this.booting && this.booting.initData === initData) return this.booting.p;
     const p = this.doResume(initData);
     this.booting = { initData, p };
+    // a failed boot (no network) may be retried by the user: forget it
+    p.catch(() => {
+      if (this.booting?.p === p) this.booting = null;
+    });
     return p;
   }
   private booting: { initData: string; p: Promise<SessionResponse> } | null = null;
@@ -182,7 +190,7 @@ export class ApiClient {
       return await this.raw<T>(method, path, opts);
     } catch (e) {
       if (!(e instanceof ApiError) || !auth || e.status !== 401 || BUSINESS_401.has(e.code)) throw e;
-      // A PIN verify / reset in flight is about to replace the tokens: wait for it instead of refreshing.
+      // A PIN verify / learner switch in flight is about to replace the tokens: wait for it instead of refreshing.
       const gen = this.generation;
       if (this.issuingP && !opts.issuing) await this.issuingP.catch(() => null);
       if (this.generation !== gen) return this.raw<T>(method, path, opts);
@@ -193,30 +201,6 @@ export class ApiClient {
         throw lost;
       }
       return this.raw<T>(method, path, opts);
-    }
-  }
-
-  /**
-   * Sprint 7 (AI concierge, SSE): the same call as `request` (auth, refresh on 401, error bodies → ApiError) but the
-   * successful Response is returned unread — the caller reads the `text/event-stream` body itself. `accept` picks the
-   * stream or the fallback JSON answer of the same endpoint.
-   */
-  async open(method: string, path: string, opts: RequestOptions & { accept: string }): Promise<Response> {
-    const auth = opts.auth !== false;
-    if (auth && this.access && !this.issuing && this.now() > this.accessExp - 20_000) await this.refreshOnce().catch(() => null);
-    try {
-      return await this.send(method, path, opts, opts.accept);
-    } catch (e) {
-      if (!(e instanceof ApiError) || !auth || e.status !== 401 || BUSINESS_401.has(e.code)) throw e;
-      const gen = this.generation;
-      if (this.issuingP) await this.issuingP.catch(() => null);
-      if (this.generation !== gen) return this.send(method, path, opts, opts.accept);
-      const lost = await this.refreshOnce(e.code === "SESSION_REVOKED");
-      if (lost) {
-        this.hooks.onSessionLost?.(lost);
-        throw lost;
-      }
-      return this.send(method, path, opts, opts.accept);
     }
   }
 
@@ -236,7 +220,7 @@ export class ApiClient {
   }
 
   /**
-   * Calls that issue a new session (POST /v1/session/pin/verify, /biometric/verify, PIN reset-confirm).
+   * Calls that issue a new session (POST /v1/session/pin/verify, POST /v1/session/learner).
    * The BFF reissues tokens and deletes the old refresh token, so they are serialised with refresh: wait for a
    * refresh in flight, block the proactive one meanwhile, and accept the returned session.
    */
@@ -257,8 +241,8 @@ export class ApiClient {
   }
 
   private async doRefresh(revoked: boolean): Promise<ApiError | null> {
-    // A session accepted while this refresh is in flight (PIN verify / reset) supersedes it: its 401 or its
-    // result is stale, and the new refresh token must not be removed (review 🟡-8: lock right after unlock).
+    // A session accepted while this refresh is in flight (PIN verify, learner switch) supersedes it: its 401
+    // or its result is stale, and the new refresh token must not be removed.
     const gen = this.generation;
     const superseded = () => this.generation !== gen;
     let lost = new ApiError(401, "REFRESH_INVALID", "no refresh token");
@@ -322,12 +306,16 @@ export class ApiClient {
 
   /** One HTTP call: a successful Response (unread), or ApiError for the error body / the network. */
   private async send(method: string, path: string, opts: RequestOptions, accept: string): Promise<Response> {
-    const headers: Record<string, string> = { Accept: accept };
+    const headers: Record<string, string> = { ...(opts.headers ?? {}), Accept: accept };
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (opts.auth !== false && this.access) headers.Authorization = `Bearer ${this.access}`;
     if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
     const lang = this.opts.lang?.();
     if (lang) headers["Accept-Language"] = lang;
+    // the zone matters where the BFF reads a plan (signed-in calls and the session ones); public GETs stay simple
+    // requests (no CORS preflight for the policy, the interface config, a guardian link preview)
+    const tz = opts.auth !== false || path.startsWith("/v1/session/") ? this.opts.timezone?.() : undefined;
+    if (tz) headers["X-Timezone"] = tz;
 
     let res: Response;
     try {
@@ -357,14 +345,14 @@ export class ApiClient {
       body = null;
     }
     let err = ApiError.fromBody(res.status, body as Record<string, unknown> | null);
-    // sprint 9: the wait of a 429 (and a 503 with Retry-After) from the header when the body does not carry it
+    // the wait of a 429 (and a 503 with Retry-After) from the header when the body does not carry it
     if ((res.status === 429 || res.status === 503) && err.retryAfter == null) {
       const ra = parseRetryAfter(res.headers.get("Retry-After"));
       if (ra != null) err = new ApiError(err.status, err.code, err.message, { ...err.details, retry_after: ra }, err.traceId);
     }
     if (err.code === "RATE_LIMITED") rateLimits.note(err);
-    // 502–504 → «Нет связи». Исключение — бизнес-503 BFF о конкретном домене (каталог событий недоступен):
-    // сам BFF отвечает, экран показывает своё состояние с повтором, а не глобальный баннер.
+    // 502–504 → «Нет связи». Exception: a business 503 of the BFF about one domain (UPSTREAM_UNAVAILABLE {service}) —
+    // the BFF itself answers, the screen shows its own state with «Повторить», not the global banner.
     if (!opts.quiet) this.hooks.onConnectivity?.(!(res.status >= 502 && res.status <= 504) || REACHABLE_503.has(err.code));
     if (res.status === 423 && err.code === "PIN_REQUIRED") this.hooks.onPinRequired?.(err);
     throw err;
@@ -372,7 +360,7 @@ export class ApiClient {
 }
 
 /** 503 codes that mean «BFF is reachable, one domain is down» — no connectivity banner. */
-const REACHABLE_503: ReadonlySet<string> = new Set(["EVENTS_UNAVAILABLE", "OFFERS_UNAVAILABLE", "AI_PROVIDER_UNAVAILABLE", "AI_BUSY", "FEATURE_UNAVAILABLE", "RATE_LIMIT_UNAVAILABLE"]);
+const REACHABLE_503: ReadonlySet<string> = new Set(["UPSTREAM_UNAVAILABLE", "RATE_LIMIT_UNAVAILABLE"]);
 
 /** Idempotency-Key for creating commands (one per draft, reused on retries). */
 export function newIdempotencyKey(): string {

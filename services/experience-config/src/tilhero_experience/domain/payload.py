@@ -1,9 +1,9 @@
 """Строгая схема payload версии конфигурации.
 
 miniapp — форма ExperienceConfig из packages/contracts/src/bff.ts без app/version (их добавляет сервис):
-  theme {id, version, tokens}, home {welcome_mode, sections[]}, flags {name: bool}, hotel_rating_min.
-admin — форма для Admin UI (ТЗ Admin §7: токены темы, порядок/видимость виджетов дашборда, пресеты колонок,
-флаги); контракт admin-bff появится в спринте 2, форма расширяема новой версией схемы.
+  theme {id: notebook | notebook_dark, version, tokens}, home {sections[]}, flags {name: bool}.
+admin — форма для админки TilHero (прототип Admin.dc.html: тема, плотность, порядок и видимость разделов меню, флаги);
+контракт admin-bff появится в спринте 2, форма расширяема новой версией схемы.
 
 Любое отклонение → ConfigInvalid(path, reason) → 422 EXPERIENCE_CONFIG_INVALID {path, reason, errors}.
 """
@@ -16,13 +16,7 @@ from typing import Annotated, Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
-from tilhero_experience.domain.tokens import (
-    ADMIN_TOKENS,
-    MINIAPP_TOKENS,
-    TokenError,
-    TokenSpec,
-    validate_token,
-)
+from tilhero_experience.domain.tokens import ADMIN_TOKENS, MINIAPP_TOKENS, TokenError, TokenSpec, validate_token
 
 App = Literal["miniapp", "admin"]
 APPS: Final[tuple[str, ...]] = ("miniapp", "admin")
@@ -30,12 +24,15 @@ SEMVER = r"^(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})\.(0|[1-9]\d{0,3})$"
 MAX_PAYLOAD_BYTES = 32 * 1024
 MAX_ERRORS = 20
 
-SectionType = Literal["event_carousel", "watch_changes", "news_carousel", "ai_summary", "catalog_link"]
+# bff.ts HomeSectionType: план на сегодня, урок дня, повторение, «Что нового», семья, новости
+SECTION_TYPES: Final[tuple[str, ...]] = ("today_plan", "lesson_of_day", "review", "whats_new", "family", "news")
+SectionType = Literal["today_plan", "lesson_of_day", "review", "whats_new", "family", "news"]
 FlagName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,63}$")]
 TokenName = Annotated[str, StringConstraints(max_length=64)]
-DASHBOARD_WIDGETS: Final[tuple[str, ...]] = (
-    "kpi_users", "kpi_ai", "kpi_support", "kpi_system", "kpi_commerce", "budget", "hourly", "cost_agents",
-    "dau", "agents_table",
+# Разделы меню админки TilHero (прототип Admin.dc.html, NAV) — порядок и видимость; права проверяет admin-bff
+ADMIN_MENU: Final[tuple[str, ...]] = (
+    "overview", "users", "content", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config",
+    "langs", "roles", "audit",
 )
 _STRICT = ConfigDict(extra="forbid", strict=True)
 
@@ -45,16 +42,16 @@ class Theme(BaseModel):
 
     id: str  # уточняется в теме приложения
     version: str = Field(pattern=SEMVER)
-    tokens: dict[TokenName, str] = Field(max_length=150)
+    tokens: dict[TokenName, str] = Field(max_length=60)
 
 
 class MiniAppTheme(Theme):
-    # Базовые темы — CSS-файлы Mini App (ТЗ UI/CSS §2: themes/default.css, bank.css); новая тема требует кода.
-    id: Literal["default", "bank"]
+    # Темы — CSS-слои Mini App (визуальный язык «Тетрадь»: светлая и тёмная); новая тема требует кода.
+    id: Literal["notebook", "notebook_dark"]
 
 
 class AdminTheme(Theme):
-    id: Literal["default", "high_contrast"]  # варианты темы прототипа Admin
+    id: Literal["admin_light"]
 
 
 class Section(BaseModel):
@@ -69,8 +66,7 @@ class Section(BaseModel):
 class Home(BaseModel):
     model_config = _STRICT
 
-    welcome_mode: Literal["first_visit_only", "always", "never"]
-    sections: list[Section] = Field(min_length=1, max_length=20)
+    sections: list[Section] = Field(min_length=1, max_length=len(SECTION_TYPES))
 
 
 class MiniAppPayload(BaseModel):
@@ -79,29 +75,20 @@ class MiniAppPayload(BaseModel):
     theme: MiniAppTheme
     home: Home
     flags: dict[FlagName, bool] = Field(max_length=50)
-    hotel_rating_min: float = Field(ge=7.0, le=10.0)
 
 
-class AdminWidget(BaseModel):
+class AdminMenuItem(BaseModel):
     model_config = _STRICT
 
-    id: Literal[DASHBOARD_WIDGETS]  # type: ignore[valid-type]
+    id: Literal[ADMIN_MENU]  # type: ignore[valid-type]
     enabled: bool
-
-
-class AdminTablePresets(BaseModel):
-    model_config = _STRICT
-
-    users: Literal["support", "analytics"]
-    audit: Literal["security", "full"]
 
 
 class AdminLayout(BaseModel):
     model_config = _STRICT
 
     density: Literal["compact", "comfortable"]
-    table_presets: AdminTablePresets
-    dashboard_widgets: list[AdminWidget] = Field(min_length=1, max_length=len(DASHBOARD_WIDGETS))
+    menu: list[AdminMenuItem] = Field(min_length=1, max_length=len(ADMIN_MENU))
 
 
 class AdminPayload(BaseModel):
@@ -171,6 +158,16 @@ def checksum(payload: dict[str, Any]) -> str:
     return hashlib.sha256(canonical(payload).encode("utf-8")).hexdigest()
 
 
+def _duplicates(values: list[str], path: str) -> list[dict[str, str]]:
+    seen: set[str] = set()
+    errors: list[dict[str, str]] = []
+    for i, value in enumerate(values):
+        if value in seen:
+            errors.append({"path": path.format(i=i), "reason": "duplicate"})
+        seen.add(value)
+    return errors
+
+
 def validate_payload(app: str, raw: Any) -> dict[str, Any]:
     """Нормализованный payload (model_dump) или ConfigInvalid со всеми найденными ошибками."""
     if not isinstance(raw, dict):
@@ -191,17 +188,11 @@ def validate_payload(app: str, raw: Any) -> dict[str, Any]:
         except TokenError as exc:
             errors.append({"path": f"payload.theme.tokens.{name}", "reason": exc.reason})
     if isinstance(model, MiniAppPayload):
-        seen: set[str] = set()
-        for i, section in enumerate(model.home.sections):
-            if section.key in seen:
-                errors.append({"path": f"payload.home.sections[{i}].key", "reason": "duplicate"})
-            seen.add(section.key)
+        # одна секция каждого типа: Mini App рисует план, урок дня, повторение… по одному разу
+        errors += _duplicates([s.type for s in model.home.sections], "payload.home.sections[{i}].type")
+        errors += _duplicates([s.key for s in model.home.sections], "payload.home.sections[{i}].key")
     elif isinstance(model, AdminPayload):
-        seen_w: set[str] = set()
-        for i, widget in enumerate(model.layout.dashboard_widgets):
-            if widget.id in seen_w:
-                errors.append({"path": f"payload.layout.dashboard_widgets[{i}].id", "reason": "duplicate"})
-            seen_w.add(widget.id)
+        errors += _duplicates([m.id for m in model.layout.menu], "payload.layout.menu[{i}].id")
     if errors:
         raise ConfigInvalid(errors)
     return model.model_dump(mode="json")
