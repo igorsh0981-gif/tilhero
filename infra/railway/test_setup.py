@@ -65,6 +65,7 @@ def test_scheduler_and_service_specific_secrets():
     assert gw["MINIAPP_URL"].startswith("https://") and "localhost" not in gw["MINIAPP_URL"]
     n8n = env_of(files, "n8n")
     assert {k for k in n8n if k.endswith("_URL")} == {"LEARNING_PLAN_URL", "NOTIFICATIONS_URL", "SOCIAL_URL"}
+    assert n8n["RAILWAY_RUN_UID"] == "0" and len(n8n["N8N_ENCRYPTION_KEY"]) >= 32
 
 
 def test_db_passwords_cover_every_role_and_secrets_are_unique():
@@ -74,7 +75,7 @@ def test_db_passwords_cover_every_role_and_secrets_are_unique():
     schemas = {s.schema for s in rs.SERVICES if s.schema}
     assert set(roles) == schemas | {f"{x}_owner" for x in schemas}
     assert all(f"'{x}'" in bootstrap for x in schemas)
-    values = [*sec.passwords.values(), sec.scheduler, sec.session_jwt, sec.invite_key, sec.webhook]
+    values = [*sec.passwords.values(), sec.scheduler, sec.session_jwt, sec.invite_key, sec.webhook, sec.internal_hmac, sec.n8n_key]
     assert len(values) == len(set(values))
 
 
@@ -92,3 +93,18 @@ def test_main_writes_files_privately_and_refuses_non_empty_dir(tmp_path, capsys)
 def test_rejects_bad_bot_username(bad):
     with pytest.raises(ValueError):
         rs.build(rs.Secrets.new(), env="prod", bot_username=bad, app_name="app")
+
+
+def test_dockerfile_path_bot_token_reference_and_miniapp_build_args():
+    sec, files = build()
+    for s in rs.SERVICES:
+        e = env_of(files, s.name)
+        assert e["RAILWAY_DOCKERFILE_PATH"] == s.dockerfile
+        if s.schema or s.name == "telegram-bot-gateway":
+            assert len(e["INTERNAL_JWT_SECRET"]) >= 32 and e["INTERNAL_JWT_SECRET"] == sec.internal_hmac
+    for name in ("telegram-bff", "telegram-bot-gateway"):
+        assert env_of(files, name)["BOT_TOKEN"] == "${{shared.BOT_TOKEN}}"  # noqa: S105 — ссылка Railway, не секрет
+    app = env_of(files, "telegram-miniapp")
+    assert app["VITE_BFF_URL"] == "https://${{telegram-bff.RAILWAY_PUBLIC_DOMAIN}}"
+    assert app["VITE_BOT_USERNAME"] == "TilHeroBot"
+    assert sec.internal_hmac != sec.session_jwt

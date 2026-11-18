@@ -1,12 +1,20 @@
 # Деплой TilHero на Railway
 
+## Prod (развёрнут 18.11.2026)
+Проект Railway **TilHero**, окружение `production`, регион `europe-west4` (ближе к Узбекистану и серверам Telegram).
+- Mini App: https://telegram-miniapp-production-c38e67a1.up.railway.app — зарегистрирован в @BotFather `/newapp` с short name `TilHero`.
+- BFF: https://telegram-bff-production-76baa800.up.railway.app; webhook бота: https://telegram-bot-gateway-production-c5712e9c.up.railway.app/telegram/webhook.
+- Бот: @TilHero_bot; ссылки `https://t.me/TilHero_bot/TilHero?startapp=…` (`TELEGRAM_APP_LINK` у social, telegram-bff, telegram-bot-gateway).
+- `BOT_TOKEN` — общая переменная проекта (Project Settings → Shared Variables), её вводит владелец; сервисы ссылаются `${{shared.BOT_TOKEN}}`.
+- Роли и схемы БД созданы разовым сервисом `db-bootstrap` (образ `postgres:18-alpine`, `psql` с `infra/db/bootstrap.sql` и паролями из `setup.py`); после `BOOTSTRAP_OK` в логе сервис удаляется вместе с переменными.
+
 Одна среда Railway = один проект: `stage` и `prod` — разные проекты с одинаковым набором сервисов. Код приходит из GitHub (`igorsh0981-gif/tilhero`), ветка `main` — только через PR с зелёным CI.
 
 ## 1. Подготовка (один раз на среду)
 1. В @BotFather: бот (токен) и Mini App с short name (ссылка `t.me/<bot>/<app>`).
 2. Сгенерировать переменные (секреты остаются только в файлах `.dev/`, в git не попадают):
    ```bash
-   uv run python infra/railway/setup.py --out .dev/railway-prod --env prod --bot-username <bot> --app-name <app>
+   uv run python infra/railway/setup.py --out .dev/railway-prod --env prod --bot-username TilHero_bot --app-name TilHero
    ```
    В каталоге: `<service>.env` для каждого сервиса, `db-passwords.sql`, `services.md` (Dockerfile, публичный домен, Pre-Deploy Command, healthcheck).
 3. Railway: создать Postgres и Redis (шаблоны), `nats` (образ `nats:2.11-alpine`, команда `-js -sd /data`, том `/data`).
