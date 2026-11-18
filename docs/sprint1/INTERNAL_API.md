@@ -186,3 +186,10 @@
 - Потребители `user.deletion.requested.v1` принимают событие только от identity-consent (P-7). `SCHEDULER_TOKEN` в stage/prod — не короче 32 символов (P-8). bot-gateway: `MINIAPP_URL` в stage/prod обязателен и не localhost (P-12).
 - BFF: `GET /v1/plan?tz=` передаётся в learning-plan, план при входе не создаётся без зоны клиента (QA D-03, T-2); в детском профиле `POST/DELETE /v1/profile/consent` → 403 `ADULT_REQUIRED` (T-5); 401 доменов не выдаются клиенту как 401 сессии (T-4).
 - Mini App: экран «Код родителя» в профиле взрослого и предложение задать код при создании первого детского профиля (T-1); время занятия детского профиля — только в окне 08:00–19:30 с пояснением (QA D-04); перевод кодов ошибок доменов (T-3); текст `already_member` (T-7).
+
+**Уточнения после исправлений.**
+- identity-consent: действующее согласие — одно на ученика и основание (`self` | `guardian`); у подростка одновременно своё согласие и согласие родителя. `guardian_consent_requests` дополнительно хранит `consent_id` и `revoked_at`. Отзыв родителем снимает у подростка только необязательные цели — обучение и напоминания продолжаются. Список решений родителя — до 100 записей.
+- learning-plan: ответ `plan:tick` — `{plans_checked, reminders, missed, skipped}`; блокировка повторов — сессионная `pg_try_advisory_lock` на выделенном соединении.
+- social: create/accept без согласия с политикой → `CONSENT_REQUIRED {purpose: "terms"}`, без цели social → `{purpose: "social"}`; open/preview/decline требуют согласия с политикой; `can_accept` в карточке цель social не учитывает (кнопка ведёт к шторке разрешения). Напоминание о приглашении — только при `consent_accepted` и возможности принять.
+- telegram-bff: язык «Что нового» и ленты — `locale` аккаунта; заголовок `X-Timezone` (bff.ts); 401 доменов (кроме `PIN_INVALID`, `BIOMETRIC_INVALID`, `RESET_CODE_INVALID`) → 503; в детском профиле `PUT /v1/profile/age` → 403 `ADULT_REQUIRED`.
+- Техдолг спринта 2 (`tilhero_common`): пакетная запись outbox, проверка издателя удаления, проверка `SCHEDULER_TOKEN`, `Idempotency-Key`; learning-plan — чтение плана без создания; типы биометрии в bff.ts.

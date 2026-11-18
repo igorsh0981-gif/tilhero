@@ -10,6 +10,9 @@
  * относятся к активному ученику; аккаунтные (/v1/profile/age, /consent, /learners, /invites, /family, /delete-request)
  * — к аккаунту. Переключение ученика — POST /v1/session/learner (для детского профиля нужен код родителя, если задан).
  *
+ * Заголовок X-Timezone: <IANA> (необязательный) — зона устройства; BFF передаёт её в learning-plan как ?tz= при
+ * создании плана по умолчанию. У GET /v1/plan?tz= параметр запроса важнее заголовка.
+ *
  * Общие коды ошибок BFF:
  *  - 401 UNAUTHORIZED | TOKEN_INVALID | TOKEN_EXPIRED (→ POST /v1/session/refresh; {reason: "learner_switched"} —
  *    ученик переключён в другой вкладке) | SESSION_REVOKED;
