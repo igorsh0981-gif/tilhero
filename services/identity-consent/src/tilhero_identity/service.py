@@ -64,6 +64,7 @@ from tilhero_identity.models import (
     DeletionRequest,
     GuardianConsentRequest,
     GuardianLink,
+    LearnerActivity,
     PinCredential,
     User,
 )
@@ -282,6 +283,8 @@ class IdentityService:
         self.rt = runtime
         self.settings: Settings = runtime.settings  # type: ignore[assignment]
         self._locked_users: list[uuid.UUID] = []  # pin_locked — опубликовать после отката основной транзакции
+        # occurred_at событий транзакции по ученику: версия снимка (users.updated_at) — не раньше их (stamp_versions)
+        self._event_at: dict[uuid.UUID, datetime] = {}
         # Часы сроков ожидающего сброса кода родителя (тесты подменяют app.state.clock).
         self.now: Callable[[], datetime] = clock or _now
 
@@ -293,14 +296,19 @@ class IdentityService:
         try:
             async with self.rt.transaction() as session:
                 yield session
+                await self.stamp_versions(session)  # последней командой перед фиксацией (только при успехе)
         finally:
+            self._event_at.clear()  # откат: события транзакции не записаны
             while self._locked_users:
                 user_id = self._locked_users.pop()
                 try:
                     async with self.rt.transaction() as session:
                         await self._emit_security(session, user_id, "pin_locked")
+                        await self.stamp_versions(session)
                 except Exception:
                     log.error("pin_locked event was not recorded", exc_info=True)
+                finally:
+                    self._event_at.clear()
 
     # ---------- инфраструктура ----------
     @property
@@ -331,16 +339,45 @@ class IdentityService:
 
     async def _emit(self, session: AsyncSession, event_type: str, payload: dict[str, Any]) -> Envelope:
         user_id = payload.get("user_id")
-        if user_id:
+        uid = uuid.UUID(str(user_id)) if user_id else None
+        if uid is not None:
             # Любое изменение ученика (в т.ч. PIN, согласие — другие таблицы) двигает users.updated_at: по нему
             # read-модель админки (спринт 2) курсорно сверяется с identity.
+            await self._touch(session, uid)
+        envelope = await emit(session, event_type, payload, producer=self.settings.service_name)
+        if uid is not None:
+            seen = self._event_at.get(uid)
+            self._event_at[uid] = envelope.occurred_at if seen is None else max(seen, envelope.occurred_at)
+        return envelope
+
+    @staticmethod
+    async def _touch(session: AsyncSession, user_id: uuid.UUID) -> None:
+        """Сдвинуть users.updated_at (не назад). Без события — когда у аккаунта меняется вычисляемое поле снимка
+        админки (число детских профилей), а сверка user-admin идёт по updated_at."""
+        await session.execute(
+            update(User).where(User.user_id == user_id)
+            .values(updated_at=func.greatest(User.updated_at, func.now()))
+            .execution_options(synchronize_session=False)
+        )
+
+    async def stamp_versions(self, session: AsyncSession) -> None:
+        """Версия снимка админки по тем же часам, что и события (ревью P2-3): users.updated_at каждого ученика с
+        событиями в этой транзакции становится не раньше их occurred_at.
+
+        now() — начало транзакции по часам БД, occurred_at — время выпуска события по часам сервиса; user-admin
+        сравнивает версию снимка с occurred_at (`снимок ≥ событие`), поэтому версия поднимается до самого времени
+        события — без допусков и независимо от расхождения часов БД и сервиса. Вызывается последней командой перед
+        фиксацией (после flush ORM), иначе onupdate следующего flush перезаписал бы версию."""
+        if not self._event_at:
+            return
+        await session.flush()
+        for user_id, at in sorted(self._event_at.items()):
             await session.execute(
-                update(User)
-                .where(User.user_id == uuid.UUID(str(user_id)))
-                .values(updated_at=func.now())
+                update(User).where(User.user_id == user_id)
+                .values(updated_at=func.greatest(User.updated_at, at))
                 .execution_options(synchronize_session=False)
             )
-        return await emit(session, event_type, payload, producer=self.settings.service_name)
+        self._event_at.clear()
 
     async def _emit_security(self, session: AsyncSession, user_id: uuid.UUID, change: str) -> None:
         await self._emit(session, EV_SECURITY_CHANGED, {"user_id": str(user_id), "change": change})
@@ -827,6 +864,7 @@ class IdentityService:
                 "guardian_user_id": str(account.user_id), "created_at": iso_utc_ms(now),
             })
             await self._consent_accepted(session, consent)
+            await self._touch(session, account.user_id)  # children_count в снимке админки
             log.info("child profile created", extra={"user_pid": pseudonymize(str(child.user_id))})
             return learner_detail(child, is_self=False)
 
@@ -1056,6 +1094,7 @@ class IdentityService:
                 grant.revoked_at = truncate_ms(now)
                 grant.revoke_reason = "guardian"
             own = await self._active_consent(session, teen.user_id, lock=True)
+            narrowed: Consent | None = None
             if own is not None:
                 optional = optional_purposes_of(own.policy_version)
                 kept = [p for p in own.purposes if p not in optional]
@@ -1063,7 +1102,8 @@ class IdentityService:
                     own.revoked_at = truncate_ms(now)
                     own.revoke_reason = "superseded"
                     await session.flush()  # освобождаем уникальный индекс действующего согласия
-                    session.add(self._narrowed(own, kept))
+                    narrowed = self._narrowed(own, kept)
+                    session.add(narrowed)
             await session.flush()
             await self._profile_updated(session, teen, ["guardian_consent"])
             if grant is not None:
@@ -1072,6 +1112,10 @@ class IdentityService:
                     "policy_version": grant.policy_version, "basis": "guardian",
                     "revoked_by_user_id": str(guardian.user_id),
                 })
+            if narrowed is not None:
+                # действующее своё согласие подростка сменилось (та же запись без необязательных целей): потребители
+                # (read-модель админки, аудит) узнают новые цели из события, а не из сверки (ревью P2-3)
+                await self._consent_accepted(session, narrowed)
             await self._notify_changed(session, teen, teen)
             log.info("guardian consent revoked", extra={"user_pid": pseudonymize(str(teen.user_id))})
             return self._grant_view(row, teen)
@@ -1424,6 +1468,8 @@ class IdentityService:
         previous = user.status
         user.status = "DELETION_REQUESTED"
         user.notifications_enabled = False
+        # проекция learning-plan для аудитории рассылок больше не нужна (поздние события пропускает activity.py)
+        await session.execute(delete(LearnerActivity).where(LearnerActivity.user_id == user.user_id))
         await session.flush()
         requested = await self._emit(session, EV_DELETION_REQUESTED, deletion_store.requested_payload(req, attempt=1))
         # attempt 1 и расписание повторов неответившим доменам (deletion/sweeper.py)
@@ -1487,8 +1533,14 @@ class IdentityService:
         user.bot_blocked = False
         await session.execute(delete(PinCredential).where(PinCredential.user_id == req.user_id))
         await session.execute(delete(BiometricCredential).where(BiometricCredential.user_id == req.user_id))
+        await session.execute(delete(LearnerActivity).where(LearnerActivity.user_id == req.user_id))
         # связь ребёнка с опекуном — персональные данные отношения; у ребёнка она снимается при его обезличивании
-        await session.execute(delete(GuardianLink).where(GuardianLink.child_user_id == req.user_id))
+        guardian_id = (await session.execute(
+            delete(GuardianLink).where(GuardianLink.child_user_id == req.user_id)
+            .returning(GuardianLink.guardian_user_id)
+        )).scalar_one_or_none()
+        if guardian_id is not None:
+            await self._touch(session, guardian_id)  # children_count в снимке админки
         await session.execute(
             update(GuardianConsentRequest)
             .where(GuardianConsentRequest.teen_user_id == req.user_id, GuardianConsentRequest.status == "pending")

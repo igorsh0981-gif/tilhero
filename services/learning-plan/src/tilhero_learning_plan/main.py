@@ -6,6 +6,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from tilhero_common.app import Runtime, create_app
+from tilhero_learning_plan.api.admin import router as admin_router
 from tilhero_learning_plan.api.client import directory_router, plan_router
 from tilhero_learning_plan.api.client import router as client_router
 from tilhero_learning_plan.api.scheduler import router as scheduler_router
@@ -19,7 +20,8 @@ def configure(runtime: Runtime) -> None:
 
 def build_app(settings: Settings | None = None, runtime: Runtime | None = None) -> FastAPI:
     settings = settings or get_settings()
-    return create_app(settings, routers=[client_router, plan_router, directory_router, scheduler_router],
+    return create_app(settings, routers=[client_router, plan_router, directory_router, scheduler_router,
+                                                admin_router],
                       runtime=runtime or Runtime(settings), configure=configure,
                       title="TilHero learning-plan-service")
 

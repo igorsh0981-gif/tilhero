@@ -1,4 +1,5 @@
-"""Зависимости API: разрешённые вызывающие (явно, CONVENTIONS §2, INTERNAL_API §1) и user_id только из токена."""
+"""Зависимости API: разрешённые вызывающие (явно, CONVENTIONS §2, INTERNAL_API §1 и спринта 2 §3) и user_id только из
+токена."""
 
 from __future__ import annotations
 
@@ -8,14 +9,36 @@ import uuid
 from fastapi import Depends, Header, Request
 
 from tilhero_common.app import Runtime, get_runtime
-from tilhero_common.errors import unauthorized, unprocessable
+from tilhero_common.errors import forbidden, unauthorized, unprocessable
 from tilhero_common.internal_auth import InternalAuth, Principal
+from tilhero_identity.admin import AdminDirectory
+from tilhero_identity.audience import Audience
 from tilhero_identity.service import IdentityService
 
 telegram_bff = InternalAuth({"telegram-bff"})
 notifications_only = InternalAuth({"notifications"})
 bot_gateway_only = InternalAuth({"telegram-bot-gateway"})
 social_or_notifications = InternalAuth({"social", "notifications"})
+# Админ-контур (спринт 2): read-модель user-admin сверяется без контекста сотрудника; раскрытие Telegram ID — только
+# admin-bff с actor и правом users.sensitive.read.
+user_admin_only = InternalAuth({"user-admin"})
+admin_bff_only = InternalAuth({"admin-bff"})
+
+
+def no_user_context(principal: Principal) -> Principal:
+    """Служебный вызов без контекста ученика: `sub` здесь лишний (цель запроса — только путь или фильтры), а actor
+    принимается только от admin-bff (internal_auth) — для остальных он не доходит сюда."""
+    if principal.subject:
+        raise forbidden("CALLER_CONTEXT_NOT_ALLOWED", "Вызов допускается только без контекста пользователя")
+    return principal
+
+
+def user_admin_service_call(principal: Principal = Depends(user_admin_only)) -> Principal:
+    return no_user_context(principal)
+
+
+def notifications_service_call(principal: Principal = Depends(notifications_only)) -> Principal:
+    return no_user_context(principal)
 
 _IDEMPOTENCY_RE = re.compile(r"^[A-Za-z0-9._:\-]{8,128}$")
 
@@ -41,3 +64,11 @@ def idempotency_key(value: str | None = Header(default=None, alias="Idempotency-
 def get_service(request: Request, rt: Runtime = Depends(get_runtime)) -> IdentityService:
     """Часы сервиса (UTC): тесты подменяют `app.state.clock` (срок ожидающего сброса кода родителя)."""
     return IdentityService(rt, clock=getattr(request.app.state, "clock", None))
+
+
+def get_admin(request: Request, rt: Runtime = Depends(get_runtime)) -> AdminDirectory:
+    return AdminDirectory(rt, clock=getattr(request.app.state, "clock", None))
+
+
+def get_audience(request: Request, rt: Runtime = Depends(get_runtime)) -> Audience:
+    return Audience(rt, clock=getattr(request.app.state, "clock", None))

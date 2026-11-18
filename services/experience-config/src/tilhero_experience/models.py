@@ -123,11 +123,17 @@ class ReleaseNote(Base):
 
 class ReleaseNoteView(Base):
     """Отметка «ученик видел заметку» (AT-11): хранится на сервере и переживает переустановку Mini App.
-    Только псевдонимный user_id ученика; удаляется сагой удаления (user.deletion.requested.v1)."""
+    Только псевдонимный user_id ученика; удаляется сагой удаления (user.deletion.requested.v1).
+
+    ui_lang и age_segment — сегмент ученика на момент первого показа (для разрезов статистики AT-18, миграция 0005);
+    у отметок до 0005 и у отметок без сегмента — NULL, в разрезах они не учитываются (в views_total — учитываются)."""
 
     __tablename__ = "release_note_views"
     __table_args__ = (
         Index("ix_release_note_views_note", "release_note_id"),
+        CheckConstraint("ui_lang IS NULL OR ui_lang IN ('ru', 'uz')", name="ck_release_note_views_ui_lang"),
+        CheckConstraint("age_segment IS NULL OR age_segment IN ('kids', 'teens', 'adults')",
+                        name="ck_release_note_views_age_segment"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
@@ -136,6 +142,8 @@ class ReleaseNoteView(Base):
         primary_key=True,
     )
     seen_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
+    ui_lang: Mapped[str | None] = mapped_column(String(2))
+    age_segment: Mapped[str | None] = mapped_column(String(8))
 
 
 class DeletedUser(Base):

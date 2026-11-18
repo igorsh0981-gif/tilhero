@@ -365,6 +365,7 @@ async def test_migrations_are_reversible(env) -> None:
         "guardian_consent_requests",
         "guardian_links",
         "inbox",
+        "learner_activity",
         "outbox",
         "pin_credentials",
         "users",

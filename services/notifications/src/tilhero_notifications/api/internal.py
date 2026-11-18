@@ -8,7 +8,8 @@
 - `POST /internal/v1/notifications:dispatch` — n8n каждые 5 мин (`Authorization: Bearer <SCHEDULER_TOKEN>`):
   обработка записей с scheduled_for ≤ now (отложенные тихими часами, окном детей, слотом пропуска; повторы).
   Повтор вызова безопасен: захват SKIP LOCKED + аренда, bot-gateway идемпотентен по notification_id.
-  Попутно — срок хранения журнала (90 дней).
+  Попутно — срок хранения журнала (90 дней). Спринт 2: сначала шаги рассылок (campaigns.Runner: запуск по
+  send_at, выборка аудитории с курсором, записи журнала пачками, завершение), затем отправка.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from fastapi import APIRouter, Depends, Request
 from tilhero_common.app import Runtime, get_runtime
 from tilhero_common.errors import unauthorized, unprocessable
 from tilhero_common.internal_auth import HEADER, InternalAuth, Principal
-from tilhero_notifications import store
+from tilhero_notifications import campaigns, store
 from tilhero_notifications.schemas import DispatchOut, TransactionalIn, TransactionalOut
 from tilhero_notifications.settings import Settings
 from tilhero_notifications.templates import TEMPLATES, TemplateError
@@ -112,6 +113,12 @@ async def dispatch(
 ) -> DispatchOut:
     settings = cast(Settings, rt.settings)
     dispatcher = request.app.state.dispatcher
+    try:  # сбой шагов рассылок не мешает доставке журнала; повтор — при следующем вызове
+        steps = await campaigns.Runner(rt, wake=dispatcher.wake).run()
+        if sum(steps.values()):
+            log.info("campaign steps", extra={f"campaign_{k}": v for k, v in steps.items()})
+    except Exception as exc:
+        log.error("campaign steps failed", extra={"error_type": type(exc).__name__})
     totals: Counter[str] = Counter()
     for _batch in range(settings.dispatch_max_batches_per_call):
         outcomes = await dispatcher.run_once()

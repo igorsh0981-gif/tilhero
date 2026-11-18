@@ -83,3 +83,85 @@ class DispatchOut(BaseModel):
 
 if set(TransactionalIn.model_fields["template"].annotation.__args__) != set(DIRECT_TEMPLATES):  # type: ignore[union-attr]
     raise RuntimeError("TransactionalIn.template must list exactly the direct-only templates")
+
+
+# ---------------------------------------------------------------- staff API (спринт 2, admin.ts)
+# Структура — pydantic (лишние поля → 422 VALIDATION_ERROR); содержание (пустой язык, длины, плейсхолдеры,
+# управляющие символы, давление) — domain/texts.py → 422 TEMPLATE_INVALID / CAMPAIGN_INVALID {fields}.
+
+UiLang = Literal["ru", "uz"]
+_IN = ConfigDict(extra="forbid")
+
+
+class TextIn(BaseModel):
+    model_config = _IN
+
+    title: Annotated[str, Field(max_length=2000)] | None = None
+    body: Annotated[str, Field(max_length=8000)] | None = None
+    button: Annotated[str, Field(max_length=500)] | None = None
+
+
+class TextsIn(BaseModel):
+    model_config = _IN
+
+    ru: TextIn | None = None
+    uz: TextIn | None = None
+
+
+class TemplateVersionIn(BaseModel):
+    model_config = _IN
+
+    texts: TextsIn
+    note: Annotated[str, Field(max_length=2000)]
+
+
+class PreviewIn(BaseModel):
+    model_config = _IN
+
+    lang: UiLang
+    sample: Annotated[dict[str, Annotated[str, Field(max_length=200)]], Field(max_length=20)] | None = None
+
+
+class ReasonIn(BaseModel):
+    model_config = _IN
+
+    reason: Annotated[str, Field(min_length=3, max_length=300)]
+
+
+class TestSendIn(BaseModel):
+    model_config = _IN
+
+    lang: UiLang
+    recipient: int
+
+
+class SegmentIn(BaseModel):
+    model_config = _IN
+
+    ui_lang: Annotated[list[Annotated[str, Field(max_length=16)]], Field(max_length=10)] | None = None
+    age: Annotated[list[Annotated[str, Field(max_length=16)]], Field(max_length=10)] | None = None
+    onboarded: bool | None = None
+    active_days: int | None = None
+
+
+class CampaignContentIn(BaseModel):
+    """CampaignContent (POST) и Partial<CampaignContent> (PATCH): что пришло — `model_fields_set`."""
+
+    model_config = _IN
+
+    title: Annotated[str, Field(max_length=2000)] | None = None
+    texts: TextsIn | None = None
+    route: Annotated[str, Field(max_length=64)] | None = None
+    segment: SegmentIn | None = None
+
+
+class CampaignPatchIn(CampaignContentIn):
+    expected_version: Annotated[int, Field(ge=1)]
+
+
+class CampaignScheduleIn(BaseModel):
+    model_config = _IN
+
+    expected_version: Annotated[int, Field(ge=1)]
+    send_at: datetime
+    reason: Annotated[str, Field(min_length=3, max_length=300)]

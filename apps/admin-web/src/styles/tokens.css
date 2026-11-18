@@ -1,0 +1,25 @@
+/* =====================================================================
+   tokens.css — non-colour design tokens of TilHero Admin (prototype Admin.dc.html, `.ad`; seed experience-config
+   `admin` 1.0.0) and the few colours that do not depend on the light/dark theme. Colour roles: theme.default.css.
+   Names of the experience-config whitelist (--r-card, --r-btn, --r-field, --nav-w, --font-*) may be overridden at
+   runtime by the active admin config version (src/theme/config.ts).
+   ===================================================================== */
+:root{
+  --r-card:14px; --r-btn:10px; --r-field:10px;
+  --nav-w:236px;
+  --font-ui:"Onest",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-display:"Unbounded","Onest",system-ui,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  /* derived radii (components) */
+  --r-xs:6px; --r-sm:8px; --r:var(--r-btn); --r-lg:var(--r-card);
+  --nav-w-collapsed:68px;
+  --top-h:64px;
+  --drawer-w:540px;
+  --drawer-w-wide:760px;
+  /* environment chip (sidebar footer, always on the dark sidebar) */
+  --env-prod-bg:rgba(242,104,93,.16); --env-prod-ink:#FFB3AC; --env-prod-line:rgba(242,104,93,.32); --env-prod-dot:#F2685D;
+  --env-stage-bg:rgba(255,196,102,.14); --env-stage-ink:#FFD28A; --env-stage-line:rgba(255,196,102,.32); --env-stage-dot:#FFC466;
+  --env-dev-bg:rgba(157,174,255,.16); --env-dev-ink:#C9D3FF; --env-dev-line:rgba(157,174,255,.32); --env-dev-dot:#9DAEFF;
+  --brand-hero:#9DAEFF;
+  --z-nav:40; --z-topbar:30; --z-drawer:70; --z-menu:80; --z-modal:90; --z-toast:100;
+}

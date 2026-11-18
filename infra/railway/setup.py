@@ -52,7 +52,7 @@ class Service:
 
 SERVICES: tuple[Service, ...] = (
     Service("identity-consent", 8101, "services/identity-consent/Dockerfile", "identity_consent",
-            calls=("notifications",)),
+            calls=("notifications", "audit")),
     Service("learning-plan", 8102, "services/learning-plan/Dockerfile", "learning_plan"),
     Service("support", 8103, "services/support/Dockerfile", "support"),
     Service("notifications", 8104, "services/notifications/Dockerfile", "notifications",
@@ -65,21 +65,32 @@ SERVICES: tuple[Service, ...] = (
     Service("telegram-bff", 8001, "services/telegram-bff/Dockerfile", public=True,
             calls=("identity-consent", "learning-plan", "support", "notifications", "experience-config", "social")),
     Service("telegram-miniapp", 8080, "apps/telegram-miniapp/Dockerfile", public=True, health="/healthz"),
+    # спринт 2 — админка: admin-bff без публичного домена, admin-web проксирует /admin/v1/* на него (один origin)
+    Service("admin-identity", 8120, "services/admin-identity/Dockerfile", "admin_identity"),
+    Service("user-admin", 8121, "services/user-admin/Dockerfile", "user_admin",
+            calls=("identity-consent", "learning-plan")),
+    Service("admin-bff", 8002, "services/admin-bff/Dockerfile", health="/health/ready",
+            calls=("admin-identity", "user-admin", "identity-consent", "support", "audit", "experience-config",
+                   "notifications")),
+    Service("admin-web", 8080, "apps/admin-web/Dockerfile", public=True, health="/healthz"),
     Service("n8n", 5678, "infra/n8n/Dockerfile", health="/healthz",
-            calls=("learning-plan", "notifications", "social")),
+            calls=("learning-plan", "notifications", "social", "user-admin")),
 )
 JWT_ISSUERS = ("identity-consent", "learning-plan", "support", "notifications", "audit", "experience-config",
-               "telegram-bot-gateway", "social", "telegram-bff", "admin-bff")
-SCHEDULED = ("learning-plan", "notifications", "social")
+               "telegram-bot-gateway", "social", "telegram-bff", "admin-bff", "admin-identity", "user-admin")
+SCHEDULED = ("learning-plan", "notifications", "social", "user-admin")
 # имя переменной адреса в коде вызывающего (BFF и Python-сервисы называют identity по-разному)
 URL_VAR = {
     ("telegram-bff", "identity-consent"): "IDENTITY_URL",
     ("telegram-bff", "experience-config"): "EXPERIENCE_URL",
+    ("admin-bff", "identity-consent"): "IDENTITY_URL",
+    ("admin-bff", "experience-config"): "EXPERIENCE_URL",
     ("notifications", "telegram-bot-gateway"): "BOT_GATEWAY_URL",
 }
 BOT_INTERNAL_PORT = 8108
 _USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,31}$")
 _APP_RE = re.compile(r"^[A-Za-z0-9_]{3,30}$")
+_EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[A-Za-z]{2,}$")
 
 
 def by_name(name: str) -> Service:
@@ -99,6 +110,14 @@ def token(nbytes: int = 32) -> str:
     return base64.urlsafe_b64encode(secrets.token_bytes(nbytes)).decode().rstrip("=")
 
 
+def admin_password() -> str:
+    """Временный пароль первого администратора: ≥ 12 символов, буквы и цифры (правила admin-identity)."""
+    while True:
+        pw = secrets.token_urlsafe(18)
+        if any(c.isalpha() for c in pw) and any(c.isdigit() for c in pw):
+            return pw
+
+
 def pg_url(role: str, password: str) -> str:
     return f"postgresql://{role}:{password}@{PG_HOST}"
 
@@ -112,6 +131,8 @@ class Secrets:
     invite_key: str
     webhook: str
     n8n_key: str  # N8N_ENCRYPTION_KEY: n8n записывает его в том при первом запуске и с другим не стартует
+    mfa_key: str  # ADMIN_MFA_ENC_KEY (admin-identity): шифрует секреты TOTP сотрудников, base64 32 байта
+    admin_password: str  # ADMIN_BOOTSTRAP_PASSWORD: временный пароль первого super_admin (смена при первом входе)
     internal_hmac: str  # INTERNAL_JWT_SECRET — обязателен Python-сервисам в stage/prod (>= 32), отличен от session_jwt
 
     @classmethod
@@ -120,14 +141,16 @@ class Secrets:
         return cls(seeds={n: os.urandom(32) for n in JWT_ISSUERS},
                    passwords={r: secrets.token_hex(24) for r in roles},
                    scheduler=token(), session_jwt=token(48), invite_key=token(), webhook=secrets.token_hex(32),
-                   n8n_key=token(), internal_hmac=token(48))
+                   n8n_key=token(), internal_hmac=token(48),
+                   mfa_key=base64.b64encode(secrets.token_bytes(32)).decode(), admin_password=admin_password())
 
     def public_keys(self) -> str:
         return json.dumps({n: b64e(public_raw(private_from_seed(s))) for n, s in self.seeds.items()},
                           separators=(",", ":"))
 
 
-def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_username: str = "") -> list[str]:
+def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_username: str = "",
+                admin_email: str = "") -> list[str]:
     dockerfile = f"RAILWAY_DOCKERFILE_PATH={svc.dockerfile}"
     lines: list[str] = [dockerfile, f"ENV={env}", f"PORT={svc.port}"]
     if svc.name == "telegram-miniapp":  # VITE_* — build args (Railway передаёт переменные сервиса в сборку)
@@ -140,18 +163,23 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
                 "DB_TYPE=sqlite", "N8N_RUNNERS_ENABLED=true", "N8N_BLOCK_ENV_ACCESS_IN_NODE=false",
                 "N8N_DIAGNOSTICS_ENABLED=false", "N8N_PERSONALIZATION_ENABLED=false",
                 "N8N_VERSION_NOTIFICATIONS_ENABLED=false", "RAILWAY_RUN_UID=0", "N8N_USER_FOLDER=/home/node"]
+    if svc.name == "admin-web":  # Caddy: статика + /admin/v1/* → admin-bff по приватной сети
+        return [dockerfile, f"PORT={svc.port}", f"ADMIN_BFF_URL={private_url('admin-bff')}"]
     if svc.name == "telegram-bff":
         lines = [dockerfile, "NODE_ENV=production", f"PORT={svc.port}", "HOST=::", "TRUST_PROXY_HOPS=1"]
+    if svc.name == "admin-bff":  # Railway edge + Caddy admin-web
+        lines = [dockerfile, "NODE_ENV=production", f"ENV={env}", f"PORT={svc.port}", "HOST=::",
+                 "TRUST_PROXY_HOPS=2"]
     if svc.schema:
         lines += [f"DATABASE_URL={pg_url(svc.schema, sec.passwords[svc.schema])}",
                   f"MIGRATION_DATABASE_URL={pg_url(svc.schema + '_owner', sec.passwords[svc.schema + '_owner'])}"]
     lines += [REDIS]
-    if svc.name != "telegram-bff":
+    if svc.name not in ("telegram-bff", "admin-bff"):
         lines += [NATS]
     if svc.name in JWT_ISSUERS:
         lines += [f"INTERNAL_JWT_PRIVATE_KEY={b64e(sec.seeds[svc.name])}",
                   f"INTERNAL_JWT_PUBLIC_KEYS={sec.public_keys()}"]
-    if svc.name != "telegram-bff":  # Python: проверка ServiceSettings в stage/prod; BFF в prod его не использует
+    if svc.name not in ("telegram-bff", "admin-bff"):  # Python: ServiceSettings в stage/prod; BFF его не использует
         lines.append(f"INTERNAL_JWT_SECRET={sec.internal_hmac}")
     lines += [f"{url_var(svc.name, c)}={private_url(c)}" for c in svc.calls]
     if svc.name in SCHEDULED:
@@ -162,6 +190,14 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
         lines += [f"SESSION_JWT_SECRET={sec.session_jwt}", f"TELEGRAM_APP_LINK={app_link}",
                   "MINIAPP_ORIGIN=https://${{telegram-miniapp.RAILWAY_PUBLIC_DOMAIN}}",
                   "BOT_TOKEN=${{shared.BOT_TOKEN}}"]
+    if svc.name == "admin-bff":
+        lines.append("ADMIN_ORIGIN=https://${{admin-web.RAILWAY_PUBLIC_DOMAIN}}")
+    if svc.name == "admin-identity":
+        lines += [f"ADMIN_MFA_ENC_KEY={sec.mfa_key}"]
+        if admin_email:  # первый super_admin; после первого входа переменные удалить
+            lines += [f"ADMIN_BOOTSTRAP_EMAIL={admin_email}", f"ADMIN_BOOTSTRAP_PASSWORD={sec.admin_password}"]
+    if svc.name == "notifications":
+        lines.append("ADMIN_TEST_CHAT_IDS=")  # Telegram chat id тестовых чатов через запятую (тестовая отправка)
     if svc.name == "telegram-bot-gateway":
         lines += [f"INTERNAL_PORT={BOT_INTERNAL_PORT}", "HOST=::", f"TELEGRAM_WEBHOOK_SECRET={sec.webhook}",
                   "TELEGRAM_WEBHOOK_URL=https://${{telegram-bot-gateway.RAILWAY_PUBLIC_DOMAIN}}/telegram/webhook",
@@ -188,11 +224,14 @@ def db_passwords_sql(sec: Secrets) -> str:
     return "".join(f"ALTER ROLE {role} PASSWORD '{pw}';\n" for role, pw in sorted(sec.passwords.items()))
 
 
-def build(sec: Secrets, *, env: str, bot_username: str, app_name: str) -> dict[str, str]:
+def build(sec: Secrets, *, env: str, bot_username: str, app_name: str, admin_email: str = "") -> dict[str, str]:
     if not _USERNAME_RE.match(bot_username) or not _APP_RE.match(app_name):
         raise ValueError("bot username / app short name: латиница, цифры, _")
+    if admin_email and not _EMAIL_RE.match(admin_email):
+        raise ValueError("admin email: некорректный адрес")
     app_link = f"https://t.me/{bot_username}/{app_name}"
-    files = {f"{s.name}.env": "\n".join(service_env(s, sec, env=env, app_link=app_link, bot_username=bot_username))
+    files = {f"{s.name}.env": "\n".join(service_env(s, sec, env=env, app_link=app_link, bot_username=bot_username,
+                                                    admin_email=admin_email))
              + "\n" for s in SERVICES}
     files["db-passwords.sql"] = db_passwords_sql(sec)
     files["services.md"] = services_table()
@@ -205,12 +244,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--env", choices=("stage", "prod"), default="prod")
     ap.add_argument("--bot-username", required=True)
     ap.add_argument("--app-name", required=True, help="short name Mini App в @BotFather (t.me/<bot>/<app>)")
+    ap.add_argument("--admin-email", default="", help="email первого super_admin админки (bootstrap admin-identity)")
     a = ap.parse_args(argv)
     out: Path = a.out
     if out.exists() and any(out.iterdir()):
         print(f"{out} не пуст — новые секреты не перезаписывают старые, выберите пустой каталог", file=sys.stderr)
         return 2
-    files = build(Secrets.new(), env=a.env, bot_username=a.bot_username, app_name=a.app_name)
+    files = build(Secrets.new(), env=a.env, bot_username=a.bot_username, app_name=a.app_name,
+                  admin_email=a.admin_email)
     out.mkdir(parents=True, exist_ok=True)
     os.chmod(out, 0o700)
     for name, text in files.items():

@@ -21,6 +21,7 @@ AT-04…08).
 | POST | `/internal/v1/me/activities` | `{kind: lesson\|review\|practice\|diagnostic, minutes 1..240, occurred_at?}` + `Idempotency-Key` (обязателен) → `TodayPlan`; `learning.activity.recorded.v1` |
 | GET | `/internal/v1/directory/goals`, `/internal/v1/directory/topics` | → `{items: DirectoryItem[]}` (6 целей, 12 тем, RU/UZ) |
 | POST | `/internal/v1/plan:tick` | n8n, `Authorization: Bearer <SCHEDULER_TOKEN>` → `{plans_checked, reminders, missed, skipped}`; пока идёт предыдущий tick — сразу 200 `{…, skipped: true}` |
+| GET | `/admin/v1/plans?updated_after=&cursor=&limit=` | спринт 2, **только `user-admin`** (внутренний JWT без actor; actor от него — 403 `ACTOR_NOT_ALLOWED`) → `{items: [{user_id, goal, level_self, ui_lang, schedule, onboarding_completed_at, updated_at}], next_cursor}` — сверка read-модели админки. Курсор `(updated_at, user_id)` по возрастанию (индекс `ix_plans_updated`, миграция 0002); `updated_after` — ISO-8601 с часовым поясом, строго позже (без зоны — 422); `limit` 1..500 (100); 400 `INVALID_CURSOR`. План по умолчанию (без события) тоже выгружается; планов удалённых учеников нет |
 
 План по умолчанию: `goal`/`level_self` null, тем нет, `ui_lang`/`explain_lang` = ru, `course_pair` = ru-en,
 `daily` (1..7), 19:00, 20 минут, напоминания выключены, `version` = 1. Создание по умолчанию — не правка: события нет.
@@ -123,7 +124,8 @@ explain_lang, preset, days, preferred_time, duration_min, reminders_enabled, tim
 ## Данные
 Схема `learning_plan`: `plans` (+ `schedule_set_at`), `activities` (`UNIQUE(user_id, idempotency_key)`),
 `slot_marks` (PK user_id, local_date, kind), `tick_state` (одна строка), `deleted_users` (отметка исполненного удаления:
-псевдонимный `user_id` + `request_id`, без PII), `outbox`/`inbox`. Миграция 0001.
+псевдонимный `user_id` + `request_id`, без PII), `outbox`/`inbox`. Миграции 0001; 0002 (спринт 2) — индекс
+`ix_plans_updated (updated_at, user_id)` для `GET /admin/v1/plans`.
 
 Сага удаления: план, занятия и отметки удаляются физически, затем ACK; повтор саги (тот же `request_id`, новый
 `event_id`) снова подтверждается; после удаления `/me/*` → 410 `USER_DELETED`.

@@ -43,6 +43,15 @@ class Settings(ServiceSettings):
     notifications_url: str = "http://127.0.0.1:8104"
     notifications_timeout_seconds: float = Field(default=8.0, gt=0)
 
+    # audit: синхронная запись просмотра Telegram ID сотрудником (reveal) — без записи значение не выдаётся
+    audit_url: str = "http://127.0.0.1:8105"
+    audit_timeout_seconds: float = Field(default=3.0, gt=0)
+    # Раскрытое значение показывается N секунд (admin.ts RevealResult.expires_in = 60)
+    reveal_expires_in_seconds: int = Field(default=60, ge=10, le=300)
+    # Квота раскрытий на сотрудника (защита от массовой выгрузки): N за окно, сверх — 429 + запись аудита
+    reveal_limit_per_window: int = Field(default=20, ge=1)
+    reveal_window_seconds: int = Field(default=3600, ge=60)
+
     # Домены, которые обязаны подтвердить удаление (user.domain.deleted.v1) до обезличивания профиля.
     deletion_domains: list[str] = Field(default_factory=lambda: list(DEFAULT_DELETION_DOMAINS))
 

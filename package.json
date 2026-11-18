@@ -7,7 +7,9 @@
     "packages/contracts",
     "packages/ui-tokens",
     "services/telegram-bff",
-    "apps/telegram-miniapp"
+    "apps/telegram-miniapp",
+    "services/admin-bff",
+    "apps/admin-web"
   ],
   "engines": {
     "node": ">=22"

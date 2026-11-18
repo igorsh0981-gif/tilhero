@@ -52,6 +52,38 @@ class Settings(ServiceSettings):
     kid_window_end: str = "20:00"
     retention_days: int = Field(default=90, ge=1, le=365)  # журнал = центр уведомлений
 
+    # Спринт 2 — шаблоны сотрудников и рассылки (INTERNAL_API спринта 2 §3)
+    # Кэш активных версий шаблонов в процессе (≤ 30 с; активация на этой реплике сбрасывает его сразу)
+    template_cache_ttl_seconds: float = Field(default=30.0, ge=0, le=30)
+    # Тестовые получатели (Telegram chat id через запятую): тестовая отправка шаблонов и рассылок — только сюда
+    admin_test_chat_ids: str = ""
+    test_sends_per_minute: int = Field(default=10, ge=1, le=100)  # на сотрудника (Redis)
+    campaign_min_interval_days: int = Field(default=7, ge=1, le=60)  # не чаще 1 рассылки в N дней на ученика
+    campaign_audience_page: int = Field(default=500, ge=1, le=500)  # identity-consent /internal/v1/audience?limit=
+    campaign_recipient_batch: int = Field(default=200, ge=1, le=500)  # получатели одной транзакции
+    campaign_max_batches_per_call: int = Field(default=50, ge=1, le=1000)  # шагов рассылок в одном :dispatch
+    campaign_max_schedule_days: int = Field(default=30, ge=1, le=365)  # send_at не дальше
+    campaign_asap_seconds: int = Field(default=60, ge=0, le=3600)  # send_at ближе — «как можно скорее»
+    # send_at в прошлом не дальше — тоже «как можно скорее» (так UI передаёт «Отправить сейчас»); раньше — 422 in_past
+    campaign_past_tolerance_seconds: int = Field(default=300, ge=0, le=3600)
+    campaign_failure_alert_attempts: int = Field(default=6, ge=1, le=100)  # неудач шага подряд → аудит campaign.failed
+
+    @field_validator("admin_test_chat_ids", mode="before")
+    @classmethod
+    def _chat_ids(cls, v: object) -> object:
+        """Список chat id через запятую: только положительные целые (личные чаты; bot-gateway принимает > 0)."""
+        if v is None:
+            return ""
+        text = str(v).strip()
+        for part in (p.strip() for p in text.split(",")):
+            if part and (not part.isdigit() or not 0 < int(part) < 2**53):
+                raise ValueError("ADMIN_TEST_CHAT_IDS: positive integer chat ids separated by commas")
+        return text
+
+    @property
+    def test_chat_ids(self) -> tuple[int, ...]:
+        return tuple(int(p) for p in (x.strip() for x in self.admin_test_chat_ids.split(",")) if p)
+
     @field_validator("scheduler_token", mode="before")
     @classmethod
     def _strip_token(cls, v: object) -> object:

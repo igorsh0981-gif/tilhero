@@ -13,9 +13,11 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
+import jwt
 from sqlalchemy import select
 
 from tilhero_common.app import Runtime
+from tilhero_common.internal_auth import Actor
 from tilhero_common.messaging import Envelope, InMemoryBus, make_envelope
 from tilhero_common.testing import assert_event_conforms, internal_headers
 from tilhero_notifications.dispatcher import Dispatcher
@@ -26,6 +28,12 @@ SERVICE_DIR = str(Path(__file__).resolve().parents[1])
 SCHEDULER_TOKEN = "sched-" + "n" * 40
 TZ = "Asia/Tashkent"
 ALL_CATEGORIES = ("reminders", "missed", "social", "support", "product")
+TEST_CHATS = "5550001111,5550002222"
+STAFF_ID = "0b6e2c1a-8d3f-4b7e-9a51-6c2d8e4f1a30"
+COMMS_PERMISSIONS = frozenset({
+    "dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage",
+    "notif.campaigns.send",
+})
 
 
 def api_error(status: int, code: str, details: dict | None = None) -> httpx.Response:
@@ -58,9 +66,58 @@ class FakeIdentity:
     public: dict[str, dict[str, Any]] = field(default_factory=dict)
     calls: list[str] = field(default_factory=list)
     fail: list[int] = field(default_factory=list)
+    # Аудитория рассылок (контракт identity-consent `/internal/v1/audience[/count]`, INTERNAL_API спринта 2 §3):
+    # список {user_id, locale}; фейк фильтрует только по ui_lang — остальное отбор identity-consent (здесь — как есть)
+    audience: list[dict[str, Any]] = field(default_factory=list)
+    audience_queries: list[dict[str, str]] = field(default_factory=list)
+    audience_fail: list[Any] = field(default_factory=list)  # статус или (статус, код, details)
+
+    def _audience(self, request: httpx.Request) -> httpx.Response:
+        """Контракт identity-consent (координатор, 18.11): вызывающий — только notifications, без sub; age по
+        умолчанию adults, kids → 422; limit 1..500; active_days ±1..90; ошибка сегмента → 422 SEGMENT_INVALID
+        {field, reason}."""
+        params = dict(request.url.params)
+        self.audience_queries.append({"path": request.url.path, **params})
+        claims = jwt.decode(request.headers["x-internal-token"], options={"verify_signature": False})
+        assert claims["iss"] == "notifications" and claims["aud"] == "identity-consent" and "sub" not in claims
+        assert "actor" not in claims
+        if self.audience_fail:
+            item = self.audience_fail.pop(0)
+            if isinstance(item, tuple):
+                return api_error(*item)
+            return api_error(item, "UPSTREAM")
+        allowed = {"ui_lang", "age", "onboarded", "active_days", "cursor", "limit"}
+        if request.url.path.endswith("/count"):
+            allowed -= {"cursor", "limit"}
+        for name in params:
+            if name not in allowed:
+                return api_error(422, "VALIDATION_ERROR")
+        ages = set((params.get("age") or "adults").split(","))
+        if not ages <= {"teens", "adults"}:
+            return api_error(422, "SEGMENT_INVALID", {"field": "age", "reason": "kids_not_allowed"
+                                                      if "kids" in ages else "invalid"})
+        if params.get("ui_lang") and not set(params["ui_lang"].split(",")) <= {"ru", "uz"}:
+            return api_error(422, "SEGMENT_INVALID", {"field": "ui_lang", "reason": "invalid"})
+        if params.get("onboarded") not in (None, "true", "false"):
+            return api_error(422, "SEGMENT_INVALID", {"field": "onboarded", "reason": "invalid"})
+        if params.get("active_days") is not None and not 1 <= abs(int(params["active_days"])) <= 90:
+            return api_error(422, "SEGMENT_INVALID", {"field": "active_days", "reason": "out_of_range"})
+        if "limit" in params and not 1 <= int(params["limit"]) <= 500:
+            return api_error(422, "VALIDATION_ERROR")
+        langs = set(params["ui_lang"].split(",")) if params.get("ui_lang") else {"ru", "uz"}
+        items = [a for a in self.audience if a["locale"] in langs]
+        if request.url.path.endswith("/count"):
+            by_lang = {lang: sum(1 for a in items if a["locale"] == lang) for lang in ("ru", "uz")}
+            return httpx.Response(200, json={"count": len(items), "by_lang": by_lang})
+        start, limit = int(params.get("cursor") or 0), int(params.get("limit") or 500)
+        page = items[start:start + limit]
+        next_cursor = str(start + limit) if start + limit < len(items) else None
+        return httpx.Response(200, json={"items": page, "next_cursor": next_cursor})
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.calls.append(request.url.path)
+        if request.url.path.startswith("/internal/v1/audience"):
+            return self._audience(request)
         _, _, _, _, user_id, kind = request.url.path.split("/")
         if self.fail:
             return api_error(self.fail.pop(0), "UPSTREAM")
@@ -156,6 +213,10 @@ class NotifEnv:
         )
         self.identity.public[str(child)]["kind"] = "child"
         return child
+
+    def to_audience(self, *users: uuid.UUID) -> None:
+        for user in users:
+            self.identity.audience.append({"user_id": str(user), "locale": self.identity.delivery[str(user)]["locale"]})
 
     def telegram_id(self, user_id: uuid.UUID) -> int:
         return int(self.identity.delivery[str(user_id)]["recipient_telegram_user_id"])
@@ -317,6 +378,23 @@ class NotifEnv:
             },
             headers=internal_headers(self.settings, issuer=issuer),
         )
+
+    def staff(
+        self,
+        *permissions: str,
+        staff_id: str | None = None,
+        issuer: str = "admin-bff",
+        role: str = "communications",
+        with_actor: bool = True,
+    ) -> dict[str, str]:
+        """Заголовки admin-bff с контекстом сотрудника (по умолчанию — все права коммуникаций)."""
+        perms = frozenset(permissions) if permissions else COMMS_PERMISSIONS
+        actor = Actor(id=staff_id or STAFF_ID, role=role, permissions=perms, name="Оператор") if with_actor else None
+        return internal_headers(self.settings, issuer=issuer, actor=actor if issuer == "admin-bff" else None)
+
+    async def audit(self, action: str | None = None) -> list[dict[str, Any]]:
+        records = [e.payload for e in await self.events("admin.audit.recorded.v1")]
+        return [r for r in records if action is None or r["action"] == action]
 
     def bff(self, user: uuid.UUID | str | None, issuer: str = "telegram-bff") -> dict[str, str]:
         return internal_headers(self.settings, issuer=issuer, subject=str(user) if user else None)

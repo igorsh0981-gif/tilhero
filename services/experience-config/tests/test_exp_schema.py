@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 from conftest import SERVICE_DIR
-from exp_actors import EDITOR, PUBLISHER
+from exp_actors import EDITOR, PUBLISHER, WN_PUBLISHER
 from sqlalchemy import text
 from test_exp_validation import DARK_TOKENS
 
@@ -69,9 +69,16 @@ async def test_models_match_migrations_and_runtime_role() -> None:
                                  params={"onboarded_at": "2026-11-17T09:00:00Z", "lang": "uz", "age": "kids"},
                                  headers=lh)
                 assert wn.status_code == 200 and wn.json()["mode"] == "welcome", wn.text
-                seen = await c.post("/internal/v1/release-notes/seen",
-                                    json={"release_note_ids": [wn.json()["notes"][0]["release_note_id"]]}, headers=lh)
+                note_id = wn.json()["notes"][0]["release_note_id"]
+                seen = await c.post("/internal/v1/release-notes/seen", json={"release_note_ids": [note_id]},
+                                    params={"lang": "uz", "age": "kids"}, headers=lh)
                 assert seen.status_code == 204
+                # статистика и сводка — чтение под ролью сервиса
+                wh = internal_headers(settings, issuer="admin-bff", actor=WN_PUBLISHER)
+                st = await c.get(f"/admin/v1/release-notes/{note_id}/stats", headers=wh)
+                assert st.status_code == 200 and st.json()["views_by_age"]["kids"] == 1, st.text
+                sm = await c.get("/admin/v1/release-notes/summary", headers=wh)
+                assert sm.status_code == 200 and sm.json()["latest"]["views_total"] == 1, sm.text
                 await bus.publish(make_envelope("user.deletion.requested.v1",
                                                 {"user_id": str(learner), "request_id": str(uuid.uuid4()),
                                                  "requested_at": "2026-11-18T09:00:00Z"},

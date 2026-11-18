@@ -31,6 +31,8 @@ jobs:
           - services/support
           - services/notifications
           - services/experience-config
+          - services/admin-identity
+          - services/user-admin
           - apps/telegram-bot-gateway
           - infra/n8n
           - infra/railway
@@ -94,6 +96,8 @@ jobs:
           - services/support
           - services/notifications
           - services/experience-config
+          - services/admin-identity
+          - services/user-admin
           - apps/telegram-bot-gateway
           - infra/n8n
           - infra/railway
@@ -117,7 +121,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        workspace: [packages/ts-common, services/telegram-bff, apps/telegram-miniapp]
+        workspace: [packages/ts-common, services/telegram-bff, apps/telegram-miniapp, services/admin-bff, apps/admin-web]
     services:
       redis:
         image: redis:7-alpine
@@ -145,7 +149,7 @@ jobs:
         working-directory: ${{ matrix.workspace }}
         run: npm run build -w @tilhero/ts-common --prefix ../.. && npm run build
       - name: E2E (Playwright, mocked BFF)
-        if: matrix.workspace == 'apps/telegram-miniapp'
+        if: matrix.workspace == 'apps/telegram-miniapp' || matrix.workspace == 'apps/admin-web'
         working-directory: ${{ matrix.workspace }}
         run: |
           npx playwright install --with-deps chromium
@@ -166,9 +170,13 @@ jobs:
           - services/support
           - services/notifications
           - services/experience-config
+          - services/admin-identity
+          - services/user-admin
           - apps/telegram-bot-gateway
           - services/telegram-bff
           - apps/telegram-miniapp
+          - services/admin-bff
+          - apps/admin-web
           - infra/n8n
     steps:
       - uses: actions/checkout@v4

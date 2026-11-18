@@ -16,10 +16,12 @@ from tilhero_common.internal_auth import InternalAuth, Principal
 from tilhero_support.api.common import cfg, idempotency_key
 from tilhero_support.domain import tickets as svc
 from tilhero_support.domain.constants import CATEGORIES, OPEN_STATUSES, STATUSES
+from tilhero_support.domain.reply_templates import reply_templates
 from tilhero_support.schemas import (
     EscalationIn,
     EscalationOut,
     Priority,
+    ReplyTemplateList,
     SlaPoliciesOut,
     SlaPoliciesPut,
     SlaState,
@@ -56,7 +58,9 @@ async def list_tickets(
     status: str | None = Query(default=None, max_length=120),
     category: str | None = Query(default=None, max_length=40),
     priority: Priority | None = None,
-    assignee: str | None = Query(default=None, max_length=64, description="staff id | _me | _none"),
+    assignee: str | None = Query(
+        default=None, max_length=64, description="me | none | staff id (_me/_none — синонимы)"
+    ),
     user_id: uuid.UUID | None = Query(default=None, description="обращения пользователя (карточка в Users)"),
     sla: SlaState | None = None,
     sort: Literal["created", "sla"] = "created",
@@ -69,8 +73,9 @@ async def list_tickets(
         raise unprocessable(
             "SUPPORT_FILTER_INVALID", "Неизвестная категория в фильтре", {"category": category}
         )
-    unassigned = assignee == "_none"
-    assignee_id = actor.id if assignee == "_me" else (None if unassigned else assignee)
+    # admin.ts: assignee=me|none|<id>; прежние _me/_none (форк aievent) принимаются как синонимы
+    unassigned = assignee in ("none", "_none")
+    assignee_id = actor.id if assignee in ("me", "_me") else (None if unassigned else assignee)
     if assignee_id is not None and not _STAFF_ID.match(assignee_id):
         raise unprocessable("SUPPORT_FILTER_INVALID", "Некорректный идентификатор оператора")
     now = datetime.now(UTC)
@@ -114,6 +119,13 @@ async def stats(
         since = now - timedelta(days=7 if period == "7d" else 30)
     async with rt.transaction() as session:
         return await svc.support_stats(session, since=since, now=now, soon_minutes=cfg(rt).sla_soon_minutes)
+
+
+@router.get("/templates", response_model=ReplyTemplateList)
+async def templates(principal: Principal = Depends(admin_bff)) -> ReplyTemplateList:
+    """Шаблоны ответов оператора (RU/UZ — язык ученика). Чтение — support.read; отправка ответа — support.reply."""
+    principal.require_permission("support.read")
+    return ReplyTemplateList.model_validate({"items": reply_templates()})
 
 
 @router.get("/tickets/{ticket_ref}/client-view", response_model=TicketOut)
@@ -210,7 +222,13 @@ async def escalate(
 async def get_sla(
     principal: Principal = Depends(admin_bff), rt: Runtime = Depends(get_runtime)
 ) -> SlaPoliciesOut:
-    principal.require_permission("support.manage")
+    """Чтение — support.read (операторы видят сроки очереди) или support.manage; изменение — только support.manage
+    (admin.ts: «GET|PUT …/sla-policies (PUT — support.manage)»)."""
+    actor = principal.actor
+    if actor is None:
+        raise forbidden("STAFF_CONTEXT_REQUIRED", "Команда доступна только сотрудникам")
+    if not {"support.read", "support.manage"} & actor.permissions:
+        raise forbidden("PERMISSION_DENIED", "Недостаточно прав", {"permission": "support.read"})
     async with rt.transaction() as session:
         return await svc.get_sla_policies(session)
 

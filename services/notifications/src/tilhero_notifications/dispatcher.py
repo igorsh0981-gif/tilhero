@@ -2,6 +2,11 @@
 в момент отправки (domain/policy.py, порядок §4), лимит дня под блокировкой ученика, доставка через bot-gateway,
 отложенные и повторы.
 
+Спринт 2: текст — активная версия шаблона сотрудника (кэш ≤ 30 с; нет версии или ошибка подстановки — текст из
+кода); записи рассылок (kind=campaign) — тексты из `campaigns` на момент отправки, остановленная рассылка →
+`cancelled`; детям и вне сегмента (возраст, язык) — `skipped` (защита в глубину: аудиторию уже отобрал
+identity-consent).
+
 Цикл не умирает от ошибок; время только aware UTC; в журнал — тип ошибки без текста (там могут быть PII).
 """
 
@@ -19,9 +24,25 @@ from tilhero_common.app import Runtime
 from tilhero_common.http_client import UpstreamError
 from tilhero_notifications import store
 from tilhero_notifications.delivery import DeliveryInfo, get_delivery, get_public
-from tilhero_notifications.domain.policy import Item, Rules, decide, limit_applies, local_day, zone
+from tilhero_notifications.domain.policy import KID_BANDS, Item, Rules, decide, limit_applies, local_day, zone
+from tilhero_notifications.domain.texts import TextError
+from tilhero_notifications.models import Campaign
 from tilhero_notifications.settings import Settings
-from tilhero_notifications.templates import TEMPLATES, Context, Rendered, TemplateError, TemplateSpec, clean_name
+from tilhero_notifications.template_versions import ActiveTemplates
+from tilhero_notifications.templates import (
+    CAMPAIGN_SPEC,
+    CAMPAIGN_TEMPLATE,
+    TEMPLATES,
+    CampaignParams,
+    Context,
+    Rendered,
+    TemplateError,
+    TemplateSpec,
+    TextOverride,
+    clean_name,
+    lang_of,
+    render_campaign,
+)
 
 log = logging.getLogger("tilhero.notifications.dispatcher")
 
@@ -31,9 +52,19 @@ BASE_OF = {spec.kid_variant: name for name, spec in TEMPLATES.items() if spec.ki
 NAME_STATUSES = frozenset({"ACTIVE", "DISABLED"})  # имя удаляемого/удалённого пользователя не показываем
 
 
+class CampaignOff(Exception):
+    """Запись рассылки не отправляется: рассылка остановлена (cancelled) или ученик вне сегмента (skipped)."""
+
+    def __init__(self, status: str, reason: str) -> None:
+        super().__init__(reason)
+        self.status = status
+        self.reason = reason
+
+
 class Dispatcher:
-    def __init__(self, runtime: Runtime) -> None:
+    def __init__(self, runtime: Runtime, templates: ActiveTemplates | None = None) -> None:
         self.rt = runtime
+        self.templates = templates or ActiveTemplates(runtime)
         self._wake = asyncio.Event()
 
     @property
@@ -160,9 +191,19 @@ class Dispatcher:
             return None
         return clean_name(public.display_name)
 
+    async def _override(self, name: str) -> TextOverride | None:
+        """Активная версия шаблона; хранилище версий недоступно — текст из кода (не падать)."""
+        try:
+            return await self.templates.get(name)
+        except Exception as exc:
+            log.warning("template versions unavailable, code text used", extra={"error_type": type(exc).__name__})
+            return None
+
     async def _render(
         self, c: store.Claimed, delivery: DeliveryInfo
     ) -> tuple[TemplateSpec, Rendered]:
+        if c.template == CAMPAIGN_TEMPLATE:
+            return CAMPAIGN_SPEC, await self._render_campaign(c, delivery)
         base = BASE_OF.get(c.template, c.template)
         name = TEMPLATES[base].kid_variant if delivery.is_kid and TEMPLATES[base].kid_variant else base
         spec = TEMPLATES[name or base]
@@ -171,12 +212,36 @@ class Dispatcher:
             other_name=await self._other_name(c.subject_user_id),
             timezone=delivery.timezone,
         )
-        return spec, spec.render(delivery.locale, c.params, ctx)
+        return spec, spec.render(delivery.locale, c.params, ctx, await self._override(spec.name))
+
+    async def _render_campaign(self, c: store.Claimed, delivery: DeliveryInfo) -> Rendered:
+        """Тексты рассылки на момент отправки. Остановлена → cancelled; дети, возраст или язык вне сегмента →
+        skipped. Имя ученика — {learner_name} (нет — пустая строка)."""
+        params = CAMPAIGN_SPEC.validate(c.params)
+        assert isinstance(params, CampaignParams)
+        async with self.rt.transaction() as session:
+            campaign = await session.get(Campaign, params.campaign_id)
+        if campaign is None or campaign.status == "stopped":
+            raise CampaignOff("cancelled", "campaign_stopped")
+        segment = campaign.segment or {}
+        band = delivery.age_band
+        if delivery.is_kid or band in KID_BANDS:
+            raise CampaignOff("skipped", "kid_excluded")  # детям 6–13 рассылки не уходят никогда
+        ages = segment.get("age") or ["adults"]
+        if not ((band == "14-17" and "teens" in ages) or (band == "18+" and "adults" in ages)):
+            raise CampaignOff("skipped", "segment_mismatch")
+        lang = lang_of(delivery.locale)
+        if segment.get("ui_lang") and lang not in segment["ui_lang"]:
+            raise CampaignOff("skipped", "segment_mismatch")
+        try:
+            return render_campaign(lang, campaign.texts, campaign.route, delivery.learner_display_name)
+        except TextError as exc:
+            raise TemplateError("campaign text cannot be rendered") from exc
 
     async def _process(self, c: store.Claimed, now: datetime) -> str:
         s = self.settings
         producer = s.service_name
-        if c.template not in TEMPLATES:
+        if c.template not in TEMPLATES and c.template != CAMPAIGN_TEMPLATE:
             return await self._fail(c, now, "template_unknown")
         try:
             delivery = await get_delivery(
@@ -191,6 +256,10 @@ class Dispatcher:
             return "skipped"
         try:
             spec, rendered = await self._render(c, delivery)
+        except CampaignOff as off:
+            async with self.rt.transaction() as session:
+                await store.mark_final(session, c, status=off.status, reason=off.reason, now=now)
+            return off.status
         except TemplateError:
             return await self._fail(c, now, "params_invalid")
         except Exception as exc:

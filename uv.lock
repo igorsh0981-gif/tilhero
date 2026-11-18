@@ -9,6 +9,7 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "tilhero-admin-identity",
     "tilhero-audit",
     "tilhero-botgw",
     "tilhero-common",
@@ -18,6 +19,7 @@ members = [
     "tilhero-notifications",
     "tilhero-social",
     "tilhero-support",
+    "tilhero-user-admin",
     "tilhero-workspace",
 ]
 
@@ -1648,6 +1650,21 @@ wheels = [
 ]
 
 [[package]]
+name = "tilhero-admin-identity"
+version = "0.1.0"
+source = { editable = "services/admin-identity" }
+dependencies = [
+    { name = "argon2-cffi" },
+    { name = "tilhero-common" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "argon2-cffi", specifier = ">=23.1" },
+    { name = "tilhero-common", editable = "packages/py-common" },
+]
+
+[[package]]
 name = "tilhero-audit"
 version = "0.1.0"
 source = { editable = "services/audit" }
@@ -1767,6 +1784,17 @@ requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
 name = "tilhero-support"
 version = "0.1.0"
 source = { editable = "services/support" }
+dependencies = [
+    { name = "tilhero-common" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
+
+[[package]]
+name = "tilhero-user-admin"
+version = "0.1.0"
+source = { editable = "services/user-admin" }
 dependencies = [
     { name = "tilhero-common" },
 ]

@@ -20,7 +20,8 @@ from tilhero_notifications.main import build_app
 from tilhero_notifications.models import Base
 from tilhero_notifications.settings import Settings
 
-TABLES = ("notifications", "deleted_users", "missed_state", "family_owners", "broadcasts", "inbox_state", "outbox")
+TABLES = ("notifications", "deleted_users", "missed_state", "family_owners", "broadcasts", "inbox_state", "outbox",
+          "notification_template_versions", "campaigns", "campaign_recipients")
 
 
 async def test_models_match_migrations_and_runtime_role() -> None:

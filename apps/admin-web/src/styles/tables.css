@@ -1,0 +1,43 @@
+/* =====================================================================
+   tables.css — data tables of the prototype (.tw/.hd/.rw): light header row, 13.5 px rows with 1 px separators,
+   selected row in pen-soft; cursor «load more» footer; permission matrix. On narrow screens the table scrolls inside
+   .table-wrap, never the page body.
+   ===================================================================== */
+.table-wrap{position:relative;width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px;font-variant-numeric:tabular-nums}
+.tbl caption{text-align:left}
+.tbl th{position:sticky;top:0;z-index:1;text-align:left;color:var(--ink2);padding:11px 14px;background:var(--surface-sunk);border-bottom:1px solid var(--line);white-space:nowrap;font-size:12px;font-weight:600}
+.tbl td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl .r{text-align:right}
+.tbl .c{text-align:center}
+.tbl th.r{text-align:right}
+.tbl tbody tr.is-click{cursor:pointer}
+.tbl tbody tr.is-click:hover td{background:var(--surface-sunk)}
+.tbl tbody tr.is-sel td{background:var(--pen-soft)}
+.tbl td:first-child,.tbl th:first-child{padding-left:16px}
+.tbl td:last-child,.tbl th:last-child{padding-right:16px}
+.tbl tr.sev-bad td:first-child{box-shadow:inset 3px 0 0 var(--err)}
+.tbl tr.sev-warn td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+.tbl tr.sev-info td:first-child{box-shadow:inset 3px 0 0 var(--pen)}
+.tbl tr.sev-good td:first-child{box-shadow:inset 3px 0 0 var(--ok)}
+.tbl tr.sev-none td:first-child{box-shadow:inset 3px 0 0 transparent}
+.tbl .cell-main{font-weight:600;color:var(--ink)}
+.tbl .cell-sub{font-size:12px;color:var(--ink2);margin-top:2px}
+.tbl .cell-sub svg{width:12px;height:12px;vertical-align:-2px}
+.tbl.compact td{padding:9px 14px}
+.tbl.dense td{padding:7px 12px;font-size:13px}
+.tbl.dense th{padding:8px 12px}
+.tbl td.actions-cell{white-space:nowrap;text-align:right}
+.tbl td.actions-cell .btn+.btn{margin-left:4px}
+.tbl tfoot td{background:var(--surface-sunk);font-weight:600;border-top:1px solid var(--line);border-bottom:0}
+.tbl td.empty-cell{padding:0}
+.pager{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--ink2);flex-wrap:wrap}
+.matrix th.c{text-align:center}
+.matrix td.c{padding:4px 6px;text-align:center}
+.matrix td{padding-top:6px;padding-bottom:6px}
+.matrix tr.grp td{background:var(--surface-sunk);font-size:12px;color:var(--ink2);font-weight:600;padding:7px 16px}
+.matrix input[type="checkbox"]{width:18px;height:18px;accent-color:var(--pen);cursor:pointer}
+.matrix input[type="checkbox"][disabled]{cursor:not-allowed}
+.matrix td.is-pending{position:relative;background:var(--warn-soft)}
+.pend-dot{position:absolute;top:6px;right:6px;width:6px;height:6px;border-radius:50%;background:var(--warn)}

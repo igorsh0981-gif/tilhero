@@ -4,24 +4,30 @@
 действий учеников, сотрудников и сервисов, событий безопасности, согласий и удаления (append-only, хеш-цепочка).
 Порт 8105, схема PostgreSQL `audit`, внутренний JWT с `aud = audit`.
 
-## Кто пишет (спринт 1, INTERNAL_API §7)
-**Только через шину** (`admin.audit.recorded.v1`, outbox издателя в транзакции изменения):
-`identity-consent`, `learning-plan`, `social`, `experience-config`, `support`, `notifications`
-(`consumers.AUDIT_EVENT_PRODUCERS`). Актора определяет издатель: сотрудник — из токена admin-bff (claim `actor`),
-ученик — из `sub`, иначе сам сервис. События безопасности, согласий и удаления — только от `identity-consent`
-(`SECURITY_EVENT_PRODUCERS`). События остальных издателей игнорируются с предупреждением в логе.
+## Кто пишет
+**Через шину** (`admin.audit.recorded.v1`, outbox издателя в транзакции изменения): спринт 1 (INTERNAL_API §7) —
+`identity-consent`, `learning-plan`, `social`, `experience-config`, `support`, `notifications`; спринт 2 —
+`admin-identity` (`auth.*`, `staff.*`, `role.*`, `approval.*`) (`consumers.AUDIT_EVENT_PRODUCERS`). Актора определяет
+издатель: сотрудник — из токена admin-bff (claim `actor`), ученик — из `sub`, иначе сам сервис. События безопасности,
+согласий и удаления — только от `identity-consent` (`SECURITY_EVENT_PRODUCERS`). События остальных издателей
+игнорируются с предупреждением в логе.
 
-**HTTP-писателей в спринте 1 нет** (`api/routes.py WRITERS` пуст): `POST /internal/v1/records` от любого сервиса →
-403 `CALLER_NOT_ALLOWED` (проверка вызывающего — до разбора тела). Эндпоинт оставлен для синхронного аудита
-админ-контура (спринт 2): писатель добавляется в `WRITERS` явно. Правило актора для него уже действует: `actor_*` в теле
-запрещены (422), актор — только из токена; сотрудник в теле (`on_behalf_of`) — только по списку `DELEGATION`
-(издатель → действия; в спринте 1 пуст).
+**По HTTP** (`POST /internal/v1/records`, синхронный аудит — запись до выдачи результата; спринт 2,
+docs/sprint2/INTERNAL_API.md §3): только `identity-consent` и `admin-bff` (`api/routes.py WRITERS`); admin-bff — только
+свои действия `dev.impersonate`, `auth.logout` и только с actor сотрудника (`ONLY_ACTIONS`, иначе 403
+`ACTION_NOT_ALLOWED`). `admin-identity` пишет только событием через outbox, HTTP-права у него нет (ревью спринта 2).
+Любой другой сервис → 403 `CALLER_NOT_ALLOWED` (проверка вызывающего — до разбора тела). `actor_*` в теле запрещены (422), актор —
+только из токена (сервис-издатель, ученик из `sub`). Сотрудник в теле (`on_behalf_of`) — только по списку `DELEGATION`
+(издатель → действия): `identity-consent` → `sensitive.view`, `sensitive.view_rate_limited` (раскрытие Telegram ID
+ученика сотрудником: claim `actor` audit принимает только от admin-bff, поэтому домен передаёт сотрудника из своего
+actor-токена); иное → 403 `DELEGATION_NOT_ALLOWED`. Повтор `record_id` того же издателя идемпотентен (та же запись),
+`record_id` чужой записи → 409 `AUDIT_RECORD_CONFLICT` (запись не перезаписывается и не возвращается).
 
 ## API
 | Метод | Путь | Кто вызывает | Право |
 |---|---|---|---|
-| POST | `/internal/v1/records` | никто в спринте 1 | — (идемпотентно по `record_id`) |
-| GET | `/admin/v1/audit/records?action=&actor_id=&object_id=&date_from=&date_to=&limit=&cursor=` | admin-bff (спринт 2) | `audit.read` |
+| POST | `/internal/v1/records` | identity-consent, admin-bff (только `dev.impersonate`, `auth.logout`) | — (идемпотентно по `record_id`) |
+| GET | `/admin/v1/audit/records?action=&actor_id=&object_type=&object_id=&date_from=&date_to=&limit=&cursor=` | admin-bff | `audit.read` |
 | GET | `/admin/v1/audit/records/{record_id}` | admin-bff | `audit.read` |
 | GET | `/admin/v1/audit/verify` | admin-bff | `audit.read` |
 

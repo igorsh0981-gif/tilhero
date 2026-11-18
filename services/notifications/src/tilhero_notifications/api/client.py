@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from tilhero_common.app import Runtime, get_runtime
 from tilhero_common.errors import unauthorized
@@ -53,6 +53,7 @@ async def _unread(rt: Runtime, user: uuid.UUID, now: datetime) -> int:
 
 @router.get("/inbox", response_model=InboxPage)
 async def inbox(
+    request: Request,
     principal: Principal = Depends(bff_only),
     rt: Runtime = Depends(get_runtime),
     limit: int = Query(default=20, ge=1, le=100),
@@ -61,7 +62,7 @@ async def inbox(
     user = learner_id(principal)
     after = decode_cursor(cursor) if cursor else None
     now = datetime.now(UTC)
-    await broadcasts.sync(rt, user, now)
+    await broadcasts.sync(rt, user, now, request.app.state.templates)
     async with rt.transaction() as session:
         rows = await store.inbox_page(session, user, limit=limit, after=after, not_older=_horizon(rt, now))
     page = rows[:limit]
@@ -70,21 +71,23 @@ async def inbox(
 
 
 @router.get("/inbox/unread-count", response_model=UnreadOut)
-async def unread_count(principal: Principal = Depends(bff_only), rt: Runtime = Depends(get_runtime)) -> UnreadOut:
+async def unread_count(
+    request: Request, principal: Principal = Depends(bff_only), rt: Runtime = Depends(get_runtime)
+) -> UnreadOut:
     user = learner_id(principal)
     now = datetime.now(UTC)
-    await broadcasts.sync(rt, user, now)
+    await broadcasts.sync(rt, user, now, request.app.state.templates)
     return UnreadOut(unread=await _unread(rt, user, now))
 
 
 @router.post("/inbox:read", response_model=UnreadOut)
 async def mark_read(
-    body: InboxReadIn, principal: Principal = Depends(bff_only), rt: Runtime = Depends(get_runtime)
+    body: InboxReadIn, request: Request, principal: Principal = Depends(bff_only), rt: Runtime = Depends(get_runtime)
 ) -> UnreadOut:
     """Идемпотентно: повтор не меняет read_at; неизвестные и чужие id игнорируются (без раскрытия)."""
     user = learner_id(principal)
     now = datetime.now(UTC)
-    await broadcasts.sync(rt, user, now)
+    await broadcasts.sync(rt, user, now, request.app.state.templates)
     async with rt.transaction() as session:
         await store.mark_read(
             session, user, ids=None if body.all else body.ids, now=now, not_older=_horizon(rt, now)

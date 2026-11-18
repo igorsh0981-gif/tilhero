@@ -54,6 +54,7 @@ from tilhero_support.schemas import (
     StaffMessageOut,
     StaffPatchIn,
     StaffStatusPoint,
+    StaffTicketContextOut,
     StaffTicketOut,
     StaffTicketSummaryOut,
     StatusPoint,
@@ -489,7 +490,7 @@ async def staff_ticket(
     )
     return StaffTicketOut(
         **staff_summary(ticket, now, soon_minutes).model_dump(),
-        context=_context_out(ticket),
+        context=StaffTicketContextOut.model_validate(ticket.context) if ticket.context else None,
         correlation_id=ticket.correlation_id,
         resolved_at=ticket.resolved_at,
         closed_at=ticket.closed_at,

@@ -1,0 +1,20 @@
+# Используется BuildKit вместо корневого .dockerignore для apps/admin-web/Dockerfile.
+# Белый список: только то, что нужно для сборки статики (без BFF, Python-сервисов, docs, тестов и e2e).
+*
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!packages/contracts/package.json
+!packages/contracts/src
+!services/telegram-bff/scripts/restore-workspace-manifests.mjs
+!apps/admin-web
+
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+apps/admin-web/test
+apps/admin-web/e2e
+apps/admin-web/test-results
+apps/admin-web/playwright-report
+apps/admin-web/blob-report

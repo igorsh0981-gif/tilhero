@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from exp_actors import EDITOR, PUBLISHER, READER, SUPPORT
+from exp_actors import DASHBOARD, EDITOR, PUBLISHER, READER, SUPPORT, WN_EDITOR, WN_PUBLISHER
 from sqlalchemy import text
 
 from tilhero_common.testing import assert_event_conforms
@@ -54,13 +54,13 @@ def note(slug: str = "2026.12", **over: Any) -> dict[str, Any]:
     return body
 
 
-async def create(env, body: dict | None = None, actor=EDITOR) -> dict:
+async def create(env, body: dict | None = None, actor=WN_EDITOR) -> dict:
     r = await env.c.post(BASE, json=body or note(), headers=env.h(actor))
     assert r.status_code == 201, r.text
     return r.json()
 
 
-async def publish(env, n: dict, reason: str = "Релиз декабря", actor=PUBLISHER, **headers: str):
+async def publish(env, n: dict, reason: str = "Релиз декабря", actor=WN_PUBLISHER, **headers: str):
     return await env.c.post(f"{BASE}/{n['release_note_id']}/publish",
                             json={"expected_version": n["version"], "reason": reason},
                             headers=env.h(actor, **headers))
@@ -75,11 +75,11 @@ async def published(env, slug: str, **over: Any) -> dict:
 
 async def archive(env, n: dict, reason: str = "Снять с показа"):
     return await env.c.post(f"{BASE}/{n['release_note_id']}/archive", json={"reason": reason},
-                            headers=env.h(PUBLISHER))
+                            headers=env.h(WN_PUBLISHER))
 
 
 async def staff_note(env, slug: str) -> dict:
-    items = (await env.c.get(BASE, params={"limit": 100}, headers=env.h(READER))).json()["items"]
+    items = (await env.c.get(BASE, params={"limit": 100}, headers=env.h(WN_EDITOR))).json()["items"]
     return next(n for n in items if n["slug"] == slug and n["status"] != "archived")
 
 
@@ -138,7 +138,7 @@ async def test_seed_welcome_published_and_draft(env) -> None:
         for pressure in ("потеряешь", "потеряете", "провал", "серия сгорит"):  # без давления (CONVENTIONS §8)
             assert pressure not in ru
     # туристический сид «Бот турист» не перенесён
-    all_slugs = [n["slug"] for n in (await env.c.get(BASE, headers=env.h(READER))).json()["items"]]
+    all_slugs = [n["slug"] for n in (await env.c.get(BASE, headers=env.h(WN_EDITOR))).json()["items"]]
     assert sorted(all_slugs) == sorted([WELCOME, DRAFT])
     # черновик не виден ученикам; лента — только welcome-1
     assert [n["slug"] for n in (await feed(env)).json()["items"]] == [WELCOME]
@@ -320,17 +320,18 @@ async def test_feed_pagination(env) -> None:
 
 async def test_lifecycle_create_edit_publish_archive_with_events(env) -> None:
     n = await create(env, note(segments={"ui_lang": ["uz", "ru"], "age": []}))
-    assert n["status"] == "draft" and n["version"] == 1 and n["created_by"] == EDITOR.id
+    assert n["status"] == "draft" and n["version"] == 1 and n["created_by"] == WN_EDITOR.id
     assert n["segments"] == {"ui_lang": ["ru", "uz"]}
     body = note(title={"ru": "Декабрь", "uz": "Dekabr"}, audience="all", segments={"age": ["kids"]})
-    r = await env.c.put(f"{BASE}/{n['release_note_id']}", json={**body, "expected_version": 1}, headers=env.h(EDITOR))
+    r = await env.c.put(f"{BASE}/{n['release_note_id']}", json={**body, "expected_version": 1},
+                        headers=env.h(WN_EDITOR))
     assert r.status_code == 200 and r.json()["version"] == 2 and r.json()["title"] == {"ru": "Декабрь", "uz": "Dekabr"}
     assert (r.json()["audience"], r.json()["segments"]) == ("all", {"age": ["kids"]})
     same = await env.c.put(f"{BASE}/{n['release_note_id']}", json={**body, "expected_version": 2},
-                           headers=env.h(EDITOR))
+                           headers=env.h(WN_EDITOR))
     assert same.status_code == 200 and same.json()["version"] == 2  # повтор той же правки — no-op
     stale = await env.c.put(f"{BASE}/{n['release_note_id']}", json={**note(), "expected_version": 1},
-                            headers=env.h(EDITOR))
+                            headers=env.h(WN_EDITOR))
     assert stale.status_code == 409 and stale.json()["code"] == "RELEASE_NOTE_VERSION_CONFLICT"
     assert stale.json()["details"]["current_version"] == 2
     bad = await publish(env, n)  # сотрудник подтверждал другое содержимое
@@ -338,15 +339,16 @@ async def test_lifecycle_create_edit_publish_archive_with_events(env) -> None:
     pub = await publish(env, r.json())
     assert pub.status_code == 201, pub.text
     p = pub.json()
-    assert p["status"] == "published" and p["published_by"] == PUBLISHER.id and p["published_at"].endswith("Z")
+    assert p["status"] == "published" and p["published_by"] == WN_PUBLISHER.id and p["published_at"].endswith("Z")
     again = await publish(env, r.json())
     assert again.status_code == 200 and again.json()["published_at"] == p["published_at"]
     edit = await env.c.put(f"{BASE}/{n['release_note_id']}", json={**note(), "expected_version": p["version"]},
-                           headers=env.h(EDITOR))
+                           headers=env.h(WN_EDITOR))
     assert edit.status_code == 409 and edit.json()["code"] == "RELEASE_NOTE_NOT_DRAFT"
     assert "2026.12" in [x["slug"] for x in (await feed(env, age="kids")).json()["items"]]
     arc = await archive(env, n, "Опечатка в тексте")
-    assert arc.status_code == 201 and arc.json()["status"] == "archived" and arc.json()["archived_by"] == PUBLISHER.id
+    assert arc.status_code == 201 and arc.json()["status"] == "archived"
+    assert arc.json()["archived_by"] == WN_PUBLISHER.id
     assert (await archive(env, n, "Опечатка в тексте")).status_code == 200
     assert "2026.12" not in [x["slug"] for x in (await feed(env, age="kids")).json()["items"]]
     re_pub = await publish(env, arc.json())
@@ -388,7 +390,7 @@ async def test_seed_draft_can_be_published_for_existing_learners(env) -> None:
 
 async def test_translation_required(env) -> None:
     async def missing(body: dict, method: str = "POST", path: str = BASE) -> list[str]:
-        r = await env.c.request(method, path, json=body, headers=env.h(EDITOR))
+        r = await env.c.request(method, path, json=body, headers=env.h(WN_EDITOR))
         assert r.status_code == 422 and r.json()["code"] == "RELEASE_NOTE_TRANSLATION_MISSING", r.text
         return r.json()["details"]["missing"]
 
@@ -414,6 +416,35 @@ async def test_translation_required(env) -> None:
     assert (await staff_note(env, "2026.12"))["status"] == "draft"
     await env.flush()
     assert env.events("experience.release_note.published.v1") == []
+
+
+async def test_publish_rechecks_route_and_icon(env) -> None:
+    """AT-19: запрещённый маршрут (или иконка) не сохраняется (422) и не публикуется, даже если попал в черновик в
+    обход API (SQL): публикация перепроверяет заметку той же схемой, что и сохранение."""
+    for link in ("catalog", "javascript:alert(1)"):
+        bad = note()
+        bad["items"][0]["link"] = link
+        r = await env.c.post(BASE, json=bad, headers=env.h(WN_EDITOR))
+        assert r.status_code == 422 and r.json()["code"] == "VALIDATION_ERROR", link
+        assert any("link" in e["loc"] for e in r.json()["details"]["errors"]), r.json()
+    n = await create(env)
+    for patch, field in (("jsonb_set(items, '{0,link}', '\"https://evil.example\"')", "link"),
+                         ("jsonb_set(items, '{1,icon}', '\"plane\"')", "icon")):
+        async with env.runtime.transaction() as s:
+            await s.execute(text(f"UPDATE release_notes SET items = {patch} WHERE id = :id"),  # noqa: S608
+                            {"id": uuid.UUID(n["release_note_id"])})
+        r = await publish(env, n)
+        assert r.status_code == 422 and r.json()["code"] == "VALIDATION_ERROR", r.text
+        assert any(field in e["loc"] for e in r.json()["details"]["errors"]), r.json()
+        assert (await env.c.get(f"{BASE}/{n['release_note_id']}", headers=env.h(WN_EDITOR))).json()[
+            "status"] == "draft"
+        async with env.runtime.transaction() as s:  # вернуть корректное значение для следующего случая
+            await s.execute(text("UPDATE release_notes SET items = CAST(:items AS jsonb) WHERE id = :id"),
+                            {"items": json.dumps(n["items"]), "id": uuid.UUID(n["release_note_id"])})
+    assert (await publish(env, n)).status_code == 201
+    await env.flush()
+    assert len(env.events("experience.release_note.published.v1")) == 1
+    assert [e.payload["action"] for e in audits(env)] == ["release_note.create", "release_note.publish"]
 
 
 def _bad(mut) -> dict:
@@ -453,7 +484,7 @@ INVALID = [
 
 @pytest.mark.parametrize(("case", "mut"), INVALID, ids=[c for c, _ in INVALID])
 async def test_invalid_content_rejected(env, case: str, mut) -> None:
-    r = await env.c.post(BASE, json=_bad(mut), headers=env.h(EDITOR))
+    r = await env.c.post(BASE, json=_bad(mut), headers=env.h(WN_EDITOR))
     assert r.status_code == 422, (case, r.text)
     assert r.json()["code"] == "VALIDATION_ERROR"
 
@@ -483,40 +514,277 @@ async def test_idempotency_key_replays_publish(env) -> None:
 
 async def test_slug_unique_among_active(env) -> None:
     await create(env)
-    dup = await env.c.post(BASE, json=note(), headers=env.h(EDITOR))
+    dup = await env.c.post(BASE, json=note(), headers=env.h(WN_EDITOR))
     assert dup.status_code == 409 and dup.json()["code"] == "RELEASE_NOTE_SLUG_EXISTS"
     for slug in (DRAFT, WELCOME):
-        assert (await env.c.post(BASE, json=note(slug=slug), headers=env.h(EDITOR))).status_code == 409
+        assert (await env.c.post(BASE, json=note(slug=slug), headers=env.h(WN_EDITOR))).status_code == 409
 
 
 async def test_staff_permissions_and_callers(env) -> None:
+    """AT-17: права «Что нового» — whatsnew.manage (чтение, черновик, правка, статистика) и whatsnew.publish
+    (публикация, снятие); права конфигурации (config.*) к заметкам больше не допускают — домен проверяет сам."""
     n = await create(env)
     nid = n["release_note_id"]
-    assert (await env.c.get(BASE)).status_code == 401
-    assert (await env.c.get(BASE, headers=env.h(SUPPORT))).status_code == 403
-    assert (await env.c.get(BASE, headers=env.h(None))).json()["code"] == "STAFF_CONTEXT_REQUIRED"
-    assert (await env.c.post(BASE, json=note("x1"), headers=env.h(READER))).status_code == 403
-    denied = await publish(env, n, actor=EDITOR)  # config.edit без config.publish
-    assert denied.status_code == 403 and denied.json()["code"] == "PERMISSION_DENIED"
-    assert (await env.c.post(f"{BASE}/{nid}/archive", json={"reason": "нет права"},
-                             headers=env.h(EDITOR))).status_code == 403
-    tg = await env.c.get(BASE, headers=env.h(PUBLISHER, issuer="telegram-bff"))
+    edit_body = {**note(), "expected_version": 1}
+    manage_calls = [("GET", BASE, None), ("GET", f"{BASE}/{nid}", None), ("GET", f"{BASE}/{nid}/stats", None),
+                    ("POST", BASE, note("x1")), ("PUT", f"{BASE}/{nid}", edit_body)]
+    publish_calls = [("POST", f"{BASE}/{nid}/publish", {"expected_version": 1, "reason": "нет права"}),
+                     ("POST", f"{BASE}/{nid}/archive", {"reason": "нет права"})]
+    for method, path, body in manage_calls + publish_calls:
+        perm = "whatsnew.publish" if (method, path, body) in publish_calls else "whatsnew.manage"
+        assert (await env.c.request(method, path, json=body)).status_code == 401, path
+        no_actor = await env.c.request(method, path, json=body, headers=env.h(None))
+        assert no_actor.status_code == 403 and no_actor.json()["code"] == "STAFF_CONTEXT_REQUIRED", path
+        tg = await env.c.request(method, path, json=body, headers=env.h(WN_PUBLISHER, issuer="telegram-bff"))
+        assert tg.status_code == 403 and tg.json()["code"] == "CALLER_NOT_ALLOWED", path
+        # config.read / config.edit / config.publish, поддержка и аналитик — не допускаются
+        for actor in (READER, EDITOR, PUBLISHER, SUPPORT, DASHBOARD):
+            r = await env.c.request(method, path, json=body, headers=env.h(actor))
+            assert r.status_code == 403, (path, actor.id, r.text)
+            assert r.json()["code"] == "PERMISSION_DENIED" and r.json()["details"] == {"permission": perm}
+    # whatsnew.manage без whatsnew.publish: черновик — да, публикация и снятие — нет
+    for method, path, body in publish_calls:
+        r = await env.c.request(method, path, json=body, headers=env.h(WN_EDITOR))
+        assert r.status_code == 403 and r.json()["details"] == {"permission": "whatsnew.publish"}, path
+    assert (await env.c.get(f"{BASE}/{nid}", headers=env.h(WN_EDITOR))).json()["status"] == "draft"
+    await env.flush()
+    assert env.events("experience.release_note.published.v1") == []
+    assert [e.payload["action"] for e in audits(env)] == ["release_note.create"]  # отказы аудит не пишут
+    # только whatsnew.publish (без manage) — публикует (step-up — в admin-bff)
+    only_publish = type(WN_PUBLISHER)(id="staff-comms-8", role="communications",
+                                      permissions=frozenset({"whatsnew.publish"}))
+    assert (await publish(env, n, actor=only_publish)).status_code == 201
+
+    tg = await env.c.get(BASE, headers=env.h(WN_PUBLISHER, issuer="telegram-bff"))
     assert tg.status_code == 403 and tg.json()["code"] == "CALLER_NOT_ALLOWED"
-    missing = await env.c.get(f"{BASE}/{uuid.uuid4()}", headers=env.h(READER))
+    missing = await env.c.get(f"{BASE}/{uuid.uuid4()}", headers=env.h(WN_EDITOR))
     assert missing.status_code == 404 and missing.json()["code"] == "RELEASE_NOTE_NOT_FOUND"
-    assert (await env.c.get(f"{BASE}/not-a-uuid", headers=env.h(READER))).status_code == 422
+    assert (await env.c.get(f"{BASE}/not-a-uuid", headers=env.h(WN_EDITOR))).status_code == 422
     missing_pub = await env.c.post(f"{BASE}/{uuid.uuid4()}/publish", json={"expected_version": 1, "reason": "нет"},
-                                   headers=env.h(PUBLISHER))
+                                   headers=env.h(WN_PUBLISHER))
     assert missing_pub.status_code == 404
-    drafts = await env.c.get(BASE, params={"status": "draft"}, headers=env.h(READER))
+    missing_arc = await env.c.post(f"{BASE}/{uuid.uuid4()}/archive", json={"reason": "нет"},
+                                   headers=env.h(WN_PUBLISHER))
+    assert missing_arc.status_code == 404 and missing_arc.json()["code"] == "RELEASE_NOTE_NOT_FOUND"
+    drafts = await env.c.get(BASE, params={"status": "draft"}, headers=env.h(WN_EDITOR))
     assert {i["status"] for i in drafts.json()["items"]} == {"draft"}
-    assert (await env.c.get(BASE, params={"status": "deleted"}, headers=env.h(READER))).status_code == 422
-    page1 = (await env.c.get(BASE, params={"limit": 2}, headers=env.h(READER))).json()
+    assert (await env.c.get(BASE, params={"status": "deleted"}, headers=env.h(WN_EDITOR))).status_code == 422
+    page1 = (await env.c.get(BASE, params={"limit": 2}, headers=env.h(WN_EDITOR))).json()
     page2 = (await env.c.get(BASE, params={"limit": 2, "cursor": page1["next_cursor"]},
-                             headers=env.h(READER))).json()
+                             headers=env.h(WN_EDITOR))).json()
     assert len(page1["items"]) == 2 and len(page2["items"]) == 1 and page2["next_cursor"] is None
-    bad = await env.c.get(BASE, params={"cursor": "@@"}, headers=env.h(READER))
+    bad = await env.c.get(BASE, params={"cursor": "@@"}, headers=env.h(WN_EDITOR))
     assert bad.status_code == 400 and bad.json()["code"] == "INVALID_CURSOR"
+
+
+async def test_config_permissions_do_not_cover_release_notes_and_vice_versa(env) -> None:
+    """config.publish больше не публикует заметку; whatsnew.* не даёт менять конфигурацию интерфейса."""
+    n = await create(env)
+    denied = await publish(env, n, actor=PUBLISHER)
+    assert denied.status_code == 403 and denied.json()["details"] == {"permission": "whatsnew.publish"}
+    for path, body in (("/admin/v1/experience/miniapp/rollback", {"reason": "попытка"}),
+                       ("/admin/v1/experience/admin/activate", {"version": "1.0.0", "reason": "попытка"})):
+        r = await env.c.post(path, json=body, headers=env.h(WN_PUBLISHER))
+        assert r.status_code == 403 and r.json()["details"] == {"permission": "config.publish"}, path
+    r = await env.c.get("/admin/v1/experience/miniapp/versions", headers=env.h(WN_PUBLISHER))
+    assert r.status_code == 403 and r.json()["details"] == {"permission": "config.read"}
+
+
+# ---------------------------------------------------------------- статистика показов (AT-18)
+
+
+async def seen_as(env, user, ids: list[str], lang: str | None = None, age: str | None = None):
+    params = {k: v for k, v in (("lang", lang), ("age", age)) if v is not None}
+    r = await env.c.post(SEEN, json={"release_note_ids": ids}, params=params, headers=env.learner(user))
+    assert r.status_code == 204, r.text
+    return r
+
+
+async def stats(env, nid: str, actor=WN_EDITOR):
+    return await env.c.get(f"{BASE}/{nid}/stats", headers=env.h(actor))
+
+
+async def test_views_total_in_list_and_card_without_n_plus_1(env) -> None:
+    welcome = await staff_note(env, WELCOME)
+    a = await published(env, "2026.12", audience="all")
+    draft = await create(env, note("2027.01"))
+    for _ in range(3):
+        await seen_as(env, uuid.uuid4(), [welcome["release_note_id"], a["release_note_id"]], "ru", "adults")
+    repeat = uuid.uuid4()
+    await seen_as(env, repeat, [welcome["release_note_id"]], "uz", "kids")
+    await seen_as(env, repeat, [welcome["release_note_id"]], "ru", "adults")  # повтор — тот же ученик
+    # отметка в обход API на черновик не попадает в views_total (у черновика показов нет по определению)
+    async with env.runtime.transaction() as s:
+        await s.execute(text("INSERT INTO release_note_views (user_id, release_note_id) VALUES (:u, :n)"),
+                        {"u": uuid.uuid4(), "n": uuid.UUID(draft["release_note_id"])})
+
+    from sqlalchemy import event
+
+    assert env.runtime.db is not None
+    engine = env.runtime.db.engine
+    statements: list[str] = []
+
+    def count_sql(_conn, _cursor, statement, *_a) -> None:
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", count_sql)
+    try:
+        page = (await env.c.get(BASE, params={"limit": 100}, headers=env.h(WN_EDITOR))).json()
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", count_sql)
+    views = {i["slug"]: (i["status"], i["views_total"]) for i in page["items"]}
+    assert views == {WELCOME: ("published", 4), "2026.12": ("published", 3), "2027.01": ("draft", 0),
+                     DRAFT: ("draft", 0)}
+    # одна выборка заметок + один GROUP BY по отметкам, не запрос на каждую заметку
+    assert sum("release_note_views" in sql for sql in statements) == 1, statements
+    card = (await env.c.get(f"{BASE}/{a['release_note_id']}", headers=env.h(WN_EDITOR))).json()
+    assert card["views_total"] == 3 and set(card) >= {"views_total", "release_note_id", "version", "segments"}
+    assert (await env.c.get(f"{BASE}/{draft['release_note_id']}", headers=env.h(WN_EDITOR))).json()[
+        "views_total"] == 0
+    # архив сохраняет показы; ответ команды тоже несёт views_total
+    arc = await archive(env, a)
+    assert arc.status_code == 201 and arc.json()["views_total"] == 3
+    assert (await archive(env, a)).json()["views_total"] == 3
+    fresh = await create(env, note("2027.02"))
+    assert fresh["views_total"] == 0
+    pub = await publish(env, fresh)
+    assert pub.json()["views_total"] == 0
+
+
+async def test_at18_publish_once_for_existing_learner_archive_and_stats(env) -> None:
+    """AT-18 (домен): черновик RU+UZ → публикация (whatsnew.publish) → ученик existing видит её при следующем входе
+    один раз → статистика показов растёт → снятие убирает заметку из «Что нового» и ленты."""
+    learner = uuid.uuid4()
+    await env.seen(learner, [(await staff_note(env, WELCOME))["release_note_id"]])  # знакомство уже видел
+    n = await create(env, note("2026.12", audience="existing"), actor=WN_EDITOR)
+    assert await ids_for_me(env, learner, onboarded_at=long_ago(), lang="uz") == ("none", [])  # черновик не виден
+    assert (await publish(env, n, actor=WN_PUBLISHER)).status_code == 201
+    r = await env.for_me(learner, onboarded_at=long_ago(), lang="uz", age="teens")
+    assert r.json()["mode"] == "updates" and [x["title"] for x in r.json()["notes"]] == ["2026-yil dekabr"]
+    await seen_as(env, learner, [n["release_note_id"]], "uz", "teens")  # шторка закрыта
+    assert await ids_for_me(env, learner, onboarded_at=long_ago(), lang="uz", age="teens") == ("none", [])
+    st = (await stats(env, n["release_note_id"])).json()
+    assert (st["views_total"], st["views_by_lang"], st["views_by_age"]) == (
+        1, {"ru": 0, "uz": 1}, {"kids": 0, "teens": 1, "adults": 0})
+    other = uuid.uuid4()
+    await env.seen(other, [(await staff_note(env, WELCOME))["release_note_id"]])
+    assert await ids_for_me(env, other, onboarded_at=long_ago()) == ("updates", ["2026.12"])
+    assert (await archive(env, n)).status_code == 201
+    assert await ids_for_me(env, other, onboarded_at=long_ago()) == ("none", [])
+    assert "2026.12" not in [x["slug"] for x in (await feed(env)).json()["items"]]
+    assert (await stats(env, n["release_note_id"])).json()["views_total"] == 1
+
+
+async def test_stats_by_language_and_age(env) -> None:
+    n = await published(env, "2026.12", audience="all")
+    nid = n["release_note_id"]
+    empty = await stats(env, nid)
+    assert empty.status_code == 200, empty.text
+    assert empty.json() == {"release_note_id": nid, "views_total": 0, "views_by_lang": {"ru": 0, "uz": 0},
+                            "views_by_age": {"kids": 0, "teens": 0, "adults": 0},
+                            "first_view_at": None, "last_view_at": None}
+    first = uuid.uuid4()
+    await seen_as(env, first, [nid], "ru", "adults")
+    await seen_as(env, uuid.uuid4(), [nid], "uz", "kids")
+    await seen_as(env, uuid.uuid4(), [nid], "uz", "teens")
+    await seen_as(env, uuid.uuid4(), [nid], "uz")  # возраст не передан — только в разрезе языка
+    await seen_as(env, uuid.uuid4(), [nid])  # сегмент не передан (старый клиент BFF) — только views_total
+    # повторная отметка не меняет сегмент первого показа (ученик сменил язык после показа)
+    await seen_as(env, first, [nid], "uz", "teens")
+    # старая отметка до миграции 0005 — без сегмента
+    async with env.runtime.transaction() as s:
+        await s.execute(text("INSERT INTO release_note_views (user_id, release_note_id, seen_at) "
+                             "VALUES (:u, :n, now() - interval '2 days')"), {"u": uuid.uuid4(), "n": uuid.UUID(nid)})
+    r = await stats(env, nid)
+    body = r.json()
+    assert body["views_total"] == 6
+    assert body["views_by_lang"] == {"ru": 1, "uz": 3}
+    assert body["views_by_age"] == {"kids": 1, "teens": 1, "adults": 1}
+    first_at = datetime.fromisoformat(body["first_view_at"].replace("Z", "+00:00"))
+    last_at = datetime.fromisoformat(body["last_view_at"].replace("Z", "+00:00"))
+    assert body["first_view_at"].endswith("Z") and first_at < last_at
+    assert datetime.now(UTC) - first_at > timedelta(days=1)  # самая ранняя — старая отметка
+    # статистика растёт с каждым новым учеником, повтор её не меняет
+    await seen_as(env, first, [nid], "ru", "adults")
+    assert (await stats(env, nid)).json()["views_total"] == 6
+    await seen_as(env, uuid.uuid4(), [nid], "ru", "teens")
+    grown = (await stats(env, nid)).json()
+    assert grown["views_total"] == 7 and grown["views_by_lang"]["ru"] == 2 and grown["views_by_age"]["teens"] == 2
+    # снятая с показа заметка — статистика остаётся
+    await archive(env, n)
+    assert (await stats(env, nid)).json()["views_total"] == 7
+    # в ответе нет идентификаторов учеников
+    assert str(first) not in r.text
+
+
+async def test_stats_not_found_draft_and_auth(env) -> None:
+    missing = await stats(env, str(uuid.uuid4()))
+    assert missing.status_code == 404 and missing.json()["code"] == "RELEASE_NOTE_NOT_FOUND"
+    assert (await env.c.get(f"{BASE}/not-a-uuid/stats", headers=env.h(WN_EDITOR))).status_code == 422
+    draft = await staff_note(env, DRAFT)
+    r = await stats(env, draft["release_note_id"])
+    assert r.status_code == 200 and r.json()["views_total"] == 0 and r.json()["first_view_at"] is None
+    assert (await stats(env, draft["release_note_id"], actor=WN_PUBLISHER)).status_code == 200
+
+
+async def test_seen_segment_validation(env) -> None:
+    user = uuid.uuid4()
+    welcome = (await staff_note(env, WELCOME))["release_note_id"]
+    for params in ({"lang": "en"}, {"age": "seniors"}, {"lang": "ru", "age": "6-9"}):
+        r = await env.c.post(SEEN, json={"release_note_ids": [welcome]}, params=params, headers=env.learner(user))
+        assert r.status_code == 422 and r.json()["code"] == "VALIDATION_ERROR", params
+    async with env.runtime.transaction() as s:
+        count = (await s.execute(text("SELECT count(*) FROM release_note_views WHERE user_id = :u"),
+                                 {"u": user})).scalar()
+    assert count == 0
+    # БД не принимает сегмент вне каталога и в обход API
+    for col, value in (("ui_lang", "en"), ("age_segment", "seniors")):
+        with pytest.raises(Exception, match="ck_release_note_views"):
+            async with env.runtime.transaction() as s:
+                await s.execute(text(f"INSERT INTO release_note_views (user_id, release_note_id, {col}) "  # noqa: S608
+                                     "VALUES (:u, :n, :v)"), {"u": user, "n": uuid.UUID(welcome), "v": value})
+
+
+# ---------------------------------------------------------------- сводка для Обзора
+
+
+async def test_summary_for_dashboard(env) -> None:
+    path = f"{BASE}/summary"
+    r = await env.c.get(path, headers=env.h(DASHBOARD))
+    assert r.status_code == 200, r.text
+    welcome = await staff_note(env, WELCOME)
+    assert r.json() == {"published": 1, "drafts": 1, "latest": {
+        "release_note_id": welcome["release_note_id"], "slug": WELCOME, "title": "Добро пожаловать в TilHero",
+        "views_total": 0, "published_at": welcome["published_at"]}}
+    a = await published(env, "2026.12", audience="all")
+    await create(env, note("2027.01"))
+    for _ in range(2):
+        await seen_as(env, uuid.uuid4(), [a["release_note_id"]], "uz", "adults")
+    s = (await env.c.get(path, headers=env.h(WN_PUBLISHER))).json()
+    assert (s["published"], s["drafts"]) == (2, 2)
+    assert s["latest"]["slug"] == "2026.12" and s["latest"]["title"] == "Декабрь 2026"  # заголовок — RU
+    assert s["latest"]["views_total"] == 2 and s["latest"]["published_at"] == a["published_at"]
+    # снятая — не «последняя опубликованная» и не считается
+    await archive(env, a)
+    s = (await env.c.get(path, headers=env.h(DASHBOARD))).json()
+    assert (s["published"], s["drafts"]) == (1, 2) and s["latest"]["slug"] == WELCOME
+    await archive(env, welcome)
+    s = (await env.c.get(path, headers=env.h(DASHBOARD))).json()
+    assert s == {"published": 0, "drafts": 2, "latest": None}
+
+
+async def test_summary_auth(env) -> None:
+    path = f"{BASE}/summary"
+    assert (await env.c.get(path)).status_code == 401
+    for actor in (WN_EDITOR, READER, SUPPORT):  # без dashboard.read
+        r = await env.c.get(path, headers=env.h(actor))
+        assert r.status_code == 403 and r.json()["details"] == {"permission": "dashboard.read"}, actor.id
+    no_actor = await env.c.get(path, headers=env.h(None))
+    assert no_actor.status_code == 403 and no_actor.json()["code"] == "STAFF_CONTEXT_REQUIRED"
+    tg = await env.c.get(path, headers=env.h(DASHBOARD, issuer="telegram-bff"))
+    assert tg.status_code == 403 and tg.json()["code"] == "CALLER_NOT_ALLOWED"
+    learner = await env.c.get(path, headers=env.learner(uuid.uuid4()))
+    assert learner.status_code == 403
 
 
 # ---------------------------------------------------------------- неизменность в БД и миграции
@@ -589,7 +857,7 @@ async def test_migrations_down_and_up_again(env) -> None:
 
 async def test_parallel_creates_with_same_slug_one_wins_other_409(env) -> None:
     """Гонка за метку: проверка без блокировки пропускает обе команды — вторую останавливает индекс → 409, не 500."""
-    rs = await asyncio.gather(*[env.c.post(BASE, json=note("race-1"), headers=env.h(EDITOR)) for _ in range(4)])
+    rs = await asyncio.gather(*[env.c.post(BASE, json=note("race-1"), headers=env.h(WN_EDITOR)) for _ in range(4)])
     assert sorted(r.status_code for r in rs) == [201, 409, 409, 409], [r.text for r in rs]
     assert {r.json()["code"] for r in rs if r.status_code == 409} == {"RELEASE_NOTE_SLUG_EXISTS"}
 
@@ -602,12 +870,12 @@ async def test_slug_unique_index_maps_to_409_even_without_precheck(env, monkeypa
         return False
 
     monkeypatch.setattr(rn, "_slug_taken", never_taken)
-    r = await env.c.post(BASE, json=note("dup-1"), headers=env.h(EDITOR))
+    r = await env.c.post(BASE, json=note("dup-1"), headers=env.h(WN_EDITOR))
     assert r.status_code == 409 and r.json()["code"] == "RELEASE_NOTE_SLUG_EXISTS", r.text
     u = await env.c.put(f"{BASE}/{other['release_note_id']}", json={**note("dup-1"), "expected_version": 1},
-                        headers=env.h(EDITOR))
+                        headers=env.h(WN_EDITOR))
     assert u.status_code == 409 and u.json()["code"] == "RELEASE_NOTE_SLUG_EXISTS", u.text
-    assert (await env.c.get(f"{BASE}/{taken['release_note_id']}", headers=env.h(READER))).json()["slug"] == "dup-1"
+    assert (await env.c.get(f"{BASE}/{taken['release_note_id']}", headers=env.h(WN_EDITOR))).json()["slug"] == "dup-1"
     await env.flush()
     assert len(audits(env, "release_note.create")) == 2  # отказ не оставил записи аудита
 

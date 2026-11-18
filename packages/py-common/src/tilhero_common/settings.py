@@ -12,7 +12,10 @@ _DEV_SECRET = "dev-internal-secret-change-me"  # noqa: S105 - только дл�
 
 
 class ServiceSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # hide_input_in_errors: ошибка конфигурации при старте не печатает значения переменных (секреты) — ревью спринта 2
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True
+    )
 
     service_name: str
     # ENV обязателен в окружении сервиса: Runtime.start() откажется стартовать без явного значения.

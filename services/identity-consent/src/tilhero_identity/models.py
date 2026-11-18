@@ -27,6 +27,7 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     func,
+    literal_column,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
@@ -36,10 +37,18 @@ from tilhero_identity.base import USER_FK, Base
 
 USER_STATUSES = ("ACTIVE", "DISABLED", "DELETION_REQUESTED", "DELETED")
 TS = DateTime(timezone=True)
+USERS_UPDATED_AT = literal_column("users.updated_at", TS)  # прежнее значение в SET … = greatest(users.updated_at, …)
 
 # SQL-фрагменты CHECK — общие для моделей и миграции 0001 (сверка schema_drift сравнивает имена ограничений)
 AGE_BANDS_SQL = "('6-9','10-13','14-17','18+')"
 CATEGORIES_SQL = "ARRAY['reminders','missed','social','support','product']::text[]"
+
+# Аудитория рассылок (миграция 0004, audience.py): частичные индексы — база отбора. Запрос аудитории повторяет эти
+# предикаты буквально (константы в SQL, не параметры), чтобы планировщик мог использовать индексы и в общем плане.
+AUDIENCE_USERS_SQL = (
+    "kind = 'account' AND status = 'ACTIVE' AND age_band IS NOT NULL AND 'product' = ANY (notify_categories)"
+)
+PRODUCT_NEWS_CONSENT_SQL = "revoked_at IS NULL AND basis = 'self' AND 'product_news' = ANY (purposes)"
 
 
 class User(Base):
@@ -71,6 +80,10 @@ class User(Base):
             "status <> 'DELETED' OR (telegram_user_id IS NULL AND username IS NULL AND display_name IS NULL)",
             name="ck_users_deleted_anonymized",
         ),
+        # Курсорная сверка read-модели user-admin: GET /admin/v1/users?updated_after=&cursor= (миграция 0004)
+        Index("ix_users_updated_at", "updated_at", "user_id"),
+        # Аудитория рассылок: ключ курсора по user_id среди «базы» (аккаунт, активен, возраст выбран, категория product)
+        Index("ix_users_audience", "user_id", postgresql_where=text(AUDIENCE_USERS_SQL)),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
@@ -93,8 +106,10 @@ class User(Base):
     bot_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
+    # Версия строки для сверки read-модели админки (GET /admin/v1/users?updated_after=). Не убывает: обновление
+    # ставит max(прежняя, now()); в конце транзакции с событиями — не раньше их occurred_at (stamp_versions).
     updated_at: Mapped[datetime] = mapped_column(
-        TS, nullable=False, server_default=func.now(), onupdate=func.now()
+        TS, nullable=False, server_default=func.now(), onupdate=func.greatest(USERS_UPDATED_AT, func.now())
     )
 
 
@@ -180,6 +195,8 @@ class Consent(Base):
         Index("ix_consents_user_accepted", "user_id", "accepted_at"),
         # Не больше одного действующего согласия на ученика и основание.
         Index("uq_consents_active", "user_id", "basis", unique=True, postgresql_where=text("revoked_at IS NULL")),
+        # Аудитория рассылок: действующее своё согласие с целью product_news (миграция 0004)
+        Index("ix_consents_product_news", "user_id", postgresql_where=text(PRODUCT_NEWS_CONSENT_SQL)),
     )
 
     consent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
@@ -243,6 +260,29 @@ class BiometricCredential(Base):
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
 
 
+class LearnerActivity(Base):
+    """Проекция learning-plan для аудитории рассылок (INTERNAL_API спринта 2 §3, миграция 0004): онбординг и последнее
+    занятие ученика. Источник — события `learning.plan.updated.v1` и `learning.activity.recorded.v1` (inbox,
+    activity.py); строка удаляется при запросе удаления и обезличивании ученика.
+
+    `plan_event_at` — время самого нового применённого события плана: более старое событие не отменяет онбординг,
+    который отметило более новое (порядок доставки не гарантирован)."""
+
+    __tablename__ = "learner_activity"
+    __table_args__ = (
+        Index("ix_learner_activity_last_activity", "last_activity_at"),
+        Index("ix_learner_activity_onboarding", "onboarding_completed_at"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True
+    )
+    onboarding_completed_at: Mapped[datetime | None] = mapped_column(TS)
+    last_activity_at: Mapped[datetime | None] = mapped_column(TS)
+    plan_event_at: Mapped[datetime | None] = mapped_column(TS)
+    updated_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
+
+
 # Сага удаления: таблицы deletion_* живут в модуле deletion/ — импорт регистрирует их в Base.metadata
 # (Alembic env и сверка моделей с миграциями видят все таблицы сервиса).
 from tilhero_identity.deletion.models import (  # noqa: E402
@@ -253,5 +293,5 @@ from tilhero_identity.deletion.models import (  # noqa: E402
 
 __all__ = [
     "USER_FK", "USER_STATUSES", "Base", "BiometricCredential", "Consent", "DeletionAttempt", "DeletionDomainAck",
-    "DeletionRequest", "GuardianConsentRequest", "GuardianLink", "PinCredential", "User",
+    "DeletionRequest", "GuardianConsentRequest", "GuardianLink", "LearnerActivity", "PinCredential", "User",
 ]

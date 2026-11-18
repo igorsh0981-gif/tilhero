@@ -129,3 +129,33 @@ class SeenIn(BaseModel):
     model_config = _IN
 
     release_note_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)
+
+
+# ---------------------------------------------------------------- «Что нового»: статистика (формы admin.ts)
+
+
+class ReleaseNoteStatsOut(BaseModel):
+    """ReleaseNoteStats: показы — уникальные ученики; разрезы — по сегменту на момент показа (без старых отметок)."""
+
+    release_note_id: uuid.UUID
+    views_total: int
+    views_by_lang: dict[Literal["ru", "uz"], int]
+    views_by_age: dict[Literal["kids", "teens", "adults"], int]
+    first_view_at: str | None
+    last_view_at: str | None
+
+
+class LatestReleaseNoteOut(BaseModel):
+    release_note_id: uuid.UUID
+    slug: str
+    title: str
+    views_total: int
+    published_at: str
+
+
+class ReleaseNotesSummaryOut(BaseModel):
+    """DashboardWhatsNew: действующие опубликованные, черновики, последняя опубликованная (заголовок RU)."""
+
+    published: int
+    drafts: int
+    latest: LatestReleaseNoteOut | None

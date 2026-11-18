@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import uuid
 
 import httpx
 import pytest
@@ -10,7 +11,7 @@ from conftest import SERVICE_DIR, make_settings
 from sqlalchemy import text
 
 from tilhero_common.app import Runtime
-from tilhero_common.messaging import InMemoryBus, messaging_metadata
+from tilhero_common.messaging import InMemoryBus, make_envelope, messaging_metadata
 from tilhero_common.testing import ddl_allowed_for, internal_headers, migrated_under_roles, schema_drift
 from tilhero_identity.main import build_app
 from tilhero_identity.models import Base
@@ -21,7 +22,8 @@ async def test_models_match_migrations_and_runtime_role() -> None:
         SERVICE_DIR, lambda db_schema, **kw: make_settings(db_schema, **kw), "id_roles"
     ) as (settings, roles):
         assert await schema_drift(roles.runtime_url, roles.schema, [Base.metadata, messaging_metadata]) == []
-        for table in ("consents", "users", "guardian_links", "guardian_consent_requests", "outbox"):
+        for table in ("consents", "users", "guardian_links", "guardian_consent_requests", "outbox",
+                      "learner_activity"):
             assert await ddl_allowed_for(roles.runtime_url, roles.schema, table) == [], table
         bus = InMemoryBus()
         runtime = Runtime(settings, bus=bus)
@@ -58,6 +60,17 @@ async def test_models_match_migrations_and_runtime_role() -> None:
                 assert link.status_code == 200, link.text
                 decided = await c.post(f"/internal/v1/guardian-consents/{link.json()['token']}/accept", headers=h)
                 assert decided.status_code == 200, decided.text
+                # спринт 2: проекция learner_activity (consumer), снимки user-admin и аудитория — под ролью сервиса
+                await bus.publish(make_envelope("learning.activity.recorded.v1", {
+                    "user_id": uid, "activity_id": str(uuid.uuid4()), "local_date": "2026-11-18", "kind": "lesson",
+                    "minutes": 10, "recorded_at": "2026-11-18T10:00:00+00:00"}, producer="learning-plan"))
+                assert not bus.dlq
+                snaps = await c.get("/admin/v1/users?limit=500",
+                                    headers=internal_headers(settings, issuer="user-admin"))
+                assert snaps.status_code == 200 and len(snaps.json()["items"]) == 3, snaps.text
+                audience = await c.get("/internal/v1/audience/count?active_days=-1",
+                                       headers=internal_headers(settings, issuer="notifications"))
+                assert audience.status_code == 200, audience.text
                 deletion = await c.post("/internal/v1/me/deletion-request", json={"pin": "2580"}, headers=h)
                 assert deletion.status_code == 202 and deletion.json()["learners"] == 2
             assert runtime.relay is not None

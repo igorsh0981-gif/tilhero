@@ -4,7 +4,7 @@ import uuid
 
 import httpx
 import pytest
-from notif_testkit import SCHEDULER_TOKEN, SERVICE_DIR, FakeGateway, FakeIdentity, NotifEnv
+from notif_testkit import SCHEDULER_TOKEN, SERVICE_DIR, TEST_CHATS, FakeGateway, FakeIdentity, NotifEnv
 
 from tilhero_common.app import Runtime
 from tilhero_common.messaging import InMemoryBus
@@ -36,6 +36,7 @@ async def env():
         identity_consent_url="http://identity-consent.test",
         bot_gateway_url="http://botgw.test",
         scheduler_token=SCHEDULER_TOKEN,
+        admin_test_chat_ids=TEST_CHATS,
     )
     await migrate(SERVICE_DIR, settings)
     bus, identity, gateway = InMemoryBus(), FakeIdentity(), FakeGateway()
