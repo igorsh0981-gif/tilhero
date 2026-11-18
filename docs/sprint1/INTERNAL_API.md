@@ -162,3 +162,27 @@
 - Маршруты кода родителя и биометрии — как в aievent (`/v1/profile/security/pin*`, `/biometric`, `/v1/session/biometric/verify`); `/v1/profile/disable|enable` удалены. `GET /v1/plan?tz=` передаётся в learning-plan.
 
 **Общий код**: каталог лимитов без туристических политик; `gw.llm.user` закреплена за ai-gateway (спринт 4). Вынести проверку `SCHEDULER_TOKEN` и `Idempotency-Key` в `tilhero_common` — техдолг спринта 2.
+
+## 11. Исправления по ревью и QA (18.11.2026)
+Источник: `docs/qa/sprint1-review-python.md`, `docs/qa/sprint1-review-ts.md`, `docs/qa/sprint1-qa-report.md`. Решения координатора:
+
+**Необязательные цели согласия работают как выключатели функций (P-3).**
+- identity-consent `/users/{id}/public` дополнительно: `consent_accepted: bool` (действующее согласие с terms и privacy; у ребёнка — согласие родителя с основанием guardian) и `purposes: string[]` (цели действующего согласия).
+- `DeliveryInfo.categories`: `social` учитывается только при цели `social`, `product` — только при цели `product_news` (identity-consent фильтрует сам; notifications ничего не меняет).
+- social: создать приглашение и принять приглашение — только при `consent_accepted` и цели `social` (403 `CONSENT_REQUIRED {purpose: "social"}`); открыть и посмотреть — при `consent_accepted` (иначе 403 `CONSENT_REQUIRED {purpose: "terms"}`). Детские профили — по-прежнему `INVITES_NOT_ALLOWED`.
+- Mini App: при `CONSENT_REQUIRED {purpose: "social"}` — шторка «Разрешить приглашения и семью» → повторный `POST /v1/profile/consent` с добавленной целью → повтор действия.
+
+**Согласие родителя за подростка 14–17 (P-4).**
+- Решать может взрослый с действующим своим согласием (terms, privacy), иначе 403 `CONSENT_REQUIRED {purpose: "terms"}`.
+- accept → запись `consents` подростка: основание `guardian`, `granted_by_user_id` = родитель, версия политики, хеш текста, evidence, locale; событие `consent.accepted.v1 {basis: guardian, granted_by_user_id}`. decline → только статус.
+- `GET /internal/v1/me/guardian-consents` (sub = родитель) → `{items: GuardianConsentGrant[]}` — подростки, за которых решал этот родитель (последнее решение по каждому).
+- `POST /internal/v1/me/guardian-consents/{teen_user_id}:revoke` → `GuardianConsentGrant`; только родитель, который дал согласие (иначе 404 `GUARDIAN_CONSENT_NOT_FOUND`); у подростка `guardian_consent=declined`, необязательные цели сняты; события `consent.revoked.v1 {basis: guardian, revoked_by_user_id}`, `user.profile.updated.v1`, `user.notification_settings.changed.v1`.
+- BFF: `GET /v1/family/guardian-consents`, `POST /v1/family/guardian-consents/{teen_user_id}/revoke` (bff.ts).
+
+**Прочее.**
+- learning-plan `plan:tick` (P-1): обработка пачками со своей транзакцией, `last_tick_at` — после всех пачек; повтор, пока идёт предыдущий tick, не ждёт блокировку: 200 `{skipped: true}` (`pg_try_advisory_xact_lock`); пакетные запросы вместо поштучных внутри пачки.
+- social `invites:tick` (QA D-02, P-5): напоминание только тому, кто сейчас может принять приглашение (те же правила, что `can_accept` в preview).
+- social (P-2): `TELEGRAM_APP_LINK` обязателен в stage/prod, значение по умолчанию только для dev/test и совпадает с BFF. (P-6): проекция `profiles` без `age_band` и `guardian_user_id`, если они не используются.
+- Потребители `user.deletion.requested.v1` принимают событие только от identity-consent (P-7). `SCHEDULER_TOKEN` в stage/prod — не короче 32 символов (P-8). bot-gateway: `MINIAPP_URL` в stage/prod обязателен и не localhost (P-12).
+- BFF: `GET /v1/plan?tz=` передаётся в learning-plan, план при входе не создаётся без зоны клиента (QA D-03, T-2); в детском профиле `POST/DELETE /v1/profile/consent` → 403 `ADULT_REQUIRED` (T-5); 401 доменов не выдаются клиенту как 401 сессии (T-4).
+- Mini App: экран «Код родителя» в профиле взрослого и предложение задать код при создании первого детского профиля (T-1); время занятия детского профиля — только в окне 08:00–19:30 с пояснением (QA D-04); перевод кодов ошибок доменов (T-3); текст `already_member` (T-7).
