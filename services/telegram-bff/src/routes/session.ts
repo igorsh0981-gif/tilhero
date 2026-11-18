@@ -10,7 +10,7 @@ import { AppError, currentContext, pseudonymize } from "@tilhero/ts-common";
 import { buildSession, hasLearner, learnerNotFound, loadLearner, loadMe } from "../account.js";
 import { sessionRevoked } from "../auth.js";
 import type { BffContext } from "../context.js";
-import { BEARER, PIN_FORMAT, authOf, errorResponses, type App } from "../http.js";
+import { BEARER, PIN_FORMAT, authOf, clientTimezone, errorResponses, type App } from "../http.js";
 import {
   BiometricVerifyRequestSchema,
   PinVerifyRequestSchema,
@@ -43,8 +43,8 @@ function loginBody(u: TelegramUser): TelegramLoginRequest {
 }
 
 /** После подтверждения кода родителя / биометрии: та же сессия и тот же ученик, новые токены с pin=true. */
-async function confirmSession(ctx: BffContext, auth: AccessClaims): Promise<SessionResponse> {
-  return reissueSession(ctx, auth, auth.learnerId, true);
+async function confirmSession(ctx: BffContext, auth: AccessClaims, tz: string | undefined): Promise<SessionResponse> {
+  return reissueSession(ctx, auth, auth.learnerId, true, tz);
 }
 
 /**
@@ -56,10 +56,11 @@ async function reissueSession(
   auth: AccessClaims,
   learnerId: string,
   pinOk: boolean,
+  tz: string | undefined,
   me?: TelegramLoginResponse,
 ): Promise<SessionResponse> {
   const account = me ?? (await loadMe(ctx, auth.accountId));
-  const draft = await buildSession(ctx, { accountId: auth.accountId, learnerId, sid: auth.sid, refreshToken: "", pinOk }, account);
+  const draft = await buildSession(ctx, { accountId: auth.accountId, learnerId, sid: auth.sid, refreshToken: "", pinOk, tz }, account);
   const re = await ctx.store(() => ctx.sessions.reissue(auth.sid, pinOk, learnerId));
   if (!re) throw sessionRevoked();
   return { ...draft, refresh_token: re.refreshToken };
@@ -124,7 +125,12 @@ export function sessionRoutes(app: App, ctx: BffContext): void {
         const pinOk = !login.security.pin_enabled;
         const { sid, refreshToken } = await ctx.store(() => sessions.create(accountId, pinOk));
         try {
-          const res = await buildSession(ctx, { accountId, learnerId: accountId, sid, refreshToken, pinOk }, login, startParamView(startParam));
+          const res = await buildSession(
+            ctx,
+            { accountId, learnerId: accountId, sid, refreshToken, pinOk, tz: clientTimezone(req) },
+            login,
+            startParamView(startParam),
+          );
           req.log.info({ is_new: login.user.is_new === true, pin_required: !pinOk, has_start_param: res.start_param !== null }, "session created");
           void reply.header("cache-control", "no-store");
           return res;
@@ -175,7 +181,11 @@ export function sessionRoutes(app: App, ctx: BffContext): void {
       const learnerId = hasLearner(me, found.learnerId) ? found.learnerId : found.userId;
       const pinOk = found.pin || !me.security.pin_enabled;
       // ответ собирается до ротации (learning-plan недоступен → 503, токен клиента цел)
-      const draft = await buildSession(ctx, { accountId: found.userId, learnerId, sid: found.sid, refreshToken: "", pinOk }, me);
+      const draft = await buildSession(
+        ctx,
+        { accountId: found.userId, learnerId, sid: found.sid, refreshToken: "", pinOk, tz: clientTimezone(req) },
+        me,
+      );
       const rotated = await ctx.store(() => sessions.rotate(token, found.sid, found.userId, pinOk, learnerId));
       if (rotated.status === "reused") {
         await ctx.store(() => sessions.revoke(found.sid));
@@ -206,7 +216,7 @@ export function sessionRoutes(app: App, ctx: BffContext): void {
       const auth = authOf(req);
       await domains.identity.post("/internal/v1/me/pin/verify", { subject: auth.accountId, body: { pin: req.body.pin } });
       void reply.header("cache-control", "no-store");
-      return confirmSession(ctx, auth);
+      return confirmSession(ctx, auth, clientTimezone(req));
     },
   );
 
@@ -230,7 +240,7 @@ export function sessionRoutes(app: App, ctx: BffContext): void {
         body: { biometric_token: req.body.biometric_token },
       });
       void reply.header("cache-control", "no-store");
-      return confirmSession(ctx, auth);
+      return confirmSession(ctx, auth, clientTimezone(req));
     },
   );
 
@@ -270,7 +280,7 @@ export function sessionRoutes(app: App, ctx: BffContext): void {
         await ctx.limiter.enforce("tg.pin", auth.accountId);
         await domains.identity.post("/internal/v1/me/pin/verify", { subject: auth.accountId, body: { pin } });
       }
-      const res = await reissueSession(ctx, auth, target, auth.pin, me);
+      const res = await reissueSession(ctx, auth, target, auth.pin, clientTimezone(req), me);
       req.log.info({ learner_kind: target === auth.accountId ? "self" : "child", parent_pin_checked: leavingChild && me.security.pin_enabled }, "active learner switched");
       void reply.header("cache-control", "no-store");
       return res;

@@ -132,7 +132,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   await app.register(cors, {
     origin: config.miniappOrigins,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allowedHeaders: ["authorization", "content-type", "idempotency-key", "if-match", "x-trace-id", "x-correlation-id"],
+    allowedHeaders: ["authorization", "content-type", "idempotency-key", "if-match", "x-timezone", "x-trace-id", "x-correlation-id"],
     exposedHeaders: ["x-trace-id", "x-correlation-id", "retry-after"],
     credentials: false,
     maxAge: 600,

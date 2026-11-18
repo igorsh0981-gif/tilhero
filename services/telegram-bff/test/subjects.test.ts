@@ -30,10 +30,7 @@ type Probe = { method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; url: string;
 const COMMON: Probe[] = [
   { method: "GET", url: "/v1/profile", listsLearners: true },
   { method: "PATCH", url: "/v1/profile/settings", payload: { notifications: { categories: { reminders: true } } }, listsLearners: true },
-  { method: "PUT", url: "/v1/profile/age", payload: { age_band: "18+" } },
   { method: "GET", url: "/v1/learners", listsLearners: true },
-  { method: "POST", url: "/v1/profile/consent", payload: { policy_version: "2026-11-18", purposes: ["terms", "privacy", "learning"] } },
-  { method: "DELETE", url: "/v1/profile/consent" },
   { method: "POST", url: "/v1/profile/guardian-consent" },
   { method: "GET", url: "/v1/plan" },
   { method: "PATCH", url: "/v1/plan", payload: { schedule: { days: [1, 3, 5], preset: "three_per_week" } } },
@@ -62,6 +59,13 @@ const ACCOUNT_ONLY: Probe[] = [
   { method: "GET", url: "/v1/support/tickets" },
   { method: "POST", url: `/v1/guardian-consents/${"Q".repeat(43)}/accept` },
   { method: "PUT", url: "/v1/profile/security/pin", payload: { pin: "4826" } },
+  // ревью T-5: возраст и согласия — свойства аккаунта родителя
+  { method: "PUT", url: "/v1/profile/age", payload: { age_band: "18+" } },
+  { method: "POST", url: "/v1/profile/consent", payload: { policy_version: "2026-11-18", purposes: ["terms", "privacy", "learning"] } },
+  { method: "DELETE", url: "/v1/profile/consent" },
+  // §11: решения родителя по подросткам
+  { method: "GET", url: "/v1/family/guardian-consents" },
+  { method: "POST", url: `/v1/family/guardian-consents/${randomUUID()}/revoke` },
 ];
 
 const ACCOUNT_DOMAINS = new Set(["identity", "social", "support"]);

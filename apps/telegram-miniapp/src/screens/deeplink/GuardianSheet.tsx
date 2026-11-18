@@ -1,22 +1,32 @@
 import type { GuardianConsentPreview } from "@tilhero/contracts/bff";
 import { useEffect, useState } from "react";
-import { ApiError, errorText } from "../../api/errors";
+import { ApiError, consentRequiredPurpose, errorText } from "../../api/errors";
+import { consentIsCurrent } from "../../domain/onboarding";
 import { useI18n, type MessageKey } from "../../i18n";
 import { useApp } from "../../state/app";
-import { useAction } from "../../state/hooks";
+import { useAction, useLoad } from "../../state/hooks";
 import { Btn, Check, ErrorLine, Skeleton } from "../../ui/kit";
 import { Sheet, showToast } from "../../ui/overlays";
+import { PolicySheet } from "../onboarding/Onboarding";
 
 /**
  * A parent opens gc_<token> (AT-03): the teen's name, what the consent switches on, «Даю согласие» / «Не согласен».
- * Only an adult decides (403 ADULT_REQUIRED): a parent without a stated age confirms 18+ here first.
+ * Only an adult decides (403 ADULT_REQUIRED): a parent without a stated age confirms 18+ here first. The decision is
+ * recorded as the teen's consent on the guardian basis, so the parent's own consent comes first (INTERNAL_API §11:
+ * 403 CONSENT_REQUIRED {purpose: "terms"}): the required purposes of the policy are accepted here, then the decision.
  */
 export function GuardianSheet({ token, onClose }: { token: string; onClose: () => void }) {
-  const { bff, session, syncProfile } = useApp();
-  const { t, fmt } = useI18n();
+  const { bff, session, syncProfile, patchSession } = useApp();
+  const { t, fmt, lang } = useI18n();
   const [preview, setPreview] = useState<GuardianConsentPreview | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [adult, setAdult] = useState(false);
+  const [needConsent, setNeedConsent] = useState(() => !consentIsCurrent(session.consent));
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [doc, setDoc] = useState(false);
+  const policy = useLoad(() => (needConsent ? bff.policy(lang) : Promise.resolve(null)), [needConsent, lang]);
+  const required = policy.data?.purposes.filter((p) => p.required) ?? [];
+  const consentReady = !needConsent || (required.length > 0 && required.every((p) => checked[p.code]));
   const noAge = session.account.age_band == null;
   const teenSelf = session.account.age_band === "14-17";
 
@@ -41,10 +51,30 @@ export function GuardianSheet({ token, onClose }: { token: string; onClose: () =
         syncProfile(await bff.profile());
       }
     }
-    const p = await bff.guardianDecide(token, d);
+    let accepted = false;
+    if (needConsent) {
+      const pol = policy.data!;
+      const known = new Set(pol.purposes.map((x) => x.code));
+      const purposes = [...new Set([...required.map((x) => x.code), ...session.consent.purposes.filter((x) => known.has(x))])];
+      patchSession({ consent: await bff.acceptConsent({ policy_version: pol.version, purposes }) });
+      setNeedConsent(false);
+      accepted = true;
+    }
+    let p: GuardianConsentPreview;
+    try {
+      p = await bff.guardianDecide(token, d);
+    } catch (e) {
+      // the server still needs the parent's consent: show the policy (once; a repeated refusal is an error)
+      if (!accepted && consentRequiredPurpose(e) === "terms") {
+        setNeedConsent(true);
+        return;
+      }
+      throw e;
+    }
     setPreview(p);
     showToast(d === "accept" ? t("gcd.granted") : t("gcd.declined"));
   });
+  const blocked = (noAge && !adult) || !consentReady || (needConsent && !policy.data);
 
   return (
     <Sheet title={t("gcd.title")} onClose={onClose} testId="guardian-sheet">
@@ -65,12 +95,32 @@ export function GuardianSheet({ token, onClose }: { token: string; onClose: () =
                     {t("ob.child.adult")}
                   </Check>
                 ) : null}
+                {needConsent ? (
+                  <div className="card stack tight" data-testid="gc-consent">
+                    <p className="sub ink">{t("gcd.consentFirst")}</p>
+                    {policy.data ? (
+                      <>
+                        {required.map((p) => (
+                          <Check key={p.code} checked={!!checked[p.code]} onChange={(v) => setChecked((c) => ({ ...c, [p.code]: v }))} testId={`gc-consent-${p.code}`}>
+                            {p.title} <span className="small">({t("ob.consent.version", { v: policy.data!.version })})</span>
+                          </Check>
+                        ))}
+                        <Btn variant="link" onClick={() => setDoc(true)}>
+                          {t("ob.consent.read")}
+                        </Btn>
+                      </>
+                    ) : policy.error ? null : (
+                      <Skeleton lines={1} />
+                    )}
+                    <ErrorLine text={policy.error} />
+                  </div>
+                ) : null}
                 <ErrorLine text={decide.error} />
                 <div className="duo">
-                  <Btn variant="secondary" busy={decide.busy} disabled={noAge && !adult} onClick={() => void decide.run("decline")} data-testid="gc-decline">
+                  <Btn variant="secondary" busy={decide.busy} disabled={blocked} onClick={() => void decide.run("decline")} data-testid="gc-decline">
                     {t("gcd.decline")}
                   </Btn>
-                  <Btn busy={decide.busy} disabled={noAge && !adult} onClick={() => void decide.run("accept")} data-testid="gc-accept">
+                  <Btn busy={decide.busy} disabled={blocked} onClick={() => void decide.run("accept")} data-testid="gc-accept">
                     {t("gcd.accept")}
                   </Btn>
                 </div>
@@ -87,6 +137,7 @@ export function GuardianSheet({ token, onClose }: { token: string; onClose: () =
         )
       ) : null}
       {loadErr ? <Btn variant="secondary" onClick={onClose}>{t("c.close")}</Btn> : null}
+      {doc && policy.data ? <PolicySheet doc={policy.data} onClose={() => setDoc(false)} /> : null}
     </Sheet>
   );
 }

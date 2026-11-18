@@ -61,6 +61,8 @@ export interface ClientOptions {
   storage?: StorageLike | null;
   hooks?: ClientHooks;
   lang?: () => string;
+  /** IANA zone of the device → X-Timezone on every request: the BFF creates a default plan in this zone (QA D-03) */
+  timezone?: () => string;
   now?: () => number;
 }
 
@@ -310,6 +312,10 @@ export class ApiClient {
     if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
     const lang = this.opts.lang?.();
     if (lang) headers["Accept-Language"] = lang;
+    // the zone matters where the BFF reads a plan (signed-in calls and the session ones); public GETs stay simple
+    // requests (no CORS preflight for the policy, the interface config, a guardian link preview)
+    const tz = opts.auth !== false || path.startsWith("/v1/session/") ? this.opts.timezone?.() : undefined;
+    if (tz) headers["X-Timezone"] = tz;
 
     let res: Response;
     try {

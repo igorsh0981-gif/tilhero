@@ -30,7 +30,16 @@ test("parent creates a child profile in onboarding; the child's plan, then back 
   await page.getByTestId("level-zero").click();
   await next.click();
   await page.getByTestId("preset-three_per_week").click();
+  // D-04: the lesson time of a child profile — only 08:00–19:30 (messages to children go out 08:00–20:00)
+  await expect(page.getByTestId("kid-window")).toHaveText("Детям сообщения приходят только с 08:00 до 20:00, поэтому занятие — с 08:00 до 19:30.");
+  await expectNoVerticalScroll(page);
+  await page.getByTestId("time-input").fill("20:30");
+  await expect(page.getByText("Для детского профиля выберите время с 08:00 до 19:30")).toBeVisible();
+  await expect(next).toBeDisabled();
+  await page.getByTestId("time-choice").getByRole("button", { name: /Вечер/ }).click();
+  await expect(next).toBeEnabled();
   await next.click();
+  expect(bff.last("PATCH", "/v1/plan")?.body).toMatchObject({ schedule: { preferred_time: "19:00" } });
   await expect(page.getByText("Напоминания придут вам, родителю, не позже 20:00")).toBeVisible();
   await next.click();
   await expect(page.getByRole("heading", { name: "Готово! План для Мадина составлен" })).toBeVisible();
@@ -84,9 +93,14 @@ test("parent opens gc_<token>: confirms 18+ and gives consent", async ({ page })
   await expect(sheet).toContainText("Тимур хочет заниматься в TilHero");
   await expect(sheet.getByTestId("gc-accept")).toBeDisabled();
   await sheet.getByTestId("gc-adult").check();
+  // §11: the parent's own consent first (the decision is recorded as the teen's consent on the guardian basis)
+  await expect(sheet.getByTestId("gc-consent")).toContainText("Сначала примите политику обработки данных");
+  await expect(sheet.getByTestId("gc-accept")).toBeDisabled();
+  for (const c of ["terms", "privacy", "learning"]) await sheet.getByTestId(`gc-consent-${c}`).check();
   await shot(page, "12_guardian_consent");
   await sheet.getByTestId("gc-accept").click();
   await expect(sheet.getByTestId("gc-status")).toHaveText("Согласие для Тимур дано.");
   expect(bff.account.age_band).toBe("18+");
+  expect(bff.last("POST", "/v1/profile/consent")?.body).toEqual({ policy_version: "1.2", purposes: ["terms", "privacy", "learning"] });
   expect(bff.calls("POST", `/v1/guardian-consents/${TOKEN}/accept`)).toHaveLength(1);
 });

@@ -79,12 +79,14 @@ describe("POST /v1/session/telegram", () => {
     const [call] = h.fake.callsTo("identity", "POST", "/internal/v1/users/telegram-login");
     expect(call?.body).toEqual({ telegram_user_id: 900001, first_name: "Игорь", username: "test_user_1", language_code: "ru" });
     expect(call?.subject).toBeUndefined();
-    // онбординг ученика — из learning-plan, внутренний JWT с sub = ученик (здесь = аккаунт)
-    expect(h.fake.callsTo("learningPlan", "GET", "/internal/v1/me/plan").map((c) => c.subject)).toEqual([body.account.user_id]);
+    // первый вход (is_new): плана ещё нет — learning-plan не вызывается, чтобы план не создался в зоне по умолчанию (D-03)
+    expect(h.fake.callsTo("learningPlan")).toHaveLength(0);
     expect(call?.headers["x-trace-id"]).toBe(res.headers["x-trace-id"]);
 
+    // дальше онбординг ученика — из learning-plan, внутренний JWT с sub = ученик (здесь = аккаунт)
     const me = await h.app.inject({ url: "/v1/profile", headers: bearer(body.access_token) });
     expect(me.statusCode).toBe(200);
+    expect(h.fake.callsTo("learningPlan", "GET", "/internal/v1/me/plan").map((c) => c.subject)).toEqual([body.account.user_id]);
   });
 
   it("start_param из initData возвращается (inv_/gc_/route_), мусор → null", async () => {

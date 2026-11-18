@@ -60,6 +60,8 @@ const SAMPLES: Record<string, Sample> = {
   "post /v1/invites/{invite_id}/accept": { params: { invite_id: ID } },
   "post /v1/invites/{invite_id}/decline": { params: { invite_id: ID } },
   "get /v1/family": {},
+  "get /v1/family/guardian-consents": {},
+  "post /v1/family/guardian-consents/{teen_user_id}/revoke": { params: { teen_user_id: ID } },
   "get /v1/plan": {},
   "patch /v1/plan": { payload: { goal: "work" } },
   "post /v1/plan/onboarding/complete": {},

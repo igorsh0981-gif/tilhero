@@ -57,6 +57,17 @@ export function isValidTime(v: unknown): v is string {
   return typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 }
 
+/**
+ * Lesson time of a child profile 6–13 (QA D-04): messages to children (to their parent) go out only 08:00–20:00 local
+ * time (INTERNAL_API §4), so a lesson starts between 08:00 and 19:30 — otherwise its reminder and the missed-lesson
+ * note would never reach Telegram. The client presets (08:00, 13:00, 19:00) are inside the window.
+ */
+export const KID_WINDOW = { from: "08:00", to: "19:30" } as const;
+
+export function inKidWindow(time: string): boolean {
+  return isValidTime(time) && time >= KID_WINDOW.from && time <= KID_WINDOW.to;
+}
+
 export function timeChoice(time: string): TimeChoice {
   for (const k of ["morning", "day", "evening"] as const) if (TIME_PRESETS[k] === time) return k;
   return "custom";
@@ -107,10 +118,11 @@ export function utcOffset(tz: string, at: Date = new Date()): string {
   }
 }
 
-/** Validation for saving: returns the first invalid field or null. */
-export function scheduleProblem(s: Schedule): "days" | "preferred_time" | "duration_min" | "timezone" | null {
+/** Validation for saving: returns the first invalid field or null. A child profile also needs the time in KID_WINDOW. */
+export function scheduleProblem(s: Schedule, opts: { kid?: boolean } = {}): "days" | "preferred_time" | "duration_min" | "timezone" | null {
   if (normalizeDays(s.days).length === 0) return "days";
   if (!isValidTime(s.preferred_time)) return "preferred_time";
+  if (opts.kid && !inKidWindow(s.preferred_time)) return "preferred_time";
   if (!isDuration(s.duration_min)) return "duration_min";
   if (!isValidZone(s.timezone)) return "timezone";
   return null;

@@ -3,7 +3,7 @@
  * код родителя (PIN) и биометрия, удаление аккаунта.
  * identity-consent вызывается от имени аккаунта (sub); user_id — только из сессии, никогда из тела/пути.
  */
-import type { ConsentState, DeletionResponse, PolicyDocument, Profile, SecurityState } from "@tilhero/contracts/bff";
+import type { ConsentState, DeletionResponse, PinResetRequestResponse, PolicyDocument, Profile, SecurityState } from "@tilhero/contracts/bff";
 import { AppError } from "@tilhero/ts-common";
 import { buildSession, learnersOf, learnersState, loadLearner, loadMe, notificationsFor } from "../account.js";
 import type { BffContext } from "../context.js";
@@ -11,6 +11,7 @@ import {
   BEARER,
   PIN_FORMAT,
   authOf,
+  clientTimezone,
   errorResponses,
   forbidInChildProfile,
   schemaErrors,
@@ -34,7 +35,6 @@ import {
   SessionResponseSchema,
   SettingsPatchSchema,
   type BiometricEnableResponse,
-  type PinResetRequestResponse,
 } from "../schemas.js";
 import type { AccessClaims } from "../tokens.js";
 import { consentView, profileView, securityView, type IdentityLearner, type IdentityMe } from "../views.js";
@@ -46,11 +46,18 @@ const SETTINGS_ERRORS = schemaErrors([
   { context: "body", field: "notifications.quiet_hours", code: "QUIET_HOURS_INVALID", message: "Тихие часы — время HH:MM" },
 ]);
 
-/** Profile после команды identity (MeResponse): ученики с онбордингом из learning-plan, настройки активного ученика. */
-export async function profileFor(ctx: BffContext, auth: AccessClaims, me: IdentityMe, child?: IdentityLearner | null): Promise<Profile> {
+/** Profile после команды identity (MeResponse): ученики с онбордингом из learning-plan, настройки активного ученика.
+ *  tz — зона клиента (X-Timezone) для плана ученика, которого ещё нет (детский профиль сразу после создания). */
+export async function profileFor(
+  ctx: BffContext,
+  auth: AccessClaims,
+  tz: string | undefined,
+  me: IdentityMe,
+  child?: IdentityLearner | null,
+): Promise<Profile> {
   const inChild = auth.learnerId !== auth.accountId;
   const [ls, detail] = await Promise.all([
-    learnersState(ctx, learnersOf(me), auth.learnerId),
+    learnersState(ctx, learnersOf(me), auth.learnerId, { tz }),
     // настройки детского профиля — из identity (GET /me/learners/{id}), если ещё не получены командой
     inChild && !child ? loadLearner(ctx, auth.accountId, auth.learnerId) : Promise.resolve(child ?? null),
   ]);
@@ -76,7 +83,7 @@ export function profileRoutes(app: App, ctx: BffContext): void {
     },
     async (req) => {
       const auth = authOf(req);
-      return profileFor(ctx, auth, await loadMe(ctx, auth.accountId));
+      return profileFor(ctx, auth, clientTimezone(req), await loadMe(ctx, auth.accountId));
     },
   );
 
@@ -110,7 +117,7 @@ export function profileRoutes(app: App, ctx: BffContext): void {
         }
         const body = { ...(locale !== undefined ? { locale } : {}), ...(notifications !== undefined ? { notifications } : {}) };
         const me = await identity.patch<IdentityMe>("/internal/v1/me/settings", { subject: auth.accountId, body });
-        return profileFor(ctx, auth, me);
+        return profileFor(ctx, auth, clientTimezone(req), me);
       }
       // детский профиль: сначала ребёнок (ошибка — язык аккаунта не меняется), затем язык аккаунта
       let child: IdentityLearner | null = null;
@@ -124,7 +131,7 @@ export function profileRoutes(app: App, ctx: BffContext): void {
         locale !== undefined
           ? await identity.patch<IdentityMe>("/internal/v1/me/settings", { subject: auth.accountId, body: { locale } })
           : await loadMe(ctx, auth.accountId);
-      return profileFor(ctx, auth, me, child);
+      return profileFor(ctx, auth, clientTimezone(req), me, child);
     },
   );
 
@@ -135,16 +142,19 @@ export function profileRoutes(app: App, ctx: BffContext): void {
       schema: {
         tags: ["profile"],
         summary: "Возраст аккаунта: 14-17 или 18+ (ребёнок 6–13 — детский профиль родителя)",
-        description: "14-17 → guardian_consent=pending (необязательные функции выключены до согласия родителя). 409 AGE_ALREADY_SET.",
+        description:
+          "14-17 → guardian_consent=pending (необязательные функции выключены до согласия родителя). 409 AGE_ALREADY_SET; " +
+          "403 ADULT_REQUIRED в детском профиле (возраст — свойство аккаунта родителя).",
         security: BEARER,
         body: AgeRequestSchema,
-        response: { 200: ProfileSchema, ...errorResponses(401, 409, 423) },
+        response: { 200: ProfileSchema, ...errorResponses(401, 403, 409, 423) },
       },
     },
     async (req) => {
       const auth = authOf(req);
+      forbidInChildProfile(auth, "ADULT_REQUIRED");
       const me = await identity.put<IdentityMe>("/internal/v1/me/age", { subject: auth.accountId, body: { age_band: req.body.age_band } });
-      return profileFor(ctx, auth, me);
+      return profileFor(ctx, auth, clientTimezone(req), me);
     },
   );
 
@@ -176,15 +186,18 @@ export function profileRoutes(app: App, ctx: BffContext): void {
         summary: "Принять политику: версия и цели (обязательные terms, privacy, learning; необязательные — по выбору)",
         description:
           "409 POLICY_VERSION_OUTDATED; 422 CONSENT_REQUIRED_PURPOSES {missing}; 403 GUARDIAN_CONSENT_REQUIRED — подросток " +
-          "выбирает необязательные цели до согласия родителя. Отказ от записи голоса онбординг не блокирует.",
+          "выбирает необязательные цели до согласия родителя. Отказ от записи голоса онбординг не блокирует. Повторный " +
+          "POST с другим набором необязательных целей — новая запись согласия. 403 ADULT_REQUIRED в детском профиле " +
+          "(согласия аккаунта меняет родитель в своём профиле).",
         security: BEARER,
         body: ConsentRequestSchema,
         response: { 200: ConsentStateSchema, ...errorResponses(401, 403, 409, 423) },
       },
     },
     async (req) => {
-      const { accountId } = authOf(req);
-      return consentView(await identity.post<ConsentState>("/internal/v1/me/consent", { subject: accountId, body: req.body }));
+      const auth = authOf(req);
+      forbidInChildProfile(auth, "ADULT_REQUIRED");
+      return consentView(await identity.post<ConsentState>("/internal/v1/me/consent", { subject: auth.accountId, body: req.body }));
     },
   );
 
@@ -195,13 +208,15 @@ export function profileRoutes(app: App, ctx: BffContext): void {
       schema: {
         tags: ["consent"],
         summary: "Отозвать согласие",
+        description: "403 ADULT_REQUIRED в детском профиле.",
         security: BEARER,
-        response: { 200: ConsentStateSchema, ...errorResponses(401, 423) },
+        response: { 200: ConsentStateSchema, ...errorResponses(401, 403, 423) },
       },
     },
     async (req) => {
-      const { accountId } = authOf(req);
-      return consentView(await identity.delete<ConsentState>("/internal/v1/me/consent", { subject: accountId }));
+      const auth = authOf(req);
+      forbidInChildProfile(auth, "ADULT_REQUIRED");
+      return consentView(await identity.delete<ConsentState>("/internal/v1/me/consent", { subject: auth.accountId }));
     },
   );
 
@@ -306,7 +321,7 @@ export function profileRoutes(app: App, ctx: BffContext): void {
       const { sid, refreshToken } = await ctx.store(() => sessions.create(auth.accountId, true));
       const me = await loadMe(ctx, auth.accountId);
       void reply.header("cache-control", "no-store");
-      return buildSession(ctx, { accountId: auth.accountId, learnerId: auth.accountId, sid, refreshToken, pinOk: true }, me);
+      return buildSession(ctx, { accountId: auth.accountId, learnerId: auth.accountId, sid, refreshToken, pinOk: true, tz: clientTimezone(req) }, me);
     },
   );
 

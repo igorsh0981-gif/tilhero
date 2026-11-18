@@ -1,10 +1,11 @@
 /**
  * «Что нового», лента новостей и Remote Experience Config (experience-config).
  *
- * GET /v1/whats-new: BFF берёт из плана активного ученика (learning-plan, sub = lrn) onboarded_at = onboarding_completed_at
- * и lang = ui_lang (язык интерфейса плана), из identity-consent (sub = аккаунт) — возраст активного ученика →
- * age: kids (6-9, 10-13), teens (14-17), adults (18+ и возраст не выбран). Режим (welcome / updates / none) выбирает
- * experience-config (for-me, sub = lrn). Онбординг не завершён — {mode: none} без вызова experience-config.
+ * GET /v1/whats-new: BFF берёт из плана активного ученика (learning-plan, sub = lrn) onboarded_at = onboarding_completed_at,
+ * из identity-consent (sub = аккаунт) — lang = locale аккаунта (язык интерфейса Mini App и сообщений notifications; один
+ * источник языка для родителя и детских профилей — ревью T-6) и возраст активного ученика → age: kids (6-9, 10-13),
+ * teens (14-17), adults (18+ и возраст не выбран). Режим (welcome / updates / none) выбирает experience-config (for-me,
+ * sub = lrn). Онбординг не завершён — {mode: none} без вызова experience-config.
  * Отметки просмотра (seen) и лента (feed) — тоже от имени ученика.
  */
 import { Type } from "@fastify/type-provider-typebox";
@@ -12,7 +13,7 @@ import type { Page, WhatsNew, WhatsNewNote } from "@tilhero/contracts/bff";
 import { ageSegment, asAccount, asLearner, learnerAgeBand, loadMe, loadPlan } from "../account.js";
 import type { BffContext } from "../context.js";
 import type { AccessClaims } from "../tokens.js";
-import { BEARER, authOf, errorResponses, type App } from "../http.js";
+import { BEARER, authOf, clientTimezone, errorResponses, type App } from "../http.js";
 import { ExperienceConfigSchema, NewsPageSchema, PageQuerySchema, WhatsNewSchema, WhatsNewSeenRequestSchema } from "../schemas.js";
 import { noteView } from "../views.js";
 
@@ -22,12 +23,12 @@ const TAG = ["whats-new"];
 export const WHATS_NEW_MAX = 5;
 const MODES = new Set(["welcome", "updates", "none"]);
 
-/** Сегмент активного ученика: язык интерфейса плана, возраст, время завершения онбординга. */
-async function segmentOf(ctx: BffContext, auth: AccessClaims) {
-  const [me, plan] = await Promise.all([loadMe(ctx, asAccount(auth)), loadPlan(ctx, asLearner(auth))]);
+/** Сегмент активного ученика: язык интерфейса (locale аккаунта), возраст, время завершения онбординга. */
+async function segmentOf(ctx: BffContext, auth: AccessClaims, tz: string | undefined) {
+  const [me, plan] = await Promise.all([loadMe(ctx, asAccount(auth)), loadPlan(ctx, asLearner(auth), tz)]);
   return {
     onboardedAt: plan.onboarding_completed_at ?? null,
-    lang: plan.ui_lang,
+    lang: me.user.locale === "uz" ? "uz" : "ru",
     age: ageSegment(learnerAgeBand(me, auth.learnerId)),
   };
 }
@@ -46,7 +47,7 @@ export function whatsNewRoutes(app: App, ctx: BffContext): void {
         tags: TAG,
         summary: "«Что нового»: welcome (после онбординга), updates (непросмотренные), none",
         description:
-          "Сегмент — из плана активного ученика (onboarded_at, язык интерфейса) и его возраста; ≤ 5 заметок. " +
+          "Сегмент — onboarded_at из плана активного ученика, язык интерфейса аккаунта (locale) и возраст ученика; ≤ 5 заметок. " +
           "Онбординг не завершён → mode none. 503 UPSTREAM_UNAVAILABLE — шторка просто не показывается.",
         security: BEARER,
         response: { 200: WhatsNewSchema, ...errorResponses(401, 423) },
@@ -54,7 +55,7 @@ export function whatsNewRoutes(app: App, ctx: BffContext): void {
     },
     async (req, reply) => {
       const auth = authOf(req);
-      const seg = await segmentOf(ctx, auth);
+      const seg = await segmentOf(ctx, auth, clientTimezone(req));
       void reply.header("cache-control", "no-store");
       if (!seg.onboardedAt) return { mode: "none", notes: [] } satisfies WhatsNew;
       const res = await experience.get<WhatsNew>("/internal/v1/release-notes/for-me", {
@@ -96,7 +97,7 @@ export function whatsNewRoutes(app: App, ctx: BffContext): void {
       config: user,
       schema: {
         tags: TAG,
-        summary: "Лента опубликованных новостей, видимых ученику (язык интерфейса плана и возраст)",
+        summary: "Лента опубликованных новостей, видимых ученику (язык интерфейса аккаунта и возраст)",
         security: BEARER,
         querystring: PageQuerySchema,
         response: { 200: NewsPageSchema, ...errorResponses(401, 423) },
@@ -104,7 +105,7 @@ export function whatsNewRoutes(app: App, ctx: BffContext): void {
     },
     async (req) => {
       const auth = authOf(req);
-      const seg = await segmentOf(ctx, auth);
+      const seg = await segmentOf(ctx, auth, clientTimezone(req));
       const page = await experience.get<Page<WhatsNewNote>>("/internal/v1/release-notes/feed", {
         subject: asLearner(auth),
         query: { lang: seg.lang, age: seg.age, limit: req.query.limit ?? 20, cursor: req.query.cursor },

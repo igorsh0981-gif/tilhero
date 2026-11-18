@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { initialOf, teenWithoutConsent } from "../../domain/people";
+import { children, initialOf, teenWithoutConsent } from "../../domain/people";
 import { flag } from "../../config/experience";
 import { env } from "../../env";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -66,6 +66,15 @@ export function Profile() {
             <NavRow title={t("profile.notif")} value={notifValue} onClick={() => nav.push({ name: "notifSettings" })} testId="row-notif" />
             <NavRow title={t("profile.lang")} value={lang === "uz" ? "Oʻzbekcha" : "Русский"} onClick={() => nav.push({ name: "language" })} testId="row-lang" />
             {!kid ? <NavRow title={t("profile.family")} onClick={() => nav.push({ name: "family" })} testId="row-family" /> : null}
+            {!kid && acc.age_band === "18+" ? (
+              <NavRow
+                title={t("profile.pin")}
+                value={session.security.pin_enabled ? t("profile.pinOn") : t("profile.pinOff")}
+                onClick={() => nav.push({ name: "parentCode" })}
+                testId="row-pin"
+                badge={!session.security.pin_enabled && children(session).length ? <span className="unread-dot" aria-hidden="true" /> : undefined}
+              />
+            ) : null}
             {!kid && acc.age_band === "14-17" ? (
               <NavRow
                 title={t("profile.guardian")}

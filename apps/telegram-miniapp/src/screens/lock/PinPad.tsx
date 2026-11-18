@@ -7,9 +7,9 @@ import { cx } from "../../ui/kit";
 /**
  * Parent code entry (4 or 6 digits) with an on-screen keypad and a hidden numeric field for hardware keyboards and
  * screen readers. `submit` gets the full code; a rejected promise shows the error (PIN_INVALID {remaining},
- * PIN_LOCKED {retry_after}) and clears the dots.
+ * PIN_LOCKED {retry_after}) and clears the dots. `note` — a message shown until the user types (e.g. «коды не совпадают»).
  */
-export function PinPad({ length, submit }: { length: number; submit: (pin: string) => Promise<void> }) {
+export function PinPad({ length, submit, note }: { length: number; submit: (pin: string) => Promise<void>; note?: string | null }) {
   const { t, fmt } = useI18n();
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
@@ -67,7 +67,7 @@ export function PinPad({ length, submit }: { length: number; submit: (pin: strin
         ))}
       </div>
       <p className="sub center" aria-live="polite">
-        {lockedFor > 0 ? t("err.PIN_LOCKED", { time: fmt.mmss(lockedFor) }) : error ?? t("pin.digits", { n: length })}
+        {lockedFor > 0 ? t("err.PIN_LOCKED", { time: fmt.mmss(lockedFor) }) : error ?? (note && !pin ? note : t("pin.digits", { n: length }))}
       </p>
       <div className="kp">
         {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (

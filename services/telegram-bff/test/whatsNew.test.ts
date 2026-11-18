@@ -1,5 +1,6 @@
 /**
- * «Что нового» и лента новостей (AT-11): сегмент из плана активного ученика (onboarded_at, язык интерфейса) и возраста,
+ * «Что нового» и лента новостей (AT-11): сегмент — onboarded_at из плана активного ученика, язык интерфейса аккаунта
+ * (locale, ревью T-6) и возраст,
  * режим выбирает experience-config; отметки просмотра — на сервере; каталог маршрутов/иконок — release-notes.json.
  */
 import { readFileSync } from "node:fs";
@@ -51,9 +52,10 @@ describe("GET /v1/whats-new", () => {
     expect(forMeCalls()).toHaveLength(0);
   });
 
-  it("onboarded_at и lang — из плана ученика, age — из возраста; sub = ученик; ответ домена проходит в контракт", async () => {
+  it("onboarded_at — из плана ученика, lang — locale аккаунта (не ui_lang плана), age — из возраста; sub = ученик", async () => {
     h.fake.setAge(s.userId, "14-17");
-    h.fake.onboard(s.userId, { ui_lang: "uz", onboarding_completed_at: "2026-11-12T07:30:00Z" });
+    h.fake.account(s.userId).summary.locale = "uz";
+    h.fake.onboard(s.userId, { ui_lang: "ru", onboarding_completed_at: "2026-11-12T07:30:00Z" });
     const note = noteFixture({ audience: "new", slug: "welcome-1" });
     h.fake.forMe = { mode: "welcome", notes: [{ ...note, internal: "x", segments: { age: ["teens"] } } as never] };
     const res = await get("/v1/whats-new");
@@ -137,7 +139,8 @@ describe("POST /v1/whats-new/seen", () => {
 describe("GET /v1/news", () => {
   it("лента для сегмента ученика (lang, age, limit, cursor), sub = ученик", async () => {
     h.fake.setAge(s.userId, "18+");
-    h.fake.onboard(s.userId, { ui_lang: "uz" });
+    h.fake.account(s.userId).summary.locale = "uz";
+    h.fake.onboard(s.userId, { ui_lang: "ru" });
     const res = await get("/v1/news?limit=10&cursor=c1");
     expect(res.statusCode).toBe(200);
     expect(Value.Check(NewsPageSchema, res.json())).toBe(true);

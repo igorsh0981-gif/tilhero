@@ -7,6 +7,11 @@
  *  - identity-consent /me/*, social, support — sub = аккаунт.
  * Список учеников и возраст — из identity-consent, признак завершённого онбординга — из плана каждого ученика
  * (learning-plan, identity его не знает).
+ *
+ * План по умолчанию создаётся learning-plan при первом GET /internal/v1/me/plan в зоне `?tz=`. Чтобы план не появился
+ * в зоне по умолчанию раньше, чем клиент сообщит свою (QA D-03, ревью T-2), каждый вызов плана несёт зону клиента
+ * (`?tz=` маршрута GET /v1/plan или заголовок X-Timezone), а при первом входе (identity: is_new) план аккаунта не
+ * запрашивается вовсе — его ещё нет, онбординг не завершён; создаст его первый GET /v1/plan?tz= клиента.
  */
 import type { AgeBand, LearningPlan, NotificationSettings, SessionResponse } from "@tilhero/contracts/bff";
 import { AppError } from "@tilhero/ts-common";
@@ -32,8 +37,16 @@ export function loadMe(ctx: BffContext, accountId: string): Promise<IdentityMe> 
   return ctx.domains.identity.get<IdentityMe>("/internal/v1/me", { subject: accountId });
 }
 
-export function loadPlan(ctx: BffContext, learnerId: string): Promise<LearningPlan> {
-  return ctx.domains.learningPlan.get<LearningPlan>("/internal/v1/me/plan", { subject: learnerId });
+/** План ученика; tz — зона клиента для плана по умолчанию (если его ещё нет). */
+export function loadPlan(ctx: BffContext, learnerId: string, tz?: string): Promise<LearningPlan> {
+  return ctx.domains.learningPlan.get<LearningPlan>("/internal/v1/me/plan", { subject: learnerId, ...(tz ? { query: { tz } } : {}) });
+}
+
+export interface PlanOpts {
+  /** зона клиента (?tz= / X-Timezone) */
+  tz?: string | undefined;
+  /** ученики без плана (только что созданный аккаунт): онбординг не завершён, learning-plan не вызывается */
+  noPlan?: ReadonlySet<string>;
 }
 
 /** Свой или свой ребёнок (identity-consent проверяет опекунство по sub = аккаунт); иначе 404 LEARNER_NOT_FOUND. */
@@ -60,16 +73,14 @@ export function learnersOf(account: TelegramLoginResponse): IdentityLearner[] {
  * Ученики с признаком онбординга (план каждого — параллельно; сбой learning-plan → 503, частичного ответа нет)
  * и активный ученик. Активного нет среди учеников аккаунта → 404 LEARNER_NOT_FOUND.
  */
-export async function learnersState(
-  ctx: BffContext,
-  list: IdentityLearner[],
-  activeId: string,
-): Promise<LearnersState & { activePlan: LearningPlan }> {
+export async function learnersState(ctx: BffContext, list: IdentityLearner[], activeId: string, opts: PlanOpts = {}): Promise<LearnersState> {
   const activeIdx = list.findIndex((l) => l.learner_id === activeId);
   if (activeIdx < 0) throw learnerNotFound();
-  const plans = await Promise.all(list.map((l) => loadPlan(ctx, l.learner_id)));
-  const learners = list.map((l, i) => learnerView(l, activeId, plans[i]?.onboarding_completed_at != null));
-  return { learners, active: learners[activeIdx]!, activePlan: plans[activeIdx]! };
+  const onboarded = await Promise.all(
+    list.map(async (l) => (opts.noPlan?.has(l.learner_id) ? false : (await loadPlan(ctx, l.learner_id, opts.tz)).onboarding_completed_at != null)),
+  );
+  const learners = list.map((l, i) => learnerView(l, activeId, onboarded[i] === true));
+  return { learners, active: learners[activeIdx]! };
 }
 
 /** Есть ли ученик среди учеников аккаунта (детский профиль мог быть удалён). */
@@ -97,14 +108,16 @@ export function notificationsFor(me: IdentityMe, learnerId: string, child?: Iden
   return child?.settings ?? learnersOf(me).find((l) => l.learner_id === learnerId)?.settings ?? me.settings;
 }
 
-/** SessionResponse: новые access-токен (sub, lrn, sid, pin) + профиль аккаунта + ученики. */
+/** SessionResponse: новые access-токен (sub, lrn, sid, pin) + профиль аккаунта + ученики. tz — зона клиента;
+ *  только что созданный аккаунт (is_new) плана ещё не имеет — learning-plan не вызывается. */
 export async function buildSession(
   ctx: BffContext,
-  s: { accountId: string; learnerId: string; sid: string; refreshToken: string; pinOk: boolean },
+  s: { accountId: string; learnerId: string; sid: string; refreshToken: string; pinOk: boolean; tz?: string | undefined },
   account: TelegramLoginResponse,
   startParam: string | null = null,
 ): Promise<SessionResponse> {
-  const ls = await learnersState(ctx, learnersOf(account), s.learnerId);
+  const noPlan = account.user.is_new === true ? new Set([account.user.user_id]) : undefined;
+  const ls = await learnersState(ctx, learnersOf(account), s.learnerId, { tz: s.tz, ...(noPlan ? { noPlan } : {}) });
   const accessToken = await ctx.tokens.issue({ accountId: s.accountId, learnerId: s.learnerId, sid: s.sid, pin: s.pinOk });
   return sessionView({ accessToken, refreshToken: s.refreshToken, expiresIn: ctx.tokens.ttlSeconds }, account, ls, s.pinOk, startParam);
 }

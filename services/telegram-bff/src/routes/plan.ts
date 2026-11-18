@@ -3,9 +3,9 @@
  * (дни, время, длительность, напоминания, часовой пояс), онбординг, план на сегодня, учёт занятий; справочники.
  */
 import type { DirectoryItem, LearningPlan, TodayPlan } from "@tilhero/contracts/bff";
-import { asLearner } from "../account.js";
+import { asLearner, loadPlan } from "../account.js";
 import type { BffContext } from "../context.js";
-import { BEARER, authOf, errorResponses, idempotencyKey, schemaErrors, type App } from "../http.js";
+import { BEARER, authOf, clientTimezone, errorResponses, idempotencyKey, schemaErrors, type App } from "../http.js";
 import {
   ActivityRequestSchema,
   DirectoryItemSchema,
@@ -13,6 +13,7 @@ import {
   LearningPlanSchema,
   PlanHeadersSchema,
   PlanPatchSchema,
+  PlanQuerySchema,
   TodayPlanSchema,
   itemsOf,
 } from "../schemas.js";
@@ -43,13 +44,17 @@ export function planRoutes(app: App, ctx: BffContext): void {
       schema: {
         tags: TAG,
         summary: "План активного ученика (при первом обращении — по умолчанию: daily, 19:00, 20 мин, напоминания выключены)",
+        description:
+          "?tz=<IANA> (или заголовок X-Timezone) передаётся в learning-plan: план по умолчанию создаётся в зоне клиента " +
+          "(неизвестная зона → Asia/Tashkent). У существующего плана зона не меняется (её меняет PATCH schedule.timezone).",
         security: BEARER,
+        querystring: PlanQuerySchema,
         response: { 200: LearningPlanSchema, ...errorResponses(401, 423) },
       },
     },
     async (req) => {
       const auth = authOf(req);
-      return planView(await lp.get<LearningPlan>("/internal/v1/me/plan", { subject: asLearner(auth) }), auth.learnerId);
+      return planView(await loadPlan(ctx, asLearner(auth), req.query.tz ?? clientTimezone(req)), auth.learnerId);
     },
   );
 

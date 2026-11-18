@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../../api/errors";
 import { flag } from "../../config/experience";
 import { agesFor, consentIsCurrent, nextStep, obSteps, optionalAllowed, prevStep, stepForMissing, type ObStart, type ObStep, type Who } from "../../domain/onboarding";
-import { isChildBand } from "../../domain/people";
+import { children, isChildBand } from "../../domain/people";
 import { DEFAULT_SCHEDULE, scheduleProblem } from "../../domain/schedule";
 import { useI18n, type Lang, type MessageKey } from "../../i18n";
 import { useApp } from "../../state/app";
@@ -14,7 +14,8 @@ import { requestWriteAccess, shareToTelegram } from "../../tg";
 import { Icon } from "../../ui/Icon";
 import { Btn, Check, Chip, Field, HERO, Hero, Opt, Pill, Seg, TextInput, ToggleRow } from "../../ui/kit";
 import { Sheet, showToast } from "../../ui/overlays";
-import { DaysPicker, DurationPicker, TimePicker, ZonePicker, daysText } from "../schedule/parts";
+import { PinOffer } from "../profile/ParentCode";
+import { DaysPicker, DurationPicker, TimePicker, ZonePicker, daysText, timeError } from "../schedule/parts";
 import { ObFrame } from "./frame";
 
 export const GOALS: readonly Goal[] = ["work", "career", "travel", "daily", "study", "exam"];
@@ -87,7 +88,7 @@ export function Onboarding({ onFinished }: { onFinished: (plan: LearningPlan) =>
     case "level":
       return <LevelStep frame={frame} kid={kid} value={level} onChange={setLevel} onNext={() => go(nextStep(steps, "level"))} />;
     case "when":
-      return <WhenStep frame={frame} value={schedule} onChange={setSchedule} onNext={() => go(nextStep(steps, "when"))} />;
+      return <WhenStep frame={frame} kid={kid} value={schedule} onChange={setSchedule} onNext={() => go(nextStep(steps, "when"))} />;
     case "minutes":
       return (
         <MinutesStep
@@ -374,6 +375,7 @@ function ConsentStep({ frame, who, childAge, childName, onNext }: { frame: Frame
   const [checked, setChecked] = useState<Record<string, boolean>>(() => Object.fromEntries(prev.filter((p) => !REQUIRED.includes(p)).map((p) => [p, true])));
   const [doc, setDoc] = useState<PolicyDocument | null>(null);
   const keyRef = useRef<DraftKey | null>(null);
+  const [offerFor, setOfferFor] = useState<string | null>(null);
   const optionalOk = optionalAllowed(session.account.age_band, session.account.guardian_consent);
   const purposes = policy.data?.purposes ?? [];
   const required = purposes.filter((p) => p.required);
@@ -394,9 +396,20 @@ function ConsentStep({ frame, who, childAge, childName, onNext }: { frame: Frame
       const band = childAge && isChildBand(childAge) ? (childAge as "6-9" | "10-13") : "6-9";
       keyRef.current = keyForDraft(keyRef.current, { name: childName, band });
       const child = await bff.createChild({ display_name: childName, age_band: band }, keyRef.current.key);
-      await applySession(await bff.switchLearner(child.learner_id));
-      await bff.patchPlan({ ui_lang: lang }).catch(() => null);
+      // the first child profile and no parent code yet: offer it while still in the parent's profile (review T-1)
+      if (!children(session).length && !session.security.pin_enabled) {
+        setOfferFor(child.learner_id);
+        return;
+      }
+      await enter.run(child.learner_id);
+      return;
     }
+    onNext();
+  });
+  // into the new child profile (after the parent code is set or skipped)
+  const enter = useAction(async (childId: string) => {
+    await applySession(await bff.switchLearner(childId));
+    await bff.patchPlan({ ui_lang: lang }).catch(() => null);
     onNext();
   });
 
@@ -405,14 +418,14 @@ function ConsentStep({ frame, who, childAge, childName, onNext }: { frame: Frame
       id="consent"
       {...frame}
       tight
-      error={save.error ?? policy.error}
+      error={save.error ?? enter.error ?? policy.error}
       foot={
         policy.error ? (
           <Btn variant="secondary" onClick={() => void policy.reload()}>
             {t("c.retry")}
           </Btn>
         ) : (
-          <Btn busy={save.busy} disabled={!allRequired || policy.loading} onClick={() => void save.run()} data-testid="ob-next">
+          <Btn busy={save.busy || enter.busy} disabled={!allRequired || policy.loading} onClick={() => void save.run()} data-testid="ob-next">
             {t("c.continue")}
           </Btn>
         )
@@ -456,6 +469,15 @@ function ConsentStep({ frame, who, childAge, childName, onNext }: { frame: Frame
         <p className="sub">{t("c.loading")}</p>
       ) : null}
       {doc ? <PolicySheet doc={doc} onClose={() => setDoc(null)} /> : null}
+      {offerFor ? (
+        <PinOffer
+          onDone={() => {
+            const id = offerFor;
+            setOfferFor(null);
+            void enter.run(id);
+          }}
+        />
+      ) : null}
     </ObFrame>
   );
 }
@@ -547,10 +569,10 @@ function LevelStep({ frame, kid, value, onChange, onNext }: { frame: FrameProps;
 }
 
 /* ---------------------------------------------------------------- days and time */
-function WhenStep({ frame, value, onChange, onNext }: { frame: FrameProps; value: Schedule; onChange: (s: Schedule) => void; onNext: () => void }) {
+function WhenStep({ frame, kid, value, onChange, onNext }: { frame: FrameProps; kid: boolean; value: Schedule; onChange: (s: Schedule) => void; onNext: () => void }) {
   const { bff, setPlan } = useApp();
   const { t } = useI18n();
-  const problem = scheduleProblem(value);
+  const problem = scheduleProblem(value, { kid });
   const save = useAction(async () => {
     setPlan(await bff.patchPlan({ schedule: { preset: value.preset, days: value.days, preferred_time: value.preferred_time } }));
     onNext();
@@ -570,7 +592,7 @@ function WhenStep({ frame, value, onChange, onNext }: { frame: FrameProps; value
       <h1 className="h1">{t("ob.when.title")}</h1>
       <p className="sub">{t("ob.when.text")}</p>
       <DaysPicker value={value} onChange={(d) => onChange({ ...value, ...d })} />
-      <TimePicker value={value.preferred_time} onChange={(v) => onChange({ ...value, preferred_time: v })} error={problem === "preferred_time" ? t("sch.timeErr") : null} />
+      <TimePicker kid={kid} value={value.preferred_time} onChange={(v) => onChange({ ...value, preferred_time: v })} error={timeError(problem, value.preferred_time, kid, t)} />
     </ObFrame>
   );
 }
@@ -610,7 +632,7 @@ function MinutesStep(props: {
       tight
       error={save.error}
       foot={
-        <Btn busy={save.busy} disabled={scheduleProblem(value) != null} onClick={() => void save.run()} data-testid="ob-next">
+        <Btn busy={save.busy} disabled={scheduleProblem(value, { kid: props.kid }) != null} onClick={() => void save.run()} data-testid="ob-next">
           {t("ob.minutes.finish")}
         </Btn>
       }

@@ -10,6 +10,7 @@ import type {
   DirectoryItem,
   ExperienceConfig,
   Family,
+  GuardianConsentGrant,
   GuardianConsentLink,
   GuardianConsentPreview,
   InboxItem,
@@ -20,9 +21,11 @@ import type {
   LearnerSummary,
   LearningPlan,
   Page,
+  PinResetRequestResponse,
   PlanPatch,
   PolicyDocument,
   Profile,
+  SecurityState,
   SessionResponse,
   SettingsPatch,
   Ticket,
@@ -68,6 +71,20 @@ export function createBff(client: ApiClient) {
     guardianPreview: (token: string) => client.request<GuardianConsentPreview>("GET", `/v1/guardian-consents/${enc(token)}`, { auth: false }),
     guardianDecide: (token: string, decision: "accept" | "decline") =>
       client.request<GuardianConsentPreview>("POST", `/v1/guardian-consents/${enc(token)}/${decision}`),
+    /** teens 14–17 this parent decided for; revoke → declined, the teen's optional purposes are withdrawn */
+    guardianGrants: () => get<{ items: GuardianConsentGrant[] }>("/v1/family/guardian-consents"),
+    revokeGuardianGrant: (teenId: string) => client.request<GuardianConsentGrant>("POST", `/v1/family/guardian-consents/${enc(teenId)}/revoke`),
+
+    // ---- parent code (PIN) ----
+    /** set (no current_pin) or change (with current_pin); other sessions of the account are revoked */
+    setPin: (pin: string, currentPin?: string) =>
+      client.request<SecurityState>("PUT", "/v1/profile/security/pin", { body: currentPin ? { pin, current_pin: currentPin } : { pin } }),
+    removePin: (currentPin: string) => client.request<SecurityState>("DELETE", "/v1/profile/security/pin", { body: { current_pin: currentPin } }),
+    /** the bot sends a 6-digit code to the chat */
+    pinResetRequest: () => client.request<PinResetRequestResponse>("POST", "/v1/profile/security/pin/reset-request"),
+    /** a new session (all previous ones are revoked) */
+    pinResetConfirm: (code: string, newPin: string) =>
+      client.issueSession("POST", "/v1/profile/security/pin/reset-confirm", { body: { code, new_pin: newPin } }),
 
     // ---- consents ----
     policy: (lang: UiLang) => client.request<PolicyDocument>("GET", "/v1/legal/policy", { query: { lang }, auth: false }),

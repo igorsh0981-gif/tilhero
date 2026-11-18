@@ -9,7 +9,7 @@ import { requestWriteAccess } from "../../tg";
 import { Btn, ErrorLine, ToggleRow } from "../../ui/kit";
 import { showToast } from "../../ui/overlays";
 import { Bar } from "../../ui/shell";
-import { DaysPicker, DurationPicker, TimePicker, ZonePicker } from "../schedule/parts";
+import { DaysPicker, DurationPicker, TimePicker, ZonePicker, timeError } from "../schedule/parts";
 
 /**
  * Profile → «График занятий» (AT-06): the same choices as in onboarding; «Сохранить» sends only the changed fields
@@ -27,8 +27,8 @@ export function ScheduleScreen() {
   }, [plan.schedule]);
   const diff = scheduleDiff(plan.schedule, draft);
   const dirty = Object.keys(diff).length > 0;
-  const problem = scheduleProblem(draft);
   const kid = session.learner.kind === "child";
+  const problem = scheduleProblem(draft, { kid });
 
   const save = useAction(async () => {
     setConflict(false);
@@ -65,7 +65,7 @@ export function ScheduleScreen() {
         <div className="pad stack loose">
           <p className="sub">{t("schedule.text")}</p>
           <DaysPicker value={draft} onChange={(d) => setDraft({ ...draft, ...d })} />
-          <TimePicker value={draft.preferred_time} onChange={(v) => setDraft({ ...draft, preferred_time: v })} error={problem === "preferred_time" ? t("sch.timeErr") : null} />
+          <TimePicker kid={kid} value={draft.preferred_time} onChange={(v) => setDraft({ ...draft, preferred_time: v })} error={timeError(problem, draft.preferred_time, kid, t)} />
           <DurationPicker value={draft.duration_min} onChange={(d) => setDraft({ ...draft, duration_min: d })} />
           <div className="list">
             <ToggleRow

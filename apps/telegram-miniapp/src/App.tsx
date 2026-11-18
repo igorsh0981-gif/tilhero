@@ -5,6 +5,7 @@ import { ApiClient, type ClientOptions } from "./api/client";
 import { ApiError, displayCode } from "./api/errors";
 import { applyTheme, fetchExperience, FALLBACK_CONFIG, flag } from "./config/experience";
 import { deviceTimeZone } from "./domain/schedule";
+import { consentIsCurrent } from "./domain/onboarding";
 import { hasWhatsNew } from "./domain/whatsNew";
 import { env } from "./env";
 import { resolveLang, useI18n } from "./i18n";
@@ -27,6 +28,7 @@ import { Family } from "./screens/profile/Family";
 import { Guardian } from "./screens/profile/Guardian";
 import { LanguageScreen } from "./screens/profile/LanguageScreen";
 import { NotifSettings } from "./screens/profile/NotifSettings";
+import { ParentCode } from "./screens/profile/ParentCode";
 import { Privacy } from "./screens/profile/Privacy";
 import { Profile as ProfileScreen } from "./screens/profile/Profile";
 import { ScheduleScreen } from "./screens/profile/ScheduleScreen";
@@ -83,7 +85,7 @@ export function App({ boot, client: injected }: { boot: BootMode; client?: Parti
 
   // one client for the life of the app (tests may inject fetch / storage)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const client = useMemo(() => new ApiClient({ baseUrl: env.bffUrl, lang: () => langRef.current, ...injected }), []);
+  const client = useMemo(() => new ApiClient({ baseUrl: env.bffUrl, lang: () => langRef.current, timezone: () => deviceTz, ...injected }), []);
   const bff = useMemo(() => createBff(client), [client]);
   // the session flag (set at login from the plan, and by «Открыть главную» after the done step) — not the plan itself:
   // completing the plan must still show the done step of onboarding
@@ -194,13 +196,16 @@ export function App({ boot, client: injected }: { boot: BootMode; client?: Parti
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---------- after onboarding: deferred deep link, then «Что нового» ---------- */
+  /* ---------- after onboarding (and the consents): deferred deep link, then «Что нового» ---------- */
+  const consentOk = !!session && consentIsCurrent(session.consent);
   useEffect(() => {
-    if (phase.kind !== "ready" || !onboarded || !pending.current) return;
     const link = pending.current;
+    if (phase.kind !== "ready" || !onboarded || !link) return;
+    // the server opens invitations only after the policy is accepted (INTERNAL_API §11)
+    if ((link.kind === "invite" || link.kind === "invitePreview") && !consentOk) return;
     pending.current = null;
     handleLink(link);
-  }, [phase.kind, onboarded, handleLink]);
+  }, [phase.kind, onboarded, consentOk, handleLink]);
 
   const learnerId = session?.learner.learner_id ?? null;
   useEffect(() => {
@@ -317,6 +322,10 @@ export function App({ boot, client: injected }: { boot: BootMode; client?: Parti
             await loadAfterSession(s);
             return s;
           }}
+          reset={{
+            request: () => bff.pinResetRequest(),
+            confirm: async (code, pin) => loadAfterSession(await bff.pinResetConfirm(code, pin)),
+          }}
         />
       </Frame>
     );
@@ -341,8 +350,8 @@ export function App({ boot, client: injected }: { boot: BootMode; client?: Parti
               closeOverlay();
               if (onboardedRef.current && r.family) nav.route("family");
             }}
-            onDefer={(inviteId) => {
-              pending.current = { kind: "invitePreview", inviteId };
+            onDefer={(target) => {
+              pending.current = "token" in target ? { kind: "invite", token: target.token } : { kind: "invitePreview", inviteId: target.inviteId };
               closeOverlay();
             }}
           />
@@ -419,6 +428,8 @@ function PushedScreen({ p }: { p: Pushed }) {
       return <Guardian />;
     case "privacy":
       return <Privacy />;
+    case "parentCode":
+      return <ParentCode />;
     case "delete":
       return <DeleteScreen />;
     case "support":

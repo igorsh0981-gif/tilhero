@@ -14,6 +14,7 @@ export type Pushed =
   | { name: "family" }
   | { name: "guardian" }
   | { name: "privacy" }
+  | { name: "parentCode" }
   | { name: "delete" }
   | { name: "support"; number?: string }
   | { name: "ticket"; id: string };

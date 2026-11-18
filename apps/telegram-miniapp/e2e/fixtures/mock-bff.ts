@@ -4,6 +4,7 @@ import type {
   ConsentState,
   Family,
   GuardianConsent,
+  GuardianConsentGrant,
   InboxItem,
   Invite,
   InvitePreview,
@@ -52,6 +53,10 @@ export interface Scenario {
   /** start_param the BFF returns from initData */
   startParam?: string | null;
   tickets?: Ticket[];
+  /** purposes of the accepted consent of an onboarded account (default: required + product_news, without social) */
+  purposes?: string[];
+  /** teens 14–17 this account decided for (GET /v1/family/guardian-consents) */
+  grants?: GuardianConsentGrant[];
 }
 
 export interface Recorded {
@@ -96,6 +101,9 @@ export class MockBff {
   invites: Invite[] = [];
   family: Family | null;
   tickets: Ticket[];
+  grants: GuardianConsentGrant[];
+  /** the parent code of the account (PUT/DELETE /v1/profile/security/pin, reset) */
+  pin: string | null;
   private access = 0;
   private failOnce: Record<string, number | [number, string]>;
   private conflictOnce: boolean;
@@ -109,7 +117,9 @@ export class MockBff {
     this.learners = [F.selfLearner({ age_band: age, onboarding_completed: onboarded })];
     this.active = F.ACCOUNT_ID;
     this.security = F.security(sc.pin ? { pin_enabled: true, pin_length: sc.pin.length as 4 | 6, pin_required: !!sc.pinRequired } : {});
-    this.consent = F.consent(onboarded, ["terms", "privacy", "learning", "product_news"]);
+    this.consent = F.consent(onboarded, sc.purposes ?? ["terms", "privacy", "learning", "product_news"]);
+    this.pin = sc.pin ?? null;
+    this.grants = sc.grants ? sc.grants.map((g) => ({ ...g })) : [];
     this.settings[F.ACCOUNT_ID] = F.settings(onboarded ? { categories: { reminders: true, missed: true, social: true, support: true, product: true } } : {});
     this.plans[F.ACCOUNT_ID] = onboarded ? F.onboardedPlan(F.ACCOUNT_ID) : F.plan(F.ACCOUNT_ID, { ui_lang: sc.locale ?? "ru" });
     this.notes = sc.notes ?? [F.WELCOME, F.UPDATE_1, F.UPDATE_2];
@@ -250,14 +260,14 @@ export class MockBff {
     // ---- session ----
     if (key === "POST /v1/session/telegram" || key === "POST /v1/session/refresh") return this.ok(route, this.session());
     if (key === "POST /v1/session/pin/verify") {
-      if (b.pin !== this.sc.pin) return this.err(route, 401, "PIN_INVALID", { remaining: 4 });
+      if (b.pin !== this.pin) return this.err(route, 401, "PIN_INVALID", { remaining: 4 });
       this.security.pin_required = false;
       return this.ok(route, this.session());
     }
     if (key === "POST /v1/session/learner") {
       const target = this.learners.find((l) => l.learner_id === b.learner_id);
       if (!target) return this.err(route, 404, "LEARNER_NOT_FOUND");
-      if (this.learner().kind === "child" && this.security.pin_enabled && b.pin !== this.sc.pin) return this.err(route, 401, "PIN_INVALID", { remaining: 4 });
+      if (this.learner().kind === "child" && this.security.pin_enabled && b.pin !== this.pin) return this.err(route, 401, "PIN_INVALID", { remaining: 4 });
       this.active = target.learner_id;
       return this.ok(route, this.session());
     }
@@ -313,9 +323,48 @@ export class MockBff {
       if (!link) return this.err(route, 404, "GUARDIAN_CONSENT_NOT_FOUND");
       if (m[2]) {
         if (this.account.age_band !== "18+") return this.err(route, 403, "ADULT_REQUIRED");
+        // §11: the decision is the teen's consent on the guardian basis — the parent's own consent first
+        if (!this.consent.accepted) return this.err(route, 403, "CONSENT_REQUIRED", { purpose: "terms" });
         link.status = m[2] === "accept" ? "granted" : "declined";
       }
       return this.ok(route, { teen_display_name: link.teen, status: link.status, expires_at: "2026-11-25T08:00:00Z" });
+    }
+
+    // ---- teens the parent decided for (§11) ----
+    if (key === "GET /v1/family/guardian-consents") {
+      if (this.learner().kind === "child") return this.err(route, 403, "ADULT_REQUIRED");
+      return this.ok(route, { items: this.grants });
+    }
+    m = /^\/v1\/family\/guardian-consents\/([0-9a-f-]{36})\/revoke$/.exec(path);
+    if (m && method === "POST") {
+      const g = this.grants.find((x) => x.teen_user_id === m![1] && x.status === "granted");
+      if (!g) return this.err(route, 404, "GUARDIAN_CONSENT_NOT_FOUND");
+      g.status = "declined";
+      g.decided_at = new Date().toISOString();
+      return this.ok(route, g);
+    }
+
+    // ---- parent code ----
+    if (path.startsWith("/v1/profile/security/pin") && this.learner().kind === "child") return this.err(route, 403, "ADULT_REQUIRED");
+    if (key === "PUT /v1/profile/security/pin") {
+      if (this.pin && b.current_pin !== this.pin) return this.err(route, 401, "PIN_INVALID", { remaining: 4 });
+      this.pin = String(b.pin);
+      this.security = { ...this.security, pin_enabled: true, pin_length: this.pin.length as 4 | 6, pin_required: false };
+      return this.ok(route, this.security);
+    }
+    if (key === "DELETE /v1/profile/security/pin") {
+      if (b.current_pin !== this.pin) return this.err(route, 401, "PIN_INVALID", { remaining: 4 });
+      this.pin = null;
+      this.security = { ...this.security, pin_enabled: false, pin_length: null, biometric_enabled: false };
+      return this.ok(route, this.security);
+    }
+    if (key === "POST /v1/profile/security/pin/reset-request") return this.ok(route, { expires_in: 600 });
+    if (key === "POST /v1/profile/security/pin/reset-confirm") {
+      if (b.code !== "246810") return this.err(route, 401, "RESET_CODE_INVALID", { remaining: 4 });
+      this.pin = String(b.new_pin);
+      this.security = { ...this.security, pin_enabled: true, pin_length: this.pin.length as 4 | 6, pin_required: false };
+      this.active = F.ACCOUNT_ID;
+      return this.ok(route, this.session());
     }
 
     // ---- consents ----
@@ -393,6 +442,7 @@ export class MockBff {
     if (key === "POST /v1/invites") {
       const k = `inv:${headers["idempotency-key"]}`;
       if (this.idem.has(k)) return this.ok(route, this.idem.get(k), 201);
+      if (!this.consent.purposes.includes("social")) return this.err(route, 403, "CONSENT_REQUIRED", { purpose: "social" });
       if (b.kind === "family" && this.account.age_band !== "18+") return this.err(route, 403, "ADULT_REQUIRED");
       const id = `33333333-aaaa-4bbb-8ccc-${String(this.seq++).padStart(12, "0")}`;
       const inv: Invite = {
@@ -417,6 +467,8 @@ export class MockBff {
       return this.ok(route, inv);
     }
     if (key === "POST /v1/invites/open" || /^GET \/v1\/invites\/[0-9a-f-]{36}\/preview$/.test(key)) {
+      // §11: open and preview — after the policy is accepted
+      if (!this.consent.accepted) return this.err(route, 403, "CONSENT_REQUIRED", { purpose: "terms" });
       const entry = key.startsWith("POST")
         ? this.sc.incoming?.[String(b.token)]
         : Object.values(this.sc.incoming ?? {}).find((e) => key.includes(e.invite.invite_id));
@@ -429,6 +481,8 @@ export class MockBff {
       if (!entry) return this.err(route, 404, "INVITE_NOT_FOUND");
       if (m[2] === "decline") return this.ok(route, { ...this.preview(entry), status: entry.invite.status });
       if (entry.self) return this.err(route, 409, "INVITE_SELF");
+      // §11: accepting needs the optional purpose «social»
+      if (!this.consent.purposes.includes("social")) return this.err(route, 403, "CONSENT_REQUIRED", { purpose: "social" });
       if (entry.invite.status === "accepted") return this.err(route, 409, "INVITE_ALREADY_USED");
       entry.invite.status = "accepted";
       if (entry.invite.kind === "family") {

@@ -98,9 +98,11 @@ describe("App: deep links from start_param (AT-09)", () => {
     await screen.findByRole("dialog", { name: "Мама приглашает вас в семью" });
     expect(f.calls.filter((c) => c === "POST /v1/invites/open")).toHaveLength(1);
   });
-  it("a new user: the invitation waits for the short setup (onboarding underneath)", async () => {
-    renderApp("inv_FamTok0123456789abcdefghijklmnop", { onboarded: false });
-    const dialog = await screen.findByRole("dialog", { name: "Мама приглашает вас в семью" });
+  it("a new user: the invitation waits for the short setup (onboarding underneath), not opened before the consents", async () => {
+    const f = renderApp("inv_FamTok0123456789abcdefghijklmnop", { onboarded: false });
+    // §11: the server opens an invitation only after the policy is accepted — the client does not try before
+    const dialog = await screen.findByRole("dialog", { name: "Приглашение" });
+    expect(f.calls).not.toContain("POST /v1/invites/open");
     expect(within(dialog).getByText("Сначала короткая настройка — затем вернёмся к приглашению.")).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Принять" })).toBeNull();
     await userEvent.click(within(dialog).getByRole("button", { name: "Продолжить настройку" }));

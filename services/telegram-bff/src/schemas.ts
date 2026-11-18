@@ -6,8 +6,8 @@
  * Вход: additionalProperties: false везде (лишние поля → 422). Ответы сериализуются по схеме (fast-json-stringify):
  * в Mini App уходят только поля контракта.
  *
- * Исключение — код родителя (установка, смена, сброс) и биометрия: маршруты aievent, типов в bff.ts нет (SecurityState
- * описывает их состояние). Локальные типы — ниже (раздел «Код родителя»), см. README «Отклонения от контракта».
+ * Исключение — биометрия (PUT/DELETE /v1/profile/security/biometric, POST /v1/session/biometric/verify): маршруты aievent,
+ * типов в bff.ts нет. Локальные типы — ниже (раздел «Код родителя и биометрия»), см. README «Отклонения от контракта».
  */
 import { Type, type Static, type TLiteral, type TSchema, type TSchemaOptions, type TUnion } from "@fastify/type-provider-typebox";
 import type * as C from "@tilhero/contracts/bff";
@@ -167,7 +167,8 @@ export const ProfileSchema = Type.Object({
 assertSame<Same<Static<typeof ProfileSchema>, C.Profile>>();
 
 /** IANA-зона: проверку существования делает домен (identity-consent / learning-plan). */
-const Timezone = Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z][A-Za-z0-9_+\\-]*(/[A-Za-z0-9_+\\-]+){0,2}$" });
+export const TIMEZONE_PATTERN = "^[A-Za-z][A-Za-z0-9_+\\-]*(/[A-Za-z0-9_+\\-]+){0,2}$";
+const Timezone = Type.String({ minLength: 1, maxLength: 64, pattern: TIMEZONE_PATTERN });
 const DisplayName = Type.String({ minLength: 1, maxLength: 40, pattern: "\\S" });
 
 export const NotificationsPatchSchema = Type.Object(
@@ -220,6 +221,18 @@ assertSame<Same<Static<typeof GuardianConsentPreviewSchema>, C.GuardianConsentPr
 /** Токен согласия родителя (32 байта base64url) — из start_param без префикса gc_. */
 export const GuardianTokenParamsSchema = Type.Object({ token: Type.String({ pattern: "^[A-Za-z0-9_-]{16,128}$" }) }, strict);
 
+export const GUARDIAN_GRANT_STATUSES = ["granted", "declined"] as const;
+export const GuardianConsentGrantSchema = Type.Object({
+  teen_user_id: Type.String(),
+  teen_display_name: Type.String(),
+  status: Enum(GUARDIAN_GRANT_STATUSES),
+  decided_at: IsoTime,
+});
+assertSame<Same<Static<typeof GuardianConsentGrantSchema>, C.GuardianConsentGrant>>();
+
+/** Подросток, за которого решал родитель: неверный формат id — как чужой (404 GUARDIAN_CONSENT_NOT_FOUND). */
+export const TeenParamsSchema = Type.Object({ teen_user_id: Uuid }, strict);
+
 // ---------- Согласия ----------
 export const PolicyDocumentSchema = Type.Object({
   version: Type.String(),
@@ -239,25 +252,19 @@ export const ConsentRequestSchema = Type.Object(
 );
 assertSame<Same<Static<typeof ConsentRequestSchema>, C.ConsentRequest>>();
 
-// ---------- Код родителя (PIN) и биометрия — маршруты aievent, локальные типы ----------
-/** PUT /v1/profile/security/pin — задать (без current_pin) или сменить (с current_pin) → SecurityState. */
-export interface PinSetRequest {
-  pin: string;
-  current_pin?: string;
-}
-/** DELETE /v1/profile/security/pin → SecurityState. */
-export interface PinRemoveRequest {
-  current_pin: string;
-}
-/** POST /v1/profile/security/pin/reset-request → {expires_in}: бот присылает 6-значный код в чат. */
-export interface PinResetRequestResponse {
-  expires_in: number;
-}
-/** POST /v1/profile/security/pin/reset-confirm → SessionResponse (все прежние сессии отозваны). */
-export interface PinResetConfirmRequest {
-  code: string;
-  new_pin: string;
-}
+// ---------- Код родителя (PIN) — bff.ts; биометрия — маршруты aievent, локальные типы ----------
+export const PinSetRequestSchema = Type.Object({ pin: PinString, current_pin: Type.Optional(PinString) }, strict);
+assertSame<Same<Static<typeof PinSetRequestSchema>, C.PinSetRequest>>();
+export const PinRemoveRequestSchema = Type.Object({ current_pin: PinString }, strict);
+assertSame<Same<Static<typeof PinRemoveRequestSchema>, C.PinRemoveRequest>>();
+export const PinResetRequestResponseSchema = Type.Object({ expires_in: Type.Integer() });
+assertSame<Same<Static<typeof PinResetRequestResponseSchema>, C.PinResetRequestResponse>>();
+export const PinResetConfirmRequestSchema = Type.Object(
+  { code: Type.String({ pattern: "^[0-9]{6}$", description: "6-значный код из бота" }), new_pin: PinString },
+  strict,
+);
+assertSame<Same<Static<typeof PinResetConfirmRequestSchema>, C.PinResetConfirmRequest>>();
+
 /** POST /v1/session/biometric/verify → SessionResponse. */
 export interface BiometricVerifyRequest {
   biometric_token: string;
@@ -267,18 +274,6 @@ export interface BiometricEnableResponse {
   biometric_token: string;
   security: C.SecurityState;
 }
-
-export const PinSetRequestSchema = Type.Object({ pin: PinString, current_pin: Type.Optional(PinString) }, strict);
-assertSame<Same<Static<typeof PinSetRequestSchema>, PinSetRequest>>();
-export const PinRemoveRequestSchema = Type.Object({ current_pin: PinString }, strict);
-assertSame<Same<Static<typeof PinRemoveRequestSchema>, PinRemoveRequest>>();
-export const PinResetRequestResponseSchema = Type.Object({ expires_in: Type.Integer() });
-assertSame<Same<Static<typeof PinResetRequestResponseSchema>, PinResetRequestResponse>>();
-export const PinResetConfirmRequestSchema = Type.Object(
-  { code: Type.String({ pattern: "^[0-9]{6}$", description: "6-значный код из бота" }), new_pin: PinString },
-  strict,
-);
-assertSame<Same<Static<typeof PinResetConfirmRequestSchema>, PinResetConfirmRequest>>();
 export const BiometricVerifyRequestSchema = Type.Object({ biometric_token: Type.String({ minLength: 1, maxLength: 256 }) }, strict);
 assertSame<Same<Static<typeof BiometricVerifyRequestSchema>, BiometricVerifyRequest>>();
 export const BiometricEnableResponseSchema = Type.Object({ biometric_token: Type.String(), security: SecurityStateSchema });
@@ -346,6 +341,9 @@ export const PlanPatchSchema = Type.Object(
   strict,
 );
 assertSame<Same<Static<typeof PlanPatchSchema>, C.PlanPatch>>();
+
+/** GET /v1/plan?tz=<IANA> — зона клиента для плана по умолчанию (learning-plan: неизвестная зона → Asia/Tashkent). */
+export const PlanQuerySchema = Type.Object({ tz: Type.Optional(Timezone) }, strict);
 
 export const PlanHeadersSchema = Type.Object({
   "if-match": Type.Optional(

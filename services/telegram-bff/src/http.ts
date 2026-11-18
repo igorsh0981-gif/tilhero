@@ -12,7 +12,7 @@ import type {
 import type { TypeBoxTypeProvider } from "@fastify/type-provider-typebox";
 import { AppError } from "@tilhero/ts-common";
 import type { AccessClaims } from "./tokens.js";
-import { ErrorBodySchema } from "./schemas.js";
+import { ErrorBodySchema, TIMEZONE_PATTERN } from "./schemas.js";
 
 export type App = FastifyInstance<
   RawServerDefault,
@@ -165,6 +165,19 @@ export function idempotencyKey(req: { headers: Record<string, string | string[] 
   if (key && IDEMPOTENCY_RE.test(key)) return key.toLowerCase();
   if (!key && !required && raw === undefined) return undefined;
   throw new AppError(422, "IDEMPOTENCY_KEY_REQUIRED", "Нужен заголовок Idempotency-Key (UUID)");
+}
+
+// ---------- часовой пояс клиента ----------
+
+const TIMEZONE_RE = new RegExp(TIMEZONE_PATTERN);
+
+/** Заголовок X-Timezone — IANA-зона устройства (Mini App шлёт его с каждым запросом, как Accept-Language).
+ *  Нужен learning-plan, чтобы план по умолчанию создавался в зоне клиента (INTERNAL_API §10–§11, QA D-03).
+ *  Необязательный: нет или не формата IANA — undefined (запрос не отклоняется, домен возьмёт зону по умолчанию). */
+export function clientTimezone(req: { headers: Record<string, string | string[] | undefined> }): string | undefined {
+  const raw = req.headers["x-timezone"];
+  const tz = typeof raw === "string" ? raw.trim() : undefined;
+  return tz && tz.length <= 64 && TIMEZONE_RE.test(tz) ? tz : undefined;
 }
 
 // ---------- детский профиль ----------

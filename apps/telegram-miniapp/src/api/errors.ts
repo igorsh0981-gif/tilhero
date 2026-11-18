@@ -43,8 +43,11 @@ export function codeForStatus(status: number): string {
   return "UNKNOWN";
 }
 
-/** 401 codes that are business answers (wrong PIN, bad initData) — they must NOT trigger a token refresh. */
-export const BUSINESS_401 = new Set(["PIN_INVALID", "INIT_DATA_INVALID", "INIT_DATA_EXPIRED", "INIT_DATA_REPLAYED", "REFRESH_INVALID"]);
+/** 401 codes that are business answers (wrong PIN / reset code / biometry, bad initData) — they must NOT trigger a
+ *  token refresh. */
+export const BUSINESS_401 = new Set([
+  "PIN_INVALID", "RESET_CODE_INVALID", "BIOMETRIC_INVALID", "INIT_DATA_INVALID", "INIT_DATA_EXPIRED", "INIT_DATA_REPLAYED", "REFRESH_INVALID",
+]);
 
 /** Codes with their own text in the dictionaries (err.<CODE>). The server's Russian `message` is never shown. */
 export const KNOWN_CODES = [
@@ -54,10 +57,13 @@ export const KNOWN_CODES = [
   "LEARNER_NOT_FOUND", "QUIET_HOURS_INVALID", "AGE_ALREADY_SET", "CHILDREN_LIMIT", "ADULT_REQUIRED",
   "GUARDIAN_CONSENT_NOT_REQUIRED", "GUARDIAN_CONSENT_NOT_FOUND", "GUARDIAN_CONSENT_EXPIRED", "GUARDIAN_CONSENT_SELF",
   "GUARDIAN_CONSENT_REQUIRED", "POLICY_VERSION_OUTDATED", "CONSENT_REQUIRED_PURPOSES",
-  "PLAN_VERSION_CONFLICT", "PLAN_INVALID", "PLAN_INCOMPLETE", "IDEMPOTENCY_KEY_REQUIRED",
+  "CONSENT_REQUIRED", "CONSENT_PURPOSES_INVALID",
+  "PLAN_VERSION_CONFLICT", "PLAN_INVALID", "PLAN_INCOMPLETE", "ACTIVITY_INVALID", "IDEMPOTENCY_KEY_REQUIRED", "IDEMPOTENCY_KEY_REUSED",
   "INVITES_NOT_ALLOWED", "INVITES_LIMIT", "INVITE_NOT_FOUND", "INVITE_SELF", "INVITE_ALREADY_USED", "INVITE_EXPIRED",
-  "INVITE_REVOKED", "FAMILY_ALREADY_MEMBER", "FAMILY_NOT_FOUND",
-  "SUPPORT_CATEGORY_INVALID", "SUPPORT_TICKET_NOT_FOUND", "SUPPORT_TICKET_CLOSED",
+  "INVITE_REVOKED", "FAMILY_ALREADY_MEMBER", "FAMILY_NOT_FOUND", "FAMILY_FULL", "ALREADY_FRIENDS",
+  "PIN_FORMAT", "PIN_ALREADY_SET", "PIN_NOT_SET", "PIN_RESET_TOO_OFTEN", "RESET_CODE_INVALID", "RESET_CODE_EXPIRED", "BIOMETRIC_INVALID",
+  "DELETION_CONFIRMATION_REQUIRED", "USER_DELETION_REQUESTED", "USER_DISABLED",
+  "SUPPORT_CATEGORY_INVALID", "SUPPORT_TICKET_NOT_FOUND", "SUPPORT_TICKET_CLOSED", "SUPPORT_RATE_LIMITED", "SUPPORT_TOO_MANY_OPEN",
 ] as const;
 export type KnownCode = (typeof KNOWN_CODES)[number];
 const KNOWN: ReadonlySet<string> = new Set(KNOWN_CODES);
@@ -68,11 +74,21 @@ const KNOWN: ReadonlySet<string> = new Set(KNOWN_CODES);
  */
 const ALIAS: Readonly<Record<string, KnownCode>> = {
   UPSTREAM_UNAVAILABLE: "SERVICE_UNAVAILABLE",
+  RATE_LIMIT_UNAVAILABLE: "SERVICE_UNAVAILABLE",
   INTERNAL_ERROR: "SERVICE_UNAVAILABLE",
   TOKEN_INVALID: "SESSION_REVOKED",
   UNAUTHORIZED: "SESSION_REVOKED",
   INVALID_JSON: "VALIDATION_ERROR",
+  IDEMPOTENCY_KEY_INVALID: "IDEMPOTENCY_KEY_REUSED",
 };
+
+/** 403 CONSENT_REQUIRED {purpose} (bff.ts): the purpose of the policy the action needs — "social" (invitations and the
+ *  family) or "terms" (the user's own consent first, e.g. before a parent's decision). null — another error. */
+export function consentRequiredPurpose(e: unknown): string | null {
+  if (!(e instanceof ApiError) || e.code !== "CONSENT_REQUIRED") return null;
+  const p = e.details.purpose;
+  return typeof p === "string" ? p : "terms";
+}
 const SERVER_FAULT = /^(INTERNAL_|ACTOR_|CALLER_)/;
 
 /** The dictionary code an error is shown with (see ALIAS / SERVER_FAULT). */
@@ -88,5 +104,7 @@ export function errorText(err: unknown, t: (key: MessageKey, vars?: Vars) => str
   if (!(err instanceof ApiError)) return t("err.UNKNOWN");
   if (err.code === "RATE_LIMITED") return err.retryAfter != null ? t("err.RATE_LIMITED.wait", { n: Math.ceil(err.retryAfter) }) : t("err.RATE_LIMITED");
   const code = displayCode(err);
+  if (code === "PIN_INVALID" && err.remaining == null) return t("err.PIN_INVALID.plain");
+  if (code === "RESET_CODE_INVALID" && err.remaining == null) return t("err.RESET_CODE_INVALID.plain");
   return t(`err.${code}` as MessageKey, { remaining: err.remaining ?? 0, time: mmss(err.retryAfter ?? 300) });
 }

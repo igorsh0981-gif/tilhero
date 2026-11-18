@@ -201,6 +201,8 @@ export class FakeDomains {
   readonly inviteIdem = new Map<string, string>();
   readonly families = new Map<string, Family>(); // owner → family
   readonly guardianRequests = new Map<string, { teen: string; status: "pending" | "granted" | "declined" | "expired"; expires_at: string }>();
+  /** Решения родителей по подросткам (INTERNAL_API §11): teen → последнее решение. */
+  readonly grants = new Map<string, { guardian: string; status: "granted" | "declined" | "revoked"; decided_at: string }>();
   readonly tickets = new Map<string, Ticket & { owner: string }>();
   readonly ticketIdem = new Map<string, string>();
   readonly childIdem = new Map<string, string>();
@@ -374,6 +376,17 @@ export class FakeDomains {
     };
   }
 
+  private grantView(teenId: string, g: { status: string; decided_at: string }) {
+    return {
+      teen_user_id: teenId,
+      teen_display_name: this.accounts.get(teenId)?.summary.display_name ?? "?",
+      status: g.status,
+      decided_at: g.decided_at,
+      guardian_user_id: "internal", // внутреннее поле — BFF не должен его пропустить
+      telegram_user_id: 1,
+    };
+  }
+
   private identity(r: Req): Response {
     const key = `${r.method} ${r.path}`;
     if (key === "POST /internal/v1/users/telegram-login") {
@@ -430,11 +443,31 @@ export class FakeDomains {
         if (req.status === "expired") return domainError(410, "GUARDIAN_CONSENT_EXPIRED");
         req.status = gc[2] === "accept" ? "granted" : "declined";
         teen.summary = { ...teen.summary, guardian_consent: req.status };
+        this.grants.set(req.teen, { guardian: r.subject, status: req.status, decided_at: "2026-11-18T11:00:00Z" });
         return preview();
       }
     }
     const u = this.requireAccount(r);
     if (u instanceof Response) return u;
+    // §11: решения родителя по подросткам (sub = родитель); отзыв — только тем, кто дал согласие
+    if (key === "GET /internal/v1/me/guardian-consents") {
+      const items = [...this.grants.entries()]
+        .filter(([, g]) => g.guardian === u.summary.user_id)
+        .map(([teen, g]) => this.grantView(teen, g));
+      return json(200, { items });
+    }
+    const gr = /^\/internal\/v1\/me\/guardian-consents\/([^/:]+):revoke$/.exec(r.path);
+    if (gr && r.method === "POST") {
+      const teenId = gr[1]!;
+      const g = this.grants.get(teenId);
+      if (!g || g.guardian !== u.summary.user_id || g.status !== "granted") return domainError(404, "GUARDIAN_CONSENT_NOT_FOUND");
+      g.status = "revoked";
+      g.decided_at = "2026-11-18T12:00:00Z";
+      const teen = this.accounts.get(teenId)!;
+      teen.summary = { ...teen.summary, guardian_consent: "declined" };
+      teen.consent = { ...teen.consent, purposes: teen.consent.purposes.filter((p) => ["terms", "privacy", "learning"].includes(p)) };
+      return json(200, this.grantView(teenId, { ...g, status: "declined" }));
+    }
     const lm = /^\/internal\/v1\/me\/learners\/([^/]+)$/.exec(r.path);
     if (lm) {
       const id = lm[1]!;
@@ -593,10 +626,12 @@ export class FakeDomains {
     };
   }
 
-  private plan(id: string): LearningPlan {
+  /** Как learning-plan: план по умолчанию создаётся при первом обращении в зоне ?tz= (неизвестная → Asia/Tashkent). */
+  private plan(id: string, tz?: string): LearningPlan {
     let p = this.plans.get(id);
     if (!p) {
       p = this.defaultPlan(id);
+      if (tz && tz !== "Mars/Base") p = { ...p, schedule: { ...p.schedule, timezone: tz } };
       this.plans.set(id, p);
     }
     return p;
@@ -624,7 +659,7 @@ export class FakeDomains {
     const key = `${r.method} ${r.path}`;
     switch (key) {
       case "GET /internal/v1/me/plan":
-        return json(200, { ...this.plan(id), user_id: id, internal_note: "x" });
+        return json(200, { ...this.plan(id, r.query.tz), user_id: id, internal_note: "x" });
       case "PATCH /internal/v1/me/plan": {
         const p = this.plan(id);
         const ifMatch = r.headers["if-match"];

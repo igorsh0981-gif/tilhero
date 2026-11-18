@@ -3,9 +3,11 @@ import { useId } from "react";
 import {
   ALL_DAYS,
   DURATIONS,
+  KID_WINDOW,
   TIME_CHOICES,
   TIME_PRESETS,
   choosePreset,
+  inKidWindow,
   isValidTime,
   presetForDays,
   timeChoice,
@@ -57,10 +59,12 @@ export function DaysPicker({ value, onChange }: { value: Pick<Schedule, "preset"
   );
 }
 
-export function TimePicker({ value, onChange, error }: { value: string; onChange: (v: string) => void; error?: string | null }) {
+/** `kid` — a child profile: the time only within KID_WINDOW (08:00–19:30), with the reason shown under the picker. */
+export function TimePicker({ value, onChange, error, kid }: { value: string; onChange: (v: string) => void; error?: string | null; kid?: boolean }) {
   const { t } = useI18n();
   const id = useId();
   const label = useId();
+  const kidNote = useId();
   const choice = timeChoice(value);
   return (
     <fieldset className="stack tight">
@@ -96,14 +100,27 @@ export function TimePicker({ value, onChange, error }: { value: string; onChange
           type="time"
           step={300}
           value={value}
-          aria-invalid={!isValidTime(value) || undefined}
+          {...(kid ? { min: KID_WINDOW.from, max: KID_WINDOW.to, "aria-describedby": kidNote } : {})}
+          aria-invalid={!!error || !isValidTime(value) || undefined}
           onChange={(e) => onChange(e.target.value)}
           data-testid="time-input"
         />
       </div>
+      {kid ? (
+        <p className="sub small field-hint" id={kidNote} data-testid="kid-window">
+          {t("sch.kidWindow", { from: KID_WINDOW.from, to: KID_WINDOW.to })}
+        </p>
+      ) : null}
       {error ? <p className="field-err" role="alert">{error}</p> : null}
     </fieldset>
   );
+}
+
+/** The error under the time picker: format, or — in a child profile — outside the 08:00–19:30 window. */
+export function timeError(problem: string | null, time: string, kid: boolean, t: I18n["t"]): string | null {
+  if (problem !== "preferred_time") return null;
+  if (kid && isValidTime(time) && !inKidWindow(time)) return t("sch.kidTimeErr", { from: KID_WINDOW.from, to: KID_WINDOW.to });
+  return t("sch.timeErr");
 }
 
 export function DurationPicker({ value, onChange }: { value: DurationMin; onChange: (v: DurationMin) => void }) {

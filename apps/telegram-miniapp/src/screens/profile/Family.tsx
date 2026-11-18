@@ -1,4 +1,4 @@
-import type { AgeBand, Invite, InviteKind } from "@tilhero/contracts/bff";
+import type { AgeBand, GuardianConsentGrant, Invite, InviteKind, LearnerSummary } from "@tilhero/contracts/bff";
 import { useRef, useState } from "react";
 import { flag } from "../../config/experience";
 import { children, initialOf, invitePermissions, teenWithoutConsent } from "../../domain/people";
@@ -12,13 +12,17 @@ import { Icon } from "../../ui/Icon";
 import { Btn, Chip, ErrorLine, Field, Pill, Skeleton, TextInput } from "../../ui/kit";
 import { showToast } from "../../ui/overlays";
 import { Bar } from "../../ui/shell";
+import { PinOffer } from "./ParentCode";
+import { useSocialConsentGate } from "./SocialConsent";
 import { useSwitchToChild } from "./switching";
 
 const STATUS_TONE: Record<Invite["status"], "ok" | "mute" | "warn" | undefined> = { active: undefined, accepted: "ok", revoked: "mute", expired: "mute" };
 
 /**
- * Profile → «Семья и приглашения» (APP-SOC-01, APP-REF-01, AT-09): the family, child profiles 6–13 (create, switch),
- * invitation links family / friend shared through Telegram, the list of my invitations and revoking them.
+ * Profile → «Семья и приглашения» (APP-SOC-01, APP-REF-01, AT-09): the family, child profiles 6–13 (create, switch;
+ * after the first one — the offer to set the parent code), teens 14–17 the parent gave consent for (revoke),
+ * invitation links family / friend shared through Telegram (403 CONSENT_REQUIRED {social} → the consent sheet), the list
+ * of my invitations and revoking them.
  */
 export function Family() {
   const { bff, session, nav, patchSession, config } = useApp();
@@ -30,10 +34,18 @@ export function Family() {
   const kids = children(session);
   const toChild = useSwitchToChild();
   const inviteKey = useRef<{ kind: InviteKind; key: string } | null>(null);
+  const gate = useSocialConsentGate();
+  const [offerPin, setOfferPin] = useState(false);
 
   const create = useAction(async (kind: InviteKind) => {
     if (!inviteKey.current || inviteKey.current.kind !== kind) inviteKey.current = { kind, key: newIdempotencyKey() };
-    const inv = await bff.createInvite(kind, inviteKey.current.key);
+    let inv: Invite;
+    try {
+      inv = await bff.createInvite(kind, inviteKey.current.key);
+    } catch (e) {
+      if (gate.intercept(e, () => void create.run(kind))) return;
+      throw e;
+    }
     inviteKey.current = null;
     invites.setData({ items: [inv, ...(invites.data?.items ?? []).filter((i) => i.invite_id !== inv.invite_id)], next_cursor: invites.data?.next_cursor ?? null });
     shareToTelegram(inv.link, t(`inv.shareText.${kind}` as MessageKey));
@@ -94,9 +106,19 @@ export function Family() {
                 </ul>
               ) : null}
               <ErrorLine text={toChild.error} />
-              <AddChild onAdded={(l) => patchSession({ learners: [...session.learners, l] })} count={kids.length} />
+              <AddChild
+                onAdded={(l: LearnerSummary) => {
+                  patchSession({ learners: [...session.learners, l] });
+                  // the first child profile: offer the parent code (without it the child leaves the profile in one tap)
+                  if (!kids.length && !session.security.pin_enabled) setOfferPin(true);
+                }}
+                count={kids.length}
+              />
             </section>
           ) : null}
+
+          {/* ---- teens the parent decided for (§11) ---- */}
+          {perms.children ? <TeenConsents /> : null}
 
           {/* ---- invite (flag family_invites) ---- */}
           {invitesOn ? (
@@ -162,11 +184,65 @@ export function Family() {
           </section>
         </div>
       </main>
+      {gate.sheet}
+      {offerPin ? <PinOffer onDone={() => setOfferPin(false)} /> : null}
     </>
   );
 }
 
-function AddChild({ onAdded, count }: { onAdded: (l: import("@tilhero/contracts/bff").LearnerSummary) => void; count: number }) {
+const GRANT_TONE: Record<GuardianConsentGrant["status"], "ok" | "mute"> = { granted: "ok", declined: "mute" };
+
+/** Teens 14–17 this adult decided for by a gc_ link; the consent given can be revoked (with a confirmation). Hidden
+ *  while there are none. */
+function TeenConsents() {
+  const { bff } = useApp();
+  const { t, fmt } = useI18n();
+  const grants = useLoad(() => bff.guardianGrants(), []);
+  const revoke = useAction(async (g: GuardianConsentGrant) => {
+    const ok = await confirmPopup({
+      title: t("gcg.revokeQ"),
+      message: t("gcg.revokeText", { name: g.teen_display_name }),
+      ok: t("gcg.revoke"),
+      cancel: t("c.cancel"),
+      destructive: true,
+    });
+    if (!ok) return;
+    const r = await bff.revokeGuardianGrant(g.teen_user_id);
+    grants.setData({ items: (grants.data?.items ?? []).map((x) => (x.teen_user_id === r.teen_user_id ? r : x)) });
+    showToast(t("gcg.revoked"));
+  });
+  if (!grants.data?.items.length && !grants.error) return null;
+  return (
+    <section className="stack tight" aria-labelledby="gcg-h" data-testid="teen-consents">
+      <h2 className="sec" id="gcg-h">{t("gcg.title")}</h2>
+      <p className="sub small">{t("gcg.note")}</p>
+      {grants.data?.items.length ? (
+        <ul className="list">
+          {grants.data.items.map((g) => (
+            <li key={g.teen_user_id} className="row" data-testid="teen-consent-row">
+              <span className="av s" aria-hidden="true">{initialOf(g.teen_display_name)}</span>
+              <span className="t">
+                <b>{g.teen_display_name}</b>
+                <span>{t("gcg.decided", { date: fmt.date(g.decided_at) })}</span>
+                <span className="pills">
+                  <Pill tone={GRANT_TONE[g.status]}>{t(`gcg.status.${g.status}` as MessageKey)}</Pill>
+                </span>
+              </span>
+              {g.status === "granted" ? (
+                <Btn variant="link" busy={revoke.busy} onClick={() => void revoke.run(g)} data-testid="teen-consent-revoke">
+                  {t("gcg.revoke")}
+                </Btn>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <ErrorLine text={grants.error ?? revoke.error} />
+    </section>
+  );
+}
+
+function AddChild({ onAdded, count }: { onAdded: (l: LearnerSummary) => void; count: number }) {
   const { bff } = useApp();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);

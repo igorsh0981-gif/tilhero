@@ -3,13 +3,15 @@ import { onboardAdult, open, shot } from "./helpers";
 
 const TOKEN = "FamTok0123456789abcdefghijklmnop";
 const INVITE_ID = "33333333-aaaa-4bbb-8ccc-0000000000aa";
+/** consents of an onboarded account with the optional purpose «social» (invitations and the family, §11) */
+const SOCIAL = ["terms", "privacy", "learning", "social"];
 const family = (status: "active" | "accepted" = "active") => ({
   [TOKEN]: { invite: { invite_id: INVITE_ID, kind: "family" as const, inviter_display_name: "Мама", status } },
 });
 
 /** AT-09: the link opens the Mini App by deep link (start_param inv_<token>), acceptance is two-sided. */
 test("invitation to the family by deep link: preview, accept, the family screen", async ({ page }) => {
-  const bff = await open(page, { onboarded: true, incoming: family(), seen: ["11111111-aaaa-4bbb-8ccc-000000000001", "11111111-aaaa-4bbb-8ccc-000000000002", "11111111-aaaa-4bbb-8ccc-000000000003"] }, `?startapp=inv_${TOKEN}`);
+  const bff = await open(page, { onboarded: true, purposes: SOCIAL, incoming: family(), seen: ["11111111-aaaa-4bbb-8ccc-000000000001", "11111111-aaaa-4bbb-8ccc-000000000002", "11111111-aaaa-4bbb-8ccc-000000000003"] }, `?startapp=inv_${TOKEN}`);
   const sheet = page.getByTestId("invite-sheet");
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole("heading", { name: "Мама приглашает вас в семью" })).toBeVisible();
@@ -41,17 +43,24 @@ test("a new user: the invitation waits for the short setup, then comes back befo
   const sheet = page.getByTestId("invite-sheet");
   await expect(sheet).toBeVisible();
   await expect(sheet).toContainText("Сначала короткая настройка");
+  // §11: before the consents the server does not open invitations — the client does not try
+  expect(bff.calls("POST", "/v1/invites/open")).toHaveLength(0);
   await sheet.getByTestId("invite-defer").click();
   await onboardAdult(page);
   await expect(sheet).toBeVisible();
-  // GET …/preview (the invitation was opened before the setup); dev StrictMode may run the effect twice
-  await expect.poll(() => bff.calls("GET", `/v1/invites/${INVITE_ID}/preview`).length).toBeGreaterThanOrEqual(1);
+  await expect(sheet.getByRole("heading", { name: "Мама приглашает вас в семью" })).toBeVisible();
+  // opened after the setup by the same token; dev StrictMode may run the effect twice
+  await expect.poll(() => bff.calls("POST", "/v1/invites/open").length).toBeGreaterThanOrEqual(1);
+  expect(bff.last("POST", "/v1/invites/open")?.body).toEqual({ token: TOKEN });
+  // only the required consents were given in the setup → «social» is asked for on acceptance
   await sheet.getByTestId("invite-accept").click();
+  await page.getByTestId("social-consent").getByTestId("social-allow").click();
   await expect(page.getByTestId("whats-new-welcome")).toBeVisible();
+  expect(bff.calls("POST", `/v1/invites/${INVITE_ID}/accept`)).toHaveLength(2);
 });
 
 test("my invitations: create a family link, share it through Telegram, revoke it", async ({ page }) => {
-  const bff = await open(page, { onboarded: true, seen: ["11111111-aaaa-4bbb-8ccc-000000000001", "11111111-aaaa-4bbb-8ccc-000000000002", "11111111-aaaa-4bbb-8ccc-000000000003"] });
+  const bff = await open(page, { onboarded: true, purposes: SOCIAL, seen: ["11111111-aaaa-4bbb-8ccc-000000000001", "11111111-aaaa-4bbb-8ccc-000000000002", "11111111-aaaa-4bbb-8ccc-000000000003"] });
   await page.getByTestId("tab-profile").click();
   await page.getByTestId("row-family").click();
   const popup = page.waitForEvent("popup");

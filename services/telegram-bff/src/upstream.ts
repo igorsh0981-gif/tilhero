@@ -10,8 +10,10 @@
  * Ошибки:
  *  - 4xx домена → клиенту как есть (код, статус, details) — UpstreamError;
  *  - недоступность, таймаут, 5xx, открытый circuit breaker → 503 UPSTREAM_UNAVAILABLE {service};
- *  - отказ во внутренней авторизации (INTERNAL_TOKEN_*, CALLER_NOT_ALLOWED) — ошибка конфигурации BFF,
- *    клиенту её 401/403 не отдаём (Mini App принял бы её за истёкшую сессию) → 503.
+ *  - отказ во внутренней авторизации (INTERNAL_*, USER_CONTEXT_*, CALLER_*, ACTOR_*) — ошибка конфигурации BFF или
+ *    домена, клиенту её 401/403 не отдаём → 503;
+ *  - любой другой 401 домена, кроме ответов о коде родителя (PIN_INVALID, BIOMETRIC_INVALID, RESET_CODE_INVALID), → 503:
+ *    401 для Mini App — «сессия истекла» (refresh и повтор), а сессию BFF домен оценить не может (ревью T-4).
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
@@ -35,7 +37,17 @@ export const DOMAIN = {
   social: "social",
 } as const;
 
-const INTERNAL_AUTH_CODES = new Set(["INTERNAL_TOKEN_INVALID", "INTERNAL_TOKEN_EXPIRED", "CALLER_NOT_ALLOWED"]);
+/** Отказ внутренней авторизации домена (любой статус). */
+const INTERNAL_AUTH_RE = /^(INTERNAL_|USER_CONTEXT_|CALLER_|ACTOR_)/;
+/** 401 доменов, которые — ответ пользователю (неверный код), а не состояние сессии. */
+export const DOMAIN_BUSINESS_401: ReadonlySet<string> = new Set(["PIN_INVALID", "BIOMETRIC_INVALID", "RESET_CODE_INVALID"]);
+
+/** Ошибка домена, которую клиент не должен видеть как есть: сбой домена или конфигурации → 503. */
+export function isDomainFault(status: number, code: string): boolean {
+  if (status >= 500) return true;
+  if (INTERNAL_AUTH_RE.test(code)) return true;
+  return status === 401 && !DOMAIN_BUSINESS_401.has(code);
+}
 
 export type UpstreamLogger = (info: { service: string; status: number; code: string }) => void;
 
@@ -97,7 +109,7 @@ export class DomainClient extends ServiceClient {
   private map(err: unknown): Error {
     if (err instanceof UpstreamError || (err instanceof AppError && "service" in err)) {
       const e = err as UpstreamError;
-      if (e.status >= 500 || INTERNAL_AUTH_CODES.has(e.code)) {
+      if (isDomainFault(e.status, e.code)) {
         this.onFailure?.({ service: this.target, status: e.status, code: e.code });
         return upstreamUnavailable(this.target);
       }

@@ -1,11 +1,13 @@
 /**
- * Ученики аккаунта и детские профили, согласие родителя для 14–17, приглашения и семья.
+ * Ученики аккаунта и детские профили, согласие родителя для 14–17 (ссылка, решение, список решений родителя и отзыв),
+ * приглашения и семья.
  * identity-consent и social вызываются от имени аккаунта (sub); активный ученик влияет только на is_active / is_me
  * и на запреты детского профиля (приглашения — 403 INVITES_NOT_ALLOWED, команды взрослого — 403 ADULT_REQUIRED).
  */
 import { Type } from "@fastify/type-provider-typebox";
 import type {
   Family,
+  GuardianConsentGrant,
   GuardianConsentLink,
   GuardianConsentPreview,
   Invite,
@@ -19,6 +21,7 @@ import type { BffContext } from "../context.js";
 import {
   BEARER,
   authOf,
+  clientTimezone,
   errorResponses,
   forbidInChildProfile,
   idempotencyKey,
@@ -29,6 +32,7 @@ import {
   CreateChildRequestSchema,
   CreateInviteRequestSchema,
   FamilySchema,
+  GuardianConsentGrantSchema,
   GuardianConsentLinkSchema,
   GuardianConsentPreviewSchema,
   GuardianTokenParamsSchema,
@@ -41,16 +45,21 @@ import {
   InviteSchema,
   LearnerSummarySchema,
   PageQuerySchema,
+  TeenParamsSchema,
   itemsOf,
 } from "../schemas.js";
 import { orNull, upstreamUnavailable } from "../upstream.js";
-import { familyView, learnerView, type IdentityLearner } from "../views.js";
+import { familyView, guardianGrantView, learnerView, type IdentityLearner } from "../views.js";
 
 const user = { access: "user" } as const;
 
 /** Неверный формат токена согласия — тот же ответ, что и для неизвестного. */
 const guardianNotFound = schemaErrors([
   { context: "params", status: 404, code: "GUARDIAN_CONSENT_NOT_FOUND", message: "Ссылка согласия не найдена" },
+]);
+/** Неверный формат teen_user_id — как подросток, за которого этот родитель не решал. */
+const grantNotFound = schemaErrors([
+  { context: "params", status: 404, code: "GUARDIAN_CONSENT_NOT_FOUND", message: "Согласие не найдено" },
 ]);
 /** Неверный invite_id / токен приглашения — как несуществующее приглашение (пустой токен — 422). */
 const inviteNotFound = schemaErrors([
@@ -80,7 +89,7 @@ export function familyRoutes(app: App, ctx: BffContext): void {
       const auth = authOf(req);
       const { items } = await identity.get<{ items: IdentityLearner[] }>("/internal/v1/me/learners", { subject: auth.accountId });
       const list = (Array.isArray(items) ? items : []).map((l) => (l.learner_id === auth.accountId ? { ...l, kind: "self" as const } : l));
-      const { learners } = await learnersState(ctx, list, auth.learnerId);
+      const { learners } = await learnersState(ctx, list, auth.learnerId, { tz: clientTimezone(req) });
       return { items: learners };
     },
   );
@@ -184,6 +193,64 @@ export function familyRoutes(app: App, ctx: BffContext): void {
       },
     );
   }
+
+  // ---------- Решения родителя по подросткам 14–17 (INTERNAL_API §11, P-4) ----------
+  app.get(
+    "/v1/family/guardian-consents",
+    {
+      config: user,
+      schema: {
+        tags: ["guardian"],
+        summary: "Подростки 14–17, за которых решал этот родитель (последнее решение по каждому)",
+        description:
+          "identity-consent GET /internal/v1/me/guardian-consents (sub = аккаунт родителя). 403 ADULT_REQUIRED в детском профиле.",
+        security: BEARER,
+        response: { 200: itemsOf(GuardianConsentGrantSchema), ...errorResponses(401, 403, 423) },
+      },
+    },
+    async (req) => {
+      const auth = authOf(req);
+      forbidInChildProfile(auth, "ADULT_REQUIRED");
+      const res = await identity.get<{ items: GuardianConsentGrant[] }>("/internal/v1/me/guardian-consents", { subject: auth.accountId });
+      const items = (Array.isArray(res?.items) ? res.items : []).flatMap((g) => {
+        const v = guardianGrantView(g);
+        return v ? [v] : [];
+      });
+      return { items };
+    },
+  );
+
+  app.post(
+    "/v1/family/guardian-consents/:teen_user_id/revoke",
+    {
+      config: user,
+      schemaErrorFormatter: grantNotFound,
+      schema: {
+        tags: ["guardian"],
+        summary: "Родитель отзывает своё согласие за подростка 14–17",
+        description:
+          "identity-consent POST /internal/v1/me/guardian-consents/{teen_user_id}:revoke (sub = аккаунт родителя): у подростка " +
+          "guardian_consent=declined, необязательные цели сняты. Только родитель, который дал согласие, иначе 404 " +
+          "GUARDIAN_CONSENT_NOT_FOUND (чужой подросток неотличим от несуществующего). 403 ADULT_REQUIRED в детском профиле.",
+        security: BEARER,
+        params: TeenParamsSchema,
+        response: { 200: GuardianConsentGrantSchema, ...errorResponses(401, 403, 404, 423) },
+      },
+    },
+    async (req) => {
+      const auth = authOf(req);
+      forbidInChildProfile(auth, "ADULT_REQUIRED");
+      const teen = req.params.teen_user_id.toLowerCase();
+      const res = await identity.post<GuardianConsentGrant>(`/internal/v1/me/guardian-consents/${teen}:revoke`, { subject: auth.accountId });
+      const view = guardianGrantView(res);
+      // ответ о другом подростке или вне контракта — ошибка домена, клиенту не отдаём
+      if (!view || view.teen_user_id.toLowerCase() !== teen) {
+        req.log.warn({ upstream: "identity-consent" }, "guardian consent revoke: unexpected response");
+        throw upstreamUnavailable("identity-consent");
+      }
+      return view;
+    },
+  );
 
   // ---------- Приглашения ----------
   app.post(

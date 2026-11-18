@@ -7,6 +7,7 @@
 import type {
   ConsentState,
   Family,
+  GuardianConsentGrant,
   InboxItem,
   LearnerSummary,
   NotificationCategories,
@@ -190,5 +191,22 @@ export function familyView(f: Family, learnerId: string): Family {
       role: m.role,
       is_me: m.user_id === learnerId,
     })),
+  };
+}
+
+/** Решение родителя по подростку (identity-consent /me/guardian-consents): только поля контракта; статус вне контракта
+ *  (`revoked` — согласие отозвано, у подростка guardian_consent=declined) → declined; запись без id/даты или с
+ *  неизвестным статусом — null (не показывается). */
+export function guardianGrantView(g: unknown): GuardianConsentGrant | null {
+  if (!g || typeof g !== "object") return null;
+  const x = g as Record<string, unknown>;
+  if (typeof x.teen_user_id !== "string" || typeof x.decided_at !== "string") return null;
+  const status = x.status === "granted" ? "granted" : x.status === "declined" || x.status === "revoked" ? "declined" : null;
+  if (!status) return null;
+  return {
+    teen_user_id: x.teen_user_id,
+    teen_display_name: typeof x.teen_display_name === "string" ? x.teen_display_name : "",
+    status,
+    decided_at: x.decided_at,
   };
 }
