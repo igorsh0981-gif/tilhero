@@ -67,3 +67,8 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes shake { 20% { transform: translateX(-9px); } 40% { transform: translateX(8px); } 60% { transform: translateX(-5px); } 80% { transform: translateX(3px); } }
 }
+
+/* Слово с дефисом в заголовке не разрывается («ИИ-коучем») */
+.nobr {
+  white-space: nowrap;
+}

@@ -7,7 +7,7 @@ import { useAction, useLoad } from "../../state/hooks";
 import { newIdempotencyKey } from "../../api/client";
 import { haptic } from "../../tg";
 import { Icon } from "../../ui/Icon";
-import { Btn, cx, ErrorLine, HERO, Hero, Margin, Pill, Skeleton } from "../../ui/kit";
+import { Btn, cx, ErrorLine, HERO, Hero, Margin, NoBreakHyphens, Pill, Skeleton } from "../../ui/kit";
 import { showToast } from "../../ui/overlays";
 import { scheduleSummary } from "../schedule/parts";
 
@@ -229,7 +229,7 @@ function LessonSoon() {
           <div className="cap">{t("home.lessonCap")}</div>
           <Pill tone="mute">{t("c.soon")}</Pill>
         </div>
-        <p className="h3">{t("home.lessonTitle")}</p>
+        <p className="h3"><NoBreakHyphens text={t("home.lessonTitle")} /></p>
         <p className="sub">{t("home.lessonText")}</p>
       </div>
     </Margin>

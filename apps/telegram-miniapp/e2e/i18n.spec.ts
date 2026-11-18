@@ -38,8 +38,9 @@ test("language in the profile: RU → UZ keeps the course, the dark notebook fol
   await expect(page.getByRole("heading", { name: "Interfeys tili" })).toBeVisible();
   await expect(page.getByTestId("course-pair")).toContainText("Rus tili → Ingliz tili");
   expect(bff.plan().course_pair).toBe("ru-en");
-  expect(bff.plan().ui_lang).toBe("uz");
-  expect(bff.account.locale).toBe("uz");
+  // интерфейс переключается сразу, а PATCH плана и профиля доходят до мока BFF чуть позже (в CI тест падал на гонке)
+  await expect.poll(() => bff.plan().ui_lang).toBe("uz");
+  await expect.poll(() => bff.account.locale).toBe("uz");
   // the only Cyrillic left is the name of the Russian language itself in the picker
   expect(CYRILLIC.test((await page.locator(".app").innerText()).replace("Русский", ""))).toBe(false);
 });
