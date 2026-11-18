@@ -115,6 +115,22 @@ export const GOALS = [
   { code: "exam", label: { ru: "Экзамен", uz: "Imtihon" }, icon: null },
 ];
 
+/** learning-plan seed (services/learning-plan/src/tilhero_learning_plan/directory.py): 12 topics, RU/UZ */
+export const TOPICS = [
+  { code: "small_talk", label: { ru: "Знакомство и разговор", uz: "Tanishuv va suhbat" }, icon: "chat" },
+  { code: "travel", label: { ru: "Поездки и транспорт", uz: "Sayohat va transport" }, icon: "globe" },
+  { code: "food", label: { ru: "Кафе и еда", uz: "Kafe va taomlar" }, icon: "food" },
+  { code: "shopping", label: { ru: "Покупки", uz: "Xaridlar" }, icon: "bag" },
+  { code: "work", label: { ru: "Работа и офис", uz: "Ish va ofis" }, icon: "briefcase" },
+  { code: "interview", label: { ru: "Собеседование", uz: "Ish suhbati" }, icon: "trophy" },
+  { code: "study", label: { ru: "Учёба", uz: "Oʻqish" }, icon: "book" },
+  { code: "health", label: { ru: "Здоровье и врач", uz: "Salomatlik va shifokor" }, icon: "heart" },
+  { code: "home", label: { ru: "Дом и семья", uz: "Uy va oila" }, icon: "home" },
+  { code: "hobbies", label: { ru: "Хобби и спорт", uz: "Sevimli mashgʻulot va sport" }, icon: "ball" },
+  { code: "movies", label: { ru: "Фильмы и музыка", uz: "Kino va musiqa" }, icon: "music" },
+  { code: "tech", label: { ru: "Технологии", uz: "Texnologiyalar" }, icon: "spark" },
+];
+
 /** experience-config seed miniapp 1.0.0 (services/experience-config/migrations/versions/0002_seed.py) */
 export const CONFIG: ExperienceConfig = {
   app: "miniapp",

@@ -39,9 +39,14 @@
   }
 
   /* ---------- onboarding frame: everything fits, the primary action is pinned ---------- */
+  /* At 390×844 every step fits without scrolling (AT-04). In Telegram's full screen the band of its buttons and the
+     home indicator take ~130 px more: then the body scrolls instead of clipping the tallest steps (consents). */
   .ob { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .ob-top { flex-shrink: 0; padding: 12px var(--gutter) 0; }
-  .ob-body { flex: 1; min-height: 0; overflow: hidden; padding: 14px var(--gutter) 0; display: flex; flex-direction: column; gap: 12px; }
+  .ob-body {
+    flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 14px var(--gutter) 0;
+    display: flex; flex-direction: column; gap: 12px;
+  }
   .ob-body.tight { gap: 8px; }
   .ob-foot { flex-shrink: 0; padding: 10px var(--gutter) calc(14px + var(--safe-bottom, 0px)); display: flex; flex-direction: column; gap: 4px; }
   .ob-foot .err-line { min-height: 0; }

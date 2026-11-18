@@ -1,4 +1,4 @@
-import type { AgeBand, DirectoryItem, Goal, LearningPlan, LevelSelf, PolicyDocument, Schedule } from "@tilhero/contracts/bff";
+import type { AgeBand, Goal, LearningPlan, LevelSelf, PolicyDocument, Schedule } from "@tilhero/contracts/bff";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../../api/errors";
 import { flag } from "../../config/experience";
@@ -17,9 +17,9 @@ import { Sheet, showToast } from "../../ui/overlays";
 import { PinOffer } from "../profile/ParentCode";
 import { DaysPicker, DurationPicker, TimePicker, ZonePicker, daysText, timeError } from "../schedule/parts";
 import { ObFrame } from "./frame";
+import { GoalPicker, LevelPicker, useGoalItems } from "./pickers";
 
-export const GOALS: readonly Goal[] = ["work", "career", "travel", "daily", "study", "exam"];
-export const LEVELS: readonly LevelSelf[] = ["zero", "beginner", "some", "confident"];
+export { GOALS, LEVELS } from "./pickers";
 const REQUIRED = ["terms", "privacy", "learning"];
 
 /**
@@ -500,13 +500,9 @@ export function PolicySheet({ doc, onClose }: { doc: PolicyDocument; onClose: ()
 /* ---------------------------------------------------------------- goal */
 function GoalStep({ frame, kid, value, onChange, onNext }: { frame: FrameProps; kid: boolean; value: Goal | null; onChange: (g: Goal) => void; onNext: () => void }) {
   const { bff, setPlan } = useApp();
-  const { t, l } = useI18n();
+  const { t } = useI18n();
   const dir = useLoad(() => bff.goals(), []);
-  const items: Array<{ code: Goal; label: string }> = useMemo(() => {
-    const fromServer = (dir.data?.items ?? []).filter((i: DirectoryItem) => (GOALS as readonly string[]).includes(i.code));
-    if (fromServer.length) return fromServer.map((i) => ({ code: i.code as Goal, label: l(i.label) }));
-    return GOALS.map((g) => ({ code: g, label: t(`goal.${g}` as MessageKey) }));
-  }, [dir.data, l, t]);
+  const items = useGoalItems(dir.data?.items);
   const save = useAction(async () => {
     setPlan(await bff.patchPlan({ goal: value! }));
     onNext();
@@ -524,11 +520,7 @@ function GoalStep({ frame, kid, value, onChange, onNext }: { frame: FrameProps; 
     >
       <h1 className="h1">{kid ? t("ob.goal.titleChild") : t("ob.goal.title")}</h1>
       <p className="sub">{t("ob.goal.text")}</p>
-      <div className="chips" role="group" aria-label={kid ? t("ob.goal.titleChild") : t("ob.goal.title")}>
-        {items.map((g) => (
-          <Chip key={g.code} on={value === g.code} label={g.label} onClick={() => onChange(g.code)} />
-        ))}
-      </div>
+      <GoalPicker items={items} value={value} onChange={onChange} label={kid ? t("ob.goal.titleChild") : t("ob.goal.title")} />
       <div className="stack tight">
         <p className="sec">{t("ob.goal.explain")}</p>
         <Opt on title="Русский" note={t("ob.goal.course")} onClick={() => undefined} />
@@ -558,11 +550,7 @@ function LevelStep({ frame, kid, value, onChange, onNext }: { frame: FrameProps;
       }
     >
       <h1 className="h1">{kid ? t("ob.level.titleChild") : t("ob.level.title")}</h1>
-      <div className="opts">
-        {LEVELS.map((lv) => (
-          <Opt key={lv} on={value === lv} title={t(`level.${lv}` as MessageKey)} note={t(`level.${lv}.note` as MessageKey)} onClick={() => onChange(lv)} testId={`level-${lv}`} />
-        ))}
-      </div>
+      <LevelPicker value={value} onChange={onChange} label={kid ? t("ob.level.titleChild") : t("ob.level.title")} />
       <p className="sub">{t("ob.level.note")}</p>
     </ObFrame>
   );

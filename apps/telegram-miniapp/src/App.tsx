@@ -25,6 +25,7 @@ import { News } from "./screens/news/News";
 import { Onboarding } from "./screens/onboarding/Onboarding";
 import { DeleteScreen, DeletionDone } from "./screens/profile/DeleteScreen";
 import { Family } from "./screens/profile/Family";
+import { GoalScreen } from "./screens/profile/GoalScreen";
 import { Guardian } from "./screens/profile/Guardian";
 import { LanguageScreen } from "./screens/profile/LanguageScreen";
 import { NotifSettings } from "./screens/profile/NotifSettings";
@@ -32,6 +33,7 @@ import { ParentCode } from "./screens/profile/ParentCode";
 import { Privacy } from "./screens/profile/Privacy";
 import { Profile as ProfileScreen } from "./screens/profile/Profile";
 import { ScheduleScreen } from "./screens/profile/ScheduleScreen";
+import { ThemeScreen } from "./screens/profile/ThemeScreen";
 import { Soon } from "./screens/soon/Soon";
 import { Support, TicketScreen } from "./screens/support/Support";
 import { WhatsNewSheet } from "./screens/whatsnew/WhatsNewSheet";
@@ -428,6 +430,10 @@ function PushedScreen({ p }: { p: Pushed }) {
       return <NotifSettings />;
     case "language":
       return <LanguageScreen />;
+    case "theme":
+      return <ThemeScreen />;
+    case "goal":
+      return <GoalScreen />;
     case "family":
       return <Family />;
     case "guardian":

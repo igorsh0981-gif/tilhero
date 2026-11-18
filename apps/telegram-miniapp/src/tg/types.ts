@@ -83,7 +83,12 @@ export interface TgPopupParams {
   buttons?: TgPopupButton[];
 }
 
-
+/** Telegram CloudStorage (Bot API 6.9+): per user and bot, keys 1–128 chars [A-Za-z0-9_-], values ≤ 4096 chars. */
+export interface TgCloudStorage {
+  setItem(key: string, value: string, cb?: (err: string | null, stored?: boolean) => void): TgCloudStorage;
+  getItem(key: string, cb: (err: string | null, value?: string) => void): TgCloudStorage;
+  removeItem(key: string, cb?: (err: string | null, removed?: boolean) => void): TgCloudStorage;
+}
 
 export type TgEvent =
   | "themeChanged"
@@ -95,7 +100,20 @@ export type TgEvent =
   | "secondaryButtonClicked"
   | "popupClosed"
   | "activated"
-  | "deactivated";
+  | "deactivated"
+  /** Bot API 8.0: full screen entered / left (WebApp.isFullscreen) */
+  | "fullscreenChanged"
+  /** Bot API 8.0: requestFullscreen failed, payload {error: "UNSUPPORTED" | "ALREADY_FULLSCREEN"} */
+  | "fullscreenFailed"
+  /** Bot API 8.0: the icon was added to the home screen (only when the device can tell) */
+  | "homeScreenAdded"
+  /** Bot API 8.0: addToHomeScreen failed, payload {error: "UNSUPPORTED"} */
+  | "homeScreenFailed"
+  /** Bot API 8.0: answer to checkHomeScreenStatus, payload {status} */
+  | "homeScreenChecked";
+
+/** Bot API 8.0: checkHomeScreenStatus / homeScreenChecked {status}. */
+export type TgHomeScreenStatus = "unsupported" | "unknown" | "added" | "missed";
 
 
 export interface TgWebApp {
@@ -119,6 +137,16 @@ export interface TgWebApp {
   offEvent(event: TgEvent, handler: (payload?: unknown) => void): void;
   ready(): void;
   expand(): void;
+  /** Bot API 8.0+: the Mini App is in full screen (Telegram draws its buttons over the content — contentSafeAreaInset). */
+  isFullscreen?: boolean;
+  /** Bot API 8.0+: fullscreenChanged on success, fullscreenFailed {error} otherwise. */
+  requestFullscreen?(): void;
+  exitFullscreen?(): void;
+  /** Bot API 8.0+: prompt to add the Mini App to the home screen (homeScreenAdded on success, if the device can tell). */
+  addToHomeScreen?(): void;
+  /** Bot API 8.0+: status via callback (and the homeScreenChecked event). */
+  checkHomeScreenStatus?(cb?: (status: TgHomeScreenStatus) => void): void;
+  CloudStorage?: TgCloudStorage;
   close(): void;
   openLink(url: string, options?: { try_instant_view?: boolean }): void;
   openTelegramLink(url: string): void;

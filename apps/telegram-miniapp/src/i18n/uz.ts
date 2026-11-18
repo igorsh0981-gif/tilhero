@@ -242,6 +242,7 @@ export const uz: Record<MessageKey, string> = {
   "home.familyText": "Yaqinlaringizni Telegram orqali havola bilan taklif qiling",
   "home.kid": "Bola profili: {name}. Xabarlar va sozlamalar — ota-onada.",
   "home.allNews": "Barcha yangiliklar",
+  "home.start": "Mashgʻulotni boshlash",
 
   // ---- «Что нового» ----
   "wn.welcome.cap": "Xush kelibsiz",
@@ -306,6 +307,8 @@ export const uz: Record<MessageKey, string> = {
   "profile.toParent": "Ota-ona profiliga qaytish",
   "profile.kidNote": "Bu bola profili. Takliflar, qoʻllab-quvvatlash va maʼlumotlarni oʻchirish — ota-ona profilida.",
   "profile.version": "Versiya {v} · interfeys konfiguratsiyasi {c}",
+  "profile.goal": "Maqsad va daraja",
+  "profile.theme": "Rang mavzusi",
 
   // ---- notification settings ----
   "ns.title": "Bildirishnomalar",
@@ -333,6 +336,35 @@ export const uz: Record<MessageKey, string> = {
   "ns.quietSave": "Tinch soatlarni saqlash",
   "ns.tz": "Vaqt mintaqasi: {tz}. «Mashgʻulotlar jadvali»da oʻzgaradi.",
   "ns.saved": "Sozlamalar saqlandi",
+
+  // ---- theme ----
+  "theme.title": "Rang mavzusi",
+  "theme.system": "Telegramdagidek",
+  "theme.systemNote": "Yorugʻ yoki qorongʻi — Telegram sozlamalaridagidek",
+  "theme.light": "Yorugʻ",
+  "theme.lightNote": "Oq qogʻozdagi daftar",
+  "theme.dark": "Qorongʻi",
+  "theme.darkNote": "Tungi daftar — kechqurun koʻzga yumshoqroq",
+  "theme.cloud": "Tanlov Telegramda saqlanadi — boshqa qurilmalaringizda ham mavzu shunday boʻladi.",
+  "theme.local": "Tanlov shu qurilmada saqlandi.",
+
+  // ---- add to the home screen (Bot API 8.0) ----
+  "hs.row": "Bosh ekranga qoʻshish",
+  "hs.row.sub": "TilHeroʼni botni qidirmasdan bitta tugma bilan oching",
+  "hs.row.added": "qoʻshilgan",
+  "hs.toast": "TilHero belgisi bosh ekranda",
+
+  // ---- goal and level ----
+  "goal.title": "Maqsad va daraja",
+  "goal.text": "Yoʻnalishni istalgan vaqtda oʻzgartirish mumkin — keyingi darslar unga moslashadi.",
+  "goal.goal": "Maqsad",
+  "goal.level": "Daraja",
+  "goal.topics": "Mavzular",
+  "goal.topicsNote": "5 tagacha mavzu tanlang — darslardagi misollar va dialoglar shular haqida boʻladi.",
+  "goal.topicsCount": "{n} / 5 tanlandi",
+  "goal.topicsFull": "5 / 5 tanlandi — boshqa mavzuni tanlash uchun tanlanganlardan birini olib tashlang.",
+  "goal.topicsInvalid": "Mavzular roʻyxati yangilandi — mavzularni qaytadan tanlang.",
+  "goal.saved": "Maqsad va daraja saqlandi",
 
   // ---- language ----
   "lang.title": "Interfeys tili",

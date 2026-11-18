@@ -26,18 +26,6 @@ export function supports(version: string): boolean {
   }
 }
 
-export function tgReady(): void {
-  const wa = getWebApp();
-  if (!wa || !isInsideTelegram()) return;
-  try {
-    wa.ready();
-    wa.expand();
-    if (supports("7.7")) wa.disableVerticalSwipes?.();
-  } catch {
-    /* older clients: ignore */
-  }
-}
-
 export function tgClose(): void {
   const wa = getWebApp();
   if (wa && isInsideTelegram()) wa.close();

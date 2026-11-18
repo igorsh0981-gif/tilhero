@@ -5,9 +5,10 @@ import tokenNames from "@tilhero/ui-tokens/token-names.json";
  * Remote Experience Config: theme tokens, Home sections and flags come from the server (GET /v1/experience/config);
  * a bundled fallback keeps the app working when experience-config is down. Only allow-listed CSS variables
  * (packages/ui-tokens/token-names.json) with validated values are applied — never arbitrary CSS or JS.
- * Theme ids: "notebook" follows the Telegram colour scheme (light / dark notebook) and its colour tokens are the LIGHT
- * palette — they are applied only while the scheme is light (the dark notebook keeps its own colours from
- * ui-tokens); lengths and fonts apply in both. "notebook_dark" pins the dark notebook and all its tokens apply.
+ * Theme ids never choose the scheme: light or dark is the user's choice (Profile → «Тема», default «Как в Telegram»,
+ * src/tg/theme.ts) — the choice is more important than the server. The id says which notebook the colour tokens tune:
+ * "notebook" — the LIGHT palette, applied only while the scheme is light; "notebook_dark" — the DARK palette, applied
+ * only while the scheme is dark. The other notebook keeps its colours from ui-tokens; lengths and fonts apply in both.
  * Server shape (experience-config 1.0.0): theme {id, version, tokens}, home.sections (each type at most once), flags.
  */
 export const FALLBACK_CONFIG: ExperienceConfig = {
@@ -113,13 +114,16 @@ export function themeCss(config: ExperienceConfig): string {
   const out: string[] = [];
   if (rest.length) out.push(`:root { ${rest.join(" ")} }`);
   if (colors.length) {
-    const sel = config.theme.id === "notebook_dark" ? ":root" : ':root:not([data-scheme="dark"])';
+    const sel = config.theme.id === "notebook_dark" ? ':root[data-scheme="dark"]' : ':root:not([data-scheme="dark"])';
     out.push(`${sel} { ${colors.join(" ")} }`);
   }
   return out.join("\n");
 }
 
-/** Apply theme id + tokens (replaces the previous remote tokens: activation and rollback without a release). */
+/**
+ * Apply the remote tokens (replaces the previous ones: activation and rollback without a release). html[data-theme]
+ * stays with the user's scheme (src/tg/theme.ts); the server's id is kept in html[data-theme-remote] for diagnostics.
+ */
 export function applyTheme(config: ExperienceConfig, root: HTMLElement = document.documentElement): void {
   const doc = root.ownerDocument;
   let el = doc.getElementById(REMOTE_STYLE_ID) as HTMLStyleElement | null;
@@ -129,7 +133,7 @@ export function applyTheme(config: ExperienceConfig, root: HTMLElement = documen
     doc.head.appendChild(el);
   }
   el.textContent = themeCss(config);
-  root.dataset.theme = THEMES.has(config.theme.id) ? config.theme.id : "notebook";
+  root.dataset.themeRemote = THEMES.has(config.theme.id) ? config.theme.id : "notebook";
   root.dataset.themeVersion = config.theme.version;
 }
 

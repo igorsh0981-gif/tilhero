@@ -101,6 +101,7 @@ export function createBff(client: ApiClient) {
     today: () => get<TodayPlan>("/v1/plan/today"),
     recordActivity: (body: ActivityRequest, key: string) => client.request<TodayPlan>("POST", "/v1/plan/activity", { body, idempotencyKey: key }),
     goals: () => get<{ items: DirectoryItem[] }>("/v1/directory/goals"),
+    topics: () => get<{ items: DirectoryItem[] }>("/v1/directory/topics"),
 
     // ---- notification center ----
     inbox: (cursor: string | null, limit = 20) => get<Page<InboxItem>>("/v1/notifications", { limit, cursor }),

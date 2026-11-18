@@ -11,6 +11,8 @@ export type Pushed =
   | { name: "schedule" }
   | { name: "notifSettings" }
   | { name: "language" }
+  | { name: "theme" }
+  | { name: "goal" }
   | { name: "family" }
   | { name: "guardian" }
   | { name: "privacy" }

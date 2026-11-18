@@ -5,7 +5,7 @@ import { App } from "./App";
 import { env } from "./env";
 import { loadBrandFonts } from "./fonts";
 import { I18nProvider, resolveLang } from "./i18n";
-import { getWebApp, resolveBoot } from "./tg";
+import { getWebApp, resolveBoot, restoreThemePref } from "./tg";
 
 const boot = resolveBoot({
   wa: getWebApp(),
@@ -14,6 +14,9 @@ const boot = resolveBoot({
   search: window.location.search,
   navigatorLanguage: typeof navigator !== "undefined" ? navigator.language : null,
 });
+
+// the saved theme (Profile → «Тема») before the first render: no flash of the wrong notebook; CloudStorage follows
+void restoreThemePref();
 
 // brand fonts off the critical path (fallback faces paint the first frame)
 loadBrandFonts();

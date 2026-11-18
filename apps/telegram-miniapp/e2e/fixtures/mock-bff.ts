@@ -2,6 +2,7 @@ import type { Page, Route } from "@playwright/test";
 import type {
   AgeBand,
   ConsentState,
+  ExperienceConfig,
   Family,
   GuardianConsent,
   GuardianConsentGrant,
@@ -59,6 +60,8 @@ export interface Scenario {
   purposes?: string[];
   /** teens 14–17 this account decided for (GET /v1/family/guardian-consents) */
   grants?: GuardianConsentGrant[];
+  /** Remote Experience Config answered instead of the seed (e.g. theme notebook_dark) */
+  config?: ExperienceConfig;
 }
 
 export interface Recorded {
@@ -286,7 +289,7 @@ export class MockBff {
       this.active = target.learner_id;
       return this.ok(route, this.session());
     }
-    if (key === "GET /v1/experience/config") return this.ok(route, F.CONFIG);
+    if (key === "GET /v1/experience/config") return this.ok(route, this.sc.config ?? F.CONFIG);
 
     // ---- profile, age, children ----
     if (key === "GET /v1/profile") return this.ok(route, this.profile());
@@ -416,10 +419,13 @@ export class MockBff {
       if (patch.schedule?.days && (!patch.schedule.days.length || patch.schedule.days.some((d) => d < 1 || d > 7))) return this.err(route, 422, "PLAN_INVALID", { field: "days", reason: "invalid" });
       if (patch.schedule?.duration_min && ![10, 15, 20, 30].includes(patch.schedule.duration_min)) return this.err(route, 422, "PLAN_INVALID", { field: "duration_min", reason: "invalid" });
       if ((patch as Record<string, unknown>).course_pair) return this.err(route, 422, "VALIDATION_ERROR");
+      if (patch.topics && patch.topics.length > 5) return this.err(route, 422, "PLAN_INVALID", { field: "topics", reason: "too_many" });
+      if (patch.topics && patch.topics.some((t) => !F.TOPICS.some((x) => x.code === t))) return this.err(route, 422, "PLAN_INVALID", { field: "topics", reason: "unknown_topic" });
       this.plans[this.active] = {
         ...p,
         ...(patch.goal ? { goal: patch.goal } : {}),
         ...(patch.level_self ? { level_self: patch.level_self } : {}),
+        ...(patch.topics ? { topics: [...patch.topics] } : {}),
         ...(patch.ui_lang ? { ui_lang: patch.ui_lang } : {}),
         ...(patch.explain_lang ? { explain_lang: patch.explain_lang } : {}),
         schedule: { ...p.schedule, ...(patch.schedule ?? {}) },
@@ -449,6 +455,7 @@ export class MockBff {
       return this.ok(route, this.today());
     }
     if (key === "GET /v1/directory/goals") return this.ok(route, { items: F.GOALS });
+    if (key === "GET /v1/directory/topics") return this.ok(route, { items: F.TOPICS });
 
     // ---- notification center ----
     if (key === "GET /v1/notifications") return this.ok(route, { items: this.inboxItems, next_cursor: null });

@@ -1,15 +1,27 @@
 /* ==========================================================================
    Telegram layer: safe area and viewport bridge (variables --tg-* are written by apps/telegram-miniapp/src/tg),
-   offline banner, reduced motion.
+   full screen (Bot API 8.0), offline banner, reduced motion.
+   --tg-safe-*         — WebApp.safeAreaInset (device: notch, status bar, home indicator);
+   --tg-content-safe-* — WebApp.contentSafeAreaInset (Telegram's own buttons drawn over the page in full screen).
    ========================================================================== */
 @layer telegram {
   :root {
     --safe-top: calc(var(--tg-safe-top, 0px) + var(--tg-content-safe-top, 0px));
-    --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-bottom, 0px));
-    --safe-left: max(env(safe-area-inset-left, 0px), var(--tg-safe-left, 0px));
-    --safe-right: max(env(safe-area-inset-right, 0px), var(--tg-safe-right, 0px));
+    --safe-bottom: max(env(safe-area-inset-bottom, 0px), calc(var(--tg-safe-bottom, 0px) + var(--tg-content-safe-bottom, 0px)));
+    --safe-left: max(env(safe-area-inset-left, 0px), calc(var(--tg-safe-left, 0px) + var(--tg-content-safe-left, 0px)));
+    --safe-right: max(env(safe-area-inset-right, 0px), calc(var(--tg-safe-right, 0px) + var(--tg-content-safe-right, 0px)));
   }
+  /* every screen (bar, onboarding header, lock and state screens) starts below --safe-top; the tab bar, pinned footers,
+     sheets and the toast end above --safe-bottom (components / layout) */
   .app { padding-top: var(--safe-top); padding-left: var(--safe-left); padding-right: var(--safe-right); }
+  /* full screen: Telegram's «Закрыть» / «⋯» sit on a plain paper band above the header (no grid behind them) */
+  .app::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: var(--safe-top); background: var(--paper);
+    z-index: var(--z-chrome); pointer-events: none;
+  }
+  /* overlays cover the whole app (scrim included) but their content stays inside the safe area */
+  .sheet-wrap { padding-top: var(--safe-top); }
+  .pop-layer { padding-top: calc(28px + var(--safe-top)); padding-bottom: calc(28px + var(--safe-bottom)); }
 
   .offline {
     flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 8px var(--gutter); background: var(--warn-soft); color: var(--warn);
