@@ -64,7 +64,8 @@ def test_scheduler_and_service_specific_secrets():
     gw = env_of(files, "telegram-bot-gateway")
     assert gw["MINIAPP_URL"].startswith("https://") and "localhost" not in gw["MINIAPP_URL"]
     n8n = env_of(files, "n8n")
-    assert {k for k in n8n if k.endswith("_URL")} == {"LEARNING_PLAN_URL", "NOTIFICATIONS_URL", "SOCIAL_URL"}
+    assert {k for k in n8n if k.endswith("_URL")} == {"LEARNING_PLAN_URL", "NOTIFICATIONS_URL", "SOCIAL_URL",
+                                                       "USER_ADMIN_URL"}
     assert n8n["RAILWAY_RUN_UID"] == "0" and len(n8n["N8N_ENCRYPTION_KEY"]) >= 32
 
 
@@ -75,7 +76,8 @@ def test_db_passwords_cover_every_role_and_secrets_are_unique():
     schemas = {s.schema for s in rs.SERVICES if s.schema}
     assert set(roles) == schemas | {f"{x}_owner" for x in schemas}
     assert all(f"'{x}'" in bootstrap for x in schemas)
-    values = [*sec.passwords.values(), sec.scheduler, sec.session_jwt, sec.invite_key, sec.webhook, sec.internal_hmac, sec.n8n_key]
+    values = [*sec.passwords.values(), sec.scheduler, sec.session_jwt, sec.invite_key, sec.webhook, sec.internal_hmac,
+              sec.n8n_key, sec.mfa_key, sec.admin_password]
     assert len(values) == len(set(values))
 
 
@@ -108,3 +110,34 @@ def test_dockerfile_path_bot_token_reference_and_miniapp_build_args():
     assert app["VITE_BFF_URL"] == "https://${{telegram-bff.RAILWAY_PUBLIC_DOMAIN}}"
     assert app["VITE_BOT_USERNAME"] == "TilHeroBot"
     assert sec.internal_hmac != sec.session_jwt
+
+
+def test_admin_services_sprint2():
+    """Спринт 2: admin-bff без публичного домена за Caddy admin-web, admin-identity с ключом MFA и bootstrap."""
+    sec = rs.Secrets.new()
+    files = rs.build(sec, env="prod", bot_username="TilHeroBot", app_name="app", admin_email="owner@example.uz")
+    bff = env_of(files, "admin-bff")
+    assert bff["ADMIN_ORIGIN"] == "https://${{admin-web.RAILWAY_PUBLIC_DOMAIN}}" and bff["TRUST_PROXY_HOPS"] == "2"
+    assert bff["NODE_ENV"] == "production" and bff["ENV"] == "prod" and "NATS_URL" not in bff
+    assert "INTERNAL_JWT_SECRET" not in bff and bff["INTERNAL_JWT_PRIVATE_KEY"]
+    assert {k for k in bff if k.endswith("_URL") and k != "REDIS_URL"} == {
+        "ADMIN_IDENTITY_URL", "USER_ADMIN_URL", "IDENTITY_URL", "SUPPORT_URL", "AUDIT_URL", "EXPERIENCE_URL",
+        "NOTIFICATIONS_URL"}
+    assert not rs.by_name("admin-bff").public and rs.by_name("admin-web").public
+    web = env_of(files, "admin-web")
+    assert web["ADMIN_BFF_URL"] == "http://${{admin-bff.RAILWAY_PRIVATE_DOMAIN}}:8002"
+    aid = env_of(files, "admin-identity")
+    assert len(__import__("base64").b64decode(aid["ADMIN_MFA_ENC_KEY"])) == 32
+    assert aid["ADMIN_BOOTSTRAP_EMAIL"] == "owner@example.uz"
+    pw = aid["ADMIN_BOOTSTRAP_PASSWORD"]
+    assert len(pw) >= 12 and any(c.isdigit() for c in pw) and any(c.isalpha() for c in pw)
+    ua = env_of(files, "user-admin")
+    assert ua["IDENTITY_CONSENT_URL"].endswith(":8101") and ua["LEARNING_PLAN_URL"].endswith(":8102")
+    assert ua["SCHEDULER_TOKEN"] == sec.scheduler
+    assert env_of(files, "identity-consent")["AUDIT_URL"].endswith(":8105")
+    assert "ADMIN_TEST_CHAT_IDS" in env_of(files, "notifications")
+    # без --admin-email bootstrap не задаётся
+    plain = rs.build(sec, env="prod", bot_username="TilHeroBot", app_name="app")
+    assert "ADMIN_BOOTSTRAP_EMAIL" not in env_of(plain, "admin-identity")
+    with pytest.raises(ValueError):
+        rs.build(sec, env="prod", bot_username="TilHeroBot", app_name="app", admin_email="not-an-email")

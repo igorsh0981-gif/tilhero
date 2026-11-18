@@ -337,6 +337,102 @@ class DeliveryInfo(BaseModel):
     status: PublicStatus
 
 
+# ---------- админ-контур (спринт 2, docs/sprint2/INTERNAL_API.md §3; типы — admin.ts «Ученики») ----------
+
+LearnerStatus = Literal["ACTIVE", "DISABLED", "DELETION_REQUESTED", "DELETED"]
+
+
+class RevealRequest(_In):
+    """admin.ts RevealRequest: причина 5..300 символов (после обрезки пробелов) — попадает в журнал аудита."""
+
+    field: Literal["telegram_user_id"]
+    reason: str = Field(min_length=5, max_length=300)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason(cls, v: str) -> str:
+        if _CONTROL_RE.search(v):
+            raise ValueError("недопустимые управляющие символы")
+        return v
+
+
+class RevealResult(BaseModel):
+    field: Literal["telegram_user_id"]
+    value: str
+    expires_in: int
+
+
+class AdminConsent(BaseModel):
+    """AdminLearnerCard.consent: согласие, по которому работают функции ученика (у аккаунта — своё, у детского
+    профиля — родителя); нет действующего — последнее отозванное этого основания (с `revoked_at`)."""
+
+    policy_version: str | None
+    purposes: list[str]
+    accepted_at: datetime | None
+    revoked_at: datetime | None
+    basis: Literal["self", "guardian"] | None
+
+
+class AdminSecurity(BaseModel):
+    pin_enabled: bool
+    pin_reset_pending: bool
+
+
+class AdminNotifications(BaseModel):
+    """Выбор ученика (как NotificationSettings), без фильтра целей согласия и блокировки бота."""
+
+    enabled: bool
+    categories: NotificationCategories
+
+
+class AdminLearnerSnapshot(BaseModel):
+    """GET /admin/v1/users[/{id}] (только user-admin): поля AdminLearnerRow, которыми владеет identity-consent, и
+    AdminLearnerCard.consent|security|notifications + `updated_at` (курсор сверки). Полного Telegram ID нет — только
+    маска `••••••789` (у детского профиля и обезличенного ученика — null)."""
+
+    user_id: uuid.UUID
+    kind: UserKind
+    guardian_user_id: uuid.UUID | None
+    display_name: str | None
+    username: str | None
+    telegram_id_masked: str | None
+    locale: Locale | None
+    age_band: AgeBand | None
+    guardian_consent: GuardianConsent
+    status: LearnerStatus
+    children_count: int
+    created_at: datetime
+    updated_at: datetime
+    consent: AdminConsent
+    security: AdminSecurity
+    notifications: AdminNotifications | None
+
+
+class AdminLearnerSnapshotPage(BaseModel):
+    items: list[AdminLearnerSnapshot]
+    next_cursor: str | None
+
+
+class AudienceMember(BaseModel):
+    user_id: uuid.UUID
+    locale: Locale
+
+
+class AudiencePage(BaseModel):
+    items: list[AudienceMember]
+    next_cursor: str | None
+
+
+class AudienceByLang(BaseModel):
+    ru: int
+    uz: int
+
+
+class AudienceCount(BaseModel):
+    count: int
+    by_lang: AudienceByLang
+
+
 class PublicProfile(BaseModel):
     """Для social и notifications: имя без username и Telegram ID; guardian_consent — чтобы social решал, может ли
     подросток 14–17 приглашать и принимать приглашения. `consent_accepted` — действующее согласие с terms и privacy

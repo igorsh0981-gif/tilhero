@@ -67,7 +67,12 @@ CATALOG = {
                                   "days": arr({"type": "integer", "minimum": 1, "maximum": 7}, 7),
                                   "preferred_time": HHMM,
                                   "duration_min": {"type": "integer", "enum": [10, 15, 20, 30]},
-                                  "reminders_enabled": BOOL, "onboarding_completed": BOOL},
+                                  "reminders_enabled": BOOL, "onboarding_completed": BOOL,
+                                  # спринт 2: для read-модели админки (user-admin) без досрочной сверки
+                                  "level_self": {"type": ["string", "null"],
+                                                 "enum": ["zero", "beginner", "some", "confident", None]},
+                                  "preset": {"type": "string",
+                                             "enum": ["daily", "weekdays", "three_per_week", "custom"]}},
                                  ["user_id", "changed_fields"]),
     # наступил слот графика, занятия сегодня ещё не было, напоминания включены
     "learning.reminder.due.v1": ({"user_id": UUID, "local_date": DATE, "slot_time": HHMM, "timezone": STR,

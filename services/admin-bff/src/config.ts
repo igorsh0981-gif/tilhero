@@ -3,28 +3,23 @@
  * не поднимается, а в сообщении перечислены ВСЕ проблемные переменные (как в telegram-bff).
  *
  * Окружение: ENV=dev|test|stage|prod. «Защищённое» окружение (stage/prod или NODE_ENV=production):
- * ключи внутреннего JWT, Redis, origin admin-web и адреса доменов спринтов 2–3 обязательны, dev-деривация ключа
- * запрещена, имперсонация выключена. В dev/test у адресов есть значения локального стенда.
- *
- * Адреса доменов спринта 4 (SOURCE_REGISTRY_URL, DISCOVERY_URL, PROVIDER_GATEWAY_URL, EVENTS_URL), спринта 5 (OFFERS_URL)
- * спринта 6 (NEWS_URL, WATCH_URL) и спринта 7 (AI_CONTROL_URL, AI_CONCIERGE_URL)
- * необязательны и в prod: код может выкатиться раньше переменных. Без адреса маршруты раздела отвечают 503 FEATURE_UNAVAILABLE, остальная
- * админка работает; список ненастроенных переменных — `Config.unconfigured` (WARNING при старте).
+ * ключи внутреннего JWT, Redis, origin admin-web и адреса всех доменов обязательны, dev-деривация ключа
+ * запрещена, имперсонация выключена. В dev/test у адресов есть значения локального стенда (порты — как у
+ * telegram-bff и docs/ARCHITECTURE.md).
  *
  * SESSION_SECRET не нужен: идентификатор сессии — непрозрачные 32 случайных байта, данные — в Redis.
  */
 import { readFileSync } from "node:fs";
-import { DEFAULT_RUNBOOK_BASE_URL } from "./runbook.js";
 
 export type AppEnv = "dev" | "test" | "stage" | "prod";
 
-/** Единый лимитер (спринт 9, INTERNAL_API §2.1): выключатель, перечитывание переопределений, префикс ключей. */
+/** Единый лимитер (ts-common): выключатель, перечитывание переопределений, префикс ключей. */
 export interface RateLimiting {
   /** RATE_LIMITS_ENABLED (true): false — лимитер пропускает всё и считает только метрики (авария). */
   enabled: boolean;
   /** RATE_LIMIT_OVERRIDE_REFRESH_SECONDS (30): как часто перечитывать rl:override:* из Redis. */
   overrideRefreshSeconds: number;
-  /** RATE_LIMIT_KEY_PREFIX — только для тестов: в stage/prod ключи лимитера без префикса (namespace rl* читает ops-monitor). */
+  /** RATE_LIMIT_KEY_PREFIX — только для тестов: в stage/prod ключи лимитера без префикса. */
   keyPrefix: string;
 }
 
@@ -52,6 +47,7 @@ export interface SessionPolicy {
   principalCacheSeconds: number;
 }
 
+/** Адреса доменов (INTERNAL_API спринта 2): все обязательны в stage/prod. */
 export interface DomainUrls {
   adminIdentity: string;
   userAdmin: string;
@@ -59,35 +55,12 @@ export interface DomainUrls {
   support: string;
   audit: string;
   experience: string;
-  /** Спринт 4: реестр источников, запуски поиска, бюджет/kill switch AI, очередь проверки событий.
-   *  null — переменная не задана (stage/prod): маршруты раздела → 503 FEATURE_UNAVAILABLE. */
-  sourceRegistry: string | null;
-  discovery: string | null;
-  providerGateway: string | null;
-  events: string | null;
-  /** Спринт 5: снимки предложений (offers). null — 503 FEATURE_UNAVAILABLE у GET /admin/v1/offers/:offerId. */
-  offers: string | null;
-  /** Спринт 6: ленты и модерация новостей (news), статистика слежений (watch). null — 503 FEATURE_UNAVAILABLE. */
-  news: string | null;
-  watch: string | null;
-  /** Спринт 7: учёт и стоимость AI, бюджеты, агенты, skills, Test Console, уровни доступа (ai-control) и метаданные /
-   *  раскрытие переписок (ai-concierge). null — 503 FEATURE_UNAVAILABLE. */
-  aiControl: string | null;
-  aiConcierge: string | null;
-  /** Спринт 8: «Мониторинг» — здоровье поставщиков, очереди и DLQ, оповещения, сводка «Здоровье системы»
-   *  (ops-monitor). null — 503 FEATURE_UNAVAILABLE; блок дашборда system — not_configured. */
-  opsMonitor: string | null;
+  notifications: string;
 }
-
-/** Необязательные адреса доменов (спринты 4–7). */
-export const FEATURE_URL_VARS = ["SOURCE_REGISTRY_URL", "DISCOVERY_URL", "PROVIDER_GATEWAY_URL", "EVENTS_URL", "OFFERS_URL", "NEWS_URL", "WATCH_URL", "AI_CONTROL_URL", "AI_CONCIERGE_URL", "OPS_MONITOR_URL"] as const;
 
 export interface Config {
   nodeEnv: string;
   env: AppEnv;
-  /** спринт 9 (ревью): раздел runbook'ов — ссылка «Runbook» оповещения только внутри него (как у ops-monitor,
-   *  notifications, bot-gateway: RUNBOOK_BASE_URL у всех одинаковый) */
-  runbookBaseUrl: string;
   isSecure: boolean;
   /** Имперсонация (POST /admin/v1/dev/impersonate) — только ENV=dev и не в защищённом окружении. */
   devTools: boolean;
@@ -104,22 +77,14 @@ export interface Config {
   redisUrl: string;
   redisKeyPrefix: string;
 
-  /** Origin admin-web (единственный разрешённый для не-GET и входа). */
-  adminWebOrigin: string;
+  /** Origin admin-web (ADMIN_ORIGIN) — единственный разрешённый для не-GET и шагов входа. */
+  adminOrigin: string;
 
   urls: DomainUrls;
-  /** Не заданные в stage/prod переменные адресов спринтов 4–7 (разделы отвечают 503 FEATURE_UNAVAILABLE). */
-  unconfigured: string[];
   upstreamTimeoutMs: number;
   upstreamRetries: number;
-  /** Таймаут вызовов дашборда (статистика доменов). */
+  /** Таймаут одного блока дашборда (блоки независимы: медленный источник → available=false). */
   dashboardTimeoutMs: number;
-  /** Таймаут проверки /health/ready доменов на дашборде. */
-  healthTimeoutMs: number;
-  /** Спринт 8 (§7.4): свежесть блока дашборда в Redis (users — ×5), stale-копия, ожидание блока. */
-  dashboardCacheSeconds: number;
-  dashboardStaleMaxSeconds: number;
-  dashboardBlockTimeoutMs: number;
 
   session: SessionPolicy;
   rateLimits: RateLimits;
@@ -130,24 +95,26 @@ export const DEV_DEFAULTS = {
   // совпадает с dev-секретом tilhero_common (Python-домены) — локальный стенд работает без настройки
   INTERNAL_JWT_SECRET: "dev-internal-secret-change-me",
   REDIS_URL: "redis://127.0.0.1:6379/0",
-  ADMIN_WEB_ORIGIN: "http://localhost:5174",
+  ADMIN_ORIGIN: "http://localhost:5174",
   ADMIN_IDENTITY_URL: "http://127.0.0.1:8120",
   USER_ADMIN_URL: "http://127.0.0.1:8121",
   IDENTITY_URL: "http://127.0.0.1:8101",
   SUPPORT_URL: "http://127.0.0.1:8103",
+  NOTIFICATIONS_URL: "http://127.0.0.1:8104",
   AUDIT_URL: "http://127.0.0.1:8105",
   EXPERIENCE_URL: "http://127.0.0.1:8106",
-  SOURCE_REGISTRY_URL: "http://127.0.0.1:8133",
-  DISCOVERY_URL: "http://127.0.0.1:8112",
-  PROVIDER_GATEWAY_URL: "http://127.0.0.1:8111",
-  EVENTS_URL: "http://127.0.0.1:8110",
-  OFFERS_URL: "http://127.0.0.1:8115",
-  WATCH_URL: "http://127.0.0.1:8116",
-  NEWS_URL: "http://127.0.0.1:8117",
-  AI_CONCIERGE_URL: "http://127.0.0.1:8118",
-  AI_CONTROL_URL: "http://127.0.0.1:8124",
-  OPS_MONITOR_URL: "http://127.0.0.1:8129",
 } as const;
+
+/** Переменные адресов доменов (порядок — как в DomainUrls). */
+export const DOMAIN_URL_VARS = {
+  adminIdentity: "ADMIN_IDENTITY_URL",
+  userAdmin: "USER_ADMIN_URL",
+  identity: "IDENTITY_URL",
+  support: "SUPPORT_URL",
+  audit: "AUDIT_URL",
+  experience: "EXPERIENCE_URL",
+  notifications: "NOTIFICATIONS_URL",
+} as const satisfies Record<keyof DomainUrls, keyof typeof DEV_DEFAULTS>;
 
 export class ConfigError extends Error {
   constructor(public readonly problems: string[]) {
@@ -224,16 +191,6 @@ export function loadConfig(env: Env = process.env): Config {
     return v.replace(/\/+$/, "");
   };
 
-  const unconfigured: string[] = [];
-  /** Адрес домена спринтов 4–7: в stage/prod может отсутствовать (→ null), формат проверяется, если задан. */
-  const featureUrl = (name: (typeof FEATURE_URL_VARS)[number]): string | null => {
-    if (raw(name) === undefined && isSecure) {
-      unconfigured.push(name);
-      return null;
-    }
-    return url(name);
-  };
-
   // ---- внутренний JWT v2 (EdDSA): в stage/prod — только личный ключ и открытые ключи доменов
   const internalJwtPrivateKey = raw("INTERNAL_JWT_PRIVATE_KEY");
   const internalJwtSecret = isSecure ? undefined : (raw("INTERNAL_JWT_SECRET") ?? DEV_DEFAULTS.INTERNAL_JWT_SECRET);
@@ -266,16 +223,16 @@ export function loadConfig(env: Env = process.env): Config {
   if (redisUrl && !/^rediss?:\/\//.test(redisUrl)) problems.push("REDIS_URL: ожидается redis:// или rediss:// URL");
 
   // ---- origin admin-web
-  const originRaw = required("ADMIN_WEB_ORIGIN");
-  let adminWebOrigin = "";
+  const originRaw = required("ADMIN_ORIGIN");
+  let adminOrigin = "";
   if (originRaw) {
     try {
       const u = new URL(originRaw);
       if (u.origin !== originRaw.replace(/\/+$/, "") || originRaw.includes(",")) throw new Error("not an origin");
-      if (isSecure && u.protocol !== "https:") problems.push("ADMIN_WEB_ORIGIN: в stage/prod только https");
-      adminWebOrigin = u.origin;
+      if (isSecure && u.protocol !== "https:") problems.push("ADMIN_ORIGIN: в stage/prod только https");
+      adminOrigin = u.origin;
     } catch {
-      problems.push(`ADMIN_WEB_ORIGIN=${JSON.stringify(originRaw)}: ожидается один origin вида https://host[:port]`);
+      problems.push(`ADMIN_ORIGIN=${JSON.stringify(originRaw)}: ожидается один origin вида https://host[:port]`);
     }
   }
 
@@ -293,12 +250,13 @@ export function loadConfig(env: Env = process.env): Config {
   const rlKeyPrefix = raw("RATE_LIMIT_KEY_PREFIX");
   const redisKeyPrefix = raw("REDIS_KEY_PREFIX") ?? "admin-bff:";
 
-  const runbookBaseUrl = raw("RUNBOOK_BASE_URL") ?? DEFAULT_RUNBOOK_BASE_URL;
-  if (!/^https:\/\/[^\s/?#@]+\/[^\s?#]*$/.test(runbookBaseUrl)) problems.push("RUNBOOK_BASE_URL: нужен https-адрес раздела runbook'ов");
+  const urls = Object.fromEntries(
+    (Object.entries(DOMAIN_URL_VARS) as Array<[keyof DomainUrls, keyof typeof DEV_DEFAULTS]>).map(([k, name]) => [k, url(name)]),
+  ) as unknown as DomainUrls;
+
   const cfg: Config = {
     nodeEnv,
     env: appEnv,
-    runbookBaseUrl,
     isSecure,
     devTools: appEnv === "dev" && !isSecure,
     serviceVersion:
@@ -314,33 +272,11 @@ export function loadConfig(env: Env = process.env): Config {
     internalJwtPublicKeys,
     redisUrl,
     redisKeyPrefix,
-    adminWebOrigin,
-    urls: {
-      adminIdentity: url("ADMIN_IDENTITY_URL"),
-      userAdmin: url("USER_ADMIN_URL"),
-      identity: url("IDENTITY_URL"),
-      support: url("SUPPORT_URL"),
-      audit: url("AUDIT_URL"),
-      experience: url("EXPERIENCE_URL"),
-      sourceRegistry: featureUrl("SOURCE_REGISTRY_URL"),
-      discovery: featureUrl("DISCOVERY_URL"),
-      providerGateway: featureUrl("PROVIDER_GATEWAY_URL"),
-      events: featureUrl("EVENTS_URL"),
-      offers: featureUrl("OFFERS_URL"),
-      news: featureUrl("NEWS_URL"),
-      watch: featureUrl("WATCH_URL"),
-      aiControl: featureUrl("AI_CONTROL_URL"),
-      aiConcierge: featureUrl("AI_CONCIERGE_URL"),
-      opsMonitor: featureUrl("OPS_MONITOR_URL"),
-    },
-    unconfigured,
+    adminOrigin,
+    urls,
     upstreamTimeoutMs: int("UPSTREAM_TIMEOUT_MS", 3000, 100, 60_000),
     upstreamRetries: int("UPSTREAM_RETRIES", 1, 0, 5),
     dashboardTimeoutMs: int("DASHBOARD_TIMEOUT_MS", 2000, 100, 30_000),
-    healthTimeoutMs: int("HEALTH_TIMEOUT_MS", 1500, 100, 30_000),
-    dashboardCacheSeconds: int("DASHBOARD_CACHE_SECONDS", 60, 0, 3600),
-    dashboardStaleMaxSeconds: int("DASHBOARD_STALE_MAX_SECONDS", 3600, 0, 86_400),
-    dashboardBlockTimeoutMs: int("DASHBOARD_BLOCK_TIMEOUT_MS", 1500, 100, 30_000),
     session: {
       idleSeconds,
       absoluteSeconds,

@@ -18,6 +18,35 @@
 
 `user_id` центра — только из токена (IDOR). Ученик детского профиля видит свои записи; родитель (`sub` = аккаунт) — свои.
 
+### Staff API (спринт 2, `packages/contracts/src/admin.ts`; вызывает **только** admin-bff с `actor`)
+Пути совпадают с admin-bff. Права проверяются здесь же (защита в глубину); step-up — в admin-bff. Ответы — формы
+admin.ts, `*_name` сотрудников — `null` (заполняет admin-bff).
+
+| Метод | Путь | Право | Описание |
+|---|---|---|---|
+| GET | `/admin/v1/notifications/templates` | `notif.templates.manage` | `{items: TemplateInfo[]}` — редактируемые (всё, кроме `pin.*`): описание RU/EN, плейсхолдеры с образцами RU/UZ, `default_texts` (код на образцах), активная версия |
+| GET | `…/templates/{key}` | то же | `TemplateInfo & {versions}` (новые первыми, ≤ 50); `pin.*`/неизвестный — 404 `TEMPLATE_NOT_FOUND` |
+| POST | `…/templates/{key}/versions` | то же | `{texts, note 3..300}` + `Idempotency-Key` (повтор — та же версия, другое тело — 422 `IDEMPOTENCY_KEY_REUSED`) → 201 draft; 422 `TEMPLATE_INVALID {fields: [{path, reason}]}` |
+| POST | `…/templates/{key}/versions/{v}/preview` | то же | `{lang, sample?}` → `TemplatePreview` (образцы; неизвестный ключ образца — 422); 404 `TEMPLATE_VERSION_NOT_FOUND` |
+| POST | `…/templates/{key}/versions/{v}/activate` | то же | `{reason}` → `TemplateVersion` (active, прежняя → archived; повтор — 200 без изменений); перед активацией тексты проверяются снова |
+| POST | `…/templates/{key}/reset` | то же | `{reason}` → `TemplateInfo` (активная → archived, текст из кода) |
+| GET | `/admin/v1/notifications/test-recipients` | `notif.templates.manage` или `notif.campaigns.manage` | `{items: [{index, label: "Тестовый чат 1 (••••4821)"}]}` — только маски |
+| POST | `…/templates/{key}/versions/{v}/test` | `notif.templates.manage` | `{lang, recipient}` → `TestSendResult`; 422 `TEST_RECIPIENT_NOT_ALLOWED`; 429 `RATE_LIMITED` |
+| GET | `/admin/v1/notifications/campaigns/summary?period=today\|7d\|30d` | `dashboard.read` (или `notif.campaigns.manage`) | `DashboardCampaigns {scheduled, sending, sent_in_period (запущены), delivered_in_period (доставлено в Telegram)}`; «сегодня» — по `DEFAULT_TIMEZONE` |
+| GET | `/admin/v1/notifications/campaigns?status=&cursor=&limit=` | `notif.campaigns.manage` | `Page<Campaign>` (новые первыми) |
+| GET | `…/campaigns/{id}` | то же | `Campaign` со `stats`; 404 `CAMPAIGN_NOT_FOUND` |
+| POST | `…/campaigns` | то же | `CampaignContent` + **обязательный** `Idempotency-Key` (нет — 422 `IDEMPOTENCY_KEY_REQUIRED`) → 201 draft; 422 `CAMPAIGN_INVALID {fields}` |
+| PATCH | `…/campaigns/{id}` | то же | `Partial<CampaignContent> & {expected_version}` → `Campaign`; 409 `CAMPAIGN_NOT_DRAFT` \| `CAMPAIGN_VERSION_CONFLICT {current_version}` |
+| POST | `…/campaigns/{id}/estimate` | то же | `CampaignEstimate` (identity-consent `/audience/count`; `frequency_capped` — пересечение до 10 страниц аудитории с получателями других рассылок за 7 дней, дальше пропорционально); 503 `UPSTREAM_UNAVAILABLE` |
+| POST | `…/campaigns/{id}/preview`, `…/test` | то же | как у шаблонов; плейсхолдер — только `{learner_name}` |
+| POST | `…/campaigns/{id}/schedule` | `notif.campaigns.send` | `{expected_version, send_at, reason}` (+ `Idempotency-Key`, Redis) → scheduled; ближе 60 с или в прошлом — «как можно скорее»; дальше 30 дней — 422 `CAMPAIGN_INVALID send_at too_far`; аудитория 0 — 422 `CAMPAIGN_EMPTY_AUDIENCE` |
+| POST | `…/campaigns/{id}/unschedule` | то же | `{reason}` → draft; черновик — 200 без изменений; `sending/done/stopped` — 409 `CAMPAIGN_ALREADY_SENDING` |
+| POST | `…/campaigns/{id}/stop` | то же | `{reason}` → stopped (из любого статуса): pending → cancelled, неотправленные записи → `cancelled`; повтор — 200 без изменений |
+
+Коды `reason` в `fields`: `required`, `too_long`, `too_short` (note), `unknown_placeholder`, `invalid_placeholder`
+(непарная скобка, формат, индекс, атрибут), `control_chars`, `pressure_words` (детские шаблоны), `invalid`,
+`kids_not_allowed`, `out_of_range`, `too_far`.
+
 Исходящие (внутренний JWT, `iss=notifications`):
 - `GET identity-consent /internal/v1/users/{id}/delivery` → `DeliveryInfo` (§1: для ребёнка адресат — опекун, его
   Telegram ID и блокировка бота) и `GET …/users/{id}/public` → имя пригласившего/принявшего/нового участника семьи.
@@ -42,7 +71,11 @@
 | `notifications.delivery_cache` | `user.status.changed.v1`, `consent.revoked.v1`, `user.notification_settings.changed.v1`, `user.profile.updated.v1` | сброс кэша адресации и имени |
 
 Публикует: `notification.delivered.v1` (отправлено), `telegram.delivery.failed.v1 {reason: blocked|invalid_chat|rate_limited|error}`
-(конечная неудача, в т.ч. блокировка бота — запись при этом остаётся в центре), `user.domain.deleted.v1`.
+(конечная неудача, в т.ч. блокировка бота — запись при этом остаётся в центре), `user.domain.deleted.v1`,
+`admin.audit.recorded.v1` (outbox, в транзакции изменения; `source` = notifications): `template.version_created |
+activated | reset | test_sent` (object_type `notification_template`, object_id — ключ), `campaign.created | updated |
+scheduled | unscheduled | stopped | finished | test_sent` (object_type `campaign`; `finished` — `actor_type=system`).
+Тексты шаблонов и рассылок в аудит не пишутся; тестовый получатель — только индекс.
 
 ## Политика (в момент отправки, порядок §4)
 Приём только создаёт запись (`telegram_status=scheduled`, `scheduled_for=now`); обработчик журнала берёт свежий
@@ -83,6 +116,40 @@
 `test_kid_texts_are_soft_and_name_the_child`). PII в текстах — только имя ребёнка родителю и имя
 пригласившего/принявшего/нового участника семьи (identity-consent `/public`, без username и Telegram ID).
 
+## Версии шаблонов (спринт 2)
+Код (`templates.py`) — тексты по умолчанию; у редактируемого `TemplateSpec` — `description`, `placeholder_names`,
+`placeholders(lang, params, ctx) → dict[str, str]` (значения на языке ученика: «15 минут» / «15 daqiqa», имена
+очищены; неизвестное имя — «Ваш ребёнок», «Ваш знакомый» …) и `sample`. Отрисовка: активная версия (кэш процесса
+`TEMPLATE_CACHE_TTL_SECONDS` ≤ 30 с, активация и сброс на этой реплике сбрасывают кэш) → подстановка строго из
+`placeholders()` (`{{`/`}}` — буквальные скобки), текст экранируется для Telegram, `startapp` и кнопка по умолчанию
+(button null) — из кода; ошибка подстановки или хранилище версий недоступно → текст из кода + WARNING. Текст
+отрисовывается в момент отправки: отложенная запись уйдёт с текстом, активным на момент отправки; уже отправленные —
+со своим. Детские шаблоны (`*.kid`) — отдельные ключи, при сохранении — проверка слов давления (`domain/texts.py`,
+тот же список проверяет тексты кода). Плейсхолдера `streak_days` у детских шаблонов нет.
+
+## Тестовая отправка (AT-21)
+Только в `ADMIN_TEST_CHAT_IDS` (личные chat id через запятую, > 0) — выбор по индексу; лишние поля тела → 422.
+Через bot-gateway (`idempotency_key` = `delivery_id`), «[ТЕСТ] » в заголовке, образцы плейсхолдеров, без записи в
+журнал/центр и без лимитов ученика; ≤ `TEST_SENDS_PER_MINUTE` (10) в минуту на сотрудника (Redis; Redis недоступен —
+503). Chat id — только в настройке: в ответе маска, в логах и аудите — индекс.
+
+## Рассылки (спринт 2, AT-22)
+Категория `product`, kind `campaign`. Аудиторию отбирает identity-consent (`GET /internal/v1/audience[/count]?ui_lang=&age=&onboarded=&active_days=`,
+`age` по умолчанию `adults`). `POST …:dispatch` сначала выполняет шаги рассылок (`campaigns.Runner`, не больше
+`CAMPAIGN_MAX_BATCHES_PER_CALL`), затем отправку: 1) `scheduled` с `send_at ≤ now` → `sending`, фиксация
+`audience_count` (identity-consent недоступен — запуск при следующем вызове); 2) страницы аудитории по
+`CAMPAIGN_AUDIENCE_PAGE` (500) с курсором в `campaigns.cursor` (сравнение-и-запись — повтор и параллельный вызов
+безопасны) → `campaign_recipients pending`; 3) пачки по `CAMPAIGN_RECIPIENT_BATCH` под блокировкой строки рассылки
+и advisory-блокировками учеников: `created` по другой рассылке за `CAMPAIGN_MIN_INTERVAL_DAYS` (7) →
+`skipped_frequency`, удалён → `cancelled`, иначе запись журнала (dedup `campaign:<id>:<user>`, детерминированный
+id) → `created`; 4) аудитория исчерпана → `done` + аудит `campaign.finished`. Запись рассылки проходит общую
+политику (категория `product` перепроверяется, выключатель, тихие часы по поясу ученика → отложить); тексты — из
+`campaigns` на момент отправки, `{learner_name}` — имя ученика (нет — пусто, пробелы схлопываются), кнопка —
+`route_<route>`. Защита в глубину при отправке: остановлена → `cancelled campaign_stopped`; дети 6–13 →
+`skipped kid_excluded`; возраст/язык вне сегмента (подросток без `teens`, без `age_band`) → `skipped
+segment_mismatch`. Статистика: `created`/`skipped_frequency` — по получателям, `sent`/`in_app_only`/`failed` — по
+журналу, `deferred` — `scheduled` с причиной `quiet_hours`.
+
 ## «Что нового» в центре
 `experience.release_note.published.v1` без адресатов: заметка хранится в `broadcasts`; при чтении центра
 (`inbox`, `unread-count`, `inbox:read`) ученику создаются записи по заметкам, полученным после его водяного знака
@@ -91,13 +158,19 @@
 Telegram-рассылки нет (кампании — спринт 2).
 
 ## Данные
-Схема `notifications` (миграция 0001): `notifications` (`notification_id` PK, `user_id` — ученик, `category`,
-`kind standard|transactional`, `template`, `params` JSONB, `subject_user_id`, `title`, `body`, `startapp`,
-`dedup_key` UNIQUE, `telegram_status scheduled|sent|in_app_only|failed|skipped`, `reason`, `center_only`,
+Схема `notifications` (миграции 0001, 0002): `notifications` (`notification_id` PK, `user_id` — ученик, `category`,
+`kind standard|transactional|campaign`, `template`, `params` JSONB, `subject_user_id`, `title`, `body`, `startapp`,
+`dedup_key` UNIQUE, `telegram_status scheduled|sent|in_app_only|failed|skipped|cancelled` (cancelled — рассылка
+остановлена; в центре не видна), `reason`, `center_only`,
 `not_before`, `stale_after`, `scheduled_for`, `attempts`, `limit_day`, `sent_at`, `telegram_message_id`, `read_at`,
 `source_event_id`, `created_at`, `updated_at`; CHECK: `params` только у `scheduled`, у `scheduled` есть
 `scheduled_for`), `deleted_users`, `missed_state (user_id, last_notified_date)`, `family_owners (family_id → owner)`,
-`broadcasts`, `inbox_state`, `outbox`, `inbox`. Срок хранения журнала/центра — 90 дней (`RETENTION_DAYS`, чистка в
+`broadcasts`, `inbox_state`, `outbox`, `inbox`; спринт 2: `notification_template_versions` (PK (key, version),
+`status draft|active|archived`, `texts` JSONB, `note`, `created_by/at`, `activated_by/at`, `archived_at`,
+`idempotency_key` + `request_hash`; частичные уникальные индексы — одна активная на ключ, ключ идемпотентности на
+сотрудника), `campaigns` (поля `Campaign`, `segment`/`texts` JSONB, `version`, `cursor`, `audience_complete`,
+`audience_count`, идемпотентность создания), `campaign_recipients` (PK (campaign_id, user_id), `status
+pending|created|skipped_frequency|cancelled`, `notification_id`, `processed_at`; удаляются сагой удаления ученика). Срок хранения журнала/центра — 90 дней (`RETENTION_DAYS`, чистка в
 `:dispatch`). Telegram ID в БД не хранится (только кэш Redis 5 мин). Модели — зеркало миграций
 (`tests/test_notifications_schema.py`).
 
@@ -112,6 +185,10 @@ Telegram-рассылки нет (кампании — спринт 2).
 `SCHEDULER_TOKEN` (в stage/prod — пусто, т. е. вход выключен, или ≥ 32 символов; ревью P-8), `INTERNAL_JWT_PRIVATE_KEY` + `INTERNAL_JWT_PUBLIC_KEYS` (stage/prod), `DEFAULT_TIMEZONE`
 (Asia/Tashkent), `DAILY_LIMIT` (3), `REMINDER_STALE_HOURS` (3), `MISSED_STALE_TIME` (22:00), `COMEBACK_MIN_DAYS` (7),
 `KID_WINDOW_START`/`KID_WINDOW_END` (08:00/20:00), `RETENTION_DAYS` (90), `DELIVERY_CACHE_TTL_SECONDS` (300).
+Спринт 2: `ADMIN_TEST_CHAT_IDS` (chat id через запятую; пусто — тест недоступен), `TEST_SENDS_PER_MINUTE` (10),
+`TEMPLATE_CACHE_TTL_SECONDS` (30, ≤ 30), `CAMPAIGN_MIN_INTERVAL_DAYS` (7), `CAMPAIGN_AUDIENCE_PAGE` (500),
+`CAMPAIGN_RECIPIENT_BATCH` (200), `CAMPAIGN_MAX_BATCHES_PER_CALL` (50), `CAMPAIGN_MAX_SCHEDULE_DAYS` (30),
+`CAMPAIGN_ASAP_SECONDS` (60).
 
 ## Runbook
 - Тесты: `infra/dev/stack.sh up`, `source .dev/testenv.sh`, `uv run pytest services/notifications -q`
@@ -121,3 +198,10 @@ Telegram-рассылки нет (кампании — спринт 2).
   `notifications_disabled`, `quiet_hours`, `kid_window`, `daily_limit`, `stale`, `blocked`, `identity_unavailable` …).
 - Застряли `scheduled` с прошедшим `scheduled_for`: проверить `notifications-dispatch` в n8n и логи
   `dispatcher iteration failed` (в журнал — только тип ошибки).
+- Новый текст шаблона не применился: `notification_template_versions` (`status=active` по ключу); другие реплики
+  подхватят не позже `TEMPLATE_CACHE_TTL_SECONDS`; WARNING `template version render failed, code text used` —
+  версия не подставилась (плейсхолдер убран из кода) — активировать исправленную версию или сбросить.
+- Рассылка висит в `sending`: шаги идут только в `:dispatch` (n8n); WARNING `campaign audience page unavailable` —
+  identity-consent; `campaigns.cursor`/`audience_complete` показывают прогресс выборки. Экстренно — `stop`.
+- Тестовая отправка: `test-recipients` пуст — не задан `ADMIN_TEST_CHAT_IDS`; `sent=false` с кодом bot-gateway
+  (`TELEGRAM_BLOCKED` — тестовый чат не начал диалог с ботом), поиск по `delivery_id` в логах.

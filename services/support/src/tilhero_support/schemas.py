@@ -253,8 +253,15 @@ class StaffTicketSummaryOut(BaseModel):
     sla_paused: bool
 
 
+class StaffTicketContextOut(BaseModel):
+    """admin.ts StaffTicket.context: deeplink — всегда есть ключ (null, если экрана нет), в отличие от bff.ts."""
+
+    deeplink: str | None = None
+    client_version: str
+
+
 class StaffTicketOut(StaffTicketSummaryOut):
-    context: TicketContextOut | None
+    context: StaffTicketContextOut | None
     correlation_id: str | None
     resolved_at: datetime | None
     closed_at: datetime | None
@@ -325,3 +332,26 @@ class SupportStatsOut(BaseModel):
     breached: int
     avg_first_response_minutes: float | None
     avg_resolution_minutes: float | None
+
+
+class StaffTitle(BaseModel):
+    ru: str
+    en: str
+
+
+class LearnerText(BaseModel):
+    ru: str
+    uz: str
+
+
+class ReplyTemplateOut(BaseModel):
+    """admin.ts ReplyTemplate: заголовок — для сотрудника (RU/EN), текст — ученику на его языке (RU/UZ)."""
+
+    id: str
+    title: StaffTitle
+    text: LearnerText
+    categories: list[str]
+
+
+class ReplyTemplateList(BaseModel):
+    items: list[ReplyTemplateOut]

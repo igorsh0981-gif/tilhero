@@ -163,6 +163,8 @@ class Env:
     # ---------- staff API
     async def create_staff(self, actor: Actor, email: str, role: str, name: str = "Сотрудник",
                            **headers: str) -> httpx.Response:
+        """Idempotency-Key обязателен (admin.ts) — если тест не задал свой, генерируется новый."""
+        headers.setdefault("Idempotency-Key", f"t-{uuid.uuid4().hex}")
         return await self.c.post("/admin/v1/staff", json={"email": email, "display_name": name, "role": role},
                                  headers=self.h(actor, **headers))
 

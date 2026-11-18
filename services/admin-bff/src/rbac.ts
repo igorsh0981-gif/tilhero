@@ -1,6 +1,5 @@
 /**
- * RBAC admin-bff: декларативные требования маршрутов и эффективные права (с учётом имперсонации). Содержимое
- * AI-переписок в ответах не появляется вовсе (спринт 7: карточка — только метаданные, раскрытие — отдельная команда).
+ * RBAC admin-bff: декларативные требования маршрутов и эффективные права (с учётом имперсонации в dev).
  *
  * Каждый маршрут /admin/v1/* ОБЯЗАН объявить доступ (fail-closed): `publicAuth(...)` для шагов входа или
  * `requirePermission(...)` / `requireRole(...)` / `authenticated()` для сессионных; `requireStepUp()` —
@@ -27,7 +26,7 @@ export interface AccessConfig {
 /** Шаг входа до сессии: обязательна проверка Origin, лимит по IP. */
 export const publicAuth = (rate: RateClass): AccessConfig => ({ access: "public", rate });
 
-/** Любой вошедший сотрудник (me, logout, step-up). */
+/** Любой вошедший сотрудник (me, logout, step-up, тема админки). */
 export const authenticated = (rate?: RateClass): AccessConfig => ({
   access: "session",
   guard: { kind: "authenticated" },
@@ -46,36 +45,25 @@ export const requireRole = (role: RoleCode): AccessConfig => ({ access: "session
 /** Повторная проверка TOTP не старше окна step-up (5 мин). Комбинируется с requirePermission/requireRole. */
 export const requireStepUp = (): Pick<AccessConfig, "stepUp"> => ({ stepUp: true });
 
+/** Каталог прав — копия `PERMISSIONS` из admin.ts (рантайм не импортирует контракт; тест сверяет списки). */
 export const ALL_PERMISSIONS = [
   "dashboard.read",
   "users.read",
   "users.sensitive.read",
-  "ai.content.read",
-  "export.csv",
   "support.read",
   "support.reply",
   "support.manage",
-  "subscriptions.override",
-  "billing.refund",
-  "skills.edit",
-  "skills.publish",
   "audit.read",
   "config.read",
   "config.edit",
   "config.publish",
-  "ops.kill_switch",
+  "whatsnew.manage",
+  "whatsnew.publish",
+  "notif.templates.manage",
+  "notif.campaigns.manage",
+  "notif.campaigns.send",
   "staff.manage",
   "roles.manage",
-  // спринт 4: AI-поиск событий
-  "events.review",
-  "sources.manage",
-  "discovery.manage",
-  // спринт 6: ленты и модерация новостей
-  "news.manage",
-  // спринт 7: уровень доступа к AI пользователю
-  "users.access.manage",
-  // спринт 8: DLQ — маскированный payload, повтор и удаление (привилегированное, admin-identity 0008)
-  "ops.queues.manage",
 ] as const satisfies readonly Permission[];
 
 /** Компиляция падает, если в admin.ts появилось право, которого нет в ALL_PERMISSIONS (права вне списка отбрасываются). */
@@ -83,40 +71,38 @@ type MissingPermissions = Exclude<Permission, (typeof ALL_PERMISSIONS)[number]>;
 const _allPermissionsListed: [MissingPermissions] extends [never] ? true : MissingPermissions = true;
 void _allPermissionsListed;
 
-export const ROLE_CODES: readonly RoleCode[] = [
+export const ROLE_CODES = [
   "super_admin",
   "operations",
+  "communications",
   "support",
-  "billing",
-  "agent_manager",
+  "methodist",
   "analyst",
   "auditor",
   "read_only",
-];
+] as const satisfies readonly RoleCode[];
+
+type MissingRoles = Exclude<RoleCode, (typeof ROLE_CODES)[number]>;
+const _allRolesListed: [MissingRoles] extends [never] ? true : MissingRoles = true;
+void _allRolesListed;
 
 /**
- * Матрица по умолчанию (docs/sprint2/INTERNAL_API.md, + права спринта 4 — docs/sprint4/INTERNAL_API.md §7, спринта 6 — docs/sprint6/INTERNAL_API.md §8, спринта 7 — docs/sprint7/INTERNAL_API.md §4, спринта 8 — docs/sprint8/INTERNAL_API.md §7.6) — только для имперсонации в dev: эффективные права =
- * свои ∩ права выбранной роли (сужение, не расширение). Источник истины матрицы — admin-identity.
+ * Матрица по умолчанию (docs/sprint2/PLAN.md §«Роли и права») — только для имперсонации в dev: эффективные
+ * права = свои ∩ права выбранной роли (сужение, не расширение). Источник истины матрицы — admin-identity (сид 0001).
  */
 export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[]>> = {
   super_admin: ALL_PERMISSIONS,
-  operations: [
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read"],
+  communications: [
     "dashboard.read",
-    "users.read",
-    "support.read",
-    "config.read",
-    "ops.kill_switch",
-    "audit.read",
-    "events.review",
-    "sources.manage",
-    "discovery.manage",
-    "news.manage",
-    "users.access.manage",
-    "ops.queues.manage",
+    "whatsnew.manage",
+    "whatsnew.publish",
+    "notif.templates.manage",
+    "notif.campaigns.manage",
+    "notif.campaigns.send",
   ],
   support: ["dashboard.read", "users.read", "support.read", "support.reply"],
-  billing: ["dashboard.read", "users.read", "subscriptions.override", "billing.refund"],
-  agent_manager: ["dashboard.read", "skills.edit"],
+  methodist: ["dashboard.read", "users.read"],
   analyst: ["dashboard.read", "users.read"],
   auditor: ["dashboard.read", "audit.read"],
   read_only: ["dashboard.read"],
@@ -175,4 +161,3 @@ export function guardLabel(guard: Guard): string {
       return `role:${guard.role}`;
   }
 }
-

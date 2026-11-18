@@ -42,6 +42,12 @@ EXPECTED: dict[str, dict[str, Any]] = {
         "body": None,
         "on_start": False,
     },
+    "user-admin-reconcile.json": {
+        "cron": "25 * * * *",  # каждый час: страховочная сверка read-модели учеников админки (спринт 2)
+        "url": "={{ $env.USER_ADMIN_URL }}/internal/v1/reconcile",
+        "body": None,
+        "on_start": False,
+    },
 }
 
 
@@ -123,7 +129,7 @@ def test_entrypoint_imports_activates_known_ids_then_starts():
 
 
 URL_VARS = {"invites-tick.json": "SOCIAL_URL", "notifications-dispatch.json": "NOTIFICATIONS_URL",
-            "plan-tick.json": "LEARNING_PLAN_URL"}
+            "plan-tick.json": "LEARNING_PLAN_URL", "user-admin-reconcile.json": "USER_ADMIN_URL"}
 
 
 def _run_entrypoint(tmp_path: Path, env: dict[str, str]) -> tuple[subprocess.CompletedProcess, list[str]]:
@@ -159,7 +165,7 @@ def test_entrypoint_activates_only_workflows_with_url(tmp_path: Path):
 
     (tmp_path / "calls.log").unlink()
     shutil.rmtree(tmp_path / "bin")
-    new = {**old, "SOCIAL_URL": "http://social:8109"}
+    new = {**old, "SOCIAL_URL": "http://social:8109", "USER_ADMIN_URL": "http://user-admin:8121"}
     proc, calls = _run_entrypoint(tmp_path, new)
     assert proc.returncode == 0, proc.stderr
     activated = [c.split("--id=")[1].split()[0] for c in calls if c.startswith("update:workflow")]

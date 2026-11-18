@@ -10,12 +10,19 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import JSONResponse
 
-from tilhero_admin_identity.api.deps import NO_STORE, bff_only, get_identity, require_actor
+from tilhero_admin_identity.api.deps import NO_STORE, bff_only, get_identity, require_actor, required_idempotency_key
 from tilhero_admin_identity.domain import approvals as approvals_domain
 from tilhero_admin_identity.domain import staff as staff_domain
 from tilhero_admin_identity.domain.auth import Identity
 from tilhero_admin_identity.domain.catalog import RoleCode
-from tilhero_admin_identity.domain.store import acting_staff, authorize, lock_identity, staff_out, summaries
+from tilhero_admin_identity.domain.store import (
+    acting_staff,
+    authorize,
+    lock_identity,
+    require_staff,
+    staff_out,
+    summaries,
+)
 from tilhero_admin_identity.schemas import (
     ApprovalDecisionOut,
     ApprovalEnvelope,
@@ -66,8 +73,8 @@ async def list_staff(
 @router.get("/staff/lookup", response_model=LookupOut)
 async def lookup(principal: Principal = Depends(bff_only), rt: Runtime = Depends(get_runtime),
                  ids: str = Query(min_length=1, max_length=4000)) -> LookupOut:
-    """Имена сотрудников (например, операторов тикетов) — любой сотрудник."""
-    require_actor(principal)
+    """Имена сотрудников (например, операторов тикетов) — любой активный сотрудник."""
+    actor = require_actor(principal)
     parts = [p.strip() for p in ids.split(",") if p.strip()]
     if not parts or len(parts) > 100:
         raise unprocessable("VALIDATION_ERROR", "Нужно от 1 до 100 идентификаторов",
@@ -79,8 +86,18 @@ async def lookup(principal: Principal = Depends(bff_only), rt: Runtime = Depends
                             {"errors": [{"loc": ["query", "ids"], "msg": "invalid uuid", "type": "uuid_parsing"}]}
                             ) from exc
     async with rt.transaction() as session:
+        await acting_staff(session, actor)  # отключённый/несуществующий сотрудник с живым токеном — 403
         found = await summaries(session, wanted)
     return LookupOut(items=[found[i] for i in dict.fromkeys(wanted) if i in found])
+
+
+@router.get("/staff/{staff_id}", response_model=StaffOut)
+async def get_staff(staff_id: uuid.UUID, principal: Principal = Depends(bff_only),
+                    rt: Runtime = Depends(get_runtime)) -> StaffOut:
+    actor = require_actor(principal)
+    async with rt.transaction() as session:
+        await authorize(session, actor, STAFF_MANAGE)
+        return staff_out(await require_staff(session, staff_id))
 
 
 @router.post("/staff", response_model=StaffCreated, status_code=201)
@@ -89,18 +106,19 @@ async def create_staff(
     principal: Principal = Depends(bff_only),
     rt: Runtime = Depends(get_runtime),
     idn: Identity = Depends(get_identity),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=128),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> JSONResponse:
+    """Idempotency-Key обязателен (admin.ts): повтор с тем же ключом и телом от того же сотрудника возвращает
+    сохранённый ответ без временного пароля (он выдаётся один раз и нигде не хранится)."""
     actor = require_actor(principal)
     async with rt.transaction() as session:  # права — до idempotency (кэш не отдаётся без права)
         await authorize(session, actor, STAFF_MANAGE)
-    store = IdempotencyStore(idn.redis(rt), f"{idn.settings.redis_namespace}:staff-create") if idempotency_key else None
+    key = required_idempotency_key(idempotency_key)
+    store = IdempotencyStore(idn.redis(rt), f"{idn.settings.redis_namespace}:staff-create")
     fp = fingerprint(body.model_dump(mode="json"))
-    if store is not None and idempotency_key:
-        cached = await store.begin(actor.id, idempotency_key, fp)
-        if cached is not None:
-            # временный пароль выдаётся один раз и не хранится — повтор возвращает null
-            return JSONResponse(cached, status_code=201, headers=NO_STORE)
+    cached = await store.begin(actor.id, key, fp)
+    if cached is not None:
+        return JSONResponse(cached, status_code=201, headers=NO_STORE)
     try:
         s = idn.settings
         async with rt.transaction() as session:
@@ -112,12 +130,10 @@ async def create_staff(
             out = StaffCreated(staff=staff_out(res.staff), temporary_password=res.temporary_password,
                                approval=approval)
     except BaseException:
-        if store is not None and idempotency_key:
-            await store.abort(actor.id, idempotency_key)
+        await store.abort(actor.id, key)
         raise
     body_json = out.model_dump(mode="json")
-    if store is not None and idempotency_key:
-        await store.complete(actor.id, idempotency_key, fp, {**body_json, "temporary_password": None})
+    await store.complete(actor.id, key, fp, {**body_json, "temporary_password": None})
     return JSONResponse(body_json, status_code=201, headers=NO_STORE)
 
 
@@ -220,7 +236,8 @@ async def _decide(approval_id: uuid.UUID, body: DecisionIn, principal: Principal
                   approve: bool) -> JSONResponse:
     actor = require_actor(principal)
     async with rt.transaction() as session:
-        decider = await acting_staff(session, actor)
+        # права токена ∩ роли из БД (токен может только сузить); решающий — super_admin по БД (domain.decide)
+        decider = await authorize(session, actor, STAFF_MANAGE, ROLES_MANAGE)
         await lock_identity(session)
         a, deferred, temp = await approvals_domain.decide(session, approval_id, decider, approve=approve,
                                                           note=body.note, ctx=idn.reset_ctx)

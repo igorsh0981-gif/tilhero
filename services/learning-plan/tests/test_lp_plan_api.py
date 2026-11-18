@@ -52,6 +52,7 @@ async def test_patch_happy_path_and_event(env, user) -> None:
                                             "preferred_time", "duration_min", "reminders_enabled", "timezone"]
     assert ev.payload["days"] == [2, 6] and ev.payload["preferred_time"] == "07:30"
     assert ev.payload["onboarding_completed"] is False and ev.payload["goal"] == "work"
+    assert ev.payload["preset"] == "custom" and ev.payload["level_self"] == body["level_self"]  # спринт 2: user-admin
     # повтор того же PATCH — no-op: версия и события не меняются
     same = await env.c.patch("/internal/v1/me/plan", json=patch, headers=env.h(user))
     assert same.status_code == 200 and same.json()["version"] == 2

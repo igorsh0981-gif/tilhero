@@ -1,10 +1,10 @@
 /**
  * Авторизация запросов admin-web (onRequest — до разбора тела, валидации и вызова домена):
  *
- *   public  (шаги входа до сессии) — проверка Origin/Sec-Fetch-Site (только ADMIN_WEB_ORIGIN) → лимит по IP;
+ *   public  (шаги входа до сессии) — проверка Origin/Sec-Fetch-Site (только ADMIN_ORIGIN) → лимит по IP;
  *   session — cookie → сессия в Redis → бездействие 30 мин / абсолют 8 ч (401 SESSION_EXPIRED) → привязка к
  *             User-Agent → CSRF (не-GET: Origin + X-CSRF-Token) → лимиты adm.staff (300/мин), для команд
- *             (не-GET) adm.command (60/мин) и для команд DLQ / повтора удаления adm.dlq (10/мин) → principal
+ *             (не-GET) adm.command (60/мин), для step-up adm.mfa (5/мин) → principal
  *             (кэш ≤ 30 с; статус ≠ ACTIVE или другая session_version → 401 SESSION_REVOKED и удаление сессии)
  *             → продление (кроме X-Background: 1 и замещённого ротацией id) → право маршрута (403 PERMISSION_DENIED) → step-up (403 STEP_UP_REQUIRED).
  */
@@ -42,11 +42,11 @@ function sameSecret(a: string, b: string): boolean {
   return timingSafeEqual(ha, hb) && a.length === b.length;
 }
 
-/** Источник запроса: Origin = ADMIN_WEB_ORIGIN; без Origin — только Sec-Fetch-Site: same-origin. */
+/** Источник запроса: Origin = ADMIN_ORIGIN; без Origin — только Sec-Fetch-Site: same-origin. */
 export function checkOrigin(ctx: BffContext, req: FastifyRequest): void {
   const origin = req.headers.origin;
   if (typeof origin === "string") {
-    if (origin !== ctx.config.adminWebOrigin) throw csrfInvalid();
+    if (origin !== ctx.config.adminOrigin) throw csrfInvalid();
     return;
   }
   if (req.headers["sec-fetch-site"] === "same-origin") return;
@@ -106,10 +106,10 @@ export async function authenticate(
     if (typeof token !== "string" || !sameSecret(token, s.csrf_token)) throw csrfInvalid();
   }
 
-  // спринт 9: единый лимитер (ts-common) — 429 RATE_LIMITED {policy, retry_after}; сбой Redis — по режиму политики
+  // единый лимитер (ts-common) — 429 RATE_LIMITED {policy, retry_after}; сбой Redis — по режиму политики
   const rate = await limiter.check("adm.staff", s.staff_id);
   if (!rate.allowed) throw rateLimited(rate.retryAfter, "adm.staff");
-  for (const policy of commandPolicies(req.method, req.routeOptions.url)) await limiter.enforce(policy, s.staff_id);
+  for (const policy of commandPolicies(req.method)) await limiter.enforce(policy, s.staff_id);
   if (need.rate === "step_up") await limiter.enforce("adm.mfa", s.staff_id);
 
   let principal: Principal;
@@ -178,11 +178,6 @@ export function stepUpRequired(permission?: string): AppError {
   return new AppError(403, "STEP_UP_REQUIRED", "Подтвердите действие кодом из приложения-аутентификатора", {
     ...(permission ? { permission } : {}),
   });
-}
-
-/** Свежий step-up (окно 5 мин) у сессии запроса — для условного step-up в обработчике (PATCH источника). */
-export function hasFreshStepUp(ctx: BffContext, auth: StaffAuth): boolean {
-  return auth.session.step_up_until > ctx.now();
 }
 
 export function registerAuth(app: App, ctx: BffContext): void {

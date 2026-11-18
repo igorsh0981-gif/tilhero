@@ -26,8 +26,7 @@ Config — неизменяемые версии темы, секций глав
 повтор возвращает сохранённый ответ с заголовком `idempotent-replay: true`, поэтому двойной клик «Откатить» не откатывает
 дважды. **Откат** не меняет историю: создаётся новая активация `kind=rollback` версии `previous_version` текущей, а её
 `previous_version` = бывшая текущая; повторный откат возвращает обратно (1.0.1 → 1.0.0 → 1.0.1). Активации приложения
-сериализуются `pg_advisory_xact_lock`. Админ-контур (admin-bff, staff API) появится в спринте 2; тесты вызывают его
-внутренним токеном с `iss = admin-bff`.
+сериализуются `pg_advisory_xact_lock`. Staff API вызывает только admin-bff (`iss = admin-bff`, контекст сотрудника `actor`).
 
 ### Payload версии
 **miniapp** — `ExperienceConfig` из `packages/contracts/src/bff.ts` без `app/version` (их добавляет сервис в ответе):
@@ -64,7 +63,7 @@ Mini App — ровно allowlist санитайзера клиента `package
 | Метод | Путь | Ответ |
 |---|---|---|
 | GET | `/internal/v1/release-notes/for-me?onboarded_at=<ISO>&lang=ru\|uz&age=kids\|teens\|adults` | `WhatsNew {mode: welcome\|updates\|none, notes: WhatsNewNote[]}` (bff.ts) |
-| POST | `/internal/v1/release-notes/seen` | `{release_note_ids: uuid[1..20]}` → 204 |
+| POST | `/internal/v1/release-notes/seen?lang=ru\|uz&age=kids\|teens\|adults` | `{release_note_ids: uuid[1..20]}` → 204; `lang`/`age` необязательны — сегмент ученика на момент показа для разрезов статистики |
 | GET | `/internal/v1/release-notes/feed?lang=&age=&limit=&cursor=` | `Page<WhatsNewNote>` — лента «Новости» |
 
 Правила `for-me` (INTERNAL_API §5, `domain/release_notes.py::pick_whats_new`):
@@ -75,19 +74,31 @@ Mini App — ровно allowlist санитайзера клиента `package
 - фильтр по сегментам (`lang` — язык интерфейса, `age` — возраст), не больше 5, новые первыми; пусто → `none`.
 Тексты — на языке `lang`; `lang` и `age` обязательны (422), наивное `onboarded_at` считается UTC.
 
-`seen` идемпотентен (повтор не меняет `seen_at`), неизвестные id и черновики игнорируются. После удаления ученика (сага)
+`seen` идемпотентен (повтор не меняет `seen_at` и сегмент первого показа), неизвестные id и черновики игнорируются;
+`lang`/`age` вне каталога → 422. После удаления ученика (сага)
 `for-me` и `seen` → 410 `USER_DELETED`. Лента — все опубликованные для сегмента (все аудитории), курсор непрозрачный
 (`published_at` + порядковый номер), неверный → 400 `INVALID_CURSOR`, `limit` 1…100 (20).
 
 ### Сотрудник (admin-bff, спринт 2)
+Права «Что нового» (PLAN «Роли и права», admin.ts) проверяет и домен: `whatsnew.manage` — список, карточка, черновик,
+статистика; `whatsnew.publish` — публикация и снятие (step-up — в admin-bff); `dashboard.read` — сводка. Права
+конфигурации интерфейса (`config.*`) к заметкам не допускают.
+
 | Метод | Путь | Право | Тело → ответ |
 |---|---|---|---|
-| GET | `/admin/v1/release-notes?status=&limit=&cursor=` | `config.read` | → `{items: StaffReleaseNote[], next_cursor}` (новые первыми) |
-| GET | `/admin/v1/release-notes/{id}` | `config.read` | → `StaffReleaseNote`; 404 `RELEASE_NOTE_NOT_FOUND` |
-| POST | `/admin/v1/release-notes` | `config.edit` | `{slug, title {ru, uz}, items[1..6], audience, segments}` → 201 черновик; 409 `RELEASE_NOTE_SLUG_EXISTS`; 422 `RELEASE_NOTE_TRANSLATION_MISSING {missing}`; `Idempotency-Key` |
-| PUT | `/admin/v1/release-notes/{id}` | `config.edit` | то же + `expected_version` → черновик (повтор тех же данных — no-op); 409 `RELEASE_NOTE_NOT_DRAFT` / `RELEASE_NOTE_VERSION_CONFLICT {current_version}` |
-| POST | `/admin/v1/release-notes/{id}/publish` | `config.publish` | `{expected_version, reason}` → 201 (`published_at` = сейчас); уже опубликована → 200; архивная → 409 `RELEASE_NOTE_NOT_DRAFT`; 422 `RELEASE_NOTE_TRANSLATION_MISSING`; `Idempotency-Key` |
-| POST | `/admin/v1/release-notes/{id}/archive` | `config.publish` | `{reason}` → 201 (снятие с показа); уже в архиве → 200 |
+| GET | `/admin/v1/release-notes?status=&limit=&cursor=` | `whatsnew.manage` | → `{items: StaffReleaseNote[], next_cursor}` (новые первыми; `views_total` — одним GROUP BY на страницу) |
+| GET | `/admin/v1/release-notes/summary` | `dashboard.read` | → `DashboardWhatsNew {published, drafts, latest: {release_note_id, slug, title (RU), views_total, published_at} \| null}` (архив не считается) |
+| GET | `/admin/v1/release-notes/{id}` | `whatsnew.manage` | → `StaffReleaseNote`; 404 `RELEASE_NOTE_NOT_FOUND` |
+| GET | `/admin/v1/release-notes/{id}/stats` | `whatsnew.manage` | → `ReleaseNoteStats {views_total, views_by_lang {ru, uz}, views_by_age {kids, teens, adults}, first_view_at, last_view_at}`; 404 `RELEASE_NOTE_NOT_FOUND` |
+| POST | `/admin/v1/release-notes` | `whatsnew.manage` | `{slug, title {ru, uz}, items[1..6], audience, segments}` → 201 черновик; 409 `RELEASE_NOTE_SLUG_EXISTS`; 422 `RELEASE_NOTE_TRANSLATION_MISSING {missing}`; `Idempotency-Key` |
+| PUT | `/admin/v1/release-notes/{id}` | `whatsnew.manage` | то же + `expected_version` → черновик (повтор тех же данных — no-op); 409 `RELEASE_NOTE_NOT_DRAFT` / `RELEASE_NOTE_VERSION_CONFLICT {current_version}` |
+| POST | `/admin/v1/release-notes/{id}/publish` | `whatsnew.publish` | `{expected_version, reason}` → 201 (`published_at` = сейчас); уже опубликована → 200; архивная → 409 `RELEASE_NOTE_NOT_DRAFT`; 422 `RELEASE_NOTE_TRANSLATION_MISSING` / `VALIDATION_ERROR` (черновик перепроверяется целиком); `Idempotency-Key` |
+| POST | `/admin/v1/release-notes/{id}/archive` | `whatsnew.publish` | `{reason}` → 201 (снятие с показа); уже в архиве → 200 |
+
+`StaffReleaseNote.views_total` — уникальные ученики с отметкой просмотра (у черновика 0; у архивной сохраняется).
+Статистика: разрезы по языку и возрасту — по сегменту, сохранённому в отметке при первом показе (миграция 0005);
+отметки без сегмента (до 0005 или без `lang`/`age` в `seen`) учитываются только в `views_total`. Удаление ученика
+(сага) удаляет и его отметки — показы уменьшаются. Идентификаторов учеников в статистике нет.
 
 Пункт заметки: `{title {ru, uz} ≤ 80, text {ru, uz} ≤ 200, link, icon}`; `link` — маршрут Mini App, `icon` — иконка
 (или null) из каталога `packages/contracts/release-notes.json` (сверка — контрактный тест). **Оба перевода обязательны**:
@@ -121,7 +132,9 @@ Mini App — ровно allowlist санитайзера клиента `package
   `audience` (`new|existing|all`), `segments` JSONB, `status` draft/published/archived, `version`, кто/когда создал,
   изменил, опубликовал, архивировал. Триггер `release_notes_guard`: у опубликованной меняется только статус → archived,
   архивная неизменна, удалить можно только черновик; TRUNCATE запрещён.
-- `release_note_views(user_id, release_note_id, seen_at, PK(user_id, release_note_id))` — отметки просмотра (FK на заметку);
+- `release_note_views(user_id, release_note_id, seen_at, ui_lang, age_segment, PK(user_id, release_note_id))` — отметки
+  просмотра (FK на заметку); `ui_lang` (`ru|uz`) и `age_segment` (`kids|teens|adults`) — сегмент на момент показа,
+  NULL у старых отметок (миграция 0005, CHECK по каталогу);
   `deleted_users(user_id PK, request_id, deleted_at)` — исполненные удаления.
 - Сид: миграция 0002 — miniapp **1.0.0** (текущая, тема «Тетрадь»: значения прототипа `Main.dc.html .app`, шрифты Onest /
   Unbounded / Caveat) и admin **1.0.0** (`Admin.dc.html .ad`, все разделы меню); миграция 0004 — опубликованная
@@ -135,9 +148,9 @@ Mini App — ровно allowlist санитайзера клиента `package
 Redis недоступен или значение повреждено → ответ из БД.
 
 ## Runbook
-- **Срочный откат темы Mini App:** `POST /admin/v1/experience/miniapp/rollback {reason}` (через admin-bff, право
-  `config.publish`) — действует сразу, без релиза Mini App; клиенты подхватят при следующем запросе конфигурации
-  (BFF кэширует до 60 с).
+- **Срочный откат темы Mini App или админки:** `POST /admin/v1/experience/{miniapp|admin}/rollback {reason}` (через
+  admin-bff, право `config.publish`, step-up) — действует сразу, без сборки клиентов: кэш `current` обновляется в той же
+  команде; Mini App и админка подхватят тему при следующем открытии (telegram-bff кэширует до 60 с).
 - **Конфигурация «пропала»** (404 `EXPERIENCE_CONFIG_NOT_FOUND`): `SELECT * FROM activations ORDER BY seq DESC LIMIT 5`;
   Mini App в этом случае использует bundled fallback.
 - **Заметку увидели не те ученики:** снять её (`/archive`), проверить `audience` и `segments`; отметки просмотра

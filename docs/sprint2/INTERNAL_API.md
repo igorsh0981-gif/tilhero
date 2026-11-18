@@ -7,7 +7,7 @@
 Новые имена в шине и аудите: `source` аудита — имя сервиса; `object_type` — `staff`, `role`, `approval`, `learner`, `release_note`, `notification_template`, `campaign`, `config`, `ticket`.
 
 ## 1. admin-identity (8120, схема `admin_identity`, пакет `tilhero_admin_identity`)
-Форк aievent admin-identity: `staff`, `roles`, `role_permissions`, `approvals`, `login_attempts`, `mfa_*`; вход `/internal/v1/auth/*` (login, mfa, mfa enroll start/confirm, password, step-up, principal, logout), bootstrap первого super_admin из `ADMIN_BOOTSTRAP_EMAIL/ADMIN_BOOTSTRAP_PASSWORD` (только при отсутствии активного super_admin; пароль должен пройти правила; must_change_password=true), Staff/Roles/Approvals API, `GET /internal/v1/staff/lookup?ids=` (имена для admin-bff), аудит `auth.*`, `staff.*`, `role.*`, `approval.*` через `admin.audit.recorded.v1`.
+Форк aievent admin-identity: `staff`, `roles`, `role_permissions`, `approvals`, `login_attempts`, `mfa_*`; вход `/internal/v1/auth/*` (login, mfa, mfa enroll start/confirm, password, step-up, principal, logout), bootstrap первого super_admin из `ADMIN_BOOTSTRAP_EMAIL/ADMIN_BOOTSTRAP_PASSWORD` (только при отсутствии активного super_admin; пароль должен пройти правила; must_change_password=true), Staff/Roles/Approvals API, `GET /admin/v1/staff/lookup?ids=` (имена для admin-bff, без проверки права — любой вошедший сотрудник), аудит `auth.*`, `staff.*`, `role.*`, `approval.*` через `admin.audit.recorded.v1`.
 - Матрица ролей и прав — `PLAN.md` §«Роли и права» и `admin.ts` (`Permission`, `RoleCode`, `PRIVILEGED_ROLES`). Одна миграция `0001` с матрицей TilHero (prod-БД админки пуста). Контрактный тест: множество прав сида = `PERMISSIONS` из `admin.ts`.
 - TOTP: issuer «TilHero Admin», секрет шифруется `ADMIN_MFA_ENC_KEY` (base64 32 байта, AES-GCM); код одноразовый в окне (повтор → MFA_INVALID).
 - Удаляются: AD/LDAP, имперсонация вне ENV=dev, всё про AI-уровни доступа.
@@ -67,7 +67,7 @@ Read-модель `admin_learner_summary` — поля `AdminLearnerRow` из `a
 Уже есть (форк aievent в спринте 1). Изменения: `ReplyTemplate` на RU/UZ (`admin.ts`), `GET /admin/v1/support/templates`. Ответ оператора ученику — уведомление `support.reply` (есть).
 
 ### audit
-Писатели HTTP `POST /internal/v1/records`: + `admin-identity`, `identity-consent` (reveal). Через шину — все сервисы, как сейчас.
+Писатели HTTP `POST /internal/v1/records`: `admin-identity`, `identity-consent` (reveal — делегирование от имени сотрудника, только `sensitive.view*`), `admin-bff` (только `dev.impersonate` и `auth.logout`, только с actor; иначе 403 ACTION_NOT_ALLOWED). Через шину (`admin.audit.recorded.v1`) — доменные сервисы, как сейчас, + `admin-identity`. Фильтр `object_type` в `GET /admin/v1/audit/records`. Чужой `record_id` → 409 AUDIT_RECORD_CONFLICT.
 
 ## 4. admin-bff (8002, Node 22 Fastify, `services/admin-bff`)
 Форк aievent admin-bff: cookie `__Host-tilhero_admin`, Redis-сессия (бездействие 30 мин, абсолют 8 ч), principal из admin-identity с кэшем 30 с, CSRF-синхронизатор + проверка Origin (`ADMIN_ORIGIN`), rate limit входа, step-up ≤ 5 мин (список — шапка `admin.ts`), actor-токен к доменам, имена сотрудников (`*_name`) через `staff/lookup`, агрегация:

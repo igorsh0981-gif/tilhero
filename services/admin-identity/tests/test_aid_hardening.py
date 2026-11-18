@@ -49,7 +49,7 @@ async def test_staff_manage_cannot_escalate(env: Env, root: Person) -> None:
     grant = await env.patch(a, ro_id, {"role": "auditor", "reason": "Перевод"})
     assert grant.status_code == 202 and grant.json()["approval"]["status"] == "PENDING"
     # привилегированная роль — не сразу, а заявкой на решение super_admin (автор не super_admin → без waiver)
-    priv = await env.create_staff(a, new_email("bill"), "billing")
+    priv = await env.create_staff(a, new_email("comm"), "communications")
     assert priv.status_code == 201
     assert priv.json()["staff"]["role"] == "read_only" and priv.json()["approval"]["status"] == "PENDING"
     assert priv.json()["approval"]["waived"] is None
@@ -63,7 +63,7 @@ async def test_staff_manage_cannot_escalate(env: Env, root: Person) -> None:
 
 async def test_approval_audit_masks_staff_email(env: Env, root: Person, root2: Person) -> None:
     email = new_email("masked")
-    r = await env.create_staff(root.actor, email, "billing", "Биллинг")
+    r = await env.create_staff(root.actor, email, "communications", "Коммуникации")
     assert r.json()["approval"]["summary"]["staff"]["email"] == email  # решающему — полностью
     await env.approve(root2.actor, r.json()["approval"]["approval_id"])
     recs = [e.payload for e in await env.audit() if e.payload["action"].startswith("approval.")]
@@ -139,7 +139,7 @@ async def test_staff_api_404_and_422(env: Env, root: Person, root2: Person) -> N
 
 async def test_reject_four_eyes_and_expired(env: Env, root: Person, root2: Person) -> None:
     target = await env.onboard(root.actor, new_email("an"), "analyst")
-    r = await env.patch(root.actor, target.staff_id, {"role": "billing", "reason": "Повышение"})
+    r = await env.patch(root.actor, target.staff_id, {"role": "communications", "reason": "Повышение"})
     aid = r.json()["approval"]["approval_id"]
     same = await env.approve(root.actor, aid, action="reject")
     assert _err(same) == (409, "FOUR_EYES_SAME_PERSON")

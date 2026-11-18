@@ -157,6 +157,8 @@ def _event_payload(p: Plan, changed: list[str]) -> dict[str, Any]:
         "duration_min": p.duration_min,
         "reminders_enabled": p.reminders_enabled,
         "onboarding_completed": p.onboarding_completed_at is not None,
+        "level_self": p.level_self,
+        "preset": p.preset,
     }
 
 

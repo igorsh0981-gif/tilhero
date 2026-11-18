@@ -13,6 +13,10 @@ def _err(r) -> tuple[int, str]:
     return r.status_code, r.json()["code"]
 
 
+def after_privileged(roles_response, code: str) -> bool:
+    return next(r for r in roles_response.json()["items"] if r["code"] == code)["privileged"]
+
+
 async def test_staff_create_list_lookup(env: Env, root: Person) -> None:
     email = new_email("Support.Agent").upper()
     r = await env.create_staff(root.actor, email, "support", "Алина")
@@ -23,7 +27,7 @@ async def test_staff_create_list_lookup(env: Env, root: Person) -> None:
     staff = body["staff"]
     assert staff["email"] == email.lower() and staff["role"] == "support" and body["approval"] is None
     assert staff["must_change_password"] is True and staff["mfa_enabled"] is False
-    assert staff["created_by"] == root.staff_id and staff["auth_provider"] == "local" and staff["status"] == "ACTIVE"
+    assert staff["created_by"] == root.staff_id and staff["status"] == "ACTIVE" and "auth_provider" not in staff
     env.leaks.append(temp)
     dup = await env.create_staff(root.actor, email, "analyst")
     assert _err(dup) == (409, "STAFF_EMAIL_EXISTS")
@@ -147,12 +151,12 @@ async def test_self_action_and_last_super_admin(env: Env, root: Person) -> None:
 async def test_four_eyes_role_grant(env: Env, root: Person, root2: Person) -> None:
     created = await env.onboard(root.actor, new_email("ops"), "support")
     sv = created.principal["session_version"]
-    r = await env.patch(root.actor, created.staff_id, {"role": "billing", "reason": "Перевод в биллинг"})
+    r = await env.patch(root.actor, created.staff_id, {"role": "communications", "reason": "Перевод в коммуникации"})
     assert r.status_code == 202, r.text
     a = r.json()["approval"]
     assert a["status"] == "PENDING" and a["waived"] is None and a["kind"] == "staff.role_grant"
     assert a["requested_by"]["staff_id"] == root.staff_id and a["decided_by"] is None
-    assert a["summary"]["from_role"] == "support" and a["summary"]["to_role"] == "billing"
+    assert a["summary"]["from_role"] == "support" and a["summary"]["to_role"] == "communications"
     assert (await env.principal(created.staff_id)).json()["staff"]["role"] == "support"  # ещё не применено
     dup = await env.patch(root.actor, created.staff_id, {"role": "operations", "reason": "Ещё одна"})
     assert _err(dup) == (409, "APPROVAL_PENDING")
@@ -165,7 +169,7 @@ async def test_four_eyes_role_grant(env: Env, root: Person, root2: Person) -> No
     assert ok.json()["status"] == "APPLIED" and ok.json()["decided_by"]["staff_id"] == root2.staff_id
     assert ok.json()["decision_note"] == "Согласовано"
     p = (await env.principal(created.staff_id)).json()
-    assert p["staff"]["role"] == "billing" and "billing.refund" in p["permissions"]
+    assert p["staff"]["role"] == "communications" and "whatsnew.publish" in p["permissions"]
     assert p["session_version"] == sv + 1
     twice = await env.approve(root2.actor, a["approval_id"])
     assert _err(twice) == (409, "APPROVAL_NOT_PENDING")
@@ -179,7 +183,7 @@ async def test_four_eyes_role_grant(env: Env, root: Person, root2: Person) -> No
 
 
 async def test_four_eyes_reject_and_create_privileged(env: Env, root: Person, root2: Person) -> None:
-    r = await env.create_staff(root.actor, new_email("bill"), "billing", "Биллинг")
+    r = await env.create_staff(root.actor, new_email("comm"), "communications", "Коммуникации")
     assert r.status_code == 201
     body = r.json()
     assert body["staff"]["role"] == "read_only" and body["approval"]["status"] == "PENDING"
@@ -220,9 +224,9 @@ async def test_waived_when_single_super_admin(env: Env, root: Person) -> None:
     assert a["status"] == "APPLIED" and a["waived"] == "single_super_admin"
     assert r.json()["staff"]["role"] == "operations"
     target = await env.onboard(root.actor, new_email("an"), "analyst")
-    up = await env.patch(root.actor, target.staff_id, {"role": "agent_manager", "reason": "Повышение"})
+    up = await env.patch(root.actor, target.staff_id, {"role": "communications", "reason": "Повышение"})
     assert up.status_code == 202 and up.json()["approval"]["waived"] == "single_super_admin"
-    assert (await env.principal(target.staff_id)).json()["staff"]["role"] == "agent_manager"
+    assert (await env.principal(target.staff_id)).json()["staff"]["role"] == "communications"
     rec = [e.payload for e in await env.audit() if e.payload["action"] == "approval.waived"]
     assert len(rec) == 2 and rec[0]["actor_id"] == root.staff_id
 
@@ -230,35 +234,35 @@ async def test_waived_when_single_super_admin(env: Env, root: Person) -> None:
 async def test_role_matrix_update_via_approval(env: Env, root: Person, root2: Person) -> None:
     analyst = await env.onboard(root.actor, new_email("an"), "analyst")
     roles = (await env.c.get("/admin/v1/roles", headers=env.h(root.actor))).json()
-    assert [r["code"] for r in roles["items"]] == ["super_admin", "operations", "support", "billing",
-                                                     "agent_manager", "analyst", "auditor", "read_only"]
-    assert len(roles["permissions"]) == 25
+    assert [r["code"] for r in roles["items"]] == ["super_admin", "operations", "communications", "support",
+                                                     "methodist", "analyst", "auditor", "read_only"]
+    assert len(roles["permissions"]) == 17
     by = {r["code"]: r for r in roles["items"]}
     assert by["super_admin"]["staff_count"] == 2 and by["analyst"]["staff_count"] == 1
     assert by["operations"]["privileged"] is True and by["support"]["privileged"] is False
     assert by["operations"]["permissions"] == ["dashboard.read", "users.read", "support.read", "audit.read",
-                                               "config.read", "ops.kill_switch", "events.review",
-                                               "sources.manage", "discovery.manage", "news.manage",
-                                               "users.access.manage", "ops.queues.manage"]
+                                               "config.read", "config.edit", "config.publish"]
     assert by["read_only"]["name"] == {"ru": "Только просмотр", "en": "Read Only"}
+    assert by["methodist"]["name"] == {"ru": "Методист", "en": "Methodologist"}
     upd = await env.c.put("/admin/v1/roles/analyst",
-                          json={"permissions": ["dashboard.read", "users.read", "export.csv"],
-                                "reason": "Выгрузки для аналитиков"}, headers=env.h(root.actor))
+                          json={"permissions": ["dashboard.read", "users.read", "audit.read"],
+                                "reason": "Журнал для аналитиков"}, headers=env.h(root.actor))
     assert upd.status_code == 202 and upd.json()["approval"]["status"] == "PENDING"
-    assert "export.csv" not in (await env.principal(analyst.staff_id)).json()["permissions"]
+    assert "audit.read" not in (await env.principal(analyst.staff_id)).json()["permissions"]
     pend = await env.c.put("/admin/v1/roles/analyst", json={"permissions": ["dashboard.read"], "reason": "Ещё"},
                            headers=env.h(root.actor))
     assert _err(pend) == (409, "APPROVAL_PENDING")
     ok = await env.approve(root2.actor, upd.json()["approval"]["approval_id"])
     assert ok.status_code == 200 and ok.json()["status"] == "APPLIED"
-    assert "export.csv" in (await env.principal(analyst.staff_id)).json()["permissions"]
+    assert "audit.read" in (await env.principal(analyst.staff_id)).json()["permissions"]
+    assert after_privileged(await env.c.get("/admin/v1/roles", headers=env.h(root.actor)), "analyst") is False
     after = {r["code"]: r for r in (await env.c.get("/admin/v1/roles", headers=env.h(root.actor))).json()["items"]}
     assert after["analyst"]["updated_by"] == root.staff_id
     sa = await env.c.put("/admin/v1/roles/super_admin", json={"permissions": ["dashboard.read"], "reason": "Сужение"},
                          headers=env.h(root.actor))
     assert _err(sa) == (409, "SUPER_ADMIN_ROLES_MANAGE")
     same = await env.c.put("/admin/v1/roles/analyst",
-                           json={"permissions": ["users.read", "dashboard.read", "export.csv"], "reason": "Без изм."},
+                           json={"permissions": ["users.read", "dashboard.read", "audit.read"], "reason": "Без изм."},
                            headers=env.h(root.actor))
     assert _err(same) == (409, "ROLE_UNCHANGED")
     unknown = await env.c.put("/admin/v1/roles/ceo", json={"permissions": [], "reason": "Нет"},
@@ -272,7 +276,7 @@ async def test_role_matrix_update_via_approval(env: Env, root: Person, root2: Pe
                                headers=env.h(root.actor))
     assert dup_perm.status_code == 422
     rec = next(e.payload for e in await env.audit() if e.payload["action"] == "role.permissions_requested")
-    assert rec["object_type"] == "approval" and rec["reason"] == "Выгрузки для аналитиков"
+    assert rec["object_type"] == "approval" and rec["reason"] == "Журнал для аналитиков"
 
 
 async def test_session_version_grows_and_principal_reflects(env: Env, root: Person, root2: Person) -> None:

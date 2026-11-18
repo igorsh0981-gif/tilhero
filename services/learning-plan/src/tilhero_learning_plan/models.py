@@ -60,6 +60,8 @@ class Plan(Base):
         ),
         CheckConstraint("duration_min IN (10,15,20,30)", name="ck_plans_duration"),
         CheckConstraint("version >= 1", name="ck_plans_version"),
+        # спринт 2 (миграция 0002): сверка read-модели админки — GET /admin/v1/plans?updated_after=&cursor=
+        Index("ix_plans_updated", "updated_at", "user_id"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)

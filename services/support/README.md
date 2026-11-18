@@ -37,15 +37,26 @@ Support **не** делает возвраты, смену тарифа, пра�
 ### Staff (вызывает `admin-bff` со спринта 2, сотрудник — claim `actor` токена)
 | Метод | Путь | Право |
 |---|---|---|
-| GET | `/admin/v1/support/tickets?status=open\|all\|NEW,…&category=&priority=&assignee=<id>\|_me\|_none&sla=breached\|soon\|ok&user_id=<uuid>&sort=created\|sla&limit=&cursor=` | `support.read` |
-| GET | `/admin/v1/support/tickets/{ref}` — с внутренними заметками, `user_id`, `has_context`, эскалациями, историей | `support.read` |
+| GET | `/admin/v1/support/tickets?status=open\|all\|NEW,…&category=&priority=&assignee=me\|none\|<id>&sla=breached\|soon\|ok&user_id=<uuid>&sort=created\|sla&limit=&cursor=` (`_me`/`_none` — синонимы) | `support.read` |
+| GET | `/admin/v1/support/tickets/{ref}` — с внутренними заметками, `user_id`, `has_context`, эскалациями, историей; `context.deeplink` — `null`, если экрана нет (admin.ts) | `support.read` |
+| GET | `/admin/v1/support/templates` → `{items: [{id, title {ru, en}, text {ru, uz}, categories}]}` — шаблоны ответов оператора на языке ученика | `support.read` |
 | GET | `/admin/v1/support/tickets/{ref}/client-view` — «Как видит клиент»: тот же сериализатор, что `GET /internal/v1/me/tickets/{ref}`; только чтение | `support.read` |
 | POST | `/admin/v1/support/tickets/{ref}/take` — назначить на себя, NEW→IN_PROGRESS; CLOSED → 409 `SUPPORT_TICKET_CLOSED`; аудит `ticket.take` | `support.reply` |
 | GET | `/admin/v1/support/stats?period=today\|7d\|30d` → `{open, in_progress, waiting_customer, breached, avg_first_response_minutes, avg_resolution_minutes}` (`today` — по `STATS_TIMEZONE`, Asia/Tashkent) | `support.read` или `dashboard.read` |
 | POST | `/admin/v1/support/tickets/{ref}/messages {text, visibility: public\|internal}` — имя оператора только из `actor.name` токена (поле `author_name` в теле → 422) | `support.reply` |
 | PATCH | `/admin/v1/support/tickets/{ref} {status?, priority?, assignee_id?}` → 409 `SUPPORT_INVALID_TRANSITION` | `support.reply` |
 | POST | `/admin/v1/support/tickets/{ref}/escalations {type, note}` (+ `Idempotency-Key`) | `support.reply` |
-| GET/PUT | `/admin/v1/support/sla-policies` (`PUT {items:[{category\|*, priority, first_response_minutes, resolution_minutes}], reason}`) | `support.manage` |
+| GET | `/admin/v1/support/sla-policies` | `support.read` или `support.manage` |
+| PUT | `/admin/v1/support/sla-policies {items:[{category\|*, priority, first_response_minutes, resolution_minutes}], reason}` | `support.manage` |
+
+Имена сотрудников (`assignee_name`, полные `author_name`) и сводку ученика (`learner`) в `StaffTicket` добавляет admin-bff
+(admin-identity `staff/lookup`, user-admin) — support хранит только `assignee_id`/`author_id` и имя оператора без фамилии.
+
+**Шаблоны ответов** (`domain/reply_templates.py`, 10 шт.): уроки, оценка урока, график и напоминания, детский профиль,
+аккаунт, персональные данные, «нужны подробности», «исправили — проверьте», «передали команде», «вопрос решён». Текст —
+RU и UZ (латиница, `oʻ`/`gʻ` — U+02BB, `ʼ` — U+02BC), без плейсхолдеров, сроков, сумм, давления и запросов PIN/кодов;
+названия разделов Mini App в «…» — как в i18n Mini App (сверка — тест). Оператор вставляет шаблон в поле ответа и правит
+перед отправкой; шаблон сам ничего не отправляет.
 
 Типы эскалаций: `billing_review` (оплата → billing), `assessment_review` (оценка урока → методисты), `content_review`
 (урок или материалы → методисты), `tech_issue` (технический сбой → разработка), `security_privacy` (безопасность и
@@ -61,8 +72,11 @@ urgent 30/240 минут. Приоритет по умолчанию: `ACCOUNT`,
 Смена приоритета пересчитывает сроки от момента создания. `sla_state`: таймер идёт в NEW/IN_PROGRESS (цель — первый
 ответ, затем решение), `breached` — срок прошёл, `soon` — < 30 мин, иначе `ok`; WAITING_CUSTOMER — пауза.
 
-Внутренние заметки (`visibility=internal`) не возвращаются клиентским API, не порождают событий и уведомлений и не меняют
-видимые ученику `updated_at`/`last_message_at`. Ученик видит имя оператора без фамилии и не видит `author_id`.
+AT-25: публичный ответ оператора виден ученику в клиентском API (непрочитанные +1) и порождает
+`support.ticket.replied.v1` → notifications отправляет `support.reply` (только номер обращения, без текста ответа).
+Внутренние заметки (`visibility=internal`) не возвращаются клиентским API и «Как видит клиент» (выборка и сериализатор
+ученика отбрасывают их оба), не порождают событий и уведомлений (только аудит `ticket.note` с длиной, без текста) и не
+меняют видимые ученику `updated_at`/`last_message_at`. Ученик видит имя оператора без фамилии и не видит `author_id`.
 
 ## События
 Публикует (outbox): `support.ticket.created.v1`, `support.ticket.replied.v1` (только публичный ответ оператора, без

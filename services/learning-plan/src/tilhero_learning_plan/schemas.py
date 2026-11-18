@@ -118,3 +118,20 @@ class TickOut(BaseModel):
     missed: int
     # true — предыдущий tick ещё идёт, этот вызов ничего не делал (повтор n8n не ждёт блокировку)
     skipped: bool = False
+
+
+class AdminPlanOut(BaseModel):
+    """Элемент GET /admin/v1/plans (INTERNAL_API §3, вызывающий — user-admin): AdminLearnerPlan + user_id."""
+
+    user_id: str
+    goal: Goal | None
+    level_self: LevelSelf | None
+    ui_lang: UiLang
+    schedule: ScheduleOut
+    onboarding_completed_at: datetime | None
+    updated_at: datetime
+
+
+class AdminPlanPage(BaseModel):
+    items: list[AdminPlanOut]
+    next_cursor: str | None

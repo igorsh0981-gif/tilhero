@@ -15,7 +15,7 @@ from tilhero_admin_identity.domain import approvals, audit
 from tilhero_admin_identity.domain.catalog import DEFAULT_ROLE, PERMISSIONS, ROLE_CODES, SUPER_ADMIN, privileged_by
 from tilhero_admin_identity.domain.crypto import Passwords, temporary_password
 from tilhero_admin_identity.domain.policy import mask_email
-from tilhero_admin_identity.domain.resets import ResetContext, ad_password, apply_mfa_reset, apply_password_reset
+from tilhero_admin_identity.domain.resets import ResetContext, apply_mfa_reset, apply_password_reset
 from tilhero_admin_identity.domain.store import (
     active_super_admin_ids,
     bump_session,
@@ -98,7 +98,7 @@ async def create_staff(session: AsyncSession, body: StaffCreate, requester: Staf
     at = now()
     s = Staff(
         staff_id=uuid.uuid4(), email=email, display_name=body.display_name,
-        role=DEFAULT_ROLE if privileged else role.code, auth_provider="local",
+        role=DEFAULT_ROLE if privileged else role.code,
         password_hash=await passwords.hash(temp), temp_password_expires_at=at + timedelta(hours=temp_ttl_hours),
         must_change_password=True, mfa_enabled=False, status="ACTIVE", session_version=1,
         created_at=at, updated_at=at, created_by=requester.staff_id,
@@ -208,7 +208,7 @@ async def reissue_allowed(session: AsyncSession, target: Staff, requester: Staff
     обычный путь заявки (N1): иначе автор, реактивировав давно не входившую учётку,
     получил бы второй голос (ревью M-1)."""
     if not (target.created_by == requester.staff_id and target.last_login_at is None
-            and target.must_change_password and target.status == "ACTIVE" and target.auth_provider == "local"):
+            and target.must_change_password and target.status == "ACTIVE"):
         return False
     others = set(await active_super_admin_ids(session)) - {requester.staff_id, target.staff_id}
     if not others:
@@ -231,8 +231,6 @@ async def _reset(session: AsyncSession, staff_id: uuid.UUID, action: str, reason
     if target.staff_id == requester.staff_id:
         raise self_action()
     await ensure_no_escalation(session, requester, target.role)
-    if action == "password" and target.auth_provider != "local":
-        raise ad_password()
     if not await is_privileged(session, target.role):
         if action == "password":
             temp = await apply_password_reset(session, target, requester, reason, ctx)

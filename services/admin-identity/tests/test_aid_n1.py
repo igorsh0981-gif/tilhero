@@ -169,9 +169,9 @@ async def test_login_failed_audit_is_aggregated_per_email(env: Env) -> None:
 
 
 async def test_author_reissues_temp_password_before_first_login(env: Env, root: Person) -> None:
-    """Прод 10.10: второй super_admin потерял временный пароль до первого входа → сброс уходил в заявку, которую
-    мог согласовать только он сам (тупик). Автор учётки перевыпускает пароль сразу, пока цель ни разу не входила
-    и других решающих нет; висящая заявка по цели отклоняется."""
+    """Инцидент форка aievent: второй super_admin потерял временный пароль до первого входа → сброс уходил
+    в заявку, которую мог согласовать только он сам (тупик). Автор учётки перевыпускает пароль сразу, пока цель
+    ни разу не входила и других решающих нет; висящая заявка по цели отклоняется."""
     email = new_email("sa-new")
     c = await env.create_staff(root.actor, email, "super_admin", "New Admin")  # единственный super_admin → waived
     first = c.json()["temporary_password"]

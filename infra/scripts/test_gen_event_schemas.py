@@ -42,5 +42,5 @@ def test_internal_keys_cover_every_service():
     spec.loader.exec_module(mod)
     root = HERE.parents[1]
     services = {p.name for p in (root / "services").iterdir() if (p / "Dockerfile").exists()}
-    services |= {"telegram-bot-gateway", "admin-bff"}  # admin-bff — спринт 2, ключ заводится заранее
+    services |= {"telegram-bot-gateway"}
     assert set(mod.SERVICES) == services

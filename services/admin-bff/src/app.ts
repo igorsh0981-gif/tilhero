@@ -15,29 +15,15 @@ import { EXTRA_REDACT_PATHS, scrub, type LogSink } from "./logging.js";
 import { createLimiter } from "./rateLimit.js";
 import { auditRoutes } from "./routes/audit.js";
 import { authRoutes } from "./routes/auth.js";
-import { billingRoutes } from "./routes/billing.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
-import { discoveryRoutes } from "./routes/discovery.js";
 import { experienceRoutes } from "./routes/experience.js";
-import { reviewRoutes } from "./routes/review.js";
-import { sourceRoutes } from "./routes/sources.js";
-import { travelRoutes } from "./routes/travel.js";
-import { newsRoutes } from "./routes/news.js";
-import { limitsRoutes } from "./routes/limits.js";
-import { watchRoutes } from "./routes/watch.js";
-import { aiRoutes } from "./routes/ai.js";
-import { usageRoutes } from "./routes/usage.js";
-import { opsRoutes } from "./routes/ops.js";
-import { alertRoutes } from "./routes/alerts.js";
-import { deletionRoutes } from "./routes/deletions.js";
-import { rateLimitRoutes } from "./routes/ratelimits.js";
-import { skillRoutes } from "./routes/skills.js";
+import { learnerRoutes } from "./routes/learners.js";
+import { notificationRoutes } from "./routes/notifications.js";
+import { releaseNoteRoutes } from "./routes/releaseNotes.js";
 import { staffRoutes } from "./routes/staff.js";
 import { supportRoutes } from "./routes/support.js";
-import { userRoutes } from "./routes/users.js";
 import { SessionStore } from "./sessions.js";
 import { SERVICE_NAME, createDomains } from "./upstream.js";
-import { setRunbookBase } from "./routes/opsCodecs.js";
 
 export interface AppDeps {
   redis?: Redis;
@@ -124,7 +110,6 @@ export function assertRouteDeclared(
 }
 
 export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App> {
-  setRunbookBase(config.runbookBaseUrl); // ссылки «Runbook» оповещений — только внутри раздела (ревью спринта 9)
   const ownRedis = !deps.redis;
   const redis = deps.redis ?? createRedis(config.redisUrl);
   const now = deps.now ?? (() => Date.now());
@@ -156,10 +141,6 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
     },
   });
   const log = app.log;
-  if (config.unconfigured.length > 0) {
-    // порядок выкладки: код спринтов 4–7 мог выйти раньше переменных — разделы закрыты (503 FEATURE_UNAVAILABLE)
-    log.warn({ missing: config.unconfigured }, "sprint 4-7 domain urls are not configured, these sections respond 503 FEATURE_UNAVAILABLE");
-  }
   const onRedisError = (err: Error) => log.warn({ err_name: err.name, err_message: err.message }, "redis connection error");
   redis.on("error", onRedisError);
 
@@ -189,7 +170,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
     });
   });
 
-  // POST без тела (approve без note, take, ai-draft) = пустой объект: схема тела проверяет обязательные поля
+  // POST без тела (approve без note, take, estimate) = пустой объект: схема тела проверяет обязательные поля
   app.addHook("preValidation", async (req) => {
     if (req.body === undefined && req.method !== "GET" && req.routeOptions.schema?.body) req.body = {};
   });
@@ -227,7 +208,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
     void reply.header("cache-control", "no-store");
     void reply.header("x-frame-options", "DENY");
     void reply.header("referrer-policy", "no-referrer");
-    // спринт 9 (SEC-12): ответы API — данные, не документы: никаких ресурсов и встраивания; чужим origin не отдаются
+    // ответы API — данные, не документы: никаких ресурсов и встраивания; чужим origin не отдаются
     void reply.header("content-security-policy", "default-src 'none'; frame-ancestors 'none'");
     void reply.header("cross-origin-resource-policy", "same-origin");
     return payload;
@@ -258,27 +239,13 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
 
   authRoutes(app, ctx);
   dashboardRoutes(app, ctx);
-  userRoutes(app, ctx);
+  learnerRoutes(app, ctx);
   supportRoutes(app, ctx);
   staffRoutes(app, ctx);
   auditRoutes(app, ctx);
   experienceRoutes(app, ctx);
-  billingRoutes(app);
-  reviewRoutes(app, ctx);
-  sourceRoutes(app, ctx);
-  discoveryRoutes(app, ctx);
-  limitsRoutes(app, ctx);
-  travelRoutes(app, ctx);
-  newsRoutes(app, ctx);
-  watchRoutes(app, ctx);
-  // спринт 7: учёт и стоимость AI, бюджеты и kill switch, агенты и skills, Test Console, уровни доступа
-  aiRoutes(app, ctx);
-  usageRoutes(app, ctx);
-  opsRoutes(app, ctx);
-  alertRoutes(app, ctx);
-  deletionRoutes(app, ctx);
-  rateLimitRoutes(app, ctx);
-  skillRoutes(app, ctx);
+  releaseNoteRoutes(app, ctx);
+  notificationRoutes(app, ctx);
 
   app.addHook("onClose", async () => {
     redis.off("error", onRedisError);

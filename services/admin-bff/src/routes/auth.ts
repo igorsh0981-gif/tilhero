@@ -9,8 +9,10 @@ import type { LoginStep, Me, MfaEnrollStart, RoleCode, StepUpResult } from "@til
 import { AppError } from "@tilhero/ts-common";
 import type { FastifyReply } from "fastify";
 import { authenticate, sessionRevoked, sessionRotated, unauthorized } from "../auth.js";
+import { parseDomain } from "../codec.js";
+import { MFA_ENROLL } from "../contract.js";
 import { clearSessionCookie, sessionCookie } from "../cookies.js";
-import { writeAudit, type BffContext } from "../context.js";
+import { parsePrincipal, writeAudit, type BffContext } from "../context.js";
 import { staffOf, validationError, type App, type Principal } from "../http.js";
 import { authenticated, canImpersonate, publicAuth } from "../rbac.js";
 import { CHALLENGE, ROLE, TOTP, nullable, obj, str } from "../schemas.js";
@@ -66,8 +68,8 @@ export function authRoutes(app: App, ctx: BffContext): void {
     { config: publicAuth("auth_step"), schema: { response: ok(MFA_ENROLL_START), body: obj({ challenge: CHALLENGE }, ["challenge"]) } },
     async (req): Promise<MfaEnrollStart> => {
       await limitChallenge(req.body.challenge);
-      const r = await idp.post<MfaEnrollStart>("/internal/v1/auth/mfa/enroll/start", { body: req.body });
-      return { secret: r.secret, otpauth_uri: r.otpauth_uri, issuer: r.issuer, account: r.account };
+      const r = await idp.post<unknown>("/internal/v1/auth/mfa/enroll/start", { body: req.body });
+      return parseDomain(ctx, "admin-identity", MFA_ENROLL, r);
     },
   );
 
@@ -113,8 +115,9 @@ export function authRoutes(app: App, ctx: BffContext): void {
       const staffId = auth.principal.staff.staff_id;
       // кэш principal только сбрасывается (не заполняется ответом шага): следующий запрос перечитает admin-identity
       await ctx.principals.invalidate(staffId);
-      const principal: Principal =
-        step.principal ?? (await idp.get<Principal>(`/internal/v1/staff/${encodeURIComponent(staffId)}/principal`));
+      const principal: Principal = step.principal
+        ? parsePrincipal(step.principal)
+        : parsePrincipal(await idp.get<unknown>(`/internal/v1/staff/${encodeURIComponent(staffId)}/principal`));
       const rotated = await ctx.store(() =>
         ctx.sessions.rotate(auth.sessionId, auth.session, { session_version: principal.session_version }, ctx.now()),
       );

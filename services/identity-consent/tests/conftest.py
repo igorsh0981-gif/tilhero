@@ -88,6 +88,33 @@ class FakeNotifications:
 
 
 @dataclass
+class FakeAudit:
+    """audit POST /internal/v1/records (httpx.MockTransport). responses — очередь: int (HTTP-статус ошибки) или
+    Exception; по умолчанию 201. calls — только принятые записи; issuers — издатель внутреннего токена (iss)."""
+
+    calls: list[dict[str, Any]] = field(default_factory=list)
+    issuers: list[str] = field(default_factory=list)
+    headers: list[dict[str, str]] = field(default_factory=list)
+    responses: list[Any] = field(default_factory=list)
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        import jwt
+
+        assert request.url.path == "/internal/v1/records"
+        item = self.responses.pop(0) if self.responses else None
+        if isinstance(item, Exception):
+            raise item
+        if isinstance(item, int):
+            return httpx.Response(item, json={"code": "X", "message": "x", "trace_id": "t", "details": {}})
+        body = json.loads(request.content)
+        token = request.headers["x-internal-token"]
+        self.issuers.append(jwt.decode(token, options={"verify_signature": False})["iss"])
+        self.headers.append(dict(request.headers))
+        self.calls.append(body)
+        return httpx.Response(201, json={"seq": len(self.calls), "record_id": body["record_id"]})
+
+
+@dataclass
 class Env:
     settings: Settings
     client: httpx.AsyncClient
@@ -96,6 +123,7 @@ class Env:
     schema: str
     notifications: FakeNotifications
     app: Any = None
+    audit: FakeAudit = field(default_factory=FakeAudit)
 
     # ---------- часы сервиса (app.state.clock): None — реальное время ----------
     def set_clock(self, now: Any) -> None:
@@ -234,12 +262,14 @@ async def env():
     bus = InMemoryBus()
     runtime = Runtime(settings, bus=bus)
     notifications = FakeNotifications()
-    app = build_app(settings, runtime, notifications_transport=httpx.MockTransport(notifications.handler))
+    audit = FakeAudit()
+    app = build_app(settings, runtime, notifications_transport=httpx.MockTransport(notifications.handler),
+                    audit_transport=httpx.MockTransport(audit.handler))
     async with app.router.lifespan_context(app):
         client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://identity-consent")
         environment = Env(
             settings=settings, client=client, runtime=runtime, bus=bus, schema=schema, notifications=notifications,
-            app=app,
+            app=app, audit=audit,
         )
         yield environment
         await client.aclose()

@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 from support_testkit import MANAGER, OPERATOR, OPERATOR_2, OUTSIDER, READER
 
+from tilhero_common.internal_auth import Actor
 from tilhero_common.testing import assert_event_conforms, internal_headers
 
 
@@ -200,7 +201,8 @@ async def test_staff_auth_and_permissions(env) -> None:
             {"type": "billing_review", "note": "Проверить"},
             "support.reply",
         ),
-        ("GET", "/admin/v1/support/sla-policies", None, "support.manage"),
+        ("GET", "/admin/v1/support/sla-policies", None, "support.read"),
+        ("GET", "/admin/v1/support/templates", None, "support.read"),
         (
             "PUT",
             "/admin/v1/support/sla-policies",
@@ -228,9 +230,23 @@ async def test_staff_auth_and_permissions(env) -> None:
     # Только чтение: ответить нельзя
     ro = await env.reply(ref, actor=READER)
     assert ro.status_code == 403 and ro.json()["details"]["permission"] == "support.reply"
+    # SLA: читать может оператор (support.read), менять — только support.manage
     assert (
         await env.client.get("/admin/v1/support/sla-policies", headers=env.staff(OPERATOR))
-    ).status_code == 403
+    ).status_code == 200
+    put_denied = await env.client.put(
+        "/admin/v1/support/sla-policies",
+        json={
+            "items": [{"category": "*", "priority": "low", "first_response_minutes": 1, "resolution_minutes": 2}],
+            "reason": "Без права",
+        },
+        headers=env.staff(OPERATOR),
+    )
+    assert put_denied.status_code == 403 and put_denied.json()["details"]["permission"] == "support.manage"
+    manage_only = Actor(id="lead.02", role="support_lead", permissions=frozenset({"support.manage"}))
+    assert (
+        await env.client.get("/admin/v1/support/sla-policies", headers=env.staff(manage_only))
+    ).status_code == 200
     await env.flush()
     assert env.bus.of_type("support.ticket.replied.v1") == []
 
@@ -304,6 +320,10 @@ async def test_queue_filters_and_pagination(env) -> None:
     assert await numbers(f"assignee={OPERATOR_2.id}") == [b["number"]]
     assert await numbers("assignee=_me", actor=OPERATOR_2) == [b["number"]]
     assert await numbers("assignee=_none") == [c["number"], a["number"]]
+    # формы admin.ts: assignee=me|none
+    assert await numbers("assignee=me", actor=OPERATOR_2) == [b["number"]]
+    assert await numbers("assignee=me", actor=OPERATOR) == []
+    assert await numbers("assignee=none") == [c["number"], a["number"]]
     assert await numbers(f"user_id={users[1]}") == [b["number"]]
     page1 = (await env.client.get("/admin/v1/support/tickets?limit=2", headers=env.staff())).json()
     page2 = (

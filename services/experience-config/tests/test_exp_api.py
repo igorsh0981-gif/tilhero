@@ -363,9 +363,47 @@ async def test_activate_rollback_and_repeat_rollback(env) -> None:
         assert_event_conforms(e)
         RecordIn.model_validate(e.payload)
         p = e.payload
-        assert (p["actor_type"], p["actor_id"], p["actor_role"]) == ("staff", PUBLISHER.id, "super_admin")
+        assert (p["actor_type"], p["actor_id"], p["actor_role"]) == ("staff", PUBLISHER.id, "operations")
         assert p["object_type"] == "experience_config" and p["object_id"] == f"miniapp@{p['after']['version']}"
         assert p["reason"] in {"Тёмная тетрадь", "Жалобы на контраст", "Вернуть"}
+
+
+async def test_admin_theme_activate_and_rollback_without_build(env) -> None:
+    """AT-24: тема и раскладка админки активируются и откатываются без сборки — admin-bff (GET current) получает
+    новую конфигурацию сразу после команды (кэш 60 с обновляется в той же команде), откат возвращает прежнюю."""
+    admin_current = "/internal/v1/experience/admin/current"
+    first = await env.c.get(admin_current, headers=env.h(issuer="admin-bff"))
+    assert first.json()["version"] == "1.0.0" and first.json()["layout"]["density"] == "compact"
+    payload = await env.seed_payload("admin", "1.0.0")
+    payload["theme"]["version"] = "1.1.0"
+    payload["layout"]["density"] = "comfortable"
+    created = await env.c.post(f"{BASE}/admin/versions", json=new_version(payload, "1.1.0", "Просторнее"),
+                               headers=env.h(EDITOR))
+    assert created.status_code == 201, created.text
+    assert (await env.c.get(admin_current, headers=env.h(issuer="admin-bff"))).json()["version"] == "1.0.0"
+    act = await env.c.post(f"{BASE}/admin/activate", json={"version": "1.1.0", "reason": "Просторная админка"},
+                           headers=env.h(PUBLISHER))
+    assert act.status_code == 201, act.text
+    now = await env.c.get(admin_current, headers=env.h(issuer="admin-bff"))
+    assert now.json()["version"] == "1.1.0" and now.json()["layout"]["density"] == "comfortable"
+    assert now.headers["x-cache"] == "hit"  # команда уже положила новую конфигурацию в кэш
+    # Mini App не затронута
+    assert (await env.current("miniapp")).json()["version"] == "1.0.0"
+    rb = await env.c.post(f"{BASE}/admin/rollback", json={"reason": "Вернуть плотную"}, headers=env.h(PUBLISHER))
+    assert rb.status_code == 201 and (rb.json()["version"], rb.json()["previous_version"]) == ("1.0.0", "1.1.0")
+    back = await env.c.get(admin_current, headers=env.h(issuer="admin-bff"))
+    assert back.json()["version"] == "1.0.0" and back.json()["layout"]["density"] == "compact"
+    state = (await env.c.get(f"{BASE}/admin/state", headers=env.h(READER))).json()
+    assert state["current"]["kind"] == "rollback" and state["previous_version"] == "1.1.0"
+    await env.flush()
+    activated = env.events("experience.config.activated.v1")
+    assert [(e.payload["app"], e.payload["version"]) for e in activated] == [("admin", "1.1.0"), ("admin", "1.0.0")]
+    audits = [e.payload for e in env.events("admin.audit.recorded.v1")]
+    assert [(a["action"], a["object_id"]) for a in audits] == [
+        ("config.create", "admin@1.1.0"), ("config.publish", "admin@1.1.0"), ("config.rollback", "admin@1.0.0")]
+    assert [a["reason"] for a in audits[1:]] == ["Просторная админка", "Вернуть плотную"]
+    for e in env.events("admin.audit.recorded.v1"):
+        assert_event_conforms(e)
 
 
 async def test_activate_errors_and_permissions(env) -> None:

@@ -1,13 +1,37 @@
 /**
  * Матрица маршрутов: КАЖДЫЙ сессионный маршрут admin-bff проверяется на
- *  - 403 PERMISSION_DENIED у сотрудника без прав (до вызова домена),
  *  - 403 STEP_UP_REQUIRED без свежего TOTP на маршрутах requireStepUp (до вызова домена),
- *  - happy path через подделку доменов: ожидаемый статус, вызов нужного домена с actor-токеном сотрудника.
- * Новый маршрут без строки в CASES роняет тест «матрица покрывает все маршруты» (A30 — в security.test.ts).
+ *  - happy path через подделку доменов: ожидаемый статус, вызов нужного домена и пути с actor-токеном сотрудника,
+ *  - 4xx домена передаётся клиенту с кодом и details; 5xx / сеть → 503 UPSTREAM_UNAVAILABLE {service}.
+ * 401 без сессии, 403 PERMISSION_DENIED и 403 CSRF_INVALID на всех маршрутах — security.test.ts.
+ * Новый маршрут без строки в CASES роняет тест «матрица покрывает все маршруты».
  *
  * Строгость контракта: fast-json-stringify молча превращает null в ""/0/{} и не требует полей, поэтому каждый 2xx
  * объект ДО сериализации проверяется строгим Ajv по той же схеме ответа (x-contract-required → required).
  */
+import { Ajv, type ValidateFunction } from "ajv";
+import type { FastifyReply, FastifyRequest } from "fastify";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { strictContractSchema } from "../src/responses.js";
+import {
+  AUD,
+  APPROVAL_ID,
+  CAMPAIGN_ID,
+  LEARNER_ID,
+  NOTE_ID,
+  RECORD_ID,
+  TICKET_ID,
+  browser,
+  campaignBody,
+  closeRedis,
+  domainError,
+  loginAs,
+  makeHarness,
+  releaseNoteBody,
+  stepUp,
+  type Harness,
+  type Service,
+} from "./helpers.js";
 
 /** Нарушения схем контракта, собранные пробой ответа (route, status, ошибки Ajv). */
 const violations: string[] = [];
@@ -31,58 +55,9 @@ function probe(req: FastifyRequest, reply: FastifyReply, payload: unknown): void
     violations.push(`${req.method} ${req.routeOptions.url} ${status}: ${ajv.errorsText(validate.errors, { separator: "; " })}`);
   }
 }
-import { Ajv, type ValidateFunction } from "ajv";
-import type { FastifyReply, FastifyRequest } from "fastify";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { strictContractSchema } from "../src/responses.js";
-import {
-  REVIEW_ID,
-  RUN_ID,
-  SOURCE_ID,
-  fakeSprint4,
-  fakeSprint5,
-  jsonApiMapping,
-  fakeSprint6,
-  fakeLimits,
-  fakeSprint7,
-  fakeSprint8,
-  fakeSprint9,
-  fakeReleaseNotes,
-  NOTE_ID,
-  releaseNoteBody,
-  DELETION_ID,
-  OPS_ALERT_ID,
-  ALERT_ID,
-  CASE_ID,
-  REQUEST_ID,
-  RUN_ID7,
-  NEWS_ID,
-  NEWS_SOURCE_ID,
-  OFFER_ID,
-  TICKET_ID,
-  activationRow,
-  approvalRow,
-  auditRow,
-  staffRow,
-  versionRow,
-  TOTP_OK,
-  USER_ID,
-  browser,
-  cookieOf,
-  stepUp,
-  closeRedis,
-  json,
-  login,
-  loginAs,
-  redis,
-  makeHarness,
-  type Harness,
-  type Service,
-} from "./helpers.js";
 
 const STAFF_ID = "7d0c2f43-58b5-4d0e-9f7e-2a8c7c1b9e11";
-const APPROVAL_ID = "5b1f0d0e-1111-4c2b-9a51-0d6c7a1e2f30";
-const RECORD_ID = "9a3e3a7e-2f4b-4c1d-8e5f-6a7b8c9d0e1f";
+const IK = (k: string) => ({ "idempotency-key": `matrix-${k}-0001` });
 
 interface Case {
   /** URL с подставленными параметрами */
@@ -90,168 +65,35 @@ interface Case {
   payload?: unknown;
   headers?: Record<string, string>;
   status: number;
-  /** домен и путь, который обязан быть вызван (null — ответ собирает сам BFF) */
+  /** домен, метод и путь, которые обязаны быть вызваны (null — ответ собирает сам BFF) */
   domain: [Service, string, string] | null;
 }
 
 /** Ключ — "<METHOD> <шаблон маршрута>" как в app.adminRoutes. */
 const CASES: Record<string, Case> = {
-  // ---------- спринт 8: мониторинг, оповещения
-  "GET /admin/v1/ops/providers": { url: "/admin/v1/ops/providers", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/health/providers"] },
-  "GET /admin/v1/ops/providers/:provider/history": {
-    url: "/admin/v1/ops/providers/aviasales/history?range=7d",
-    status: 200,
-    domain: ["opsMonitor", "GET", "/internal/v1/health/providers/aviasales/history"],
-  },
-  "POST /admin/v1/ops/providers/:provider/probe": {
-    url: "/admin/v1/ops/providers/aviasales/probe",
-    payload: {},
-    status: 200,
-    domain: ["opsMonitor", "POST", "/internal/v1/health/providers/aviasales:probe"],
-  },
-  "GET /admin/v1/ops/feeds": { url: "/admin/v1/ops/feeds", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/health/feeds"] },
-  "GET /admin/v1/ops/alerts": { url: "/admin/v1/ops/alerts?state=open&limit=20", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/alerts"] },
-  "GET /admin/v1/ops/queues/streams": { url: "/admin/v1/ops/queues/streams", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/queues/streams"] },
-  "GET /admin/v1/ops/queues/consumers": { url: "/admin/v1/ops/queues/consumers", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/queues/consumers"] },
-  "GET /admin/v1/ops/queues/outbox": { url: "/admin/v1/ops/queues/outbox", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/queues/outbox"] },
-  "GET /admin/v1/ops/queues/services": { url: "/admin/v1/ops/queues/services", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/queues/services"] },
-  "GET /admin/v1/ops/dlq": { url: "/admin/v1/ops/dlq?consumer=notifications_watch_changes&limit=50", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/dlq/messages"] },
-  "GET /admin/v1/ops/dlq/actions": { url: "/admin/v1/ops/dlq/actions", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/dlq/actions"] },
-  "GET /admin/v1/ops/dlq/:dlqId": { url: "/admin/v1/ops/dlq/dlq:42", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/dlq/messages/dlq:42"] },
-  "POST /admin/v1/ops/dlq/replay": {
-    url: "/admin/v1/ops/dlq/replay",
-    payload: { ids: ["dlq:42"], reason: "Исправлен обработчик" },
-    headers: { "idempotency-key": "matrix-dlq-0001" },
-    status: 200,
-    domain: ["opsMonitor", "POST", "/internal/v1/dlq:replay"],
-  },
-  "POST /admin/v1/ops/dlq/delete": {
-    url: "/admin/v1/ops/dlq/delete",
-    payload: { filter: { consumer: "notifications_watch_changes" }, expected_count: 3, reason: "Тестовые сообщения" },
-    headers: { "idempotency-key": "matrix-dlq-0002" },
-    status: 200,
-    domain: ["opsMonitor", "POST", "/internal/v1/dlq:delete"],
-  },
-  "GET /admin/v1/alerts": { url: "/admin/v1/alerts?state=open", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/alerts"] },
-  "POST /admin/v1/alerts/:source/:id/ack": {
-    url: `/admin/v1/alerts/ops/${OPS_ALERT_ID}/ack`,
-    payload: { comment: "Смотрим" },
-    status: 200,
-    domain: ["opsMonitor", "POST", `/internal/v1/alerts/${OPS_ALERT_ID}:ack`],
-  },
-  // ---------- спринт 9: удаления профиля и лимиты запросов
-  "GET /admin/v1/deletions": { url: "/admin/v1/deletions?status=stuck&limit=20", status: 200, domain: ["identity", "GET", "/admin/v1/deletions"] },
-  "GET /admin/v1/deletions/:request_id": { url: `/admin/v1/deletions/${DELETION_ID}`, status: 200, domain: ["identity", "GET", `/admin/v1/deletions/${DELETION_ID}`] },
-  "POST /admin/v1/deletions/:request_id::retry": {
-    url: `/admin/v1/deletions/${DELETION_ID}:retry`,
-    payload: { reason: "Домен watch поднят" },
-    headers: { "idempotency-key": "matrix-del-0001" },
-    status: 200,
-    domain: ["identity", "POST", `/admin/v1/deletions/${DELETION_ID}:retry`],
-  },
-  "GET /admin/v1/ops/ratelimits": { url: "/admin/v1/ops/ratelimits", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/ratelimits/policies"] },
-  "GET /admin/v1/ops/ratelimits/:policy/history": { url: "/admin/v1/ops/ratelimits/tg.user/history?range=24h", status: 200, domain: ["opsMonitor", "GET", "/internal/v1/ratelimits/tg.user/history"] },
-  "PUT /admin/v1/ops/ratelimits/:policy/override": {
-    url: "/admin/v1/ops/ratelimits/tg.user/override",
-    payload: { limit: 240, window_s: 60, reason: "Акция в Mini App" },
-    headers: { "idempotency-key": "matrix-rl-0001" },
-    status: 200,
-    domain: ["opsMonitor", "PUT", "/internal/v1/ratelimits/tg.user/override"],
-  },
-  "DELETE /admin/v1/ops/ratelimits/:policy/override": {
-    url: "/admin/v1/ops/ratelimits/tg.user/override",
-    payload: { reason: "Акция закончилась" },
-    headers: { "idempotency-key": "matrix-rl-0002" },
-    status: 200,
-    domain: ["opsMonitor", "DELETE", "/internal/v1/ratelimits/tg.user/override"],
-  },
+  // ---------- вход и сессия
+  "POST /admin/v1/auth/step-up": { url: "/admin/v1/auth/step-up", payload: { code: "123456" }, status: 200, domain: ["adminIdentity", "POST", "/internal/v1/auth/step-up"] },
+  "POST /admin/v1/auth/logout": { url: "/admin/v1/auth/logout", status: 204, domain: ["adminIdentity", "POST", "/internal/v1/auth/logout"] },
   "GET /admin/v1/me": { url: "/admin/v1/me", status: 200, domain: null },
-  "POST /admin/v1/auth/step-up": {
-    url: "/admin/v1/auth/step-up",
-    payload: { code: TOTP_OK },
-    status: 200,
-    domain: ["adminIdentity", "POST", "/internal/v1/auth/step-up"],
-  },
-  "POST /admin/v1/dev/impersonate": {
-    url: "/admin/v1/dev/impersonate",
-    payload: { role: null },
-    status: 200,
-    domain: ["audit", "POST", "/internal/v1/records"],
-  },
-  "GET /admin/v1/dashboard": { url: "/admin/v1/dashboard?period=30d", status: 200, domain: ["userAdmin", "GET", "/admin/v1/users/stats"] },
-  "GET /admin/v1/users": { url: "/admin/v1/users?has_open_tickets=true", status: 200, domain: ["userAdmin", "GET", "/admin/v1/users"] },
-  "GET /admin/v1/users/:id": { url: `/admin/v1/users/${USER_ID}`, status: 200, domain: ["userAdmin", "GET", `/admin/v1/users/${USER_ID}`] },
-  "POST /admin/v1/users/:id/reveal": {
-    url: `/admin/v1/users/${USER_ID}/reveal`,
-    payload: { field: "telegram_user_id", reason: "проверка обращения" },
-    status: 200,
-    domain: ["identity", "POST", `/admin/v1/users/${USER_ID}/reveal`],
-  },
-  "GET /admin/v1/support/tickets": { url: "/admin/v1/support/tickets?status=open", status: 200, domain: ["support", "GET", "/admin/v1/support/tickets"] },
-  "GET /admin/v1/support/stats": { url: "/admin/v1/support/stats", status: 200, domain: ["support", "GET", "/admin/v1/support/stats"] },
-  "GET /admin/v1/support/templates": { url: "/admin/v1/support/templates", status: 200, domain: null },
-  "GET /admin/v1/support/tickets/:id": {
-    url: `/admin/v1/support/tickets/${TICKET_ID}`,
-    status: 200,
-    domain: ["support", "GET", `/admin/v1/support/tickets/${TICKET_ID}`],
-  },
-  "GET /admin/v1/support/tickets/:id/client-view": {
-    url: `/admin/v1/support/tickets/${TICKET_ID}/client-view`,
-    status: 200,
-    domain: ["support", "GET", `/admin/v1/support/tickets/${TICKET_ID}/client-view`],
-  },
-  "POST /admin/v1/support/tickets/:id/messages": {
-    url: `/admin/v1/support/tickets/${TICKET_ID}/messages`,
-    payload: { text: "Здравствуйте!", visibility: "public" },
-    headers: { "idempotency-key": "matrix-msg-0001" },
-    status: 200,
-    domain: ["support", "POST", `/admin/v1/support/tickets/${TICKET_ID}/messages`],
-  },
-  "PATCH /admin/v1/support/tickets/:id": {
-    url: `/admin/v1/support/tickets/${TICKET_ID}`,
-    payload: { status: "RESOLVED" },
-    status: 200,
-    domain: ["support", "PATCH", `/admin/v1/support/tickets/${TICKET_ID}`],
-  },
-  "POST /admin/v1/support/tickets/:id/take": {
-    url: `/admin/v1/support/tickets/${TICKET_ID}/take`,
-    status: 200,
-    domain: ["support", "POST", `/admin/v1/support/tickets/${TICKET_ID}/take`],
-  },
-  "POST /admin/v1/support/tickets/:id/escalations": {
-    url: `/admin/v1/support/tickets/${TICKET_ID}/escalations`,
-    payload: { type: "billing_review", note: "Двойное списание" },
-    status: 201,
-    domain: ["support", "POST", `/admin/v1/support/tickets/${TICKET_ID}/escalations`],
-  },
-  "POST /admin/v1/support/tickets/:id/ai-draft": {
-    url: `/admin/v1/support/tickets/${TICKET_ID}/ai-draft`,
-    status: 200,
-    domain: ["support", "GET", `/admin/v1/support/tickets/${TICKET_ID}`],
-  },
-  "GET /admin/v1/support/sla-policies": { url: "/admin/v1/support/sla-policies", status: 200, domain: ["support", "GET", "/admin/v1/support/sla-policies"] },
-  "PUT /admin/v1/support/sla-policies": {
-    url: "/admin/v1/support/sla-policies",
-    payload: { items: [{ category: "PRICE", priority: "high", first_response_minutes: 30, resolution_minutes: 240 }], reason: "ускорение" },
-    status: 200,
-    domain: ["support", "PUT", "/admin/v1/support/sla-policies"],
-  },
-  "GET /admin/v1/staff": { url: "/admin/v1/staff?role=support&status=ACTIVE", status: 200, domain: ["adminIdentity", "GET", "/admin/v1/staff"] },
+  // ---------- сотрудники, роли, заявки
+  "GET /admin/v1/staff": { url: "/admin/v1/staff?q=anna&role=support&status=ACTIVE&limit=20", status: 200, domain: ["adminIdentity", "GET", "/admin/v1/staff"] },
+  "GET /admin/v1/staff/:id": { url: `/admin/v1/staff/${STAFF_ID}`, status: 200, domain: ["adminIdentity", "GET", `/admin/v1/staff/${STAFF_ID}`] },
   "POST /admin/v1/staff": {
     url: "/admin/v1/staff",
-    payload: { email: "matrix@tilhero.test", display_name: "Матрица", role: "analyst" },
+    payload: { email: "new@tilhero.test", display_name: "Новый", role: "support" },
+    headers: IK("staff"),
     status: 201,
     domain: ["adminIdentity", "POST", "/admin/v1/staff"],
   },
   "PATCH /admin/v1/staff/:id": {
     url: `/admin/v1/staff/${STAFF_ID}`,
-    payload: { display_name: "Новое имя", reason: "опечатка" },
+    payload: { display_name: "Анна", reason: "опечатка" },
     status: 200,
     domain: ["adminIdentity", "PATCH", `/admin/v1/staff/${STAFF_ID}`],
   },
   "POST /admin/v1/staff/:id/reset-password": {
     url: `/admin/v1/staff/${STAFF_ID}/reset-password`,
-    payload: { reason: "забыл пароль" },
+    payload: { reason: "забыла" },
     status: 200,
     domain: ["adminIdentity", "POST", `/admin/v1/staff/${STAFF_ID}/reset-password`],
   },
@@ -263,10 +105,10 @@ const CASES: Record<string, Case> = {
   },
   "GET /admin/v1/roles": { url: "/admin/v1/roles", status: 200, domain: ["adminIdentity", "GET", "/admin/v1/roles"] },
   "PUT /admin/v1/roles/:code": {
-    url: "/admin/v1/roles/auditor",
-    payload: { permissions: ["dashboard.read", "audit.read"], reason: "без изменений" },
+    url: "/admin/v1/roles/support",
+    payload: { permissions: ["dashboard.read", "support.read"], reason: "сужение" },
     status: 202,
-    domain: ["adminIdentity", "PUT", "/admin/v1/roles/auditor"],
+    domain: ["adminIdentity", "PUT", "/admin/v1/roles/support"],
   },
   "GET /admin/v1/approvals": { url: "/admin/v1/approvals?status=PENDING", status: 200, domain: ["adminIdentity", "GET", "/admin/v1/approvals"] },
   "POST /admin/v1/approvals/:id/approve": {
@@ -280,55 +122,92 @@ const CASES: Record<string, Case> = {
     status: 200,
     domain: ["adminIdentity", "POST", `/admin/v1/approvals/${APPROVAL_ID}/reject`],
   },
-  "GET /admin/v1/audit/records": { url: "/admin/v1/audit/records?object_type=staff", status: 200, domain: ["audit", "GET", "/admin/v1/audit/records"] },
-  "GET /admin/v1/audit/records/:id": {
-    url: `/admin/v1/audit/records/${RECORD_ID}`,
+  // ---------- ученики
+  "GET /admin/v1/learners": {
+    url: "/admin/v1/learners?q=%40aziz&kind=account&age_band=18%2B&status=ACTIVE&locale=uz&has_open_tickets=true&limit=50",
     status: 200,
-    domain: ["audit", "GET", `/admin/v1/audit/records/${RECORD_ID}`],
+    domain: ["userAdmin", "GET", "/admin/v1/learners"],
   },
+  "GET /admin/v1/learners/:id": { url: `/admin/v1/learners/${LEARNER_ID}`, status: 200, domain: ["userAdmin", "GET", `/admin/v1/learners/${LEARNER_ID}`] },
+  "POST /admin/v1/learners/:id/reveal": {
+    url: `/admin/v1/learners/${LEARNER_ID}/reveal`,
+    payload: { field: "telegram_user_id", reason: "проверка обращения" },
+    status: 200,
+    domain: ["identity", "POST", `/admin/v1/users/${LEARNER_ID}/reveal`],
+  },
+  "GET /admin/v1/dashboard": { url: "/admin/v1/dashboard?period=7d", status: 200, domain: ["userAdmin", "GET", "/admin/v1/learners/stats"] },
+  // ---------- поддержка
+  "GET /admin/v1/support/tickets": {
+    url: `/admin/v1/support/tickets?status=open&category=LESSON&priority=high&assignee=me&sla=breached&user_id=${LEARNER_ID}&sort=sla&limit=10`,
+    status: 200,
+    domain: ["support", "GET", "/admin/v1/support/tickets"],
+  },
+  "GET /admin/v1/support/tickets/:id": { url: "/admin/v1/support/tickets/TCK-3001", status: 200, domain: ["support", "GET", "/admin/v1/support/tickets/TCK-3001"] },
+  "GET /admin/v1/support/tickets/:id/client-view": {
+    url: `/admin/v1/support/tickets/${TICKET_ID}/client-view`,
+    status: 200,
+    domain: ["support", "GET", `/admin/v1/support/tickets/${TICKET_ID}/client-view`],
+  },
+  "POST /admin/v1/support/tickets/:id/messages": {
+    url: "/admin/v1/support/tickets/TCK-3001/messages",
+    payload: { text: "Здравствуйте! Обновите приложение.", visibility: "public" },
+    headers: IK("msg"),
+    status: 200,
+    domain: ["support", "POST", "/admin/v1/support/tickets/TCK-3001/messages"],
+  },
+  "PATCH /admin/v1/support/tickets/:id": {
+    url: "/admin/v1/support/tickets/TCK-3001",
+    payload: { status: "WAITING_CUSTOMER", priority: "high", assignee_id: null },
+    status: 200,
+    domain: ["support", "PATCH", "/admin/v1/support/tickets/TCK-3001"],
+  },
+  "POST /admin/v1/support/tickets/:id/take": { url: "/admin/v1/support/tickets/TCK-3001/take", status: 200, domain: ["support", "POST", "/admin/v1/support/tickets/TCK-3001/take"] },
+  "POST /admin/v1/support/tickets/:id/escalations": {
+    url: "/admin/v1/support/tickets/TCK-3001/escalations",
+    payload: { type: "content_review", note: "Ошибка в упражнении" },
+    headers: IK("esc"),
+    status: 201,
+    domain: ["support", "POST", "/admin/v1/support/tickets/TCK-3001/escalations"],
+  },
+  "GET /admin/v1/support/stats": { url: "/admin/v1/support/stats?period=30d", status: 200, domain: ["support", "GET", "/admin/v1/support/stats"] },
+  "GET /admin/v1/support/templates": { url: "/admin/v1/support/templates", status: 200, domain: ["support", "GET", "/admin/v1/support/templates"] },
+  "GET /admin/v1/support/sla-policies": { url: "/admin/v1/support/sla-policies", status: 200, domain: ["support", "GET", "/admin/v1/support/sla-policies"] },
+  "PUT /admin/v1/support/sla-policies": {
+    url: "/admin/v1/support/sla-policies",
+    payload: { items: [{ category: "*", priority: "normal", first_response_minutes: 60, resolution_minutes: 600 }], reason: "ускоряем ответы" },
+    status: 200,
+    domain: ["support", "PUT", "/admin/v1/support/sla-policies"],
+  },
+  // ---------- аудит
+  "GET /admin/v1/audit/records": {
+    url: "/admin/v1/audit/records?action=release_note.publish&object_type=release_note&from=2026-11-01&to=2026-11-18T00:00:00Z",
+    status: 200,
+    domain: ["audit", "GET", "/admin/v1/audit/records"],
+  },
+  "GET /admin/v1/audit/records/:id": { url: `/admin/v1/audit/records/${RECORD_ID}`, status: 200, domain: ["audit", "GET", `/admin/v1/audit/records/${RECORD_ID}`] },
   "GET /admin/v1/audit/verify": { url: "/admin/v1/audit/verify", status: 200, domain: ["audit", "GET", "/admin/v1/audit/verify"] },
-  "GET /admin/v1/experience/:app/state": {
-    url: "/admin/v1/experience/miniapp/state",
-    status: 200,
-    domain: ["experience", "GET", "/admin/v1/experience/miniapp/state"],
-  },
-  "GET /admin/v1/experience/admin/current": {
-    url: "/admin/v1/experience/admin/current",
-    status: 200,
-    domain: ["experience", "GET", "/internal/v1/experience/admin/current"],
-  },
-  "GET /admin/v1/experience/miniapp/current": {
-    url: "/admin/v1/experience/miniapp/current",
-    status: 200,
-    domain: ["experience", "GET", "/internal/v1/experience/miniapp/current"],
-  },
-  "GET /admin/v1/experience/:app/versions": {
-    url: "/admin/v1/experience/admin/versions?limit=10",
-    status: 200,
-    domain: ["experience", "GET", "/admin/v1/experience/admin/versions"],
-  },
+  // ---------- конфигурация
+  "GET /admin/v1/experience/admin/current": { url: "/admin/v1/experience/admin/current", status: 200, domain: ["experience", "GET", "/internal/v1/experience/admin/current"] },
+  "GET /admin/v1/experience/miniapp/current": { url: "/admin/v1/experience/miniapp/current", status: 200, domain: ["experience", "GET", "/internal/v1/experience/miniapp/current"] },
+  "GET /admin/v1/experience/:app/state": { url: "/admin/v1/experience/miniapp/state", status: 200, domain: ["experience", "GET", "/admin/v1/experience/miniapp/state"] },
+  "GET /admin/v1/experience/:app/versions": { url: "/admin/v1/experience/admin/versions?limit=5", status: 200, domain: ["experience", "GET", "/admin/v1/experience/admin/versions"] },
   "GET /admin/v1/experience/:app/versions/:version": {
     url: "/admin/v1/experience/admin/versions/1.0.0",
     status: 200,
     domain: ["experience", "GET", "/admin/v1/experience/admin/versions/1.0.0"],
   },
-  "GET /admin/v1/experience/:app/activations": {
-    url: "/admin/v1/experience/admin/activations",
-    status: 200,
-    domain: ["experience", "GET", "/admin/v1/experience/admin/activations"],
-  },
+  "GET /admin/v1/experience/:app/activations": { url: "/admin/v1/experience/admin/activations", status: 200, domain: ["experience", "GET", "/admin/v1/experience/admin/activations"] },
   "POST /admin/v1/experience/:app/versions": {
-    url: "/admin/v1/experience/admin/versions",
-    payload: { version: "1.0.1", payload: { theme: { tokens: {} } }, change_note: "новый акцент" },
-    headers: { "idempotency-key": "matrix-ver-0001" },
+    url: "/admin/v1/experience/miniapp/versions",
+    payload: { version: "1.1.0", payload: { theme: { id: "notebook" } }, change_note: "новая тема" },
     status: 201,
-    domain: ["experience", "POST", "/admin/v1/experience/admin/versions"],
+    domain: ["experience", "POST", "/admin/v1/experience/miniapp/versions"],
   },
   "POST /admin/v1/experience/:app/activate": {
-    url: "/admin/v1/experience/admin/activate",
-    payload: { version: "1.0.1", reason: "релиз темы" },
-    status: 200,
-    domain: ["experience", "POST", "/admin/v1/experience/admin/activate"],
+    url: "/admin/v1/experience/miniapp/activate",
+    payload: { version: "1.1.0", reason: "релиз" },
+    status: 201,
+    domain: ["experience", "POST", "/admin/v1/experience/miniapp/activate"],
   },
   "POST /admin/v1/experience/:app/rollback": {
     url: "/admin/v1/experience/admin/rollback",
@@ -336,16 +215,11 @@ const CASES: Record<string, Case> = {
     status: 201,
     domain: ["experience", "POST", "/admin/v1/experience/admin/rollback"],
   },
-  // доработка 9.4: «Что нового»
-  "GET /admin/v1/release-notes": { url: "/admin/v1/release-notes?status=draft&limit=20", status: 200, domain: ["experience", "GET", "/admin/v1/release-notes"] },
+  // ---------- «Что нового»
+  "GET /admin/v1/release-notes": { url: "/admin/v1/release-notes?status=draft&limit=10", status: 200, domain: ["experience", "GET", "/admin/v1/release-notes"] },
   "GET /admin/v1/release-notes/:id": { url: `/admin/v1/release-notes/${NOTE_ID}`, status: 200, domain: ["experience", "GET", `/admin/v1/release-notes/${NOTE_ID}`] },
-  "POST /admin/v1/release-notes": {
-    url: "/admin/v1/release-notes",
-    payload: releaseNoteBody(),
-    headers: { "idempotency-key": "matrix-note-0001" },
-    status: 201,
-    domain: ["experience", "POST", "/admin/v1/release-notes"],
-  },
+  "GET /admin/v1/release-notes/:id/stats": { url: `/admin/v1/release-notes/${NOTE_ID}/stats`, status: 200, domain: ["experience", "GET", `/admin/v1/release-notes/${NOTE_ID}/stats`] },
+  "POST /admin/v1/release-notes": { url: "/admin/v1/release-notes", payload: releaseNoteBody(), headers: IK("note"), status: 201, domain: ["experience", "POST", "/admin/v1/release-notes"] },
   "PUT /admin/v1/release-notes/:id": {
     url: `/admin/v1/release-notes/${NOTE_ID}`,
     payload: { ...releaseNoteBody(), expected_version: 1 },
@@ -354,652 +228,201 @@ const CASES: Record<string, Case> = {
   },
   "POST /admin/v1/release-notes/:id/publish": {
     url: `/admin/v1/release-notes/${NOTE_ID}/publish`,
-    payload: { expected_version: 1, reason: "релиз декабря" },
-    headers: { "idempotency-key": "matrix-note-0002" },
+    payload: { expected_version: 1, reason: "релиз ноября" },
+    headers: IK("pub"),
     status: 201,
     domain: ["experience", "POST", `/admin/v1/release-notes/${NOTE_ID}/publish`],
   },
   "POST /admin/v1/release-notes/:id/archive": {
     url: `/admin/v1/release-notes/${NOTE_ID}/archive`,
-    payload: { reason: "опечатка" },
+    payload: { reason: "устарела" },
     status: 201,
     domain: ["experience", "POST", `/admin/v1/release-notes/${NOTE_ID}/archive`],
   },
-  "POST /admin/v1/billing/payments/:paymentId/refunds": { url: "/admin/v1/billing/payments/pay_1/refunds", status: 501, domain: null },
-  // спринт 4: очередь проверки, источники, поиск событий
-  "GET /admin/v1/review": { url: "/admin/v1/review?status=OPEN&country=UZ", status: 200, domain: ["events", "GET", "/internal/v1/review"] },
-  "GET /admin/v1/review/:id": { url: `/admin/v1/review/${REVIEW_ID}`, status: 200, domain: ["events", "GET", `/internal/v1/review/${REVIEW_ID}`] },
-  "POST /admin/v1/review/:id/accept": {
-    url: `/admin/v1/review/${REVIEW_ID}/accept`,
-    payload: { expected_status: "OPEN", expected_content_hash: "a".repeat(64), note: "проверено на сайте" },
-    headers: { "idempotency-key": "matrix-rev-0001" },
+  // ---------- шаблоны уведомлений
+  "GET /admin/v1/notifications/templates": { url: "/admin/v1/notifications/templates", status: 200, domain: ["notifications", "GET", "/admin/v1/notifications/templates"] },
+  "GET /admin/v1/notifications/templates/:key": {
+    url: "/admin/v1/notifications/templates/lesson.reminder.kid",
     status: 200,
-    domain: ["events", "POST", `/internal/v1/review/${REVIEW_ID}:accept`],
+    domain: ["notifications", "GET", "/admin/v1/notifications/templates/lesson.reminder.kid"],
   },
-  "POST /admin/v1/review/:id/reject": {
-    url: `/admin/v1/review/${REVIEW_ID}/reject`,
-    payload: { expected_status: "OPEN", expected_content_hash: "a".repeat(64), reason_code: "NOT_AN_EVENT", note: "это новость" },
-    status: 200,
-    domain: ["events", "POST", `/internal/v1/review/${REVIEW_ID}:reject`],
-  },
-  "POST /admin/v1/review/:id/correct": {
-    url: `/admin/v1/review/${REVIEW_ID}/correct`,
-    payload: { expected_status: "OPEN", expected_content_hash: "a".repeat(64), changes: { title: "Концерт оркестра" }, basis_url: "https://iticket.uz/events/concert-1", note: "опечатка" },
-    status: 200,
-    domain: ["events", "POST", `/internal/v1/review/${REVIEW_ID}:correct`],
-  },
-  // исправление 5.1: массовое отклонение, возврат из «Не подтверждено»
-  "POST /admin/v1/review/bulk-reject": {
-    url: "/admin/v1/review/bulk-reject",
-    payload: { items: [{ review_id: REVIEW_ID, expected_content_hash: "a".repeat(64) }], reason_code: "DUPLICATE", note: "дубль" },
-    headers: { "idempotency-key": "matrix-bulk-0001" },
-    status: 200,
-    domain: ["events", "POST", "/internal/v1/review:bulk-reject"],
-  },
-  "POST /admin/v1/review/bulk-reopen": {
-    url: "/admin/v1/review/bulk-reopen",
-    payload: { items: [{ review_id: REVIEW_ID }], note: "вернуть" },
-    headers: { "idempotency-key": "matrix-bulk-0002" },
-    status: 200,
-    domain: ["events", "POST", "/internal/v1/review:bulk-reopen"],
-  },
-  "POST /admin/v1/review/:id/reopen": {
-    url: `/admin/v1/review/${REVIEW_ID}/reopen`,
-    payload: { expected_status: "EXPIRED", note: "ещё актуально" },
-    status: 200,
-    domain: ["events", "POST", `/internal/v1/review/${REVIEW_ID}:reopen`],
-  },
-  "GET /admin/v1/sources": { url: "/admin/v1/sources?country=UZ&enabled=true", status: 200, domain: ["sourceRegistry", "GET", "/internal/v1/sources"] },
-  "GET /admin/v1/sources/crawl-stats": { url: "/admin/v1/sources/crawl-stats", status: 200, domain: ["providerGateway", "GET", "/internal/v1/providers/ai_web/sources"] },
-  "GET /admin/v1/sources/:id": { url: `/admin/v1/sources/${SOURCE_ID}`, status: 200, domain: ["sourceRegistry", "GET", `/internal/v1/sources/${SOURCE_ID}`] },
-  "POST /admin/v1/sources": {
-    url: "/admin/v1/sources",
-    payload: {
-      slug: "kassir-kz",
-      name: "Kassir.kz",
-      country_code: "KZ",
-      tier: "OFFICIAL_TICKET_PROVIDER",
-      event_domains: ["kassir.kz"],
-      media_domains: [],
-      listing_pages: [{ url: "https://kassir.kz/afisha", city: "Almaty", category: null }],
-      enabled: false,
-      js_only: null,
-      notes: null,
-      reason: "новый источник",
-    },
-    headers: { "idempotency-key": "matrix-src-0001" },
+  "POST /admin/v1/notifications/templates/:key/versions": {
+    url: "/admin/v1/notifications/templates/lesson.reminder/versions",
+    payload: { texts: campaignBody().texts, note: "мягче тон" },
+    headers: IK("tplv"),
     status: 201,
-    domain: ["sourceRegistry", "POST", "/internal/v1/sources"],
+    domain: ["notifications", "POST", "/admin/v1/notifications/templates/lesson.reminder/versions"],
   },
-  // исправление 9.3: предпросмотр страницы «JSON API»
-  "POST /admin/v1/sources/json-api/preview": {
-    url: "/admin/v1/sources/json-api/preview",
-    payload: { source_id: SOURCE_ID, country_code: "KZ", event_domains: ["iticket.uz"], media_domains: ["cdn.iticket.uz"], city: "Almaty", category: "culture.theatre", json_api: jsonApiMapping() },
+  "POST /admin/v1/notifications/templates/:key/versions/:v/preview": {
+    url: "/admin/v1/notifications/templates/lesson.reminder/versions/3/preview",
+    payload: { lang: "ru", sample: { learner_name: "Азиз" } },
     status: 200,
-    domain: ["providerGateway", "POST", "/internal/v1/providers/ai_web/json_api:preview"],
+    domain: ["notifications", "POST", "/admin/v1/notifications/templates/lesson.reminder/versions/3/preview"],
   },
-  "PATCH /admin/v1/sources/:id": {
-    url: `/admin/v1/sources/${SOURCE_ID}`,
-    payload: { expected_version: 3, name: "iTicket Uzbekistan", reason: "название" },
+  "POST /admin/v1/notifications/templates/:key/versions/:v/activate": {
+    url: "/admin/v1/notifications/templates/lesson.reminder/versions/3/activate",
+    payload: { reason: "новый текст" },
     status: 200,
-    domain: ["sourceRegistry", "PATCH", `/internal/v1/sources/${SOURCE_ID}`],
+    domain: ["notifications", "POST", "/admin/v1/notifications/templates/lesson.reminder/versions/3/activate"],
   },
-  "GET /admin/v1/discovery/runs": { url: "/admin/v1/discovery/runs?limit=10", status: 200, domain: ["discovery", "GET", "/internal/v1/runs"] },
-  "GET /admin/v1/discovery/runs/:id": { url: `/admin/v1/discovery/runs/${RUN_ID}`, status: 200, domain: ["discovery", "GET", `/internal/v1/runs/${RUN_ID}`] },
-  "POST /admin/v1/discovery/runs": {
-    url: "/admin/v1/discovery/runs",
-    payload: { max_provider_calls: 50 },
-    status: 202,
-    domain: ["discovery", "POST", "/internal/v1/runs"],
-  },
-  "GET /admin/v1/discovery/budget": { url: "/admin/v1/discovery/budget", status: 200, domain: ["providerGateway", "GET", "/internal/v1/providers/ai_web/budget"] },
-  "PUT /admin/v1/discovery/pause": {
-    url: "/admin/v1/discovery/pause",
-    payload: { paused: true, reason: "перерасход" },
+  "POST /admin/v1/notifications/templates/:key/reset": {
+    url: "/admin/v1/notifications/templates/lesson.reminder/reset",
+    payload: { reason: "вернуть по умолчанию" },
     status: 200,
-    domain: ["providerGateway", "PUT", "/internal/v1/providers/ai_web/pause"],
+    domain: ["notifications", "POST", "/admin/v1/notifications/templates/lesson.reminder/reset"],
   },
-  // спринт 5: поставщики поездок, снимок предложения
-  "GET /admin/v1/travel/providers": { url: "/admin/v1/travel/providers", status: 200, domain: ["providerGateway", "GET", "/internal/v1/providers"] },
-  "GET /admin/v1/offers/:offerId": { url: `/admin/v1/offers/${OFFER_ID}`, status: 200, domain: ["offers", "GET", `/internal/v1/offers/${OFFER_ID}`] },
-  "POST /admin/v1/travel/providers/:name/probe": {
-    url: "/admin/v1/travel/providers/aviasales/probe",
+  "POST /admin/v1/notifications/templates/:key/versions/:v/test": {
+    url: "/admin/v1/notifications/templates/lesson.reminder/versions/3/test",
+    payload: { lang: "uz", recipient: 0 },
     status: 200,
-    domain: ["providerGateway", "POST", "/internal/v1/travel/providers/aviasales:probe"],
+    domain: ["notifications", "POST", "/admin/v1/notifications/templates/lesson.reminder/versions/3/test"],
   },
-  // спринт 6: ленты и модерация новостей (news), статистика слежений (watch)
-  "GET /admin/v1/news/sources": { url: "/admin/v1/news/sources?interest=sport.motorsport", status: 200, domain: ["news", "GET", "/internal/v1/news/sources"] },
-  "GET /admin/v1/news/sources/:id": { url: `/admin/v1/news/sources/${NEWS_SOURCE_ID}`, status: 200, domain: ["news", "GET", `/internal/v1/news/sources/${NEWS_SOURCE_ID}`] },
-  "POST /admin/v1/news/sources": {
-    url: "/admin/v1/news/sources",
-    headers: { "idempotency-key": "news-src-create-1" },
-    payload: {
-      slug: "uefa-inside",
-      name: "UEFA — Inside UEFA",
-      kind: "official",
-      mode: "rss",
-      feed_url: "https://www.uefa.com/rss/insideuefa/rss.xml",
-      page_url: null,
-      site_domain: "uefa.com",
-      extra_domains: [],
-      interests: ["sport.football"],
-      entities: ["UEFA"],
-      country_code: null,
-      lang: "en",
-      display: "summary",
-      category_filter: null,
-      enabled: true,
-      reason: "Официальная лента UEFA",
-    },
+  "GET /admin/v1/notifications/test-recipients": { url: "/admin/v1/notifications/test-recipients", status: 200, domain: ["notifications", "GET", "/admin/v1/notifications/test-recipients"] },
+  // ---------- рассылки
+  "GET /admin/v1/notifications/campaigns": { url: "/admin/v1/notifications/campaigns?status=draft", status: 200, domain: ["notifications", "GET", "/admin/v1/notifications/campaigns"] },
+  "GET /admin/v1/notifications/campaigns/:id": {
+    url: `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`,
+    status: 200,
+    domain: ["notifications", "GET", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`],
+  },
+  "POST /admin/v1/notifications/campaigns": {
+    url: "/admin/v1/notifications/campaigns",
+    payload: campaignBody(),
+    headers: IK("camp"),
     status: 201,
-    domain: ["news", "POST", "/internal/v1/news/sources"],
+    domain: ["notifications", "POST", "/admin/v1/notifications/campaigns"],
   },
-  "PATCH /admin/v1/news/sources/:id": {
-    url: `/admin/v1/news/sources/${NEWS_SOURCE_ID}`,
-    payload: { expected_version: 3, display: "title_only", reason: "права издания" },
+  "PATCH /admin/v1/notifications/campaigns/:id": {
+    url: `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`,
+    payload: { expected_version: 1, segment: { age: ["teens", "adults"] } },
     status: 200,
-    domain: ["news", "PATCH", `/internal/v1/news/sources/${NEWS_SOURCE_ID}`],
+    domain: ["notifications", "PATCH", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`],
   },
-  "DELETE /admin/v1/news/sources/:id": {
-    url: `/admin/v1/news/sources/${NEWS_SOURCE_ID}`,
-    payload: { expected_version: 3, reason: "лента закрыта" },
-    status: 204,
-    domain: ["news", "DELETE", `/internal/v1/news/sources/${NEWS_SOURCE_ID}`],
-  },
-  "POST /admin/v1/news/sources/:id/check": {
-    url: `/admin/v1/news/sources/${NEWS_SOURCE_ID}/check`,
+  "POST /admin/v1/notifications/campaigns/:id/estimate": {
+    url: `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/estimate`,
     status: 200,
-    domain: ["news", "POST", `/internal/v1/news/sources/${NEWS_SOURCE_ID}:check`],
+    domain: ["notifications", "POST", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/estimate`],
   },
-  "POST /admin/v1/news/sources/check": {
-    url: "/admin/v1/news/sources/check",
-    payload: { mode: "rss", feed_url: "https://www.uefa.com/rss/insideuefa/rss.xml", page_url: null, site_domain: "uefa.com", extra_domains: [], category_filter: null },
+  "POST /admin/v1/notifications/campaigns/:id/preview": {
+    url: `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/preview`,
+    payload: { lang: "uz" },
     status: 200,
-    domain: ["news", "POST", "/internal/v1/news/sources:check"],
+    domain: ["notifications", "POST", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/preview`],
   },
-  "GET /admin/v1/news/items": { url: "/admin/v1/news/items?hidden=false", status: 200, domain: ["news", "GET", "/internal/v1/news/items"] },
-  "POST /admin/v1/news/items/:id/hide": {
-    url: `/admin/v1/news/items/${NEWS_ID}/hide`,
-    payload: { reason: "Не относится к событиям" },
+  "POST /admin/v1/notifications/campaigns/:id/test": {
+    url: `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/test`,
+    payload: { lang: "ru", recipient: 0 },
     status: 200,
-    domain: ["news", "POST", `/internal/v1/news/items/${NEWS_ID}:hide`],
+    domain: ["notifications", "POST", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/test`],
   },
-  "POST /admin/v1/news/items/:id/unhide": {
-    url: `/admin/v1/news/items/${NEWS_ID}/unhide`,
-    payload: { reason: "Скрыта по ошибке" },
+  "POST /admin/v1/notifications/campaigns/:id/schedule": {
+    url: `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/schedule`,
+    payload: { expected_version: 1, send_at: "2026-11-20T09:00:00+05:00", reason: "рассылка ноября" },
+    headers: IK("sched"),
     status: 200,
-    domain: ["news", "POST", `/internal/v1/news/items/${NEWS_ID}:unhide`],
+    domain: ["notifications", "POST", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/schedule`],
   },
-  "GET /admin/v1/watches/stats": { url: "/admin/v1/watches/stats", status: 200, domain: ["watch", "GET", "/internal/v1/watches:stats"] },
-  // исправление 6.1: лимиты AI
-  "GET /admin/v1/discovery/limits": { url: "/admin/v1/discovery/limits", status: 200, domain: ["providerGateway", "GET", "/internal/v1/providers/ai_web/limits"] },
-  "PUT /admin/v1/discovery/limits": {
-    url: "/admin/v1/discovery/limits",
-    payload: { ai_daily_usd: "2.5", news_daily_usd: "0.40", pages_daily: 500, reason: "Сезон фестивалей" },
+  "POST /admin/v1/notifications/campaigns/:id/unschedule": {
+    url: `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/unschedule`,
+    payload: { reason: "перенос" },
     status: 200,
-    domain: ["providerGateway", "PUT", "/internal/v1/providers/ai_web/limits"],
+    domain: ["notifications", "POST", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/unschedule`],
   },
-  "DELETE /admin/v1/discovery/limits": {
-    url: "/admin/v1/discovery/limits",
-    payload: { reason: "Сезон закончился" },
+  "POST /admin/v1/notifications/campaigns/:id/stop": {
+    url: `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/stop`,
+    payload: { reason: "ошибка в тексте" },
     status: 200,
-    domain: ["providerGateway", "DELETE", "/internal/v1/providers/ai_web/limits"],
+    domain: ["notifications", "POST", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/stop`],
   },
-  // спринт 7: учёт и стоимость, бюджеты и kill switch, агенты и skills, Test Console, уровни доступа
-  "GET /admin/v1/ai/limits": { url: "/admin/v1/ai/limits", status: 200, domain: ["providerGateway", "GET", "/internal/v1/providers/ai_web/limits"] },
-  "PUT /admin/v1/ai/limits": {
-    url: "/admin/v1/ai/limits",
-    payload: { ai_daily_usd: "2.5", news_daily_usd: "0.40", pages_daily: 500, concierge_daily_usd: "1.5", evaluation_daily_usd: "0.30", reason: "Сезон фестивалей" },
-    status: 200,
-    domain: ["providerGateway", "PUT", "/internal/v1/providers/ai_web/limits"],
-  },
-  "DELETE /admin/v1/ai/limits": {
-    url: "/admin/v1/ai/limits",
-    payload: { reason: "Сезон закончился" },
-    status: 200,
-    domain: ["providerGateway", "DELETE", "/internal/v1/providers/ai_web/limits"],
-  },
-  "GET /admin/v1/ai/budgets": { url: "/admin/v1/ai/budgets", status: 200, domain: ["aiControl", "GET", "/internal/v1/budgets/overview"] },
-  "PUT /admin/v1/ai/agents/:agentId/pause": {
-    url: "/admin/v1/ai/agents/concierge/pause",
-    payload: { paused: true, reason: "Расход вне плана" },
-    status: 200,
-    domain: ["providerGateway", "PUT", "/internal/v1/providers/ai/agents/concierge/pause"],
-  },
-  "PUT /admin/v1/ai/providers/anthropic/pause": {
-    url: "/admin/v1/ai/providers/anthropic/pause",
-    payload: { paused: false, reason: "Инцидент закрыт" },
-    status: 200,
-    domain: ["providerGateway", "PUT", "/internal/v1/providers/ai/provider/anthropic/pause"],
-  },
-  "GET /admin/v1/ai/agents": { url: "/admin/v1/ai/agents", status: 200, domain: ["aiControl", "GET", "/internal/v1/agents"] },
-  "GET /admin/v1/ai/agents/:agentId": { url: "/admin/v1/ai/agents/concierge", status: 200, domain: ["aiControl", "GET", "/internal/v1/agents/concierge"] },
-  "PATCH /admin/v1/ai/agents/:agentId": {
-    url: "/admin/v1/ai/agents/concierge",
-    payload: { degrade_at_pct: 85, reason: "Раньше на Haiku", expected_version: 4 },
-    headers: { "idempotency-key": "matrix-agent-0001" },
-    status: 200,
-    domain: ["aiControl", "PATCH", "/internal/v1/agents/concierge"],
-  },
-  "GET /admin/v1/ai/alerts": { url: "/admin/v1/ai/alerts?unacked=true", status: 200, domain: ["aiControl", "GET", "/internal/v1/budgets/alerts"] },
-  "POST /admin/v1/ai/alerts/:ref": {
-    url: `/admin/v1/ai/alerts/${ALERT_ID}:ack`,
-    status: 200,
-    domain: ["aiControl", "POST", `/internal/v1/budgets/alerts/${ALERT_ID}:ack`],
-  },
-  "GET /admin/v1/ai/pricing/versions": { url: "/admin/v1/ai/pricing/versions", status: 200, domain: ["aiControl", "GET", "/internal/v1/pricing/versions"] },
-  "GET /admin/v1/ai/pricing/versions/:version": {
-    url: "/admin/v1/ai/pricing/versions/2026-10-12",
-    status: 200,
-    domain: ["aiControl", "GET", "/internal/v1/pricing/versions/2026-10-12"],
-  },
-  "POST /admin/v1/ai/pricing/versions": {
-    url: "/admin/v1/ai/pricing/versions",
-    payload: { based_on: "2026-10-12", note: "Sonnet" },
-    headers: { "idempotency-key": "matrix-price-0001" },
-    status: 201,
-    domain: ["aiControl", "POST", "/internal/v1/pricing/versions"],
-  },
-  "PATCH /admin/v1/ai/pricing/versions/:version": {
-    url: "/admin/v1/ai/pricing/versions/2026-10-12",
-    payload: { note: "Сверено", expected_version: 1 },
-    headers: { "idempotency-key": "matrix-price-0002" },
-    status: 200,
-    domain: ["aiControl", "PATCH", "/internal/v1/pricing/versions/2026-10-12"],
-  },
-  "POST /admin/v1/ai/pricing/versions/:ref": {
-    url: "/admin/v1/ai/pricing/versions/2026-10-12:activate",
-    payload: { reason: "Сверено с прайсом", expected_version: 1 },
-    headers: { "idempotency-key": "matrix-price-0003" },
-    status: 200,
-    domain: ["aiControl", "POST", "/internal/v1/pricing/versions/2026-10-12:activate"],
-  },
-  "GET /admin/v1/ai/access-levels": { url: "/admin/v1/ai/access-levels", status: 200, domain: ["aiControl", "GET", "/internal/v1/access/levels"] },
-  "PUT /admin/v1/ai/access-levels/:code": {
-    url: "/admin/v1/ai/access-levels/plus",
-    payload: { name_ru: "Расширенный", name_en: "Plus", concierge_messages_per_day: 25, reason: "Больше сообщений", expected_version: 1 },
-    headers: { "idempotency-key": "matrix-level-0001" },
-    status: 200,
-    domain: ["aiControl", "PUT", "/internal/v1/access/levels/plus"],
-  },
-  "DELETE /admin/v1/ai/access-levels/:code": {
-    url: "/admin/v1/ai/access-levels/plus",
-    payload: { reason: "Не нужен" },
-    headers: { "idempotency-key": "matrix-level-0002" },
-    status: 200,
-    domain: ["aiControl", "DELETE", "/internal/v1/access/levels/plus"],
-  },
-  "GET /admin/v1/users/:id/access-level": {
-    url: `/admin/v1/users/${USER_ID}/access-level`,
-    status: 200,
-    domain: ["aiControl", "GET", `/internal/v1/access/users/${USER_ID}`],
-  },
-  "PUT /admin/v1/users/:id/access-level": {
-    url: `/admin/v1/users/${USER_ID}/access-level`,
-    payload: { level: "plus", reason: "Партнёр", expires_at: "2027-01-01T00:00:00Z" },
-    headers: { "idempotency-key": "matrix-access-0001" },
-    status: 200,
-    domain: ["aiControl", "PUT", `/internal/v1/access/users/${USER_ID}`],
-  },
-  "DELETE /admin/v1/users/:id/access-level": {
-    url: `/admin/v1/users/${USER_ID}/access-level`,
-    payload: { reason: "Срок истёк", expected_version: 1 },
-    headers: { "idempotency-key": "matrix-access-0002" },
-    status: 200,
-    domain: ["aiControl", "DELETE", `/internal/v1/access/users/${USER_ID}`],
-  },
-  "GET /admin/v1/usage/kpi": { url: "/admin/v1/usage/kpi?period=7d", status: 200, domain: ["aiControl", "GET", "/internal/v1/usage/kpi"] },
-  "GET /admin/v1/usage/agents": { url: "/admin/v1/usage/agents?period=today", status: 200, domain: ["aiControl", "GET", "/internal/v1/usage/agents"] },
-  "GET /admin/v1/usage/requests": { url: "/admin/v1/usage/requests?agent=concierge&status=SUCCESS", status: 200, domain: ["aiControl", "GET", "/internal/v1/usage/requests"] },
-  "GET /admin/v1/usage/requests/:requestId": {
-    url: `/admin/v1/usage/requests/${REQUEST_ID}`,
-    status: 200,
-    domain: ["aiControl", "GET", `/internal/v1/usage/requests/${REQUEST_ID}`],
-  },
-  "POST /admin/v1/usage/requests/:requestId/content::reveal": {
-    url: `/admin/v1/usage/requests/${REQUEST_ID}/content:reveal`,
-    payload: { reason: "Жалоба пользователя TCK-3081" },
-    status: 200,
-    domain: ["aiConcierge", "POST", `/internal/v1/admin/requests/${REQUEST_ID}/content:reveal`],
-  },
-  "GET /admin/v1/skills": { url: "/admin/v1/skills", status: 200, domain: ["aiControl", "GET", "/internal/v1/skills"] },
-  "GET /admin/v1/skills/:skillId": { url: "/admin/v1/skills/concierge.event", status: 200, domain: ["aiControl", "GET", "/internal/v1/skills/concierge.event"] },
-  "GET /admin/v1/skills/:skillId/versions/:v": {
-    url: "/admin/v1/skills/concierge.event/versions/2",
-    status: 200,
-    domain: ["aiControl", "GET", "/internal/v1/skills/concierge.event/versions/2"],
-  },
-  "GET /admin/v1/skills/:skillId/compare": {
-    url: "/admin/v1/skills/concierge.event/compare?a=1&b=2",
-    status: 200,
-    domain: ["aiControl", "GET", "/internal/v1/skills/concierge.event/compare"],
-  },
-  "POST /admin/v1/skills/:skillId/versions": {
-    url: "/admin/v1/skills/concierge.event/versions",
-    payload: { from_version: 1 },
-    headers: { "idempotency-key": "matrix-skill-0001" },
-    status: 201,
-    domain: ["aiControl", "POST", "/internal/v1/skills/concierge.event/versions"],
-  },
-  "PATCH /admin/v1/skills/:skillId/versions/:v": {
-    url: "/admin/v1/skills/concierge.event/versions/2",
-    payload: { change_note: "Короче", expected_version: 1 },
-    headers: { "idempotency-key": "matrix-skill-0002" },
-    status: 200,
-    domain: ["aiControl", "PATCH", "/internal/v1/skills/concierge.event/versions/2"],
-  },
-  "POST /admin/v1/skills/:skillId/versions/:v/test": {
-    url: "/admin/v1/skills/concierge.event/versions/2/test",
-    payload: { compare_version: 1 },
-    headers: { "idempotency-key": "matrix-skill-0003" },
-    status: 202,
-    domain: ["aiControl", "POST", "/internal/v1/skills/concierge.event/versions/2/test"],
-  },
-  "POST /admin/v1/skills/:skillId/versions/:v/review": {
-    url: "/admin/v1/skills/concierge.event/versions/2/review",
-    payload: { action: "request" },
-    headers: { "idempotency-key": "matrix-skill-0004" },
-    status: 200,
-    domain: ["aiControl", "POST", "/internal/v1/skills/concierge.event/versions/2/review"],
-  },
-  "POST /admin/v1/skills/:skillId/versions/:v/publish": {
-    url: "/admin/v1/skills/concierge.event/versions/2/publish",
-    payload: { reason: "Ревью пройдено" },
-    headers: { "idempotency-key": "matrix-skill-0005" },
-    status: 200,
-    domain: ["aiControl", "POST", "/internal/v1/skills/concierge.event/versions/2/publish"],
-  },
-  "POST /admin/v1/skills/:skillId/rollback": {
-    url: "/admin/v1/skills/concierge.event/rollback",
-    payload: { to_version: 1, reason: "Жалобы на ответы" },
-    headers: { "idempotency-key": "matrix-skill-0006" },
-    status: 200,
-    domain: ["aiControl", "POST", "/internal/v1/skills/concierge.event/rollback"],
-  },
-  "POST /admin/v1/skills/:skillId/versions/:v/deprecate": {
-    url: "/admin/v1/skills/concierge.event/versions/2/deprecate",
-    payload: { reason: "Не нужна" },
-    headers: { "idempotency-key": "matrix-skill-0007" },
-    status: 200,
-    domain: ["aiControl", "POST", "/internal/v1/skills/concierge.event/versions/2/deprecate"],
-  },
-  "GET /admin/v1/evaluation/runs/:runId": { url: `/admin/v1/evaluation/runs/${RUN_ID7}`, status: 200, domain: ["aiControl", "GET", `/internal/v1/evaluation/runs/${RUN_ID7}`] },
-  "GET /admin/v1/evaluation/cases": { url: "/admin/v1/evaluation/cases?skill_id=concierge.event", status: 200, domain: ["aiControl", "GET", "/internal/v1/evaluation/cases"] },
-  "POST /admin/v1/evaluation/cases": {
-    url: "/admin/v1/evaluation/cases",
-    payload: { skill_id: "concierge.event", name: "direct_only_text2", input: { mode: "event", text: "Прямой" } },
-    headers: { "idempotency-key": "matrix-case-0001" },
-    status: 201,
-    domain: ["aiControl", "POST", "/internal/v1/evaluation/cases"],
-  },
-  "PATCH /admin/v1/evaluation/cases/:caseId": {
-    url: `/admin/v1/evaluation/cases/${CASE_ID}`,
-    payload: { enabled: false, expected_version: 1 },
-    headers: { "idempotency-key": "matrix-case-0002" },
-    status: 200,
-    domain: ["aiControl", "PATCH", `/internal/v1/evaluation/cases/${CASE_ID}`],
-  },
-  "DELETE /admin/v1/evaluation/cases/:caseId": {
-    url: `/admin/v1/evaluation/cases/${CASE_ID}?reason=Дубль`,
-    headers: { "idempotency-key": "matrix-case-0003" },
-    status: 200,
-    domain: ["aiControl", "DELETE", `/internal/v1/evaluation/cases/${CASE_ID}`],
-  },
-  // последним: завершает сессию
-  "POST /admin/v1/auth/logout": { url: "/admin/v1/auth/logout", status: 204, domain: ["adminIdentity", "POST", "/internal/v1/auth/logout"] },
 };
 
 let h: Harness;
 beforeEach(async () => {
   violations.length = 0;
-  // матрица всех маршрутов одним сотрудником — больше 60 команд в минуту (adm.command): лимитер выключен (спринт 9)
-  h = await makeHarness({ ENV: "dev", NODE_ENV: "development", RATE_LIMITS_ENABLED: "false" }, { responseProbe: probe });
-  const f = h.fake;
-  f.on("support", "PUT", "/admin/v1/support/sla-policies", (c) => json(200, { items: c.body.items, category_defaults: {} }));
-  f.on("audit", "GET", `/admin/v1/audit/records/${RECORD_ID}`, () => json(200, auditRow({ record_id: RECORD_ID })));
-  f.on("experience", "GET", "/internal/v1/experience/admin/current", () => json(200, { app: "admin", version: "1.0.0" }));
-  f.on("experience", "GET", "/internal/v1/experience/miniapp/current", () => json(200, { app: "miniapp", version: "2.0.3" }));
-  f.on("experience", "GET", "/admin/v1/experience/admin/versions", () => json(200, { items: [versionRow()], next_cursor: null }));
-  f.on("experience", "GET", "/admin/v1/experience/admin/versions/1.0.0", () => json(200, versionRow({ payload: { theme: {} } })));
-  f.on("experience", "GET", "/admin/v1/experience/admin/activations", () => json(200, { items: [activationRow()], next_cursor: null }));
-  f.on("experience", "POST", "/admin/v1/experience/admin/versions", (c) =>
-    json(201, versionRow({ version: c.body.version, change_note: c.body.change_note, status: null, payload: c.body.payload })),
-  );
-  f.on("experience", "POST", "/admin/v1/experience/admin/rollback", () => json(201, activationRow({ kind: "rollback", previous_version: "1.0.1" })));
-  f.on("audit", "GET", "/admin/v1/audit/records", () => json(200, { items: [auditRow()], next_cursor: null }));
-  f.on("adminIdentity", "GET", "/admin/v1/staff", () => json(200, { items: [staffRow()], next_cursor: null }));
-  f.on("adminIdentity", "GET", "/admin/v1/approvals", () => json(200, { items: [approvalRow()], next_cursor: null }));
-  fakeSprint4(f);
-  fakeSprint5(f);
-  fakeSprint6(f);
-  fakeLimits(f);
-  fakeSprint7(f);
-  fakeSprint8(f);
-  fakeSprint9(f);
-  fakeReleaseNotes(f);
+  h = await makeHarness({}, { responseProbe: probe });
 });
 afterEach(async () => {
   await h?.close();
 });
 afterAll(closeRedis);
 
-const SPRINT4_SERVICES = { events: 1, sourceRegistry: 1, discovery: 1, providerGateway: 1, offers: 1, news: 1, watch: 1, aiControl: 1, aiConcierge: 1, opsMonitor: 1 };
-const sessionRoutes = () => h.app.adminRoutes.filter((r) => r.access === "session");
-const key = (r: { method: string; url: string }) => `${r.method} ${r.url}`;
-
 describe("матрица маршрутов", () => {
-  it("матрица покрывает все сессионные маршруты (и только их)", () => {
-    expect(sessionRoutes().map(key).sort()).toEqual(Object.keys(CASES).sort());
+  it("покрывает все сессионные маршруты", () => {
+    const routes = h.app.adminRoutes.filter((r) => r.access === "session").map((r) => `${r.method} ${r.url}`);
+    expect(routes.filter((r) => !(r in CASES))).toEqual([]);
+    expect(Object.keys(CASES).filter((k) => !routes.includes(k))).toEqual([]);
   });
 
-  it("без нужного права → 403 PERMISSION_DENIED {permission}, домен не вызывается", async () => {
-    const { s } = await loginAs(h, "read_only", { permissions: [] });
-    const before = h.fake.calls.length;
-    const guarded = sessionRoutes().filter((r) => r.guard !== "authenticated");
-    expect(guarded.length).toBeGreaterThanOrEqual(52);
-    for (const r of guarded) {
-      const c = CASES[key(r)]!;
-      const res = await h.app.inject({
-        method: r.method as "GET",
-        url: c.url,
-        headers: browser(s, c.headers),
-        ...(c.payload !== undefined ? { payload: c.payload as object } : {}),
-      });
-      expect(res.statusCode, key(r)).toBe(403);
-      expect(res.json(), key(r)).toMatchObject({ code: "PERMISSION_DENIED", details: { permission: r.guard } });
-    }
-    expect(h.fake.calls.length).toBe(before);
-  });
-
-  it("право есть, step-up нет → 403 STEP_UP_REQUIRED, домен не вызывается", async () => {
+  it("step-up маршруты: без свежего TOTP → 403 STEP_UP_REQUIRED {permission}, домен не вызывается", async () => {
     const { s } = await loginAs(h, "super_admin");
-    const before = h.fake.calls.length;
-    const stepUp = sessionRoutes().filter((r) => r.stepUp);
-    expect(stepUp).toHaveLength(27);
-    for (const r of stepUp) {
-      const c = CASES[key(r)]!;
-      const res = await h.app.inject({
-        method: r.method as "GET",
-        url: c.url,
-        headers: browser(s, c.headers),
-        ...(c.payload !== undefined ? { payload: c.payload as object } : {}),
-      });
-      expect(res.statusCode, key(r)).toBe(403);
-      expect(res.json().code, key(r)).toBe("STEP_UP_REQUIRED");
+    for (const r of h.app.adminRoutes.filter((x) => x.stepUp)) {
+      const c = CASES[`${r.method} ${r.url}`]!;
+      const before = h.fake.calls.length;
+      const res = await h.app.inject({ method: r.method as "POST", url: c.url, headers: { ...browser(s), ...c.headers }, payload: (c.payload ?? {}) as object });
+      expect(res.statusCode, `${r.method} ${r.url}`).toBe(403);
+      expect(res.json().code).toBe("STEP_UP_REQUIRED");
+      if (r.guard.startsWith("role:")) expect(res.json().details).toEqual({});
+      else expect(res.json().details.permission).toBe(r.guard.split("|")[0]);
+      expect(h.fake.calls.length, `${r.method} ${r.url}`).toBe(before);
     }
-    expect(h.fake.calls.length).toBe(before);
   });
 
-  it("happy path каждого маршрута: статус, вызов домена с actor сотрудника", async () => {
+  it("happy path: статус, вызов домена с actor, ответ строго по контракту admin.ts", async () => {
     const { staff, s } = await loginAs(h, "super_admin");
-    expect((await stepUp(h, s)).statusCode).toBe(200);
-    const order = Object.keys(CASES); // logout — последним
-    for (const k of order) {
-      const c = CASES[k]!;
-      const method = k.split(" ")[0]!;
+    await stepUp(h, s);
+    // logout завершает сессию — последним
+    const keys = Object.keys(CASES).sort((a, b) => Number(a.includes("/logout")) - Number(b.includes("/logout")));
+    for (const key of keys) {
+      if (key === "POST /admin/v1/auth/step-up") continue; // уже выполнен
+      const c = CASES[key]!;
+      const method = key.split(" ")[0]! as "GET";
       const before = h.fake.calls.length;
       const res = await h.app.inject({
-        method: method as "GET",
+        method,
         url: c.url,
-        headers: browser(s, c.headers),
-        ...(c.payload !== undefined ? { payload: c.payload as object } : {}),
+        headers: { ...browser(s), ...c.headers },
+        ...(method === "GET" ? {} : { payload: (c.payload ?? {}) as object }),
       });
-      expect(res.statusCode, `${k}: ${res.body.slice(0, 200)}`).toBe(c.status);
-      if (k === "POST /admin/v1/auth/step-up") s.id = cookieOf(res.headers["set-cookie"]); // step-up ротирует id
-      expect(violations, k).toEqual([]);
-      if (res.statusCode >= 400) expect(Object.keys(res.json()).sort(), k).toEqual(["code", "details", "message", "trace_id"]);
-      const made = h.fake.calls.slice(before);
+      expect(res.statusCode, `${key}: ${res.body.slice(0, 300)}`).toBe(c.status);
       if (c.domain) {
-        const [service, m, path] = c.domain;
-        const hit = made.find((x) => x.service === service && x.method === m && x.path === path);
-        expect(hit, `${k} → ${service} ${m} ${path}`).toBeDefined();
-        // staff API доменов — только с actor; внутренние вызовы (вход, текущий конфиг) — без него
-        // спринт 4: очередь, реестр, запуски, бюджет — /internal/v1/* доменов, но с actor (домены проверяют права)
-        const actorRequired = path.startsWith("/admin/v1/") || path === "/internal/v1/records" || service in SPRINT4_SERVICES;
-        if (actorRequired) expect(hit!.actor?.id, k).toBe(staff.staff_id);
+        const [svc, m, path] = c.domain;
+        const call = h.fake.calls.slice(before).find((x) => x.service === svc && x.method === m && x.path === path);
+        expect(call, `${key} → ${svc} ${m} ${path}`).toBeDefined();
+        if (path !== "/internal/v1/experience/admin/current" && path !== "/internal/v1/experience/miniapp/current" && !path.startsWith("/internal/v1/auth/")) {
+          expect(call!.actor?.id, key).toBe(staff.staff_id);
+        }
+        if (c.headers?.["idempotency-key"]) expect(call!.headers["idempotency-key"], key).toBe(c.headers["idempotency-key"]);
       }
-      for (const x of made.filter((y) => y.path.startsWith("/admin/v1/"))) expect(x.actor?.id, `${k} → ${x.path}`).toBe(staff.staff_id);
     }
-    // после logout сессии нет
-    expect((await h.app.inject({ url: "/admin/v1/me", headers: browser(s) })).statusCode).toBe(401);
+    expect(violations).toEqual([]);
   });
-});
 
-describe("ответы фильтруются по контракту (T2)", () => {
-  it("служебные поля доменов не доходят до admin-web", async () => {
+  it("4xx домена → клиенту с кодом и details; 5xx и сеть → 503 UPSTREAM_UNAVAILABLE {service} на каждом проксирующем маршруте", async () => {
     const { s } = await loginAs(h, "super_admin");
     await stepUp(h, s);
-    const SECRET = "leak-marker-7f3a";
-    const staffRow = {
-      staff_id: STAFF_ID,
-      email: "a@tilhero.test",
-      display_name: "А",
-      role: "support",
-      status: "ACTIVE",
-      auth_provider: "local",
-      mfa_enabled: true,
-      must_change_password: false,
-      last_login_at: null,
-      created_at: "2026-10-01T00:00:00Z",
-      created_by: null,
-      password_hash: SECRET,
-      mfa_secret_enc: SECRET,
-      session_version: 7,
+    const proxied = Object.entries(CASES).filter(
+      ([k, c]) => c.domain && c.domain[0] !== "adminIdentity" && k !== "GET /admin/v1/dashboard" && !k.includes("/auth/"),
+    );
+    expect(proxied.length).toBeGreaterThan(45);
+    const send = (key: string, c: Case) => {
+      const method = key.split(" ")[0]! as "GET";
+      return h.app.inject({ method, url: c.url, headers: { ...browser(s), ...c.headers }, ...(method === "GET" ? {} : { payload: (c.payload ?? {}) as object }) });
     };
-    h.fake.on("adminIdentity", "GET", "/admin/v1/staff", () => json(200, { items: [staffRow], next_cursor: null, total_internal: SECRET }));
-    h.fake.on("adminIdentity", "PATCH", `/admin/v1/staff/${STAFF_ID}`, () =>
-      json(202, { approval: { approval_id: APPROVAL_ID, kind: "staff.role_grant", status: "PENDING", payload: { secret: SECRET }, summary: { role: "operations" } } }),
-    );
-    h.fake.on("support", "GET", `/admin/v1/support/tickets/${TICKET_ID}/client-view`, () =>
-      json(200, { ticket_id: TICKET_ID, number: "TCK-1", user_id: SECRET, assignee_id: SECRET, messages: [{ message_id: "m1", text: "Привет", visibility: SECRET, author_id: SECRET }] }),
-    );
-    h.fake.on("experience", "GET", "/admin/v1/experience/admin/versions", () =>
-      json(200, { items: [{ version_id: "v", version: "1.0.0", payload: { secret: SECRET } }], next_cursor: null }),
-    );
-    h.fake.on("audit", "GET", "/admin/v1/audit/records", () => json(200, { items: [{ seq: 1, record_id: RECORD_ID, before: { a: 1 }, internal_hmac_key: SECRET }], next_cursor: null }));
-
-    const list = await h.app.inject({ url: "/admin/v1/staff", headers: browser(s) });
-    expect(list.json()).toEqual({ items: [Object.fromEntries(Object.entries(staffRow).filter(([k]) => !["password_hash", "mfa_secret_enc", "session_version"].includes(k)))], next_cursor: null });
-
-    const patch = await h.app.inject({ method: "PATCH", url: `/admin/v1/staff/${STAFF_ID}`, headers: browser(s), payload: { role: "operations", reason: "повышение" } });
-    expect(patch.statusCode).toBe(202);
-    expect(patch.json().approval).toMatchObject({ approval_id: APPROVAL_ID, summary: { role: "operations" } });
-
-    const cv = await h.app.inject({ url: `/admin/v1/support/tickets/${TICKET_ID}/client-view`, headers: browser(s) });
-    expect(cv.json()).toEqual({ ticket_id: TICKET_ID, number: "TCK-1", messages: [{ message_id: "m1", text: "Привет" }] });
-
-    const vers = await h.app.inject({ url: "/admin/v1/experience/admin/versions", headers: browser(s) });
-    expect(vers.json()).toEqual({ items: [{ version_id: "v", version: "1.0.0" }], next_cursor: null });
-
-    const audit = await h.app.inject({ url: "/admin/v1/audit/records", headers: browser(s) });
-    expect(audit.json().items[0]).toEqual({ seq: 1, record_id: RECORD_ID, before: { a: 1 } });
-
-    for (const r of [list, patch, cv, vers, audit]) expect(r.body).not.toContain(SECRET);
-  });
-
-  it("карточка пользователя: полного Telegram ID и лишних полей нет", async () => {
-    const { s } = await loginAs(h, "support");
-    h.fake.on("userAdmin", "GET", `/admin/v1/users/${USER_ID}`, () =>
-      json(200, { user_id: USER_ID, telegram_id_masked: "••••••789", telegram_user_id: "777000123456789", refreshed_at: "2026-10-09T10:00:00Z" }),
-    );
-    const res = await h.app.inject({ url: `/admin/v1/users/${USER_ID}`, headers: browser(s) });
-    expect(res.statusCode).toBe(200);
-    expect(res.body).not.toContain("777000123456789");
-    expect(res.json()).toMatchObject({ user_id: USER_ID, telegram_id_masked: "••••••789", ai_conversations: [{ conversation_id: expect.any(String), turns_count: 3 }] });
-  });
-});
-
-describe("строгая проверка контракта (Ajv поверх схем ответа)", () => {
-  it("null вместо обязательного значения и пропущенное поле ловятся, хотя сериализатор отдал бы \"\"", async () => {
-    const { s } = await loginAs(h, "super_admin");
-    const broken = { ...staffRow({ email: null }) } as Record<string, unknown>;
-    delete broken.created_at;
-    h.fake.on("adminIdentity", "GET", "/admin/v1/staff", () => json(200, { items: [broken], next_cursor: null }));
-    const res = await h.app.inject({ url: "/admin/v1/staff", headers: browser(s) });
-    expect(res.statusCode).toBe(200);
-    expect(res.json().items[0].email).toBe(""); // так fast-json-stringify «чинит» null — молча
-    expect(violations.join("\n")).toMatch(/GET \/admin\/v1\/staff 200: .*email must be string/);
-    expect(violations.join("\n")).toMatch(/must have required property 'created_at'/);
-  });
-
-  it("необязательные поля контракта (?:) не требуются: ConfigVersion без payload, SLA без updated_at", async () => {
-    const { s } = await loginAs(h, "super_admin");
-    expect((await h.app.inject({ url: "/admin/v1/experience/admin/versions", headers: browser(s) })).statusCode).toBe(200);
-    expect((await h.app.inject({ url: "/admin/v1/support/sla-policies", headers: browser(s) })).statusCode).toBe(200);
-    expect(violations).toEqual([]);
-  });
-});
-
-describe("временный пароль: reset-password / approve staff.privileged_reset", () => {
-  const TMP = "Tmp-Approve-Secret-91xQ";
-
-  it("approve privileged_reset → ApprovalDecision с temporary_password, no-store, не в логах; без пароля — поле опущено", async () => {
-    const { s } = await loginAs(h, "super_admin");
-    await stepUp(h, s);
-    const target = h.fake.addStaff({ role: "operations" });
-    const summary = { staff: { staff_id: target.staff_id, email: target.email, display_name: target.display_name }, action: "password", role: "operations" };
-    h.fake.on("adminIdentity", "POST", `/admin/v1/approvals/${APPROVAL_ID}/approve`, () =>
-      json(200, { ...approvalRow({ approval_id: APPROVAL_ID, kind: "staff.privileged_reset", status: "APPLIED", summary }), temporary_password: TMP }),
-    );
-    // principal цели в кэше (наполнен при её входе) — после применения заявки он сбрасывается сразу
-    await login(h, target);
-    const cacheKey = `${h.config.redisKeyPrefix}principal:${target.staff_id}`;
-    expect(await redis().exists(cacheKey)).toBe(1);
-
-    const res = await h.app.inject({ method: "POST", url: `/admin/v1/approvals/${APPROVAL_ID}/approve`, headers: browser(s), payload: { note: "ок" } });
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ approval_id: APPROVAL_ID, kind: "staff.privileged_reset", status: "APPLIED", temporary_password: TMP });
-    expect(res.headers["cache-control"]).toBe("no-store");
-    expect(await redis().exists(cacheKey)).toBe(0);
-    expect(violations).toEqual([]);
-
-    // reject (и approve других видов): домен отдаёт temporary_password: null — в ответе поля нет
-    const rej = await h.app.inject({ method: "POST", url: `/admin/v1/approvals/${RECORD_ID}/reject`, headers: browser(s), payload: {} });
-    expect(rej.statusCode).toBe(200);
-    expect("temporary_password" in rej.json()).toBe(false);
-    expect(violations).toEqual([]);
-
-    expect(h.logs.text).not.toContain(TMP);
-  });
-
-  it("reset-password: 200 {temporary_password} (no-store) или 202 {approval}; reset-mfa: 200 Staff или 202 {approval}", async () => {
-    const { s } = await loginAs(h, "super_admin");
-    await stepUp(h, s);
-    const plain = await h.app.inject({ method: "POST", url: `/admin/v1/staff/${STAFF_ID}/reset-password`, headers: browser(s), payload: { reason: "забыл" } });
-    expect(plain.statusCode).toBe(200);
-    expect(plain.json()).toEqual({ temporary_password: "Tmp-Secret-Passw0rd-XYZ" });
-    expect(plain.headers["cache-control"]).toBe("no-store");
-
-    for (const action of ["reset-password", "reset-mfa"] as const) {
-      h.fake.on("adminIdentity", "POST", `/admin/v1/staff/${STAFF_ID}/${action}`, () =>
-        json(202, { approval: approvalRow({ kind: "staff.privileged_reset", summary: { action: action === "reset-mfa" ? "mfa" : "password" } }) }),
-      );
-      const res = await h.app.inject({ method: "POST", url: `/admin/v1/staff/${STAFF_ID}/${action}`, headers: browser(s), payload: { reason: "four-eyes" } });
-      expect(res.statusCode, action).toBe(202);
-      expect(res.json().approval).toMatchObject({ kind: "staff.privileged_reset", status: "PENDING" });
-      expect(res.json().temporary_password).toBeUndefined();
+    for (const [key, c] of proxied) {
+      const [svc, m, path] = c.domain!;
+      h.fake.on(svc, m, path, () => domainError(409, "DOMAIN_CONFLICT", { current_version: 7 }));
+      const conflict = await send(key, c);
+      expect(conflict.statusCode, key).toBe(409);
+      expect(conflict.json(), key).toMatchObject({ code: "DOMAIN_CONFLICT", details: { current_version: 7 } });
     }
-    expect(violations).toEqual([]);
-    expect(h.logs.text).not.toContain("Tmp-Secret-Passw0rd-XYZ");
+    // 5xx — вторым проходом: после 5 сбоев circuit breaker домена открыт, ответ тот же 503
+    for (const [key, c] of proxied) {
+      const [svc, m, path] = c.domain!;
+      h.fake.on(svc, m, path, () => domainError(500, "BOOM"));
+      const boom = await send(key, c);
+      expect(boom.statusCode, key).toBe(503);
+      expect(boom.json(), key).toMatchObject({ code: "UPSTREAM_UNAVAILABLE", details: { service: AUD[svc] } });
+      expect(boom.body, key).not.toContain("BOOM");
+    }
   });
 });

@@ -64,6 +64,7 @@ from tilhero_identity.models import (
     DeletionRequest,
     GuardianConsentRequest,
     GuardianLink,
+    LearnerActivity,
     PinCredential,
     User,
 )
@@ -341,6 +342,15 @@ class IdentityService:
                 .execution_options(synchronize_session=False)
             )
         return await emit(session, event_type, payload, producer=self.settings.service_name)
+
+    @staticmethod
+    async def _touch(session: AsyncSession, user_id: uuid.UUID) -> None:
+        """Сдвинуть users.updated_at без события: у аккаунта меняется вычисляемое поле снимка админки (число детских
+        профилей), а сверка user-admin идёт по updated_at."""
+        await session.execute(
+            update(User).where(User.user_id == user_id).values(updated_at=func.now())
+            .execution_options(synchronize_session=False)
+        )
 
     async def _emit_security(self, session: AsyncSession, user_id: uuid.UUID, change: str) -> None:
         await self._emit(session, EV_SECURITY_CHANGED, {"user_id": str(user_id), "change": change})
@@ -827,6 +837,7 @@ class IdentityService:
                 "guardian_user_id": str(account.user_id), "created_at": iso_utc_ms(now),
             })
             await self._consent_accepted(session, consent)
+            await self._touch(session, account.user_id)  # children_count в снимке админки
             log.info("child profile created", extra={"user_pid": pseudonymize(str(child.user_id))})
             return learner_detail(child, is_self=False)
 
@@ -1424,6 +1435,8 @@ class IdentityService:
         previous = user.status
         user.status = "DELETION_REQUESTED"
         user.notifications_enabled = False
+        # проекция learning-plan для аудитории рассылок больше не нужна (поздние события пропускает activity.py)
+        await session.execute(delete(LearnerActivity).where(LearnerActivity.user_id == user.user_id))
         await session.flush()
         requested = await self._emit(session, EV_DELETION_REQUESTED, deletion_store.requested_payload(req, attempt=1))
         # attempt 1 и расписание повторов неответившим доменам (deletion/sweeper.py)
@@ -1487,8 +1500,14 @@ class IdentityService:
         user.bot_blocked = False
         await session.execute(delete(PinCredential).where(PinCredential.user_id == req.user_id))
         await session.execute(delete(BiometricCredential).where(BiometricCredential.user_id == req.user_id))
+        await session.execute(delete(LearnerActivity).where(LearnerActivity.user_id == req.user_id))
         # связь ребёнка с опекуном — персональные данные отношения; у ребёнка она снимается при его обезличивании
-        await session.execute(delete(GuardianLink).where(GuardianLink.child_user_id == req.user_id))
+        guardian_id = (await session.execute(
+            delete(GuardianLink).where(GuardianLink.child_user_id == req.user_id)
+            .returning(GuardianLink.guardian_user_id)
+        )).scalar_one_or_none()
+        if guardian_id is not None:
+            await self._touch(session, guardian_id)  # children_count в снимке админки
         await session.execute(
             update(GuardianConsentRequest)
             .where(GuardianConsentRequest.teen_user_id == req.user_id, GuardianConsentRequest.status == "pending")

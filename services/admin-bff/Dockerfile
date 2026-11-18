@@ -49,7 +49,8 @@ COPY --from=build /repo/services/admin-bff/dist /app/services/admin-bff/dist
 WORKDIR /app/services/admin-bff
 USER node
 EXPOSE 8002
-# готовность: процесс жив и Redis сессий отвечает (без Redis вход и сессии невозможны)
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s CMD wget -qO- "http://127.0.0.1:${PORT}/health/ready" >/dev/null || exit 1
-# Railway: приватная сеть — IPv6; HOST=:: в Node — dual-stack (IPv4 тоже); PORT задаёт платформа.
+# как telegram-bff: живость процесса (/health/live); готовность с проверкой Redis — /health/ready (без Redis вход
+# и сессии невозможны, но перезапуск контейнера при сбое Redis не помогает)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s CMD wget -qO- "http://127.0.0.1:${PORT}/health/live" >/dev/null || exit 1
+# Railway: приватная сеть — IPv6; HOST=:: в Node — dual-stack (IPv4 тоже); PORT задаёт платформа (по умолчанию 8002).
 CMD ["node", "--enable-source-maps", "dist/main.js"]

@@ -119,7 +119,7 @@ async def test_no_secrets_in_logs_or_audit(env: Env, caplog: pytest.LogCaptureFi
 async def test_audit_events_conform_to_contract(env: Env, root: Person, root2: Person) -> None:
     await env.login(root.email, "Wrong-passw0rd-zz")
     t = await env.onboard(root.actor, new_email("c"), "support")
-    r = await env.patch(root.actor, t.staff_id, {"role": "billing", "reason": "Контракт"})
+    r = await env.patch(root.actor, t.staff_id, {"role": "communications", "reason": "Контракт"})
     await env.approve(root2.actor, r.json()["approval"]["approval_id"])
     await env.post("/auth/logout", {"staff_id": root.staff_id, "session_id": "abc"})
     events = await env.audit()
@@ -264,8 +264,8 @@ class _PausedAfterFirstCommand:
 
 
 async def test_reservation_started_before_lock_cannot_pass_after_it(env: Env) -> None:
-    """Спринт 9 (Q9), причина нестабильности test_parallel_burst_cannot_exceed_attempt_limit: запрос прочитал
-    «не заблокировано», сосед тем временем исчерпал лимит (блокировка + удаление счётчика), запрос сделал INCR
+    """Исправление Q9 форка aievent, причина нестабильности test_parallel_burst_cannot_exceed_attempt_limit: запрос
+    прочитал «не заблокировано», сосед тем временем исчерпал лимит (блокировка + удаление счётчика), запрос сделал INCR
     по пустому счётчику и получил попытку с полным запасом. Резервирование атомарно — оба запроса блокируются."""
     from tilhero_admin_identity.domain.attempts import ReservingLimiter
 

@@ -14,7 +14,6 @@ from tilhero_admin_identity.domain import audit
 from tilhero_admin_identity.domain.crypto import Passwords, temporary_password
 from tilhero_admin_identity.domain.store import bump_session, now
 from tilhero_admin_identity.models import Staff
-from tilhero_common.errors import conflict
 
 
 @dataclass(frozen=True)
@@ -23,14 +22,8 @@ class ResetContext:
     temp_ttl_hours: int
 
 
-def ad_password() -> Exception:
-    return conflict("STAFF_AUTH_PROVIDER_AD", "Пароль сотрудника из Active Directory меняется в AD")
-
-
 async def apply_password_reset(session: AsyncSession, target: Staff, by: Staff, reason: str, ctx: ResetContext,
                                *, approval_id: uuid.UUID | None = None, reissue: bool = False) -> str:
-    if target.auth_provider != "local":
-        raise ad_password()
     temp = temporary_password()
     target.password_hash = await ctx.passwords.hash(temp)
     target.must_change_password = True

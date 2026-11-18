@@ -14,6 +14,8 @@ from tilhero_common.internal_auth import b64e, private_from_seed, public_raw
 SERVICES = [
     "telegram-bff",
     "admin-bff",
+    "admin-identity",
+    "user-admin",
     "identity-consent",
     "learning-plan",
     "social",

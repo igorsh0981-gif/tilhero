@@ -1,7 +1,7 @@
 """Вход сотрудника: пароль → (смена пароля) → (подключение MFA) → (TOTP) → done; step-up; principal; bootstrap.
 
 Безопасность:
-- счётчик неудач — по sha256(нормализованный email) в Redis, одинаково для существующих и несуществующих
+- счётчик неудач — по HMAC-SHA256(нормализованный email) в Redis, одинаково для существующих и несуществующих
   учёток (5 → 423 ACCOUNT_LOCKED на 15 мин); для неизвестного email проверяется фиктивный argon2-хеш;
 - challenge — одноразовый, 5 мин, привязан к staff_id/шагу/session_version, 5 попыток кода;
 - TOTP: окно ±1, повтор шага запрещён (mfa_last_step под блокировкой строки);
@@ -36,7 +36,6 @@ from tilhero_admin_identity.domain.crypto import (
     otpauth_uri,
 )
 from tilhero_admin_identity.domain.policy import ensure_strong, is_valid_email, mask_email, normalize_email
-from tilhero_admin_identity.domain.providers import AuthProvider, make_provider
 from tilhero_admin_identity.domain.resets import ResetContext
 from tilhero_admin_identity.domain.store import (
     get_staff,
@@ -108,14 +107,13 @@ return tonumber(c or '0')
 
 
 class Identity:
-    """Зависимости домена (без FastAPI): настройки, argon2, шифрование MFA, провайдер входа."""
+    """Зависимости домена (без FastAPI): настройки, argon2, шифрование MFA."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.passwords = Passwords(settings.argon2_time_cost, settings.argon2_memory_cost,
                                    settings.argon2_parallelism)
         self.box = SecretBox(settings.mfa_key)
-        self.provider: AuthProvider = make_provider(settings.auth_mode, self.passwords)
         self.reset_ctx = ResetContext(self.passwords, settings.temp_password_ttl_hours)
         self._email_key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None,
                                info=b"tilhero-admin-identity/email-hmac/v1").derive(settings.mfa_key)
@@ -194,8 +192,6 @@ class Identity:
 
     # ---------- вход
     async def login(self, rt: Runtime, body: LoginIn) -> LoginStepOut:
-        if self.settings.auth_mode == "ad":
-            await self.provider.verify(None, body.password)  # LdapAuthProvider → 501 AUTH_MODE_UNAVAILABLE
         email = normalize_email(body.email)
         subject = self.email_subject(email)
         limiter = self.login_limiter(rt)
@@ -205,7 +201,8 @@ class Identity:
         async with rt.transaction() as session:
             staff = await staff_by_email(session, email) if is_valid_email(email) else None
             staff_id = staff.staff_id if staff else None
-        ok = await self.provider.verify(staff, body.password)
+        # для неизвестного email — фиктивный хеш: время ответа не выдаёт существование учётки
+        ok = await self.passwords.verify(staff.password_hash if staff is not None else None, body.password)
         if not ok or staff is None:
             state = await limiter.failed(subject, state)
             await self._audit_login_failure(rt, subject, state, object_id=staff_id, ip=body.ip)
@@ -297,8 +294,6 @@ class Identity:
             s = await require_staff(session, staff_id)
             if s.status != "ACTIVE":
                 raise account_disabled()
-            if s.auth_provider != "local":
-                raise conflict("STAFF_AUTH_PROVIDER_AD", "Пароль учётной записи AD меняется в Active Directory")
             subject = self.email_subject(s.email)
         limiter = self.login_limiter(rt)
         state = await limiter.reserve(subject)
@@ -446,8 +441,9 @@ class Identity:
 
     # ---------- bootstrap
     async def bootstrap(self, rt: Runtime) -> bool:
-        """Первый super_admin из ADMIN_BOOTSTRAP_EMAIL/PASSWORD. Идемпотентно: если super_admin уже есть
-        (в любом статусе) — не создаёт. Пароль из переменной временный: срок 72 ч, при первом входе — смена.
+        """Первый super_admin из ADMIN_BOOTSTRAP_EMAIL/PASSWORD (пароль уже проверен правилами в Settings).
+        Идемпотентно: если есть активный super_admin — не создаёт (INTERNAL_API §1). Пароль из переменной
+        временный: срок 72 ч, при первом входе — смена (must_change_password) и подключение TOTP.
         Пока первый вход не выполнен — предупреждение в лог при каждом старте; если срок истёк, а bootstrap-учётка
         по-прежнему единственный super_admin, — пароль из переменной выдаётся заново (иначе тупик без консоли).
         True — учётка создана."""
@@ -463,17 +459,17 @@ class Identity:
         async with rt.transaction() as session:
             await lock_identity(session)
             supers = list((await session.execute(
-                select(Staff).where(Staff.role == SUPER_ADMIN)
+                select(Staff).where(Staff.role == SUPER_ADMIN, Staff.status == "ACTIVE")
             )).scalars().all())
             if supers:
                 await self._bootstrap_pending(session, supers, email, password, ttl)
                 return False
             if await staff_by_email(session, email) is not None:
-                log.warning("admin bootstrap skipped: bootstrap email belongs to an existing non-super_admin staff")
+                log.warning("admin bootstrap skipped: bootstrap email belongs to an existing staff account")
                 return False
             at = now()
             s = Staff(staff_id=uuid.uuid4(), email=email, display_name=st.admin_bootstrap_display_name[:120],
-                      role=SUPER_ADMIN, auth_provider="local", password_hash=await self.passwords.hash(password),
+                      role=SUPER_ADMIN, password_hash=await self.passwords.hash(password),
                       must_change_password=True, temp_password_expires_at=at + ttl, mfa_enabled=False,
                       status="ACTIVE", session_version=1, created_at=at, updated_at=at, created_by=None)
             session.add(s)
@@ -491,7 +487,7 @@ class Identity:
                      and x.last_login_at is None and x.status == "ACTIVE"), None)
         if boot is None:
             # Переменные нужны только до первого входа — напоминаем удалить (значения не логируем)
-            log.warning("admin bootstrap skipped: super_admin already exists; "
+            log.warning("admin bootstrap skipped: active super_admin already exists; "
                         "remove ADMIN_BOOTSTRAP_EMAIL/ADMIN_BOOTSTRAP_PASSWORD from the environment")
             return
         expires = boot.temp_password_expires_at

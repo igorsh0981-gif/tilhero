@@ -21,7 +21,7 @@ async def test_b1_super_admin_revoke_needs_four_eyes_and_blocks_waiver(env: Env,
                                                                       root2: Person) -> None:
     an = await env.onboard(root.actor, new_email("an"), "analyst")
     # заявка root2, которая должна отклониться при его отключении (MINOR 5)
-    b_req = await env.patch(root2.actor, an.staff_id, {"role": "billing", "reason": "Повышение от B"})
+    b_req = await env.patch(root2.actor, an.staff_id, {"role": "communications", "reason": "Повышение от B"})
     assert b_req.status_code == 202 and b_req.json()["approval"]["status"] == "PENDING"
     # A отключает B — не сразу, а заявкой; B по-прежнему активный super_admin
     r = await env.patch(root.actor, root2.staff_id, {"status": "DISABLED", "reason": "Ротация"})
@@ -45,7 +45,7 @@ async def test_b1_super_admin_revoke_needs_four_eyes_and_blocks_waiver(env: Env,
     c = await env.create_staff(root.actor, new_email("ops"), "operations")
     assert c.json()["approval"]["status"] == "PENDING" and c.json()["approval"]["waived"] is None
     assert c.json()["staff"]["role"] == "read_only"
-    g = await env.patch(root.actor, an.staff_id, {"role": "billing", "reason": "Повышение"})
+    g = await env.patch(root.actor, an.staff_id, {"role": "communications", "reason": "Повышение"})
     assert g.status_code == 202 and g.json()["approval"]["status"] == "PENDING"
     # спустя 72 ч исключение снова действует
     await env.sql("UPDATE approvals SET decided_at = now() - interval '73 hours' WHERE approval_id = :i "
@@ -187,7 +187,7 @@ async def test_minor4_permissions_come_from_db_role(env: Env, root: Person) -> N
 
 async def test_minor5_approval_of_inactive_author_not_applicable(env: Env, root: Person, root2: Person) -> None:
     an = await env.onboard(root.actor, new_email("an"), "analyst")
-    r = await env.patch(root2.actor, an.staff_id, {"role": "billing", "reason": "Повышение"})
+    r = await env.patch(root2.actor, an.staff_id, {"role": "communications", "reason": "Повышение"})
     aid = r.json()["approval"]["approval_id"]
     # автор отключён в обход API (например, вручную) — согласовать нельзя, отклонить можно
     await env.sql("UPDATE staff SET status = 'DISABLED' WHERE staff_id = :i RETURNING staff_id", i=root2.staff_id)
@@ -204,7 +204,7 @@ async def test_minor5_approval_of_inactive_author_not_applicable(env: Env, root:
     await env.sql("UPDATE staff SET role = 'auditor' WHERE staff_id = :i RETURNING staff_id", i=aud.staff_id)
     aud = await env.refresh(aud)
     ro = await env.create_staff(aud.actor, new_email("ro"), "read_only")
-    req = await env.patch(aud.actor, ro.json()["staff"]["staff_id"], {"role": "billing", "reason": "Повышение"})
+    req = await env.patch(aud.actor, ro.json()["staff"]["staff_id"], {"role": "communications", "reason": "Повышение"})
     assert req.status_code == 202
     off = await env.patch(root.actor, aud.staff_id, {"status": "DISABLED", "reason": "Увольнение"})
     assert off.status_code == 200

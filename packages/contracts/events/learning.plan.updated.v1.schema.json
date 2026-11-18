@@ -130,6 +130,42 @@
           "type": "null"
         }
       ]
+    },
+    "level_self": {
+      "anyOf": [
+        {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "zero",
+            "beginner",
+            "some",
+            "confident",
+            null
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "preset": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "daily",
+            "weekdays",
+            "three_per_week",
+            "custom"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   }
 }

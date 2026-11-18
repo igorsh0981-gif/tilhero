@@ -127,6 +127,16 @@ describe("POST /v1/whats-new/seen", () => {
     expect(h.fake.seen.get(s.userId)).toEqual(new Set([id]));
   });
 
+  it("сегмент для статистики показов: lang — locale аккаунта, age — возраст ученика; identity недоступен — без сегмента", async () => {
+    h.fake.setAge(s.userId, "14-17");
+    h.fake.account(s.userId).summary.locale = "uz";
+    expect((await seen([randomUUID()])).statusCode).toBe(204);
+    expect(h.fake.callsTo("experience", "POST", "/internal/v1/release-notes/seen")[0]!.query).toEqual({ lang: "uz", age: "teens" });
+    h.fake.override("identity", "GET", "/internal/v1/me", () => domainError(503, "UPSTREAM_UNAVAILABLE"));
+    expect((await seen([randomUUID()])).statusCode).toBe(204);
+    expect(h.fake.callsTo("experience", "POST", "/internal/v1/release-notes/seen")[1]!.query).toEqual({});
+  });
+
   it("422: пусто, > 20, не UUID, дубли; ошибка домена — как есть", async () => {
     for (const ids of [[], Array.from({ length: 21 }, () => randomUUID()), ["welcome-1"], (() => { const x = randomUUID(); return [x, x]; })(), "x"]) {
       expect((await seen(ids)).statusCode, JSON.stringify(ids).slice(0, 30)).toBe(422);

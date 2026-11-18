@@ -7,7 +7,7 @@ import type { LoginStep, Me } from "@tilhero/contracts/admin";
 import { AppError } from "@tilhero/ts-common";
 import { ipHash, uaHash } from "./auth.js";
 import { readSessionCookie, sessionCookie } from "./cookies.js";
-import type { BffContext } from "./context.js";
+import { parsePrincipal, type BffContext } from "./context.js";
 import type { Principal } from "./http.js";
 import { effectiveAccess } from "./rbac.js";
 import { isSessionId, type SessionData } from "./sessions.js";
@@ -17,7 +17,7 @@ import { upstreamUnavailable } from "./upstream.js";
 export interface AuthStep {
   next: LoginStep["next"];
   challenge?: string | null;
-  principal?: Principal | null;
+  principal?: unknown;
 }
 
 /** Сколько старый id живёт после ротации по step-up (запросы, ушедшие до ответа step-up). */
@@ -50,7 +50,6 @@ export function buildMe(ctx: BffContext, s: SessionData, principal: Principal): 
     },
     csrf_token: s.csrf_token,
     env: ctx.config.env,
-    runbook_base_url: ctx.config.runbookBaseUrl,
     impersonating: eff.impersonating,
   };
 }
@@ -101,8 +100,9 @@ export async function finishStep(
 ): Promise<LoginStep> {
   if (step.next === "done") {
     if (!step.principal) throw upstreamUnavailable("admin-identity");
-    return { next: "done", challenge: null, me: await startSession(ctx, req, reply, step.principal) };
+    return { next: "done", challenge: null, me: await startSession(ctx, req, reply, parsePrincipal(step.principal)) };
   }
-  if (!step.challenge) throw upstreamUnavailable("admin-identity");
+  if (!["mfa", "mfa_enroll", "password_change"].includes(step.next)) throw upstreamUnavailable("admin-identity");
+  if (typeof step.challenge !== "string" || !/^[A-Za-z0-9_-]{16,128}$/.test(step.challenge)) throw upstreamUnavailable("admin-identity");
   return { next: step.next, challenge: step.challenge, me: null };
 }

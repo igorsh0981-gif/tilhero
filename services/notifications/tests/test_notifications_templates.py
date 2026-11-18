@@ -7,6 +7,7 @@ import uuid
 
 import pytest
 
+from tilhero_notifications.domain.texts import PRESSURE_WORDS
 from tilhero_notifications.templates import (
     KID_TEMPLATES,
     TEMPLATES,
@@ -34,8 +35,9 @@ PARAMS: dict[str, dict] = {
 for base in ("lesson.reminder", "lesson.missed", "lesson.comeback"):
     PARAMS[base + ".kid"] = PARAMS[base]
 
-# Детям и о детях — без давления: ни «потери серии», ни «провала» (CONVENTIONS §8)
-FORBIDDEN = re.compile(r"сери|потер|провал|теря|штраф|seriya|yoʻqot|muvaffaqiyatsiz|jarima", re.IGNORECASE)
+# Детям и о детях — без давления: ни «потери серии», ни «провала» (CONVENTIONS §8). Список — в коде: им же
+# проверяются детские версии сотрудников при сохранении (domain/texts.py)
+FORBIDDEN = PRESSURE_WORDS
 STARTAPP = {
     "lesson.reminder": "route_home",
     "lesson.missed": "route_home",

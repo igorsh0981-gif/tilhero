@@ -1,7 +1,7 @@
 /**
- * Лимиты админки (спринт 9, INTERNAL_API §2.3) — единый лимитер ts-common (GCRA на Redis, общий для реплик,
- * переопределения без деплоя, метрики для ops-monitor, fail open / closed по политике).
- * Значения по умолчанию — прежние env RATE_LIMIT_* (config.rateLimits); `adm.command`, `adm.dlq` — из каталога.
+ * Лимиты админки — единый лимитер ts-common (GCRA на Redis, общий для реплик, переопределения без деплоя,
+ * fail open / closed по политике каталога `packages/contracts/rate-limit-policies.json`).
+ * Значения по умолчанию — env RATE_LIMIT_* (config.rateLimits); `adm.command` — из каталога.
  */
 import type { Redis } from "ioredis";
 import { AppError, RateLimiter, policyDefaults, rateLimitedError, type Logger } from "@tilhero/ts-common";
@@ -36,12 +36,7 @@ export function createLimiter(redis: Redis, config: Config, log: Logger): RateLi
   });
 }
 
-/** Команды DLQ и повтор удаления профиля — сверх `adm.command` ещё `adm.dlq` (10/мин на сотрудника). */
-const DLQ_ROUTES = [/^\/admin\/v1\/ops\/dlq\/(replay|delete)$/, /^\/admin\/v1\/deletions\/[^/]+retry$/];
-
-/** Политики команды сотрудника по маршруту: небезопасный метод → `adm.command` (+ `adm.dlq`). */
-export function commandPolicies(method: string, routeUrl: string | undefined): string[] {
-  if (["GET", "HEAD", "OPTIONS"].includes(method)) return [];
-  const url = routeUrl ?? "";
-  return DLQ_ROUTES.some((re) => re.test(url)) ? ["adm.command", "adm.dlq"] : ["adm.command"];
+/** Политики команды сотрудника по методу: небезопасный метод → `adm.command` (60/мин на сотрудника). */
+export function commandPolicies(method: string): string[] {
+  return ["GET", "HEAD", "OPTIONS"].includes(method) ? [] : ["adm.command"];
 }

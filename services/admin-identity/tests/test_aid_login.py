@@ -11,6 +11,8 @@ import aid_testkit
 import pytest
 from aid_testkit import NEW_PASSWORD, ROOT_EMAIL, ROOT_PASSWORD, Env, Person, bad_code, code_at, new_email
 
+from tilhero_admin_identity.domain.catalog import PERMISSIONS
+
 
 def _shape(r) -> tuple[int, str, dict]:
     body = r.json()
@@ -37,7 +39,7 @@ async def test_bootstrap_first_login_then_mfa_login(env: Env) -> None:
     assert done.json()["next"] == "done" and done.json()["challenge"] is None
     assert p["staff"]["role"] == "super_admin" and p["mfa_enabled"] is True and p["must_change_password"] is False
     assert p["session_version"] == 2 and p["status"] == "ACTIVE"  # смена пароля → рост версии
-    assert "roles.manage" in p["permissions"] and len(p["permissions"]) == 25
+    assert p["permissions"] == list(PERMISSIONS)  # super_admin — все 17 прав в порядке admin.ts
     # повторный вход: пароль → TOTP → done (следующий шаг TOTP — повтор текущего запрещён)
     r = await env.login(ROOT_EMAIL, NEW_PASSWORD)
     assert r.json()["next"] == "mfa"
@@ -232,8 +234,9 @@ async def test_step_up(env: Env, root: Person) -> None:
 
 async def test_step_up_replay_rejected_after_step_change(env: Env, root: Person,
                                                          monkeypatch: pytest.MonkeyPatch) -> None:
-    """Спринт 9 (Q9): смена 30-секундного шага между входом и повтором — детерминированно, на подменённых часах
-    TOTP (сервер и тест). Прежний код ещё в окне −1, но его шаг использован → повтор; код нового шага принимается."""
+    """Исправление Q9 форка aievent: смена 30-секундного шага между входом и повтором — детерминированно,
+    на подменённых часах TOTP (сервер и тест). Прежний код ещё в окне −1, но его шаг использован → повтор;
+    код нового шага принимается."""
     from tilhero_admin_identity.domain import crypto
 
     assert root.secret is not None
@@ -301,12 +304,6 @@ async def test_internal_api_caller_checks(env: Env, root: Person) -> None:
     assert extra.status_code == 422
 
 
-async def test_ad_mode_unavailable(env_factory) -> None:
-    e = await env_factory(auth_mode="ad")
-    r = await e.login(ROOT_EMAIL, ROOT_PASSWORD)
-    assert _shape(r)[:2] == (501, "AUTH_MODE_UNAVAILABLE")
-
-
 async def test_parallel_burst_cannot_exceed_attempt_limit(env: Env, root: Person) -> None:
     burst = await asyncio.gather(*(env.login(root.email, f"Wrong-passw0rd-{i}") for i in range(8)))
     codes = sorted(r.status_code for r in burst)
@@ -320,7 +317,7 @@ async def test_parallel_burst_cannot_exceed_attempt_limit(env: Env, root: Person
 
 def test_email_validation_rejects_template_brackets() -> None:
     from tilhero_admin_identity.domain.policy import is_valid_email, normalize_email
-    for bad in ["<igorsh81@bk.ru>", "\"a\"@b.ru", "a b@c.ru", "a@b", "a,b@c.ru", "ВПИШИТЕ_EMAIL", "a@-b.ru", "@b.ru"]:
+    for bad in ["<admin@example.uz>", "\"a\"@b.ru", "a b@c.ru", "a@b", "a,b@c.ru", "ВПИШИТЕ_EMAIL", "a@-b.ru", "@b.ru"]:
         assert not is_valid_email(normalize_email(bad)), bad
-    for good in ["igorsh81@bk.ru", "First.Last+tag@Example.co.uk", "o'neil@mail.example.com", "a_b-c%d@x-y.uz"]:
+    for good in ["admin@example.uz", "First.Last+tag@Example.co.uk", "o'neil@mail.example.com", "a_b-c%d@x-y.uz"]:
         assert is_valid_email(normalize_email(good)), good

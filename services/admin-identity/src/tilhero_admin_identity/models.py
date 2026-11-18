@@ -50,7 +50,6 @@ class Staff(Base):
     __tablename__ = "staff"
     __table_args__ = (
         CheckConstraint("email = lower(email)", name="ck_staff_email_lower"),
-        CheckConstraint("auth_provider IN ('local','ad')", name="ck_staff_auth_provider"),
         CheckConstraint("status IN ('ACTIVE','LOCKED','DISABLED')", name="ck_staff_status"),
         Index("ix_staff_role", "role"),
         Index("ix_staff_created_at", "created_at"),
@@ -60,7 +59,6 @@ class Staff(Base):
     email: Mapped[str] = mapped_column(String(254), nullable=False, unique=True)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     role: Mapped[str] = mapped_column(String(32), ForeignKey("roles.code"), nullable=False)
-    auth_provider: Mapped[str] = mapped_column(String(8), nullable=False, server_default="local")
     password_hash: Mapped[str | None] = mapped_column(Text)
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     temp_password_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

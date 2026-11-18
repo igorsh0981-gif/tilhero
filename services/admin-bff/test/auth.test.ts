@@ -7,7 +7,6 @@ import type { LoginStep, Me } from "@tilhero/contracts/admin";
 import {
   PASSWORD_OK,
   TOTP_OK,
-  avoidWindowEdge,
   browser,
   json,
   stepUp,
@@ -106,20 +105,21 @@ describe("login flow", () => {
     expect(locked.headers["retry-after"]).toBe("900");
   });
 
-  it("AUTH_MODE=ad без LDAP: 501 AUTH_MODE_UNAVAILABLE домена передаётся как есть (не 503), cookie нет", async () => {
+  it("5xx admin-identity → 503 UPSTREAM_UNAVAILABLE {service}, cookie нет; испорченный principal шага — тоже 503", async () => {
     const staff = h.fake.addStaff({ role: "support" });
-    h.fake.on("adminIdentity", "POST", "/internal/v1/auth/login", () => domainError(501, "AUTH_MODE_UNAVAILABLE"));
-    await avoidWindowEdge();
-    for (let i = 0; i < 5; i++) {
-      const res = await post("/admin/v1/auth/login", { email: `ad-user-${i}@tilhero.test`, password: PASSWORD_OK });
-      expect(res.statusCode).toBe(501);
-      expect(res.json()).toMatchObject({ code: "AUTH_MODE_UNAVAILABLE" });
-      expect(res.headers["set-cookie"]).toBeUndefined();
-    }
-    // 501 — не сбой: circuit breaker не размыкается (порог 5)
-    h.fake.overrides.delete("adminIdentity POST /internal/v1/auth/login");
-    const ok = await post("/admin/v1/auth/login", { email: staff.email, password: PASSWORD_OK });
-    expect(ok.statusCode).toBe(200);
+    h.fake.on("adminIdentity", "POST", "/internal/v1/auth/login", () => domainError(500, "INTERNAL_ERROR"));
+    const res = await post("/admin/v1/auth/login", { email: staff.email, password: PASSWORD_OK });
+    expect(res.statusCode).toBe(503);
+    expect(res.json()).toMatchObject({ code: "UPSTREAM_UNAVAILABLE", details: { service: "admin-identity" } });
+    expect(res.headers["set-cookie"]).toBeUndefined();
+    h.fake.on("adminIdentity", "POST", "/internal/v1/auth/login", () =>
+      json(200, { next: "done", principal: { ...h.fake.principal(staff), session_version: "1" } }),
+    );
+    const broken = await post("/admin/v1/auth/login", { email: staff.email, password: PASSWORD_OK });
+    expect(broken.statusCode).toBe(503);
+    expect(broken.headers["set-cookie"]).toBeUndefined();
+    h.fake.on("adminIdentity", "POST", "/internal/v1/auth/login", () => json(200, { next: "mfa", challenge: "short" }));
+    expect((await post("/admin/v1/auth/login", { email: staff.email, password: PASSWORD_OK })).statusCode).toBe(503);
   });
 
   it("admin-identity недоступен → 503 UPSTREAM_UNAVAILABLE", async () => {
@@ -296,7 +296,7 @@ describe("step-up", () => {
       h.app.inject({
         method: "POST",
         url: "/admin/v1/staff",
-        headers: browser(s),
+        headers: { ...browser(s), "idempotency-key": "create-staff-0001" },
         payload: { email: "new@tilhero.test", display_name: "Новый", role: "support" },
       });
     const r1 = await create();
@@ -317,7 +317,7 @@ describe("step-up", () => {
     const viaOld = await h.app.inject({
       method: "POST",
       url: "/admin/v1/staff",
-      headers: browser({ id: oldId, csrf: s.csrf }),
+      headers: { ...browser({ id: oldId, csrf: s.csrf }), "idempotency-key": "create-staff-0002" },
       payload: { email: "old@tilhero.test", display_name: "Старый", role: "support" },
     });
     expect(viaOld.json().code).toBe("STEP_UP_REQUIRED");

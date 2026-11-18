@@ -11,6 +11,10 @@ import type { Principal, StaffAuth } from "./http.js";
 import type { RateLimiter } from "./rateLimit.js";
 import type { SessionStore } from "./sessions.js";
 import { upstreamUnavailable, type DomainClient, type Domains } from "./upstream.js";
+import { BadValue, C, type Codec } from "./codec.js";
+import { STAFF_SUMMARY } from "./contract.js";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface BffContext {
   config: Config;
@@ -36,6 +40,25 @@ export function makeStoreGuard(log: FastifyBaseLogger) {
       throw upstreamUnavailable("session-store");
     }
   };
+}
+
+const PRINCIPAL: Codec<Principal> = C.obj<Principal>({
+  staff: STAFF_SUMMARY,
+  permissions: C.arr(C.str(64, 1), 200),
+  mfa_enabled: C.bool,
+  must_change_password: C.bool,
+  session_version: C.int(0),
+  status: C.oneOf(["ACTIVE", "LOCKED", "DISABLED"] as const),
+});
+
+/** principal admin-identity (шаг входа, GET principal) — строго; испорченный → 503 UPSTREAM_UNAVAILABLE. */
+export function parsePrincipal(v: unknown): Principal {
+  try {
+    return PRINCIPAL.parse(v, "$");
+  } catch (e) {
+    if (e instanceof BadValue) throw upstreamUnavailable("admin-identity");
+    throw e;
+  }
 }
 
 /**
@@ -66,7 +89,7 @@ export class PrincipalCache {
         }
       }
     }
-    const p = await this.client.get<Principal>(`/internal/v1/staff/${encodeURIComponent(staffId)}/principal`);
+    const p = parsePrincipal(await this.client.get<unknown>(`/internal/v1/staff/${encodeURIComponent(staffId)}/principal`));
     await this.put(p);
     return p;
   }
@@ -82,7 +105,9 @@ export class PrincipalCache {
 }
 
 /**
- * Имена операторов для тикетов (admin-identity GET /admin/v1/staff/lookup) — in-memory кэш 60 с.
+ * Имена сотрудников для полей `*_name` (операторы тикетов, авторы заметок, версий шаблонов и рассылок) —
+ * admin-identity `GET /admin/v1/staff/lookup?ids=` (с actor; в INTERNAL_API §1 — /internal/v1/…, admin-identity
+ * реализовал по пути staff API), in-memory кэш 60 с, до 100 id за вызов.
  * Сбой lookup не ломает экран: имена остаются null.
  */
 export class StaffNames {
@@ -97,20 +122,24 @@ export class StaffNames {
     const now = Date.now();
     const out = new Map<string, string>();
     const missing: string[] = [];
-    for (const id of new Set(ids.filter((x): x is string => typeof x === "string" && x.length > 0))) {
+    for (const id of new Set(ids.filter((x): x is string => typeof x === "string" && UUID_RE.test(x)).map((x) => x.toLowerCase()))) {
       const hit = this.cache.get(id);
       if (hit && now - hit.at < this.ttlMs) out.set(id, hit.name);
       else missing.push(id);
     }
     if (missing.length === 0) return out;
     try {
-      const res = await this.client.get<{ items: StaffSummary[] }>("/admin/v1/staff/lookup", {
+      const res = await this.client.get<{ items?: unknown }>("/admin/v1/staff/lookup", {
         actor: auth.actor,
         query: { ids: missing.slice(0, 100).join(",") },
       });
-      for (const s of res.items ?? []) {
-        this.cache.set(s.staff_id, { name: s.display_name, at: now });
-        out.set(s.staff_id, s.display_name);
+      for (const s of Array.isArray(res?.items) ? (res.items as Partial<StaffSummary>[]) : []) {
+        if (typeof s?.staff_id !== "string" || typeof s.display_name !== "string") continue;
+        const name = s.display_name.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 120);
+        if (!name) continue;
+        const id = s.staff_id.toLowerCase();
+        this.cache.set(id, { name, at: now });
+        out.set(id, name);
       }
       if (this.cache.size > 5000) this.cache.clear();
     } catch (err) {
@@ -129,7 +158,7 @@ export interface AuditEntry {
   reason?: string | null;
 }
 
-/** Аудит действий самого BFF (impersonate, резервная запись logout) — синхронно в audit. */
+/** Аудит действий самого BFF (dev.impersonate, резервная запись auth.logout) — синхронно в audit. */
 export async function writeAudit(
   ctx: BffContext,
   auth: StaffAuth,

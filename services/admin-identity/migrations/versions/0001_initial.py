@@ -1,8 +1,13 @@
-"""staff, roles, role_permissions, approvals + outbox/inbox; сид ролей и матрицы прав (INTERNAL_API спринта 2)
+"""staff, roles, role_permissions, approvals + outbox/inbox; сид ролей и матрицы прав TilHero
+
+Одна миграция вместо истории форка (prod-БД админки пуста). Матрица по умолчанию — docs/sprint2/PLAN.md
+§«Роли и права»; права и роли — packages/contracts/src/admin.ts (`Permission`, `RoleCode`, `PRIVILEGED_ROLES`),
+сверка — tests/test_aid_contract.py. Дальше матрица меняется только через four-eyes (role.permissions_change).
+Значения зафиксированы здесь, а не импортируются из кода: миграция не должна меняться вместе с каталогом.
 
 Revision ID: 0001
 Revises:
-Create Date: 2026-10-09
+Create Date: 2026-11-18
 """
 import sqlalchemy as sa
 from alembic import op
@@ -16,25 +21,38 @@ branch_labels = None
 depends_on = None
 
 ALL_PERMISSIONS = [
-    "dashboard.read", "users.read", "users.sensitive.read", "ai.content.read", "export.csv",
-    "support.read", "support.reply", "support.manage", "subscriptions.override", "billing.refund",
-    "skills.edit", "skills.publish", "audit.read", "config.read", "config.edit", "config.publish",
-    "ops.kill_switch", "staff.manage", "roles.manage",
+    "dashboard.read", "users.read", "users.sensitive.read", "support.read", "support.reply", "support.manage",
+    "audit.read", "config.read", "config.edit", "config.publish", "whatsnew.manage", "whatsnew.publish",
+    "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send", "staff.manage", "roles.manage",
+]
+# MFA обязательна, назначение — four-eyes (admin.ts PRIVILEGED_ROLES)
+PRIVILEGED_ROLES = ["super_admin", "operations", "communications"]
+# Роль с любым из этих прав тоже привилегированна (domain/catalog.py PRIVILEGED_PERMISSIONS)
+PRIVILEGED_PERMISSIONS = ["users.sensitive.read", "staff.manage", "roles.manage", "config.publish",
+                          "whatsnew.publish", "notif.templates.manage", "notif.campaigns.send"]
+
+# (code, name_ru, name_en, permissions) — порядок ролей = RoleCode в admin.ts
+ROLES = [
+    ("super_admin", "Суперадминистратор", "Super Admin", ALL_PERMISSIONS),
+    ("operations", "Операции", "Operations",
+     ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read"]),
+    ("communications", "Коммуникации", "Communications",
+     ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage",
+      "notif.campaigns.send"]),
+    ("support", "Поддержка", "Support", ["dashboard.read", "users.read", "support.read", "support.reply"]),
+    # контент и сценарии — спринт 3; пока только чтение (users.read без раскрытия)
+    ("methodist", "Методист", "Methodologist", ["dashboard.read", "users.read"]),
+    ("analyst", "Аналитик", "Analyst", ["dashboard.read", "users.read"]),
+    ("auditor", "Аудитор", "Auditor", ["dashboard.read", "audit.read"]),
+    ("read_only", "Только просмотр", "Read Only", ["dashboard.read"]),
 ]
 
-# (code, name_ru, name_en, privileged, permissions) — матрица по умолчанию; дальше меняется через four-eyes
-ROLES = [
-    ("super_admin", "Суперадминистратор", "Super Admin", True, ALL_PERMISSIONS),
-    ("operations", "Операции", "Operations", True,
-     ["dashboard.read", "users.read", "support.read", "config.read", "ops.kill_switch", "audit.read"]),
-    ("support", "Поддержка", "Support", False, ["dashboard.read", "users.read", "support.read", "support.reply"]),
-    ("billing", "Биллинг", "Billing", True,
-     ["dashboard.read", "users.read", "subscriptions.override", "billing.refund"]),
-    ("agent_manager", "Менеджер агентов", "Agent Manager", True, ["dashboard.read", "skills.edit"]),
-    ("analyst", "Аналитик", "Analyst", False, ["dashboard.read", "users.read"]),
-    ("auditor", "Аудитор", "Auditor", False, ["dashboard.read", "audit.read"]),
-    ("read_only", "Только просмотр", "Read Only", False, ["dashboard.read"]),
-]
+APPROVAL_KINDS = ("kind IN ('staff.role_grant','staff.create_privileged','role.permissions_change',"
+                  "'staff.privileged_revoke','staff.privileged_reset')")
+
+
+def _privileged(code: str, perms: list[str]) -> bool:
+    return code in PRIVILEGED_ROLES or any(p in PRIVILEGED_PERMISSIONS for p in perms)
 
 
 def upgrade() -> None:
@@ -58,7 +76,6 @@ def upgrade() -> None:
         sa.Column("email", sa.String(254), nullable=False, unique=True),
         sa.Column("display_name", sa.String(120), nullable=False),
         sa.Column("role", sa.String(32), sa.ForeignKey("roles.code"), nullable=False),
-        sa.Column("auth_provider", sa.String(8), nullable=False, server_default="local"),
         sa.Column("password_hash", sa.Text()),
         sa.Column("password_changed_at", sa.DateTime(timezone=True)),
         sa.Column("temp_password_expires_at", sa.DateTime(timezone=True)),
@@ -73,7 +90,6 @@ def upgrade() -> None:
         sa.Column("created_by", pg.UUID(as_uuid=True)),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.CheckConstraint("email = lower(email)", name="ck_staff_email_lower"),
-        sa.CheckConstraint("auth_provider IN ('local','ad')", name="ck_staff_auth_provider"),
         sa.CheckConstraint("status IN ('ACTIVE','LOCKED','DISABLED')", name="ck_staff_status"),
     )
     op.create_index("ix_staff_role", "staff", ["role"])
@@ -94,8 +110,7 @@ def upgrade() -> None:
         sa.Column("decision_note", sa.Text()),
         sa.Column("waived", sa.String(32)),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint("kind IN ('staff.role_grant','staff.create_privileged','role.permissions_change')",
-                           name="ck_approval_kind"),
+        sa.CheckConstraint(APPROVAL_KINDS, name="ck_approval_kind"),
         sa.CheckConstraint("status IN ('PENDING','APPROVED','REJECTED','EXPIRED','APPLIED')",
                            name="ck_approval_status"),
         sa.CheckConstraint("waived IS NULL OR waived = 'single_super_admin'", name="ck_approval_waived"),
@@ -105,11 +120,11 @@ def upgrade() -> None:
                     postgresql_where=sa.text("status = 'PENDING'"))
 
     op.bulk_insert(roles, [
-        {"code": code, "name_ru": ru, "name_en": en, "privileged": privileged}
-        for code, ru, en, privileged, _ in ROLES
+        {"code": code, "name_ru": ru, "name_en": en, "privileged": _privileged(code, perms)}
+        for code, ru, en, perms in ROLES
     ])
     op.bulk_insert(role_permissions, [
-        {"role": code, "permission": perm} for code, _, _, _, perms in ROLES for perm in perms
+        {"role": code, "permission": perm} for code, _, _, perms in ROLES for perm in perms
     ])
 
     create_messaging_tables(op)

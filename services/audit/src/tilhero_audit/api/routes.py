@@ -11,19 +11,27 @@ from tilhero_audit.domain import append, decode_cursor, encode_cursor, verify_ch
 from tilhero_audit.models import AuditRecord
 from tilhero_audit.schemas import ChainVerification, RecordIn, RecordOut, RecordPage, RecordWriteIn
 from tilhero_common.app import Runtime, get_runtime
-from tilhero_common.errors import bad_request, forbidden, not_found
+from tilhero_common.errors import bad_request, conflict, forbidden, not_found
 from tilhero_common.internal_auth import InternalAuth, Principal
 
 router = APIRouter()
 
-# Спринт 1 (INTERNAL_API §7): HTTP-писателей нет — доменные сервисы TilHero пишут аудит событием
-# admin.audit.recorded.v1 через outbox (consumers.AUDIT_EVENT_PRODUCERS). Эндпоинт остаётся для синхронного аудита
-# админ-контура (спринт 2): писатель добавляется сюда явно, по принципу минимальных прав. Пустой список → любой
-# вызывающий получает 403 CALLER_NOT_ALLOWED.
-WRITERS: frozenset[str] = frozenset()
+# Синхронный аудит (запись ДО выдачи результата). Доменные сервисы TilHero пишут аудит событием
+# admin.audit.recorded.v1 через outbox (consumers.AUDIT_EVENT_PRODUCERS); по HTTP — только перечисленные здесь,
+# явно, по принципу минимальных прав (остальные → 403 CALLER_NOT_ALLOWED до разбора тела).
+# Спринт 2 (docs/sprint2/INTERNAL_API.md §3 «audit»): admin-identity и identity-consent (раскрытие Telegram ID).
+# admin-bff — только собственные действия BFF от имени сотрудника из actor-токена (dev.impersonate в ENV=dev,
+# резервная запись auth.logout, когда admin-identity недоступен) — список ONLY_ACTIONS.
+WRITERS: frozenset[str] = frozenset({"admin-identity", "identity-consent", "admin-bff"})
+ONLY_ACTIONS: dict[str, frozenset[str]] = {"admin-bff": frozenset({"dev.impersonate", "auth.logout"})}
 # Делегирование (сотрудник в теле, on_behalf_of) — узкое исключение: издатель + перечисленные действия, которые он
-# пишет синхронно от имени сотрудника (claim actor принимается только от admin-bff). В спринте 1 таких нет.
-DELEGATION: dict[str, frozenset[str]] = {}
+# пишет синхронно от имени сотрудника (claim actor принимается только от admin-bff, поэтому домен передаёт сотрудника
+# из своего actor-токена в теле). identity-consent: раскрытие Telegram ID ученика (`sensitive.view`, без записи значение
+# не выдаётся) и отказ по лимиту раскрытий (`sensitive.view_rate_limited`). admin-identity пишет от своего имени или
+# событием — делегирование ему не нужно.
+DELEGATION: dict[str, frozenset[str]] = {
+    "identity-consent": frozenset({"sensitive.view", "sensitive.view_rate_limited"}),
+}
 writer = InternalAuth(set(WRITERS))
 admin_only = InternalAuth({"admin-bff"})
 
@@ -49,9 +57,15 @@ def actor_from_token(principal: Principal, body: RecordWriteIn | None = None) ->
 async def write_record(
     body: RecordWriteIn, principal: Principal = Depends(writer), rt: Runtime = Depends(get_runtime)
 ) -> RecordOut:
+    only = ONLY_ACTIONS.get(principal.issuer)
+    if only is not None and (body.action not in only or principal.actor is None):
+        raise forbidden("ACTION_NOT_ALLOWED", "Этот сервис не может писать такое действие")
     record_in = RecordIn(**body.model_dump(exclude={"on_behalf_of"}), **actor_from_token(principal, body))
     async with rt.transaction() as session:
         record = await append(session, record_in, source=principal.issuer)
+        if record.source != principal.issuer:
+            # повтор record_id идемпотентен только для своего издателя: чужую запись по её id не прочитать
+            raise conflict("AUDIT_RECORD_CONFLICT", "Запись с таким record_id уже существует")
         return RecordOut.model_validate(record)
 
 
@@ -62,6 +76,7 @@ async def list_records(
     rt: Runtime = Depends(get_runtime),
     action: str | None = Query(default=None, max_length=80),
     actor_id: str | None = Query(default=None, max_length=64),
+    object_type: str | None = Query(default=None, max_length=64),
     object_id: str | None = Query(default=None, max_length=128),
     date_from: datetime | None = None,
     date_to: datetime | None = None,
@@ -74,6 +89,8 @@ async def list_records(
         stmt = stmt.where(AuditRecord.action == action)
     if actor_id:
         stmt = stmt.where(AuditRecord.actor_id == actor_id)
+    if object_type:
+        stmt = stmt.where(AuditRecord.object_type == object_type)
     if object_id:
         stmt = stmt.where(AuditRecord.object_id == object_id)
     if date_from:

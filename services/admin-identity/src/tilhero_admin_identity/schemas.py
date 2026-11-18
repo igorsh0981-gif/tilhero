@@ -40,7 +40,6 @@ class StaffSummary(BaseModel):
 
 class StaffOut(StaffSummary):
     status: StaffStatus
-    auth_provider: Literal["local", "ad"]
     mfa_enabled: bool
     must_change_password: bool
     last_login_at: datetime | None

@@ -1,6 +1,7 @@
-"""audit-service TilHero, спринт 1 (INTERNAL_API §7): журнал с хеш-цепочкой; писатели — только через шину
-(identity-consent, learning-plan, social, experience-config, support, notifications); HTTP-писателей нет; чтение —
-admin-bff с правом audit.read (админ-контур появится в спринте 2)."""
+"""audit-service TilHero: журнал с хеш-цепочкой. Писатели через шину — спринт 1 (INTERNAL_API §7: identity-consent,
+learning-plan, social, experience-config, support, notifications) и спринт 2 (admin-identity); HTTP-писатели —
+спринт 2 (docs/sprint2/INTERNAL_API.md §3): admin-identity и identity-consent (раскрытие Telegram ID, делегирование
+sensitive.view*); чтение — admin-bff с правом audit.read."""
 
 from __future__ import annotations
 
@@ -39,6 +40,8 @@ SERVICE_DIR = str(Path(__file__).resolve().parents[1])
 AUDITOR = Actor(id="staff-7", role="auditor", permissions=frozenset({"audit.read"}))
 SUPPORT = Actor(id="staff-8", role="support", permissions=frozenset({"support.reply"}))
 SPRINT1_WRITERS = ("identity-consent", "learning-plan", "social", "experience-config", "support", "notifications")
+BUS_WRITERS = (*SPRINT1_WRITERS, "admin-identity")
+HTTP_WRITERS = ("admin-identity", "identity-consent")
 
 
 class Env:
@@ -115,32 +118,40 @@ WRITER_RECORDS: dict[str, dict[str, Any]] = {
     "notifications": record(actor_type="service", actor_id="notifications", actor_role=None,
                             action="notification.campaign_stopped", object_type="campaign",
                             reason="Кампания остановлена"),
+    # как domain/audit.py admin-identity: сотрудник — staff_id, email только маской/хешем
+    "admin-identity": record(actor_id=str(uuid.uuid4()), actor_role="super_admin", action="staff.created",
+                             object_type="staff", before=None,
+                             after={"email": "s***@tilhero.test", "role": "support", "must_change_password": True},
+                             reason=None, ip="10.0.0.1", session_id=None),
 }
 
 
 # ---------------------------------------------------------------- писатели через шину
 
 
-def test_sprint1_writer_lists() -> None:
-    assert set(SPRINT1_WRITERS) == AUDIT_EVENT_PRODUCERS
+def test_writer_lists() -> None:
+    assert set(BUS_WRITERS) == AUDIT_EVENT_PRODUCERS
     assert SECURITY_EVENT_PRODUCERS == {"identity-consent"}
-    assert routes.WRITERS == frozenset() and routes.DELEGATION == {}
+    assert routes.WRITERS == frozenset({*HTTP_WRITERS, "admin-bff"})
+    assert routes.ONLY_ACTIONS == {"admin-bff": frozenset({"dev.impersonate", "auth.logout"})}
+    assert routes.DELEGATION == {"identity-consent": frozenset({"sensitive.view", "sensitive.view_rate_limited"})}
 
 
 async def test_bus_writers_append_hash_chain_exactly_once(env) -> None:
-    for producer in SPRINT1_WRITERS:
+    for producer in BUS_WRITERS:
         ev = make_envelope("admin.audit.recorded.v1", WRITER_RECORDS[producer], producer=producer)
         assert_event_conforms(ev)
         await env.bus.publish(ev)
         await env.handler("audit.admin_records")(ev)  # повторная доставка того же события — inbox
     items = await env.records()
-    assert sorted(i["source"] for i in items) == sorted(SPRINT1_WRITERS)
+    assert sorted(i["source"] for i in items) == sorted(BUS_WRITERS)
     by_source = {i["source"]: i for i in items}
     for producer, rec in WRITER_RECORDS.items():
         got = by_source[producer]
         assert (got["record_id"], got["action"], got["actor_type"], got["actor_id"], got["actor_role"]) == (
             rec["record_id"], rec["action"], rec["actor_type"], rec["actor_id"], rec["actor_role"]), producer
         assert (got["before"], got["after"], got["reason"]) == (rec["before"], rec["after"], rec["reason"])
+        assert (got["object_type"], got["ip"]) == (rec["object_type"], rec.get("ip"))
     # цепочка: каждая запись ссылается на хеш предыдущей
     chain = sorted(items, key=lambda i: i["seq"])
     assert chain[0]["prev_hash"] == GENESIS
@@ -150,14 +161,15 @@ async def test_bus_writers_append_hash_chain_exactly_once(env) -> None:
     again = make_envelope("admin.audit.recorded.v1", {**WRITER_RECORDS["support"], "action": "ticket.close"},
                           producer="support")
     await env.bus.publish(again)
-    assert len(await env.records()) == len(SPRINT1_WRITERS)
+    assert len(await env.records()) == len(BUS_WRITERS)
     verify = await env.c.get("/admin/v1/audit/verify", headers=env.read_headers())
-    assert verify.json() == {"valid": True, "checked": 6, "first_seq": chain[0]["seq"],
+    assert verify.json() == {"valid": True, "checked": 7, "first_seq": chain[0]["seq"],
                              "last_seq": chain[-1]["seq"], "broken_at_seq": None}
 
 
 async def test_events_from_unknown_producers_are_ignored(env) -> None:
-    for producer in ("telegram-bff", "telegram-bot-gateway", "admin-bff", "watch", "news", "provider-gateway"):
+    for producer in ("telegram-bff", "telegram-bot-gateway", "admin-bff", "user-admin", "watch", "news",
+                     "provider-gateway"):
         await env.publish("admin.audit.recorded.v1", record(action="config.publish"), producer)
     # события безопасности — только от identity-consent
     for producer in ("support", "learning-plan", "social"):
@@ -234,29 +246,107 @@ def test_consumed_event_contracts() -> None:
         assert_event_conforms(make_envelope("consent.accepted.v1", {"user_id": "nope"}, producer="x"))
 
 
-# ---------------------------------------------------------------- HTTP-запись закрыта в спринте 1
+# ---------------------------------------------------------------- HTTP-писатели (спринт 2)
 
 
-async def test_http_writes_are_closed_in_sprint1(env) -> None:
-    body = record()
+def _http_body(**kw: Any) -> dict[str, Any]:
+    body = record(**kw)
     for key in ("actor_type", "actor_id", "actor_role"):
         body.pop(key)
+    return body
+
+
+async def test_http_writers_accepted_others_forbidden(env) -> None:
+    body = _http_body()
     missing = await env.c.post("/internal/v1/records", json=body)
     assert missing.status_code == 401 and missing.json()["code"] == "INTERNAL_TOKEN_MISSING"
-    forged = issue_token("x" * 40, issuer="experience-config", audience="audit")
+    forged = issue_token("x" * 40, issuer="admin-identity", audience="audit")
     bad = await env.c.post("/internal/v1/records", json=body, headers={"x-internal-token": forged})
     assert bad.status_code == 401 and bad.json()["code"] == "INTERNAL_TOKEN_INVALID"
-    for issuer in (*SPRINT1_WRITERS, "admin-bff", "telegram-bff", "telegram-bot-gateway"):
-        r = await env.c.post("/internal/v1/records", json=body, headers=internal_headers(env.settings, issuer=issuer))
+    # писатели спринта 2: запись от имени сервиса (актор — только из токена), повтор record_id идемпотентен
+    written: dict[str, dict[str, Any]] = {}
+    for issuer in HTTP_WRITERS:
+        b = _http_body(action="staff.created" if issuer == "admin-identity" else "sensitive.view",
+                       object_type="staff" if issuer == "admin-identity" else "learner")
+        h = internal_headers(env.settings, issuer=issuer)
+        r = await env.c.post("/internal/v1/records", json=b, headers=h)
+        assert r.status_code == 201, (issuer, r.text)
+        got = r.json()
+        assert (got["source"], got["actor_type"], got["actor_id"], got["actor_role"]) == (
+            issuer, "service", issuer, None)
+        assert (got["record_id"], got["action"], got["reason"]) == (b["record_id"], b["action"], b["reason"])
+        again = await env.c.post("/internal/v1/records", json=b, headers=h)
+        assert again.status_code == 201 and again.json()["seq"] == got["seq"]
+        written[issuer] = got
+    # все прочие сервисы — 403 до разбора тела (невалидное тело не раскрывает схему)
+    others = (*(w for w in BUS_WRITERS if w not in HTTP_WRITERS), "user-admin", "telegram-bff",
+              "telegram-bot-gateway")
+    for issuer in others:
+        h = internal_headers(env.settings, issuer=issuer)
+        r = await env.c.post("/internal/v1/records", json=_http_body(), headers=h)
         assert r.status_code == 403 and r.json()["code"] == "CALLER_NOT_ALLOWED", issuer
-    # проверка вызывающего — до разбора тела: невалидное тело не раскрывает схему
-    r = await env.c.post("/internal/v1/records", json={"x": 1},
-                         headers=internal_headers(env.settings, issuer="support"))
-    assert r.status_code == 403
-    with_actor = await env.c.post("/internal/v1/records", json=body,
-                                  headers=internal_headers(env.settings, issuer="admin-bff", actor=SUPPORT))
-    assert with_actor.status_code == 403 and with_actor.json()["code"] == "CALLER_NOT_ALLOWED"
-    assert await env.records() == []
+        r = await env.c.post("/internal/v1/records", json={"x": 1}, headers=h)
+        assert r.status_code == 403 and r.json()["code"] == "CALLER_NOT_ALLOWED", issuer
+    # admin-bff — только свои действия (dev.impersonate, auth.logout) и только с actor сотрудника
+    bff_other = await env.c.post("/internal/v1/records", json=_http_body(action="config.publish"),
+                                 headers=internal_headers(env.settings, issuer="admin-bff", actor=SUPPORT))
+    assert bff_other.status_code == 403 and bff_other.json()["code"] == "ACTION_NOT_ALLOWED"
+    bff_no_actor = await env.c.post("/internal/v1/records", json=_http_body(action="auth.logout"),
+                                    headers=internal_headers(env.settings, issuer="admin-bff"))
+    assert bff_no_actor.status_code == 403 and bff_no_actor.json()["code"] == "ACTION_NOT_ALLOWED"
+    # писатель с невалидным телом или актором в теле — 422
+    h = internal_headers(env.settings, issuer="admin-identity")
+    for invalid in ({"x": 1}, {**_http_body(), "actor_type": "staff"}, {**_http_body(), "actor_id": "root"},
+                    _http_body(action="Bad Action")):
+        assert (await env.c.post("/internal/v1/records", json=invalid, headers=h)).status_code == 422
+    # чужой record_id: не перезаписывается и не читается другим писателем
+    stolen = {**_http_body(), "record_id": written["admin-identity"]["record_id"]}
+    r = await env.c.post("/internal/v1/records", json=stolen,
+                         headers=internal_headers(env.settings, issuer="identity-consent"))
+    assert r.status_code == 409 and r.json()["code"] == "AUDIT_RECORD_CONFLICT"
+    assert "staff.created" not in r.text and written["admin-identity"]["hash"] not in r.text
+    items = await env.records()
+    assert sorted(i["source"] for i in items) == sorted(HTTP_WRITERS)
+    bff = await env.c.post("/internal/v1/records", json=_http_body(action="auth.logout", object_type="staff"),
+                           headers=internal_headers(env.settings, issuer="admin-bff", actor=SUPPORT))
+    assert bff.status_code == 201, bff.text
+    got = bff.json()
+    assert (got["source"], got["actor_type"], got["actor_id"]) == ("admin-bff", "staff", SUPPORT.id)
+
+
+async def test_identity_consent_reveal_delegation(env) -> None:
+    """identity-consent пишет раскрытие Telegram ID синхронно от имени сотрудника (claim actor ему передал
+    admin-bff): on_behalf_of — только для sensitive.view*, только у identity-consent и без sub/actor в токене."""
+    ic = internal_headers(env.settings, issuer="identity-consent")
+    learner = str(uuid.uuid4())
+    staff = {"actor_id": str(uuid.uuid4()), "actor_role": "super_admin"}
+    for action in ("sensitive.view", "sensitive.view_rate_limited"):
+        b = _http_body(action=action, object_type="learner", object_id=learner, before=None,
+                       after={"field": "telegram_user_id"}, reason="Проверка обращения TCK-0042")
+        r = await env.c.post("/internal/v1/records", json={**b, "on_behalf_of": staff}, headers=ic)
+        assert r.status_code == 201, r.text
+        got = r.json()
+        assert (got["actor_type"], got["actor_id"], got["actor_role"], got["source"]) == (
+            "staff", staff["actor_id"], "super_admin", "identity-consent")
+        assert got["after"] == {"field": "telegram_user_id"}  # значение Telegram ID в журнал не попадает
+    denied = [
+        ("identity-consent", _http_body(action="consent.revoke")),  # действие вне списка
+        ("admin-identity", _http_body(action="sensitive.view")),  # издатель без делегирования
+        ("admin-identity", _http_body(action="staff.created")),
+    ]
+    for issuer, b in denied:
+        r = await env.c.post("/internal/v1/records", json={**b, "on_behalf_of": staff},
+                             headers=internal_headers(env.settings, issuer=issuer))
+        assert r.status_code == 403 and r.json()["code"] == "DELEGATION_NOT_ALLOWED", (issuer, b["action"])
+    with_sub = internal_headers(env.settings, issuer="identity-consent", subject=learner)
+    r = await env.c.post("/internal/v1/records",
+                         json={**_http_body(action="sensitive.view"), "on_behalf_of": staff}, headers=with_sub)
+    assert r.status_code == 403 and r.json()["code"] == "DELEGATION_NOT_ALLOWED"
+    bad_staff = await env.c.post("/internal/v1/records",
+                                 json={**_http_body(action="sensitive.view"),
+                                       "on_behalf_of": {"actor_id": "x", "actor_role": "Super Admin"}}, headers=ic)
+    assert bad_staff.status_code == 422
+    assert [i["action"] for i in await env.records()] == ["sensitive.view_rate_limited", "sensitive.view"]
 
 
 def _principal(issuer: str, subject: str | None = None, actor: Actor | None = None) -> Principal:
@@ -271,7 +361,7 @@ def _write_body(**kw: Any) -> RecordWriteIn:
 
 
 def test_actor_comes_only_from_token(monkeypatch) -> None:
-    """Правило для будущих HTTP-писателей (спринт 2): актор — только из токена; делегирование — по списку."""
+    """Правило HTTP-писателей: актор — только из токена; делегирование — по списку издатель → действия."""
     assert routes.actor_from_token(_principal("admin-bff", actor=SUPPORT)) == {
         "actor_type": "staff", "actor_id": "staff-8", "actor_role": "support"}
     user = str(uuid.uuid4())
@@ -284,7 +374,7 @@ def test_actor_comes_only_from_token(monkeypatch) -> None:
         with pytest.raises(ValidationError):
             RecordWriteIn.model_validate({**_write_body().model_dump(mode="json"), field: value})
     delegated = _write_body(on_behalf_of={"actor_id": "staff-9", "actor_role": "support"})
-    with pytest.raises(ApiError) as e:  # спринт 1: делегирования нет ни у кого
+    with pytest.raises(ApiError) as e:  # release_note.publish не делегирован никому
         routes.actor_from_token(_principal("identity-consent"), delegated)
     assert (e.value.status, e.value.code) == (403, "DELEGATION_NOT_ALLOWED")
     monkeypatch.setitem(routes.DELEGATION, "identity-consent", frozenset({"release_note.publish"}))
@@ -340,6 +430,12 @@ async def test_pagination_and_filters(env) -> None:
     assert {i["action"] for i in await env.records("&action=ticket.reply")} == {"ticket.reply"}
     assert [i["object_id"] for i in await env.records(f"&actor_id={actor_user}")] == ["obj-4"]
     assert [i["object_id"] for i in await env.records("&object_id=obj-2")] == ["obj-2"]
+    await env.publish("admin.audit.recorded.v1", record(action="staff.created", object_type="staff", object_id="obj-5",
+                                                        occurred_at=(base - timedelta(days=1)).isoformat()),
+                      "admin-identity")
+    assert [i["object_id"] for i in await env.records("&object_type=staff")] == ["obj-5"]
+    assert len(await env.records("&object_type=release_note")) == 5
+    assert (await env.c.get("/admin/v1/audit/records?object_type=" + "x" * 65, headers=h)).status_code == 422
     window = await env.records("&date_from=2026-11-18T10:00:00Z&date_to=2026-11-18T12:00:00Z")
     assert sorted(i["object_id"] for i in window) == ["obj-1", "obj-2", "obj-3"]
     bad = await env.c.get("/admin/v1/audit/records?cursor=@@", headers=h)

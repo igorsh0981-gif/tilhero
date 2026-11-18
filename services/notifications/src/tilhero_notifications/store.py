@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tilhero_common.messaging import emit
 from tilhero_notifications.models import (
     Broadcast,
+    CampaignRecipient,
     DeletedUser,
     FamilyOwner,
     InboxState,
@@ -446,7 +447,7 @@ def _visible(user_id: uuid.UUID, not_older: datetime) -> Any:
     return and_(
         Notification.user_id == user_id,
         Notification.title.is_not(None),
-        Notification.telegram_status != "skipped",
+        Notification.telegram_status.not_in(("skipped", "cancelled")),
         Notification.created_at >= not_older,
     )
 
@@ -499,10 +500,12 @@ async def mark_read(
 
 
 async def delete_user(session: AsyncSession, user_id: uuid.UUID) -> int:
-    """Журнал и центр ученика, записи других учеников с его именем, состояния и проекции с его id."""
+    """Журнал и центр ученика, записи других учеников с его именем, состояния и проекции с его id, получатель
+    рассылок (статистика рассылок уменьшится — данные ученика важнее)."""
     result = await session.execute(
         delete(Notification).where(or_(Notification.user_id == user_id, Notification.subject_user_id == user_id))
     )
+    await session.execute(delete(CampaignRecipient).where(CampaignRecipient.user_id == user_id))
     await session.execute(delete(MissedState).where(MissedState.user_id == user_id))
     await session.execute(delete(InboxState).where(InboxState.user_id == user_id))
     await session.execute(delete(FamilyOwner).where(FamilyOwner.owner_user_id == user_id))

@@ -1,0 +1,84 @@
+{
+  "id": "TilHeroUAdmRecon",
+  "name": "user-admin-reconcile",
+  "active": true,
+  "nodes": [
+    {
+      "id": "7f1e0000-0000-4000-8000-000000004001",
+      "name": "Расписание",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "25 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7f1e0000-0000-4000-8000-000000004002",
+      "name": "POST /internal/v1/reconcile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.USER_ADMIN_URL }}/internal/v1/reconcile",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SCHEDULER_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Источник — infra/n8n/workflows/user-admin-reconcile.json (импортируется при каждом старте, правки в UI перезаписываются). Спринт 2: страховочная сверка read-модели учеников админки с identity-consent и learning-plan (user-admin и сам сверяется каждые 10 мин). Ответ — {applied}; 503 RECONCILE_FAILED — источник недоступен. Секрет — переменная окружения SCHEDULER_TOKEN. Без USER_ADMIN_URL workflow не включается (entrypoint.sh).",
+      "notesInFlow": false
+    }
+  ],
+  "connections": {
+    "Расписание": {
+      "main": [
+        [
+          {
+            "node": "POST /internal/v1/reconcile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

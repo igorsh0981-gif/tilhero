@@ -40,7 +40,7 @@ def staff_summary(s: Staff) -> StaffSummary:
 def staff_out(s: Staff) -> StaffOut:
     return StaffOut(
         staff_id=s.staff_id, email=s.email, display_name=s.display_name, role=s.role,  # type: ignore[arg-type]
-        status=s.status, auth_provider=s.auth_provider,  # type: ignore[arg-type]
+        status=s.status,  # type: ignore[arg-type]
         mfa_enabled=s.mfa_enabled, must_change_password=s.must_change_password, last_login_at=s.last_login_at,
         created_at=s.created_at, created_by=s.created_by,
     )

@@ -13,14 +13,17 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from tilhero_common.app import Runtime
 from tilhero_notifications import store
 from tilhero_notifications.delivery import DeliveryInfo, get_delivery
 from tilhero_notifications.models import Broadcast
 from tilhero_notifications.settings import Settings
-from tilhero_notifications.templates import TEMPLATES, lang_of
+from tilhero_notifications.templates import TEMPLATES, TextOverride, lang_of
+
+if TYPE_CHECKING:
+    from tilhero_notifications.template_versions import ActiveTemplates
 
 log = logging.getLogger("tilhero.notifications.broadcasts")
 TEMPLATE = "release_note.published"
@@ -49,8 +52,21 @@ def eligible(b: Broadcast, d: DeliveryInfo) -> bool:
     return not (isinstance(langs, list) and langs and lang_of(d.locale) not in langs)
 
 
-async def sync(rt: Runtime, user_id: uuid.UUID, now: datetime | None = None) -> int:
-    """Создать записи центра по новым заметкам «Что нового». → сколько создано."""
+async def _override(templates: ActiveTemplates | None) -> TextOverride | None:
+    if templates is None:
+        return None
+    try:
+        return await templates.get(TEMPLATE)
+    except Exception as exc:  # версии недоступны — текст из кода
+        log.warning("template versions unavailable, code text used", extra={"error_type": type(exc).__name__})
+        return None
+
+
+async def sync(
+    rt: Runtime, user_id: uuid.UUID, now: datetime | None = None, templates: ActiveTemplates | None = None
+) -> int:
+    """Создать записи центра по новым заметкам «Что нового» (текст — активная версия шаблона, если есть).
+    → сколько создано."""
     s = cast(Settings, rt.settings)
     now = now or datetime.now(UTC)
     not_older = now - timedelta(days=s.retention_days)
@@ -76,6 +92,7 @@ async def sync(rt: Runtime, user_id: uuid.UUID, now: datetime | None = None) -> 
     if delivery is None:
         return 0
     spec = TEMPLATES[TEMPLATE]
+    override = await _override(templates)
     created = 0
     async with rt.transaction() as session:
         await store.lock_user(session, user_id)
@@ -85,7 +102,7 @@ async def sync(rt: Runtime, user_id: uuid.UUID, now: datetime | None = None) -> 
             if not eligible(b, delivery):
                 continue
             params = {"release_note_id": str(b.broadcast_id), "slug": b.slug}
-            rendered = spec.render(delivery.locale, params)
+            rendered = spec.render(delivery.locale, params, override=override)
             dedup = f"release_note:{b.broadcast_id}:{user_id}"
             created += await store.insert_notification(
                 session,

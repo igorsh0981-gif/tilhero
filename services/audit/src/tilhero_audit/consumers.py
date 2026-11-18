@@ -1,8 +1,9 @@
 """Потребители событий: всё, что относится к аудиту, попадает в журнал ровно один раз (inbox).
 
 Приём только от известных издателей (ревью P4 «Бот турист»): записи `admin.audit.recorded.v1` — от доменных
-сервисов TilHero, которые пишут аудит через outbox (INTERNAL_API спринта 1, §7); события безопасности, согласий и
-удаления — только от identity-consent. Прочее отбрасывается с предупреждением (inbox отмечает событие обработанным).
+сервисов TilHero, которые пишут аудит через outbox (INTERNAL_API спринта 1, §7; спринта 2 — admin-identity);
+события безопасности, согласий и удаления — только от identity-consent. Прочее отбрасывается с предупреждением
+(inbox отмечает событие обработанным).
 """
 
 from __future__ import annotations
@@ -17,9 +18,10 @@ from tilhero_audit.schemas import RecordIn
 from tilhero_common.messaging import Envelope
 
 AUDIT_EVENT = "admin.audit.recorded.v1"
-# Спринт 1 (INTERNAL_API §7): писатели через шину. admin-bff и сервисы админ-контура добавятся в спринте 2.
+# Писатели через шину: спринт 1 (INTERNAL_API §7) + спринт 2 — admin-identity (вход, сотрудники, роли, four-eyes;
+# docs/sprint2/INTERNAL_API.md §1: аудит auth.*, staff.*, role.*, approval.* через admin.audit.recorded.v1).
 AUDIT_EVENT_PRODUCERS = frozenset({
-    "identity-consent", "learning-plan", "social", "experience-config", "support", "notifications",
+    "identity-consent", "learning-plan", "social", "experience-config", "support", "notifications", "admin-identity",
 })
 SECURITY_EVENT_PRODUCERS = frozenset({"identity-consent"})
 

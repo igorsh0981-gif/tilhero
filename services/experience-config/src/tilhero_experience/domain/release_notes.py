@@ -11,6 +11,10 @@ RELEASE_NOTE_TRANSLATION_MISSING (и при сохранении чернови�
 `experience.release_note.published.v1`; каждое действие сотрудника — `admin.audit.recorded.v1` через outbox в той же
 транзакции, что и изменение.
 
+Статистика показов (спринт 2, AT-18): views_total — уникальные ученики с отметкой просмотра (PK user_id +
+release_note_id); разрезы по языку и возрасту — по сегменту ученика на момент показа, который отметка хранит с миграции
+0005 (старые отметки без сегмента в разрезах не учитываются).
+
 Маршруты Mini App, иконки, аудитории, сегменты и лимиты — общий каталог `packages/contracts/release-notes.json`
 (сверка — контрактный тест). Тексты — простой текст без управляющих символов; клиенты выводят их только как текст.
 """
@@ -26,8 +30,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any, Final, Literal, Protocol
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
-from sqlalchemy import delete, exists, literal, or_, select, text, tuple_
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import ColumnElement, delete, exists, func, literal, or_, select, text, tuple_
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
@@ -175,6 +179,21 @@ def ensure_translations(title: dict[str, Any], items: Sequence[dict[str, Any]]) 
                             {"missing": missing[:20]})
 
 
+def ensure_publishable(n: ReleaseNote) -> None:
+    """Защита в глубину перед публикацией (AT-19): черновик мог попасть в БД в обход API (сид, SQL) — пустой перевод →
+    RELEASE_NOTE_TRANSLATION_MISSING; маршрут или иконка не из каталога, лишние поля, длины, управляющие символы →
+    VALIDATION_ERROR (та же схема, что и при сохранении черновика)."""
+    ensure_translations(n.title, n.items)
+    try:
+        NoteContent.model_validate({"slug": n.slug, "title": n.title, "items": n.items, "audience": n.audience,
+                                    "segments": n.segments})
+    except ValidationError as exc:
+        errors = [{"loc": ["note", *(str(p) for p in e["loc"])], "msg": e["msg"], "type": e["type"]}
+                  for e in exc.errors()[:20]]
+        raise unprocessable("VALIDATION_ERROR", "Заметка не прошла проверку — исправьте черновик",
+                            {"errors": errors}) from None
+
+
 # ---------------------------------------------------------------- представления
 
 
@@ -184,7 +203,9 @@ def iso_z(value: datetime | None) -> str | None:
     return value.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def staff_view(n: ReleaseNote) -> dict[str, Any]:
+def staff_view(n: ReleaseNote, views_total: int = 0) -> dict[str, Any]:
+    """StaffReleaseNote (admin.ts) без имён сотрудников (*_name добавляет admin-bff). views_total — уникальные
+    ученики, видевшие заметку; у черновика всегда 0."""
     return {
         "release_note_id": str(n.id), "slug": n.slug, "title": n.title, "items": n.items, "audience": n.audience,
         "segments": n.segments, "status": n.status, "version": n.version,
@@ -192,7 +213,29 @@ def staff_view(n: ReleaseNote) -> dict[str, Any]:
         "updated_by": n.updated_by, "updated_at": iso_z(n.updated_at),
         "published_by": n.published_by, "published_at": iso_z(n.published_at),
         "archived_by": n.archived_by, "archived_at": iso_z(n.archived_at),
+        "views_total": 0 if n.status == "draft" else views_total,
     }
+
+
+async def views_by_note(session: AsyncSession, note_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, int]:
+    """Показы (уникальные ученики) по заметкам — один GROUP BY на страницу списка (без N+1)."""
+    if not note_ids:
+        return {}
+    rows = await session.execute(
+        select(ReleaseNoteView.release_note_id, func.count())
+        .where(ReleaseNoteView.release_note_id.in_(set(note_ids)))
+        .group_by(ReleaseNoteView.release_note_id))
+    return {note_id: int(count) for note_id, count in rows.all()}
+
+
+async def staff_views(session: AsyncSession, notes: Sequence[ReleaseNote]) -> list[dict[str, Any]]:
+    counted = [n.id for n in notes if n.status != "draft"]
+    views = await views_by_note(session, counted)
+    return [staff_view(n, views.get(n.id, 0)) for n in notes]
+
+
+async def staff_view_of(session: AsyncSession, n: ReleaseNote) -> dict[str, Any]:
+    return (await staff_views(session, [n]))[0]
 
 
 def localized_view(n: ReleaseNote, lang: str) -> dict[str, Any]:
@@ -328,13 +371,17 @@ async def for_me(session: AsyncSession, user_id: uuid.UUID, *, onboarded_at: dat
     return {"mode": pick.mode, "notes": [localized_view(n, lang) for n in pick.notes]}
 
 
-async def mark_seen(session: AsyncSession, user_id: uuid.UUID, note_ids: Sequence[uuid.UUID]) -> int:
-    """Отметки просмотра — идемпотентно (повтор не меняет seen_at), неизвестные id и черновики игнорируются."""
+async def mark_seen(session: AsyncSession, user_id: uuid.UUID, note_ids: Sequence[uuid.UUID], *,
+                    lang: str | None = None, age: str | None = None) -> int:
+    """Отметки просмотра — идемпотентно (повтор не меняет seen_at и сегмент: в статистике — сегмент первого показа),
+    неизвестные id и черновики игнорируются. lang/age — сегмент ученика сейчас (для разрезов статистики), не PII."""
     await lock_user(session, user_id)
     await ensure_not_deleted(session, user_id)
-    source = select(literal(user_id, PG_UUID(as_uuid=True)), ReleaseNote.id).where(
+    source = select(literal(user_id, PG_UUID(as_uuid=True)), ReleaseNote.id,
+                    literal(lang, ReleaseNoteView.ui_lang.type), literal(age, ReleaseNoteView.age_segment.type)).where(
         ReleaseNote.id.in_(set(note_ids)), ReleaseNote.status != "draft")
-    stmt = insert(ReleaseNoteView).from_select(["user_id", "release_note_id"], source).on_conflict_do_nothing()
+    stmt = insert(ReleaseNoteView).from_select(["user_id", "release_note_id", "ui_lang", "age_segment"],
+                                               source).on_conflict_do_nothing()
     result = await session.execute(stmt)
     return int(getattr(result, "rowcount", 0) or 0)
 
@@ -353,6 +400,52 @@ async def feed(session: AsyncSession, *, lang: str, age: str, limit: int, cursor
     rows = (await session.execute(stmt)).scalars().all()
     next_cursor = encode_feed_cursor(rows[limit - 1]) if len(rows) > limit else None
     return {"items": [localized_view(n, lang) for n in rows[:limit]], "next_cursor": next_cursor}
+
+
+# ---------------------------------------------------------------- статистика (сотрудники)
+
+
+async def stats(session: AsyncSession, note_id: uuid.UUID) -> dict[str, Any]:
+    """ReleaseNoteStats (admin.ts): один агрегирующий запрос по release_note_views. Разрезы — только по отметкам с
+    известным сегментом (миграция 0005), поэтому сумма разреза может быть меньше views_total."""
+    note = await session.get(ReleaseNote, note_id)
+    if note is None:
+        raise note_not_found()
+    v = ReleaseNoteView
+    cols: list[ColumnElement[Any]] = [func.count()]
+    cols += [func.count().filter(v.ui_lang == lang) for lang in UI_LANGS]
+    cols += [func.count().filter(v.age_segment == age) for age in AGE_SEGMENTS]
+    cols += [func.min(v.seen_at), func.max(v.seen_at)]
+    row = (await session.execute(select(*cols).where(v.release_note_id == note_id))).one()
+    total, *rest = row
+    by_lang, rest = rest[:len(UI_LANGS)], rest[len(UI_LANGS):]
+    by_age, (first, last) = rest[:len(AGE_SEGMENTS)], rest[len(AGE_SEGMENTS):]
+    return {
+        "release_note_id": str(note.id),
+        "views_total": int(total),
+        "views_by_lang": {lang: int(c) for lang, c in zip(UI_LANGS, by_lang, strict=True)},
+        "views_by_age": {age: int(c) for age, c in zip(AGE_SEGMENTS, by_age, strict=True)},
+        "first_view_at": iso_z(first),
+        "last_view_at": iso_z(last),
+    }
+
+
+async def summary(session: AsyncSession) -> dict[str, Any]:
+    """DashboardWhatsNew (admin.ts): действующие опубликованные и черновики (архив не считается); последняя
+    опубликованная (ещё не снятая) — с заголовком на RU (язык сотрудников) и показами."""
+    counts = dict((await session.execute(
+        select(ReleaseNote.status, func.count()).where(ReleaseNote.status.in_(("published", "draft")))
+        .group_by(ReleaseNote.status))).all())
+    latest = (await session.execute(
+        select(ReleaseNote).where(ReleaseNote.status == "published").order_by(*published_order()).limit(1)
+    )).scalar_one_or_none()
+    latest_out = None
+    if latest is not None:
+        views = (await views_by_note(session, [latest.id])).get(latest.id, 0)
+        latest_out = {"release_note_id": str(latest.id), "slug": latest.slug, "title": str(latest.title.get("ru", "")),
+                      "views_total": views, "published_at": iso_z(latest.published_at)}
+    return {"published": int(counts.get("published", 0)), "drafts": int(counts.get("draft", 0)),
+            "latest": latest_out}
 
 
 async def delete_user_data(session: AsyncSession, *, user_id: str, request_id: str) -> int:
@@ -508,7 +601,7 @@ async def publish(session: AsyncSession, note_id: uuid.UUID, expected_version: i
     if note.version != expected_version:
         raise conflict("RELEASE_NOTE_VERSION_CONFLICT", "Заметку уже изменили — проверьте её ещё раз перед публикацией",
                        {"current_version": note.version})
-    ensure_translations(note.title, note.items)  # защита в глубину: черновик мог прийти в обход API (сид, SQL)
+    ensure_publishable(note)  # защита в глубину: черновик мог прийти в обход API (сид, SQL)
     now = datetime.now(UTC)
     note.status = "published"
     note.published_by = actor.id[:64]

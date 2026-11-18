@@ -6,7 +6,8 @@
  * источник языка для родителя и детских профилей — ревью T-6) и возраст активного ученика → age: kids (6-9, 10-13),
  * teens (14-17), adults (18+ и возраст не выбран). Режим (welcome / updates / none) выбирает experience-config (for-me,
  * sub = lrn). Онбординг не завершён — {mode: none} без вызова experience-config.
- * Отметки просмотра (seen) и лента (feed) — тоже от имени ученика.
+ * Отметки просмотра (seen) и лента (feed) — тоже от имени ученика; seen передаёт lang и age для разрезов статистики
+ * показов в админке (спринт 2), без них — если identity-consent недоступен.
  */
 import { Type } from "@fastify/type-provider-typebox";
 import type { Page, WhatsNew, WhatsNewNote } from "@tilhero/contracts/bff";
@@ -83,8 +84,15 @@ export function whatsNewRoutes(app: App, ctx: BffContext): void {
     },
     async (req, reply) => {
       const auth = authOf(req);
+      // Сегмент для разрезов статистики показов (спринт 2, ReleaseNoteStats) — необязателен: без identity/плана
+      // отметка всё равно ставится, только без языка и возраста.
+      // План не нужен (и не создаётся): только язык аккаунта и возраст ученика.
+      const seg = await loadMe(ctx, asAccount(auth))
+        .then((me) => ({ lang: me.user.locale === "uz" ? "uz" : "ru", age: ageSegment(learnerAgeBand(me, auth.learnerId)) }))
+        .catch(() => null);
       await experience.post("/internal/v1/release-notes/seen", {
         subject: asLearner(auth),
+        query: seg ? { lang: seg.lang, age: seg.age } : undefined,
         body: { release_note_ids: req.body.release_note_ids.map((id) => id.toLowerCase()) },
       });
       return reply.code(204).send(null);

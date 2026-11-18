@@ -93,13 +93,13 @@ export function validationError(field: string, message: string, inPart = "body")
 }
 
 /**
- * Idempotency-Key создающей команды (пробрасывается в домен): нет и обязателен → 400 IDEMPOTENCY_KEY_REQUIRED,
- * неверный формат → 422 IDEMPOTENCY_KEY_INVALID (коды и правила — как у доменов, tilhero_common).
+ * Idempotency-Key создающей команды (пробрасывается в домен): нет и обязателен → 422 IDEMPOTENCY_KEY_REQUIRED,
+ * неверный формат → 422 IDEMPOTENCY_KEY_INVALID (admin.ts: 8..128, [A-Za-z0-9_\-:.]).
  */
 export function idempotencyKeyOf(req: FastifyRequest, required: boolean): string | undefined {
   const raw = req.headers["idempotency-key"];
   if (raw === undefined) {
-    if (required) throw new AppError(400, "IDEMPOTENCY_KEY_REQUIRED", "Нужен заголовок Idempotency-Key");
+    if (required) throw new AppError(422, "IDEMPOTENCY_KEY_REQUIRED", "Нужен заголовок Idempotency-Key");
     return undefined;
   }
   if (typeof raw !== "string" || !IDEMPOTENCY_RE.test(raw)) {
@@ -108,7 +108,7 @@ export function idempotencyKeyOf(req: FastifyRequest, required: boolean): string
   return raw;
 }
 
-/** Спринт 9 (§10): ответ домена — повтор команды по тому же Idempotency-Key → клиенту `Idempotent-Replayed: true`. */
+/** Ответ домена — повтор команды по тому же Idempotency-Key → клиенту `Idempotent-Replayed: true`. */
 export function passReplayed(reply: FastifyReply, res: { replayed?: boolean }): void {
   if (res.replayed) void reply.header("idempotent-replayed", "true");
 }
