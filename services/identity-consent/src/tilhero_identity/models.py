@@ -121,7 +121,11 @@ class GuardianLink(Base):
 class GuardianConsentRequest(Base):
     """Ссылка согласия родителя для подростка 14–17. Хранится только sha256 токена; у подростка не больше одной
     действующей (pending) ссылки — новая отзывает прежнюю (revoked). Истечение — по expires_at (в строке остаётся
-    pending, наружу — expired)."""
+    pending, наружу — expired).
+
+    Решение `granted` создаёт запись consents подростка с основанием guardian (`consent_id`); у подростка не больше
+    одного действующего `granted`. Отзыв родителем: строка → `declined` + `revoked_at` (`decided_at` — время
+    исходного решения)."""
 
     __tablename__ = "guardian_consent_requests"
     __table_args__ = (
@@ -132,9 +136,13 @@ class GuardianConsentRequest(Base):
         CheckConstraint("(status IN ('granted','declined')) = (decided_at IS NOT NULL)",
                         name="ck_guardian_consent_requests_decided"),
         CheckConstraint("expires_at > created_at", name="ck_guardian_consent_requests_expiry"),
+        CheckConstraint("revoked_at IS NULL OR status = 'declined'", name="ck_guardian_consent_requests_revoked"),
         Index("ix_guardian_consent_requests_teen", "teen_user_id"),
+        Index("ix_guardian_consent_requests_guardian", "guardian_user_id"),
         Index("uq_guardian_consent_requests_pending", "teen_user_id", unique=True,
               postgresql_where=text("status = 'pending'")),
+        Index("uq_guardian_consent_requests_granted", "teen_user_id", unique=True,
+              postgresql_where=text("status = 'granted'")),
         UniqueConstraint("teen_user_id", "idempotency_key", name="uq_guardian_consent_requests_idempotency"),
     )
 
@@ -147,24 +155,31 @@ class GuardianConsentRequest(Base):
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
     decided_at: Mapped[datetime | None] = mapped_column(TS)
     expires_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    consent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("consents.consent_id"))
+    revoked_at: Mapped[datetime | None] = mapped_column(TS)
 
 
 class Consent(Base):
-    """История согласий. Строки неизменяемы (триггер), кроме однократной фиксации отзыва."""
+    """История согласий. Строки неизменяемы (триггер), кроме однократной фиксации отзыва.
+
+    Действующее согласие — одно на ученика и основание: `self` — своё (аккаунт; цели, которые выбрал сам),
+    `guardian` — родителя (детский профиль — единственное основание; подросток 14–17 — разрешение родителя,
+    действует рядом со своим). Причины закрытия: user — отозвал сам, superseded — заменено новой записью,
+    deletion — удаление, guardian — отозвано родителем."""
 
     __tablename__ = "consents"
     __table_args__ = (
-        CheckConstraint("revoke_reason IS NULL OR revoke_reason IN ('user','superseded','deletion')",
+        CheckConstraint("revoke_reason IS NULL OR revoke_reason IN ('user','superseded','deletion','guardian')",
                         name="ck_consents_revoke_reason"),
         CheckConstraint("(revoked_at IS NULL) = (revoke_reason IS NULL)", name="ck_consents_revoke_pair"),
         CheckConstraint("locale IN ('ru','uz')", name="ck_consents_locale"),
         CheckConstraint(f"age_band IS NULL OR age_band IN {AGE_BANDS_SQL}", name="ck_consents_age_band"),
-        # основание: сам пользователь или родитель за детский профиль (granted_by — аккаунт родителя)
+        # основание: сам пользователь или родитель за ребёнка / подростка (granted_by — аккаунт родителя)
         CheckConstraint("basis IN ('self','guardian')", name="ck_consents_basis"),
         CheckConstraint("(basis = 'guardian') = (granted_by_user_id IS NOT NULL)", name="ck_consents_granted_by"),
         Index("ix_consents_user_accepted", "user_id", "accepted_at"),
-        # Не больше одного действующего согласия на ученика.
-        Index("uq_consents_active", "user_id", unique=True, postgresql_where=text("revoked_at IS NULL")),
+        # Не больше одного действующего согласия на ученика и основание.
+        Index("uq_consents_active", "user_id", "basis", unique=True, postgresql_where=text("revoked_at IS NULL")),
     )
 
     consent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)

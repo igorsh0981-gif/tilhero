@@ -135,6 +135,13 @@ class Env:
         await self.set_age(uid, "18+")
         return uid
 
+    async def parent(self, **kw: Any) -> str:
+        """Взрослый с действующим своим согласием (terms, privacy) — может решать за подростка по ссылке."""
+        uid = await self.adult(**kw)
+        r = await self.consent(uid)
+        assert r.status_code == 200, r.text
+        return uid
+
     async def teen(self, **kw: Any) -> str:
         uid = await self.new_user(**kw)
         await self.set_age(uid, "14-17")
@@ -165,6 +172,9 @@ class Env:
 
     async def delivery(self, user_id: str) -> httpx.Response:
         return await self.call("GET", f"/internal/v1/users/{user_id}/delivery", None, issuer="notifications")
+
+    async def public(self, user_id: str, issuer: str = "social") -> httpx.Response:
+        return await self.call("GET", f"/internal/v1/users/{user_id}/public", None, issuer=issuer)
 
     async def user_row(self, user_id: str) -> User:
         async with self.runtime.transaction() as s:

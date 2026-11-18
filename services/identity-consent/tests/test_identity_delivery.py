@@ -8,6 +8,7 @@ import logging
 import uuid
 
 import pytest
+from conftest import REQUIRED
 
 from tilhero_common.logging import JsonFormatter
 
@@ -15,7 +16,7 @@ from tilhero_common.logging import JsonFormatter
 async def test_delivery_for_account(env) -> None:
     tg = 4_242_424_242
     uid = await env.adult(telegram_user_id=tg, language_code="uz", first_name="Тест")
-    await env.consent(uid)
+    await env.consent(uid, [*REQUIRED, "social"])
     await env.call("PATCH", "/internal/v1/me/settings", uid, {"notifications": {
         "quiet_hours": {"start": "23:00", "end": "07:00"}, "timezone": "Europe/Moscow",
         "categories": {"reminders": True, "social": True}}})
@@ -108,11 +109,14 @@ async def test_public_profile(env) -> None:
         r = await env.call("GET", f"/internal/v1/users/{guardian}/public", None, issuer=caller)
         assert r.status_code == 200
         assert r.json() == {"user_id": guardian, "display_name": "Анна Тест", "kind": "account", "age_band": "18+",
-                            "guardian_consent": "not_required", "status": "ACTIVE"}
+                            "guardian_consent": "not_required", "status": "ACTIVE", "consent_accepted": False,
+                            "purposes": []}
         assert "secret_handle" not in r.text and str(tg) not in r.text
     r = await env.call("GET", f"/internal/v1/users/{child['learner_id']}/public", None, issuer="social")
+    # детский профиль: согласие — родителя (основание guardian, создание профиля), только обязательные цели
     assert r.json() == {"user_id": child["learner_id"], "display_name": "Мадина", "kind": "child",
-                        "age_band": "10-13", "guardian_consent": "granted", "status": "ACTIVE"}
+                        "age_band": "10-13", "guardian_consent": "granted", "status": "ACTIVE",
+                        "consent_accepted": True, "purposes": REQUIRED}
     for caller in ("telegram-bff", "telegram-bot-gateway", "learning-plan"):
         r = await env.call("GET", f"/internal/v1/users/{guardian}/public", None, issuer=caller)
         assert r.status_code == 403 and r.json()["code"] == "CALLER_NOT_ALLOWED"

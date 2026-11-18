@@ -258,6 +258,20 @@ class GuardianConsentPreview(BaseModel):
     expires_at: datetime
 
 
+class GuardianConsentGrant(BaseModel):
+    """bff.ts GuardianConsentGrant: последнее решение этого родителя по подростку; `decided_at` — время решения или
+    отзыва."""
+
+    teen_user_id: uuid.UUID
+    teen_display_name: str
+    status: Literal["granted", "declined"]
+    decided_at: datetime
+
+
+class GuardianConsentGrantList(BaseModel):
+    items: list[GuardianConsentGrant]
+
+
 class OkResponse(BaseModel):
     ok: Literal[True] = True
 
@@ -312,7 +326,9 @@ class DeliveryInfo(BaseModel):
 
 class PublicProfile(BaseModel):
     """Для social и notifications: имя без username и Telegram ID; guardian_consent — чтобы social решал, может ли
-    подросток 14–17 приглашать и принимать приглашения."""
+    подросток 14–17 приглашать и принимать приглашения. `consent_accepted` — действующее согласие с terms и privacy
+    (у детского профиля — согласие родителя с основанием guardian), `purposes` — его цели; необязательные — только
+    если они сейчас разрешены (18+ или 14–17 с согласием родителя), INTERNAL_API §11."""
 
     user_id: uuid.UUID
     display_name: str
@@ -320,3 +336,5 @@ class PublicProfile(BaseModel):
     age_band: AgeBand | None
     guardian_consent: GuardianConsent
     status: PublicStatus
+    consent_accepted: bool
+    purposes: list[str]

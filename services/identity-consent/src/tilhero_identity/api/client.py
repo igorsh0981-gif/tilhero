@@ -20,6 +20,8 @@ from tilhero_identity.schemas import (
     CreateChildRequest,
     DeletionRequestIn,
     DeletionResponse,
+    GuardianConsentGrant,
+    GuardianConsentGrantList,
     GuardianConsentPreview,
     GuardianConsentRequestOut,
     LearnerDetail,
@@ -147,6 +149,19 @@ async def guardian_consent_decline(
     token: str = Token, user_id: uuid.UUID = Me, svc: IdentityService = Svc
 ) -> GuardianConsentPreview:
     return await svc.decide_guardian_consent(token, user_id, accept=False)
+
+
+# Решения родителя (`sub` = аккаунт родителя): за кого решал и отзыв своего согласия (INTERNAL_API §11).
+@router.get("/me/guardian-consents", response_model=GuardianConsentGrantList)
+async def list_guardian_consents(user_id: uuid.UUID = Me, svc: IdentityService = Svc) -> GuardianConsentGrantList:
+    return await svc.list_guardian_consents(user_id)
+
+
+@router.post("/me/guardian-consents/{teen_user_id}:revoke", response_model=GuardianConsentGrant)
+async def revoke_guardian_consent(
+    teen_user_id: uuid.UUID, user_id: uuid.UUID = Me, svc: IdentityService = Svc
+) -> GuardianConsentGrant:
+    return await svc.revoke_guardian_consent(user_id, teen_user_id)
 
 
 # ---------- код родителя (PIN) ----------

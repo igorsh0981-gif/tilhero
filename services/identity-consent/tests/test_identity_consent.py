@@ -72,6 +72,7 @@ async def test_accept_consent_with_evidence(env) -> None:
         "policy_version": "1.0",
         "purposes": state["purposes"],
         "age_band": "18+",
+        "basis": "self",
     }
     [notify] = await env.events("user.notification_settings.changed.v1", uid)
     assert notify.payload == {"user_id": uid, "enabled": True, "categories": ["support"]}
@@ -98,19 +99,21 @@ async def test_teen_optional_purposes_need_guardian_consent(env) -> None:
     assert required.status_code == 200  # обязательные — сам
 
     token = (await env.call("POST", "/internal/v1/me/guardian-consent-requests", teen)).json()["token"]
-    parent = await env.adult()
+    parent = await env.parent()
     assert (await env.call("POST", f"/internal/v1/guardian-consents/{token}/accept", parent)).status_code == 200
     r = await env.consent(teen, ALL_PURPOSES)
     assert r.status_code == 200 and r.json()["purposes"] == ALL_PURPOSES
-    rows = await _consents(env, teen)
+    rows = [c for c in await _consents(env, teen) if c.basis == "self"]
     assert [(c.revoke_reason, c.age_band) for c in rows] == [("superseded", "14-17"), (None, "14-17")]
-    assert [e.payload["age_band"] for e in await env.events("consent.accepted.v1", teen)] == ["14-17", "14-17"]
+    events = await env.events("consent.accepted.v1", teen)
+    assert [(e.payload["age_band"], e.payload["basis"]) for e in events] == [
+        ("14-17", "self"), ("14-17", "guardian"), ("14-17", "self")]
 
 
 async def test_declined_guardian_consent_keeps_optional_off(env) -> None:
     teen = await env.teen()
     token = (await env.call("POST", "/internal/v1/me/guardian-consent-requests", teen)).json()["token"]
-    await env.call("POST", f"/internal/v1/guardian-consents/{token}/decline", await env.adult())
+    await env.call("POST", f"/internal/v1/guardian-consents/{token}/decline", await env.parent())
     r = await env.consent(teen, [*REQUIRED, "social"])
     assert r.status_code == 403 and r.json()["details"]["guardian_consent"] == "declined"
 
@@ -202,7 +205,8 @@ async def test_revoke_consent(env) -> None:
     again = await env.call("DELETE", "/internal/v1/me/consent", uid)
     assert again.status_code == 200 and again.json()["accepted"] is False
     [event] = await env.events("consent.revoked.v1", uid)
-    assert event.payload == {"user_id": uid, "consent_id": str(row.consent_id), "policy_version": "1.0"}
+    assert event.payload == {"user_id": uid, "consent_id": str(row.consent_id), "policy_version": "1.0",
+                             "basis": "self"}
 
     # повторное согласие после отзыва — новая запись, уведомления снова включены
     renewed = (await env.consent(uid)).json()

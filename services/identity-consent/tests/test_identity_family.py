@@ -266,7 +266,7 @@ async def test_guardian_locale_change_applies_to_children(env) -> None:
 
 async def test_guardian_consent_accept_flow(env) -> None:
     teen = await env.teen(first_name="Подросток")
-    parent = await env.adult()
+    parent = await env.parent()
     r = await _request_link(env, teen)
     assert r.status_code == 200, r.text
     token, expires_at = r.json()["token"], datetime.fromisoformat(r.json()["expires_at"])
@@ -300,7 +300,7 @@ async def test_guardian_consent_accept_flow(env) -> None:
 
 async def test_guardian_consent_decline_then_new_link(env) -> None:
     teen = await env.teen()
-    parent = await env.adult()
+    parent = await env.parent()
     first = await _token(env, teen)
     declined = await _decide(env, first, parent, "decline")
     assert declined.status_code == 200 and declined.json()["status"] == "declined"
@@ -317,7 +317,7 @@ async def test_guardian_consent_decline_then_new_link(env) -> None:
 
 async def test_new_link_revokes_previous(env) -> None:
     teen = await env.teen()
-    parent = await env.adult()
+    parent = await env.parent()
     old = await _token(env, teen)
     new = await _token(env, teen)
     assert (await _preview(env, old)).json()["status"] == "expired"
@@ -346,7 +346,7 @@ async def test_guardian_consent_errors(env) -> None:
         await s.execute(text("UPDATE guardian_consent_requests SET created_at = now() - interval '8 days', "
                              "expires_at = now() - interval '1 day'"))
     assert (await _preview(env, token)).json()["status"] == "expired"
-    r = await _decide(env, token, await env.adult())
+    r = await _decide(env, token, await env.parent())
     assert r.status_code == 410 and r.json()["code"] == "GUARDIAN_CONSENT_EXPIRED"
     assert (await env.user_row(teen)).guardian_consent == "pending"
     # взрослому и без выбранного возраста согласие родителя не нужно
@@ -358,7 +358,7 @@ async def test_guardian_consent_errors(env) -> None:
 
 async def test_guardian_consent_repeat_and_parallel_decisions(env) -> None:
     teen = await env.teen()
-    parents = [await env.adult() for _ in range(3)]
+    parents = [await env.parent() for _ in range(3)]
     token = await _token(env, teen)
     results = await asyncio.gather(*[_decide(env, token, p) for p in parents],
                                    *[_decide(env, token, p, "decline") for p in parents])
@@ -390,5 +390,5 @@ async def test_guardian_consent_preview_hidden_after_teen_deletion(env) -> None:
     r = await env.call("POST", "/internal/v1/me/deletion-request", teen, {"confirm_word": "УДАЛИТЬ"})
     assert r.status_code == 202
     assert (await _preview(env, token)).json()["status"] == "expired"  # ссылка отозвана удалением
-    r = await _decide(env, token, await env.adult())
+    r = await _decide(env, token, await env.parent())
     assert r.status_code == 410 and (await env.user_row(teen)).guardian_consent == "pending"

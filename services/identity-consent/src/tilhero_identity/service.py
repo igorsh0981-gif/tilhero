@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,7 +55,8 @@ from tilhero_identity.domain.notify import (
     parse_quiet_hours,
 )
 from tilhero_identity.domain.pin import PinHasher, new_biometric_token, pin_problem, token_digest, token_matches
-from tilhero_identity.domain.policy import get_policy, normalize_purposes
+from tilhero_identity.domain.policy import OPTIONAL_PURPOSES, POLICIES, get_policy, normalize_purposes
+from tilhero_identity.domain.purposes import consent_accepted, delivery_categories, effective_purposes
 from tilhero_identity.domain.reset_codes import ResetCodeStore
 from tilhero_identity.models import (
     BiometricCredential,
@@ -74,6 +76,8 @@ from tilhero_identity.schemas import (
     DeletionRequestIn,
     DeletionResponse,
     DeliveryInfo,
+    GuardianConsentGrant,
+    GuardianConsentGrantList,
     GuardianConsentPreview,
     GuardianConsentRequestOut,
     LearnerDetail,
@@ -103,6 +107,7 @@ CHANNEL = "telegram"
 DELETION_WORDS = frozenset({"УДАЛИТЬ", "OʻCHIRISH"})
 _APOSTROPHES = str.maketrans(dict.fromkeys("'‘’ʼ`´", "ʻ"))
 LIVE_STATUSES = ("ACTIVE", "DISABLED")  # ученик виден в списке и управляется
+GRANTS_LIMIT = 100  # GET /me/guardian-consents: последние решения родителя, новые первыми
 
 EV_PROFILE_CREATED = "user.profile.created.v1"
 EV_PROFILE_UPDATED = "user.profile.updated.v1"
@@ -134,6 +139,15 @@ def _guardian_consent_not_found() -> ApiError:
     return not_found("GUARDIAN_CONSENT_NOT_FOUND", "Ссылка согласия не найдена")
 
 
+def _grant_not_found() -> ApiError:
+    return not_found("GUARDIAN_CONSENT_NOT_FOUND", "Согласие родителя не найдено")
+
+
+def _consent_required(purpose: str) -> ApiError:
+    return forbidden("CONSENT_REQUIRED", "Сначала примите условия использования и политику конфиденциальности",
+                     {"purpose": purpose})
+
+
 def _adult_required(age_band: str | None) -> ApiError:
     return forbidden("ADULT_REQUIRED", "Действие доступно только взрослому (18+)", {"age_band": age_band})
 
@@ -158,6 +172,29 @@ def _username(raw: str | None) -> str | None:
 
 def _deletion_word(raw: str | None) -> str:
     return (raw or "").strip().upper().translate(_APOSTROPHES)
+
+
+def optional_purposes_of(policy_version: str) -> frozenset[str]:
+    policy = POLICIES.get(policy_version)
+    return policy.optional_purposes if policy is not None else frozenset(OPTIONAL_PURPOSES)
+
+
+def learner_purposes(learner: User, consent: Consent | None) -> list[str]:
+    """Цели действующего согласия ученика; необязательные — только пока разрешены (18+ сам, 14–17 с согласием
+    родителя; детский профиль и возраст не выбран — нет)."""
+    if consent is None:
+        return []
+    return effective_purposes(
+        consent.purposes,
+        optional=optional_purposes_of(consent.policy_version),
+        optional_allowed=learner.kind == "account" and optional_purposes_allowed(learner.age_band,
+                                                                                  learner.guardian_consent),
+    )
+
+
+def learner_categories(learner: User, consent: Consent | None) -> list[str]:
+    """Категории доставки: включённые учеником, без social/product при непринятых целях social/product_news."""
+    return delivery_categories(normalize_categories(learner.notify_categories), learner_purposes(learner, consent))
 
 
 def effective_delivery(learner: User, recipient: User) -> bool:
@@ -316,11 +353,13 @@ class IdentityService:
 
     async def _notify_changed(self, session: AsyncSession, learner: User, recipient: User) -> None:
         """user.notification_settings.changed.v1 — сброс кэша адресации в notifications. `enabled` — итоговая
-        доставка в Telegram (как DeliveryInfo.notifications_enabled), `categories` — включённые категории."""
+        доставка в Telegram (как DeliveryInfo.notifications_enabled), `categories` — категории доставки (как
+        DeliveryInfo.categories: social/product только при целях social/product_news)."""
+        consent = await self._learner_consent(session, learner)
         await self._emit(session, EV_NOTIFY_CHANGED, {
             "user_id": str(learner.user_id),
             "enabled": effective_delivery(learner, recipient),
-            "categories": normalize_categories(learner.notify_categories),
+            "categories": learner_categories(learner, consent),
         })
 
     async def _load_user(self, session: AsyncSession, user_id: uuid.UUID, *, lock: bool = False) -> User:
@@ -341,12 +380,19 @@ class IdentityService:
 
     @staticmethod
     async def _active_consent(
-        session: AsyncSession, user_id: uuid.UUID, *, lock: bool = False
+        session: AsyncSession, user_id: uuid.UUID, *, basis: str = "self", lock: bool = False
     ) -> Consent | None:
-        stmt = select(Consent).where(Consent.user_id == user_id, Consent.revoked_at.is_(None))
+        """Действующее согласие ученика с основанием `basis`: `self` — своё согласие аккаунта (его цели — выбор
+        ученика), `guardian` — согласие родителя (детский профиль; у подростка 14–17 — разрешение родителя)."""
+        stmt = select(Consent).where(Consent.user_id == user_id, Consent.basis == basis, Consent.revoked_at.is_(None))
         if lock:
             stmt = stmt.with_for_update()
         return (await session.execute(stmt)).scalar_one_or_none()
+
+    async def _learner_consent(self, session: AsyncSession, learner: User) -> Consent | None:
+        """Согласие, по которому работают функции ученика: у детского профиля — родителя, у аккаунта — своё."""
+        return await self._active_consent(session, learner.user_id,
+                                          basis="guardian" if learner.kind == "child" else "self")
 
     @staticmethod
     async def _children(
@@ -489,11 +535,31 @@ class IdentityService:
         )
 
     async def _consent_accepted(self, session: AsyncSession, consent: Consent) -> None:
-        await self._emit(session, EV_CONSENT_ACCEPTED, {
+        payload: dict[str, Any] = {
             "user_id": str(consent.user_id), "consent_id": str(consent.consent_id),
             "policy_version": consent.policy_version, "purposes": list(consent.purposes),
-            "age_band": consent.age_band,
-        })
+            "age_band": consent.age_band, "basis": consent.basis,
+        }
+        if consent.granted_by_user_id is not None:
+            payload["granted_by_user_id"] = str(consent.granted_by_user_id)
+        await self._emit(session, EV_CONSENT_ACCEPTED, payload)
+
+    @staticmethod
+    def _narrowed(consent: Consent, purposes: list[str]) -> Consent:
+        """Та же запись согласия с меньшим набором целей: время, язык, текст политики и основание — исходные (это
+        согласие действительно было дано тогда и на эти цели), evidence пересчитывается."""
+        return Consent(
+            consent_id=uuid.uuid4(), user_id=consent.user_id, policy_version=consent.policy_version,
+            purposes=purposes, accepted_at=consent.accepted_at, channel=consent.channel, locale=consent.locale,
+            age_band=consent.age_band, basis=consent.basis, granted_by_user_id=consent.granted_by_user_id,
+            policy_text_sha256=consent.policy_text_sha256,
+            evidence_hash=evidence_hash(
+                user_id=consent.user_id, policy_version=consent.policy_version, purposes=purposes,
+                accepted_at=consent.accepted_at, channel=consent.channel, locale=consent.locale,
+                policy_text_sha256=consent.policy_text_sha256, age_band=consent.age_band, basis=consent.basis,
+                granted_by=consent.granted_by_user_id,
+            ),
+        )
 
     # ---------- проверка секретов с общим счётчиком ----------
     async def _fail(self, user_id: uuid.UUID, failure: Failure, reserved: AttemptState) -> NoReturn:
@@ -784,8 +850,10 @@ class IdentityService:
                                           expires_at=row.expires_at)
 
     async def decide_guardian_consent(self, token: str, guardian_id: uuid.UUID, accept: bool) -> GuardianConsentPreview:
-        """Родитель (взрослый аккаунт, не сам подросток) принимает или отклоняет согласие. Повтор решения — 200 без
-        изменений; решение по уже решённой ссылке не меняется (новая ссылка — новый запрос подростка)."""
+        """Родитель (взрослый аккаунт с действующим своим согласием, не сам подросток) принимает или отклоняет
+        согласие. Повтор решения — 200 без изменений; решение по уже решённой ссылке не меняется (новая ссылка — новый
+        запрос подростка). accept → запись consents подростка с основанием guardian (доказательство: версия и текст
+        политики на языке родителя, evidence) + consent.accepted.v1; decline — только статус."""
         if not well_formed(token):
             raise _guardian_consent_not_found()
         digest = token_hash(token)
@@ -817,17 +885,144 @@ class IdentityService:
             if (row.status != "pending" or row.expires_at <= now or teen.status not in LIVE_STATUSES
                     or teen.age_band != TEEN):
                 raise ApiError(410, "GUARDIAN_CONSENT_EXPIRED", "Ссылка устарела — попросите отправить новую")
+            own = await self._active_consent(session, guardian.user_id)
+            if own is None or not consent_accepted(own.purposes):
+                # решение обрабатывает данные родителя: сначала он сам принимает условия и политику (Mini App
+                # показывает политику и повторяет решение). Проверка — перед самим решением: по устаревшей или уже
+                # решённой ссылке родитель сразу видит её статус
+                raise _consent_required("terms")
+            own_teen = await self._active_consent(session, teen.user_id, lock=True)
+            before = learner_categories(teen, own_teen)
             row.status = "granted" if accept else "declined"
             row.guardian_user_id = guardian.user_id
             row.decided_at = now
             teen.guardian_consent = row.status
+            if accept:
+                row.consent_id = (await self._grant_guardian_consent(session, teen, guardian, now)).consent_id
             await self._profile_updated(session, teen, ["guardian_consent"])
+            if learner_categories(teen, own_teen) != before:
+                await self._notify_changed(session, teen, teen)
             await session.flush()
             log.info("guardian consent decided", extra={"user_pid": pseudonymize(str(teen.user_id)),
                                                         "decision": row.status})
             return GuardianConsentPreview(teen_display_name=teen.display_name or "",
                                           status=row.status,  # type: ignore[arg-type]
                                           expires_at=row.expires_at)
+
+    async def _grant_guardian_consent(
+        self, session: AsyncSession, teen: User, guardian: User, now: datetime
+    ) -> Consent:
+        """Согласие родителя за подростка — отдельная запись рядом с собственным согласием подростка: цели — все цели
+        политики (родитель разрешает функции, подросток включает необязательные сам), язык и хеш текста — родителя
+        (он читал политику)."""
+        previous = await self._active_consent(session, teen.user_id, basis="guardian", lock=True)
+        if previous is not None:  # защитно: прежнее решение уже закрыто отзывом
+            previous.revoked_at = truncate_ms(now)
+            previous.revoke_reason = "superseded"
+            await session.flush()
+        policy = get_policy(self.settings.current_policy_version)
+        consent = self._new_consent(teen, purposes=list(policy.purpose_codes), basis="guardian",
+                                    granted_by=guardian.user_id, locale=guardian.locale, now=now)
+        session.add(consent)
+        await session.flush()  # строка ссылки ссылается на запись согласия (FK)
+        await self._consent_accepted(session, consent)
+        return consent
+
+    @staticmethod
+    def _grant_view(row: GuardianConsentRequest, teen: User) -> GuardianConsentGrant:
+        return GuardianConsentGrant(
+            teen_user_id=teen.user_id, teen_display_name=teen.display_name or "",
+            status=row.status,  # type: ignore[arg-type]
+            decided_at=row.revoked_at or row.decided_at,  # type: ignore[arg-type]
+        )
+
+    @staticmethod
+    def _decisions_where(guardian_id: uuid.UUID, teen_id: uuid.UUID) -> tuple[Any, ...]:
+        return (GuardianConsentRequest.guardian_user_id == guardian_id,
+                GuardianConsentRequest.teen_user_id == teen_id)
+
+    async def list_guardian_consents(self, guardian_id: uuid.UUID) -> GuardianConsentGrantList:
+        """Подростки, за которых решал этот родитель: последнее его решение по каждому (удалённые не показываются)."""
+        gcr = GuardianConsentRequest
+        async with self._tx() as session:
+            guardian = await self._load_account(session, guardian_id)
+            latest = (
+                select(gcr.id)
+                .where(gcr.guardian_user_id == guardian.user_id)
+                .order_by(gcr.teen_user_id, gcr.decided_at.desc(), gcr.id)
+                .ext(distinct_on(gcr.teen_user_id))
+                .subquery()
+            )
+            rows = (await session.execute(
+                select(gcr, User)
+                .join(latest, latest.c.id == gcr.id)
+                .join(User, User.user_id == gcr.teen_user_id)
+                .where(User.status.in_(LIVE_STATUSES))
+                .order_by(func.coalesce(gcr.revoked_at, gcr.decided_at).desc(), gcr.id)
+                .limit(GRANTS_LIMIT)
+            )).all()
+            return GuardianConsentGrantList(items=[self._grant_view(row, teen) for row, teen in rows])
+
+    async def revoke_guardian_consent(self, guardian_id: uuid.UUID, teen_id: uuid.UUID) -> GuardianConsentGrant:
+        """Отзыв согласия родителем: только тот, кто его дал (последнее решение этого родителя — granted), иначе 404;
+        повтор — 200 без изменений. У подростка guardian_consent=declined, согласие родителя закрывается (guardian),
+        из собственного согласия подростка снимаются необязательные цели: запись заменяется той же записью без них
+        (обязательные цели подросток принимал сам — обучение продолжается)."""
+        async with self._tx() as session:
+            guardian = await self._load_account(session, guardian_id)
+            where = self._decisions_where(guardian.user_id, teen_id)
+            known = (await session.execute(
+                select(GuardianConsentRequest.id).where(*where).limit(1)
+            )).scalar_one_or_none()
+            if known is None:  # не решал за этого подростка (в т.ч. сам подросток, чужой родитель) — неотличимо
+                raise _grant_not_found()
+            # порядок блокировок как у решения по ссылке: аккаунт подростка → строки ссылок; последнее решение
+            # перечитывается под блокировкой подростка (параллельный отзыв или новое решение уже видны)
+            teen = (await session.execute(
+                select(User).where(User.user_id == teen_id).with_for_update()
+                .execution_options(populate_existing=True)
+            )).scalar_one_or_none()
+            if teen is None or teen.status not in LIVE_STATUSES:
+                raise _grant_not_found()
+            row = (await session.execute(
+                select(GuardianConsentRequest).where(*where)
+                .order_by(GuardianConsentRequest.decided_at.desc(), GuardianConsentRequest.id)
+                .limit(1).with_for_update().execution_options(populate_existing=True)
+            )).scalar_one()
+            if row.status != "granted":
+                if row.revoked_at is not None:  # уже отозвал — повтор без изменений
+                    return self._grant_view(row, teen)
+                raise _grant_not_found()  # отказал по ссылке — отзывать нечего
+            now = _now()
+            row.status = "declined"
+            row.revoked_at = now
+            teen.guardian_consent = "declined"
+            grant = await session.get(Consent, row.consent_id) if row.consent_id is not None else None
+            if grant is None:  # решение до появления записи согласия родителя (dev-стенды)
+                grant = await self._active_consent(session, teen.user_id, basis="guardian", lock=True)
+            if grant is not None and grant.revoked_at is None:
+                grant.revoked_at = truncate_ms(now)
+                grant.revoke_reason = "guardian"
+            own = await self._active_consent(session, teen.user_id, lock=True)
+            if own is not None:
+                optional = optional_purposes_of(own.policy_version)
+                kept = [p for p in own.purposes if p not in optional]
+                if kept != list(own.purposes):
+                    own.revoked_at = truncate_ms(now)
+                    own.revoke_reason = "superseded"
+                    await session.flush()  # освобождаем уникальный индекс действующего согласия
+                    session.add(self._narrowed(own, kept))
+            await session.flush()
+            await self._profile_updated(session, teen, ["guardian_consent"])
+            if grant is not None:
+                await self._emit(session, EV_CONSENT_REVOKED, {
+                    "user_id": str(teen.user_id), "consent_id": str(grant.consent_id),
+                    "policy_version": grant.policy_version, "basis": "guardian",
+                    "revoked_by_user_id": str(guardian.user_id),
+                })
+            await self._notify_changed(session, teen, teen)
+            log.info("guardian consent revoked", extra={"user_pid": pseudonymize(str(teen.user_id))})
+            return self._grant_view(row, teen)
 
     # ---------- PIN (код родителя) ----------
     async def set_pin(self, user_id: uuid.UUID, body: PinSetRequest) -> SecurityState:
@@ -1029,18 +1224,23 @@ class IdentityService:
             active = await self._active_consent(session, user_id, lock=True)
             if active is not None and active.policy_version == current and list(active.purposes) == purposes:
                 return consent_state(active, current)  # повтор того же согласия — без новой записи
+            before = learner_categories(user, active)
             now = _now()
             if active is not None:
                 active.revoked_at = truncate_ms(now)
                 active.revoke_reason = "superseded"
                 await session.flush()  # освобождаем уникальный индекс действующего согласия
+            # другой набор целей (добавить или снять необязательную) — новая запись и consent.accepted.v1
             consent = self._new_consent(user, purposes=purposes, basis="self", granted_by=None, locale=user.locale,
                                         now=now)
             session.add(consent)
             await self._consent_accepted(session, consent)
             # первое согласие (или после отзыва) включает уведомления; категории — только явным выбором
-            if active is None and user.status == "ACTIVE" and not user.notifications_enabled:
+            enabled = active is None and user.status == "ACTIVE" and not user.notifications_enabled
+            if enabled:
                 user.notifications_enabled = True
+            # цели social / product_news включают и выключают доставку категорий social / product
+            if enabled or learner_categories(user, consent) != before:
                 await self._notify_changed(session, user, user)
             return consent_state(consent, current)
 
@@ -1056,7 +1256,7 @@ class IdentityService:
                 user.notifications_enabled = False
                 await self._emit(session, EV_CONSENT_REVOKED, {
                     "user_id": str(user_id), "consent_id": str(active.consent_id),
-                    "policy_version": active.policy_version,
+                    "policy_version": active.policy_version, "basis": "self",
                 })
             return consent_state(None, current)
 
@@ -1237,7 +1437,7 @@ class IdentityService:
                 age_band=learner.age_band,  # type: ignore[arg-type]
                 is_minor=is_minor(learner.age_band),
                 notifications_enabled=effective_delivery(learner, recipient),
-                categories=normalize_categories(learner.notify_categories),
+                categories=learner_categories(learner, await self._learner_consent(session, learner)),
                 quiet_hours=quiet_hours(learner),
                 timezone=learner.timezone,
                 status=learner.status,  # type: ignore[arg-type]
@@ -1248,6 +1448,7 @@ class IdentityService:
             user = await session.get(User, user_id)
             if user is None or user.status == "DELETED":
                 raise _user_not_found()
+            consent = await self._learner_consent(session, user)
             return PublicProfile(
                 user_id=user.user_id,
                 display_name=user.display_name or "",
@@ -1255,6 +1456,8 @@ class IdentityService:
                 age_band=user.age_band,  # type: ignore[arg-type]
                 guardian_consent=user.guardian_consent,  # type: ignore[arg-type]
                 status=user.status,  # type: ignore[arg-type]
+                consent_accepted=consent is not None and consent_accepted(consent.purposes),
+                purposes=learner_purposes(user, consent),
             )
 
     async def set_bot_status(self, telegram_user_id: int, blocked: bool) -> None:
