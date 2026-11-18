@@ -672,7 +672,8 @@ EDITOR_ID = str(uuid.uuid4())  # сотрудник-редактор «Что н
 
 
 def _publish(body: dict[str, Any]) -> dict[str, Any]:
-    edit = staff_headers("experience-config", ["config.read", "config.edit", "config.publish"], EDITOR_ID)
+    # спринт 2: права «Что нового» — whatsnew.manage (черновик) и whatsnew.publish (публикация, архив)
+    edit = staff_headers("experience-config", ["whatsnew.manage", "whatsnew.publish"], EDITOR_ID)
     note = expect(httpx.post(f"{EXPERIENCE}/admin/v1/release-notes", json=body,
                              headers={**edit, "idempotency-key": uuid.uuid4().hex}), 201)
     check(note.get("status") == "draft", note)
@@ -702,14 +703,15 @@ def s_whats_new(c: Ctx) -> None:
 
     # staff API: права и переводы
     body = _note(f"e2e-{c.tag.lower()}", "existing", {})
+    # права конфигурации интерфейса (config.*) к заметкам отношения не имеют (спринт 2)
     r = httpx.post(f"{EXPERIENCE}/admin/v1/release-notes", json=body,
-                   headers=staff_headers("experience-config", ["config.read"]))
+                   headers=staff_headers("experience-config", ["config.read", "config.edit", "config.publish"]))
     expect(r, 403, "PERMISSION_DENIED")
     r = httpx.post(f"{EXPERIENCE}/admin/v1/release-notes", json=body,
                    headers=internal_token("telegram-bff", "experience-config", u.account_id))
     check(r.status_code == 403, f"telegram-bff в staff API: {r.status_code}")
     r = httpx.post(f"{EXPERIENCE}/admin/v1/release-notes", json=_note(f"e2e-{c.tag.lower()}-x", "existing", uz=False),
-                   headers=staff_headers("experience-config", ["config.edit"]))
+                   headers=staff_headers("experience-config", ["whatsnew.manage"]))
     expect(r, 422, "RELEASE_NOTE_TRANSLATION_MISSING")
     note = _publish(body)
     note_uz = _publish(_note(f"e2e-{c.tag.lower()}-uz", "existing", {"ui_lang": ["uz"]}))
@@ -1700,7 +1702,9 @@ def dlq_counts() -> dict[str, int]:
                 info = await js.stream_info("TILHERO_DLQ", subjects_filter="tilherodlq.>")
             except Exception:
                 return {}
-            return dict(info.state.subjects or {})
+            # NATS стенда общий с юнит-тестами: py-common test_nats_publish_subscribe_dedup_and_dlq намеренно кладёт
+            # сообщение в DLQ своего потребителя test_bad_<suffix> — это не сервисы стенда
+            return {k: v for k, v in (info.state.subjects or {}).items() if not k.startswith("tilherodlq.test_")}
         finally:
             await nc.close()
 
@@ -1806,7 +1810,7 @@ def s_audit_trail(c: Ctx) -> None:
 
 
 def s_cleanup_notes(c: Ctx) -> None:
-    hdr = staff_headers("experience-config", ["config.read", "config.publish"], EDITOR_ID)
+    hdr = staff_headers("experience-config", ["whatsnew.manage", "whatsnew.publish"], EDITOR_ID)
     for note in c.data.get("notes", []):
         r = httpx.post(f"{EXPERIENCE}/admin/v1/release-notes/{note['release_note_id']}/archive",
                        json={"reason": "e2e: уборка"}, headers={**hdr, "idempotency-key": uuid.uuid4().hex})

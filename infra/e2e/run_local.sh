@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# TilHero — сквозной локальный стенд спринта 1: все сервисы на реальных PG/Redis/NATS + мок Telegram Bot API.
-# Перенесён из aievent (infra/e2e/run_local.sh) — только то, что нужно спринту 1, без туристического контура.
+# TilHero — сквозной локальный стенд спринтов 1–2: все сервисы на реальных PG/Redis/NATS + мок Telegram Bot API.
+# Перенесён из aievent (infra/e2e/run_local.sh) — только то, что нужно TilHero, без туристического контура.
 #
 #   infra/e2e/run_local.sh up        — ключи внутреннего JWT (Ed25519 на издателя, как в prod), bootstrap ролей БД
 #                                      (infra/db/bootstrap.sql), миграции под <svc>_owner, запуск сервисов под ролью <svc>
-#                                      (только DML) + telegram-bff (Node, tsx) + мок Telegram
-#   infra/e2e/run_local.sh test      — up + infra/e2e/scenario.py (PASS/FAIL по шагам, «Итого: N/M PASS»)
+#                                      (только DML) + telegram-bff и admin-bff (Node, tsx) + мок Telegram
+#   infra/e2e/run_local.sh test [аргументы scenario.py] — сброс учёток admin-identity + up + infra/e2e/scenario.py
+#                                      (спринт 1, Mini App) + infra/e2e/scenario_admin.py (спринт 2, админка через
+#                                      admin-bff); у каждого — PASS/FAIL по шагам и «Итого: N/M PASS»
+#   infra/e2e/run_local.sh admin     — сброс учёток admin-identity + up + только infra/e2e/scenario_admin.py
 #   infra/e2e/run_local.sh ui [TGID] — дополнительно Mini App (vite :5173) с VITE_DEV_INIT_DATA для Telegram ID TGID
 #   infra/e2e/run_local.sh status    — состояние процессов и /health/ready
 #   infra/e2e/run_local.sh restart [name] — перезапустить один сервис (после правки кода) или всё
@@ -13,7 +16,13 @@
 #
 # Порты (docs/ARCHITECTURE.md): identity-consent 8101, learning-plan 8102, support 8103, notifications 8104, audit 8105,
 # experience-config 8106, telegram-bot-gateway 8107 (публичный: webhook + health) + 8108 (внутренний API),
-# social 8109, telegram-bff 8001, мок Telegram 8190, Mini App 5173.
+# social 8109, telegram-bff 8001, мок Telegram 8190, Mini App 5173; админ-контур (спринт 2): admin-identity 8120,
+# user-admin 8121, admin-bff 8002 (Node, tsx; Origin admin-web — E2E_ADMIN_ORIGIN, сам admin-web не поднимается).
+# Сценарий спринта 2 входит bootstrap-учёткой admin-identity (временный пароль → смена → TOTP), а bootstrap срабатывает
+# только при старте admin-identity и только без активного super_admin, — поэтому `test` и `admin` перед прогоном
+# сбрасывают сотрудников и заявки admin-identity (матрица ролей — сид миграции — остаётся) и их ключи Redis (reset_admin).
+# Кэш конфигурации Mini App в telegram-bff на стенде — 5 с (prod 60, EXPERIENCE_CACHE_SECONDS): AT-24 проверяет откат
+# темы без ожидания минуты.
 # n8n на стенде не поднимается: plan:tick, notifications:dispatch и invites:tick вызывает сценарий с E2E_SCHEDULER_TOKEN
 # (как n8n). Время слотов сценарий подбирает сдвигом часового пояса графика относительно реального now — часы сервисов
 # не подменяются.
@@ -46,6 +55,15 @@ export E2E_TELEGRAM_APP_LINK="${E2E_TELEGRAM_APP_LINK:-https://t.me/tilhero_e2e_
 export E2E_REDIS_URL="${E2E_REDIS_URL:-redis://127.0.0.1:6379/0}"
 export E2E_NATS_URL="${E2E_NATS_URL:-nats://127.0.0.1:4222}"
 export E2E_DB="${E2E_DB:-tilhero}"
+# админ-контур (спринт 2): dev-значения стенда, не prod. Ключ шифрования TOTP-секретов — base64 32 байт; bootstrap —
+# первый super_admin admin-identity (создаётся, только если активного super_admin нет; пароль временный — смена при
+# первом входе); тестовый чат уведомлений — chat id мока Telegram (тестовая отправка шаблонов и рассылок).
+export E2E_ADMIN_ORIGIN="${E2E_ADMIN_ORIGIN:-http://127.0.0.1:5174}"
+export E2E_ADMIN_MFA_ENC_KEY="${E2E_ADMIN_MFA_ENC_KEY:-dGlsaGVyby1lMmUtYWRtaW4tbWZhLWVuYy1rZXktMzI=}"
+export E2E_ADMIN_BOOTSTRAP_EMAIL="${E2E_ADMIN_BOOTSTRAP_EMAIL:-root.e2e@tilhero.local}"
+export E2E_ADMIN_BOOTSTRAP_PASSWORD="${E2E_ADMIN_BOOTSTRAP_PASSWORD:-Bootstrap-e2e-2026-temp}"
+export E2E_ADMIN_TEST_CHAT_IDS="${E2E_ADMIN_TEST_CHAT_IDS:-5550001001,5550001002}"
+ADMIN_BFF_PORT="${ADMIN_BFF_PORT:-8002}"
 MOCK_TG_PORT="${MOCK_TG_PORT:-8190}"
 BOTGW_INTERNAL_PORT="${BOTGW_INTERNAL_PORT:-8108}"
 PG="127.0.0.1:5432"
@@ -61,6 +79,8 @@ PY_SERVICES=(
   "support|services/support|tilhero_support.main:app|8103|support"
   "telegram-bot-gateway|apps/telegram-bot-gateway|-m tilhero_botgw|8107|"
   "notifications|services/notifications|tilhero_notifications.main:app|8104|notifications"
+  "admin-identity|services/admin-identity|tilhero_admin_identity.main:app|8120|admin_identity"
+  "user-admin|services/user-admin|tilhero_user_admin.main:app|8121|user_admin"
 )
 
 log() { printf '\033[1;34m[e2e]\033[0m %s\n' "$*"; }
@@ -95,8 +115,16 @@ svc_env() {
   fi
   case "$name" in
     identity-consent)
-      # таймер саги удаления — раз в 5 с (prod 60); расписание повторов и DELETION_STUCK_HOURS — как в prod
-      env="$env NOTIFICATIONS_URL=http://127.0.0.1:8104 DELETION_SWEEP_SECONDS=${E2E_DELETION_SWEEP_SECONDS:-5}" ;;
+      # таймер саги удаления — раз в 5 с (prod 60); расписание повторов и DELETION_STUCK_HOURS — как в prod;
+      # audit — синхронная запись sensitive.view при раскрытии Telegram ID сотрудником (спринт 2)
+      env="$env NOTIFICATIONS_URL=http://127.0.0.1:8104 DELETION_SWEEP_SECONDS=${E2E_DELETION_SWEEP_SECONDS:-5}"
+      env="$env AUDIT_URL=http://127.0.0.1:8105" ;;
+    admin-identity)
+      env="$env ADMIN_MFA_ENC_KEY=$E2E_ADMIN_MFA_ENC_KEY"
+      env="$env ADMIN_BOOTSTRAP_EMAIL=$E2E_ADMIN_BOOTSTRAP_EMAIL ADMIN_BOOTSTRAP_PASSWORD=$E2E_ADMIN_BOOTSTRAP_PASSWORD" ;;
+    user-admin)
+      env="$env IDENTITY_CONSENT_URL=http://127.0.0.1:8101 LEARNING_PLAN_URL=http://127.0.0.1:8102"
+      env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN" ;;
     learning-plan)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN" ;;
     social)
@@ -105,7 +133,8 @@ svc_env() {
     notifications)
       # bot-gateway: только ВНУТРЕННИЙ порт (публичный 8107 отдаёт лишь webhook и health)
       env="$env IDENTITY_CONSENT_URL=http://127.0.0.1:8101 BOTGW_URL=http://127.0.0.1:$BOTGW_INTERNAL_PORT"
-      env="$env DISPATCH_INTERVAL_SECONDS=0.5 SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN" ;;
+      env="$env DISPATCH_INTERVAL_SECONDS=0.5 SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN"
+      env="$env ADMIN_TEST_CHAT_IDS=$E2E_ADMIN_TEST_CHAT_IDS" ;;
     telegram-bot-gateway)
       env="$env BOT_TOKEN=$E2E_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET=$E2E_WEBHOOK_SECRET MINIAPP_URL=$E2E_MINIAPP_URL"
       env="$env TELEGRAM_API_BASE=http://127.0.0.1:$MOCK_TG_PORT IDENTITY_CONSENT_URL=http://127.0.0.1:8101"
@@ -214,6 +243,21 @@ up() {
     RATE_LIMIT_SESSION_IP_PER_MIN="${E2E_RATE_LIMIT_SESSION_IP_PER_MIN:-500}" \
     RATE_LIMIT_USER_PER_MIN="${E2E_RATE_LIMIT_USER_PER_MIN:-600}" \
     RATE_LIMIT_PUBLIC_IP_PER_MIN="${E2E_RATE_LIMIT_PUBLIC_IP_PER_MIN:-600}" \
+    EXPERIENCE_CACHE_SECONDS="${E2E_EXPERIENCE_CACHE_SECONDS:-5}" \
+    npx tsx src/main.ts
+
+  # admin-bff (спринт 2) — как telegram-bff: собранный ts-common, сам BFF через tsx из src. Свой ключ внутреннего JWT
+  # (actor-токены к доменам), Origin admin-web, адреса всех доменов. Все запросы сценария идут с 127.0.0.1 — лимиты
+  # входа с одного IP подняты (как у telegram-bff); лимиты на email, TOTP и команды — по умолчанию (prod).
+  spawn admin-bff services/admin-bff env ENV=dev NODE_ENV=development PORT="$ADMIN_BFF_PORT" HOST=127.0.0.1 \
+    LOG_LEVEL=info TRUST_PROXY_HOPS=0 \
+    INTERNAL_JWT_PRIVATE_KEY="$(key_of admin-bff)" INTERNAL_JWT_PUBLIC_KEYS="$E2E_PUBLIC_KEYS" \
+    REDIS_URL="$E2E_REDIS_URL" ADMIN_ORIGIN="$E2E_ADMIN_ORIGIN" \
+    ADMIN_IDENTITY_URL=http://127.0.0.1:8120 USER_ADMIN_URL=http://127.0.0.1:8121 \
+    IDENTITY_URL=http://127.0.0.1:8101 SUPPORT_URL=http://127.0.0.1:8103 NOTIFICATIONS_URL=http://127.0.0.1:8104 \
+    AUDIT_URL=http://127.0.0.1:8105 EXPERIENCE_URL=http://127.0.0.1:8106 \
+    RATE_LIMIT_LOGIN_IP_PER_MIN="${E2E_RATE_LIMIT_LOGIN_IP_PER_MIN:-60}" \
+    RATE_LIMIT_AUTH_STEP_IP_PER_MIN="${E2E_RATE_LIMIT_AUTH_STEP_IP_PER_MIN:-120}" \
     npx tsx src/main.ts
 
   for spec in "${PY_SERVICES[@]}"; do
@@ -222,7 +266,28 @@ up() {
   done
   wait_ready telegram-bot-gateway "http://127.0.0.1:$BOTGW_INTERNAL_PORT/health/ready" 30
   wait_ready telegram-bff "http://127.0.0.1:8001/health/ready" 90
+  wait_ready admin-bff "http://127.0.0.1:$ADMIN_BFF_PORT/health/ready" 90
   log "стенд поднят; логи: $LOGS"
+}
+
+reset_admin() {
+  # Сценарий спринта 2 входит bootstrap-учёткой (временный пароль → смена → TOTP). Bootstrap срабатывает только при
+  # старте admin-identity и только если активного super_admin нет — поэтому перед прогоном: остановить admin-identity
+  # и admin-bff, удалить сотрудников и заявки (матрица ролей — сид миграции — остаётся), сбросить их ключи Redis
+  # (счётчики попыток, challenge, сессии, кэш principal). Только dev-стенд; up затем поднимет оба сервиса заново.
+  bash "$ROOT/infra/dev/stack.sh" up >/dev/null || die "stack.sh up не поднял PG/Redis/NATS"
+  stop_one admin-bff
+  stop_one admin-identity
+  if psql -h 127.0.0.1 -p 5432 -U postgres -d "$E2E_DB" -tAc "SELECT to_regclass('admin_identity.staff')" \
+       | grep -q staff; then
+    log "сброс учёток admin-identity (dev-стенд)"
+    psql -h 127.0.0.1 -p 5432 -U postgres -d "$E2E_DB" -q -v ON_ERROR_STOP=1 \
+      -c "TRUNCATE admin_identity.approvals, admin_identity.staff CASCADE" >/dev/null
+  fi
+  local pat
+  for pat in 'adminid:*' 'admin-bff:*'; do
+    redis-cli -u "$E2E_REDIS_URL" --scan --pattern "$pat" | xargs -r redis-cli -u "$E2E_REDIS_URL" del >/dev/null
+  done
 }
 
 ui() {
@@ -256,8 +321,8 @@ stop_one() {
 
 stop() {
   local f
-  for f in miniapp telegram-bff notifications telegram-bot-gateway social support learning-plan identity-consent \
-           experience-config audit mock-telegram; do
+  for f in miniapp admin-bff telegram-bff user-admin admin-identity notifications telegram-bot-gateway social support \
+           learning-plan identity-consent experience-config audit mock-telegram; do
     stop_one "$f"
   done
 }
@@ -266,7 +331,7 @@ status() {
   local spec name dir mod port role
   printf '%-22s %-8s %s\n' service pid ready
   for spec in "${PY_SERVICES[@]}" "telegram-bot-gateway(int)|.|.|$BOTGW_INTERNAL_PORT|" "telegram-bff|.|.|8001|" \
-              "mock-telegram|.|.|$MOCK_TG_PORT|" "miniapp|.|.|5173|"; do
+              "admin-bff|.|.|$ADMIN_BFF_PORT|" "mock-telegram|.|.|$MOCK_TG_PORT|" "miniapp|.|.|5173|"; do
     IFS='|' read -r name dir mod port role <<<"$spec"
     local path="/health/ready"; [[ "$name" == mock-* ]] && path="/health"; [ "$name" = miniapp ] && path="/"
     local pid="-"; is_running "${name%(int)}" && pid="$(cat "$RUN/${name%(int)}.pid")"
@@ -280,12 +345,18 @@ case "${1:-up}" in
   up) up ;;
   ui) shift; ui "${1:-}" ;;
   test)
-    up; cd "$ROOT"
+    reset_admin; up; cd "$ROOT"
     rc=0
+    # остатки прерванного прогона (шаблон, заметка, рассылка, тема) — до сценария спринта 1, который их бы увидел
+    uv run --quiet python infra/e2e/scenario_admin.py --cleanup || rc=1
     uv run --quiet python infra/e2e/scenario.py "${@:2}" || rc=1
+    echo
+    uv run --quiet python infra/e2e/scenario_admin.py || rc=1
     exit $rc ;;
+  admin) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_admin.py "$@" ;;  # уборка — в шаге A00
   stop|down) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi ;;
   restart) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi; up ;;
   status) status ;;
-  *) echo "usage: $0 up|test [аргументы scenario.py]|ui [tg_id]|status|stop [name]|restart [name]"; exit 2 ;;
+  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|ui [tg_id]|status|stop [name]|restart [name]"
+     exit 2 ;;
 esac

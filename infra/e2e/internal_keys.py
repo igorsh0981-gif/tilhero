@@ -8,6 +8,7 @@
   INTERNAL_JWT_PUBLIC_KEYS=<JSON открытых ключей всех издателей>
 (сервис подписывает только своим ключом и проверяет входящие по ключу конкретного издателя — подделать admin-bff
 нельзя). Сценарий берёт отсюда же ключ admin-bff (staff API) и notifications/telegram-bff (проверки портов bot-gateway).
+Набор издателей совпадает с infra/scripts/gen_internal_keys.py (шаг 17a сценария спринта 1).
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ from tilhero_common.internal_auth import KeyRing, b64e, private_from_seed, publi
 ISSUERS = (
     "telegram-bff",
     "admin-bff",
+    "admin-identity",  # спринт 2: аудит HTTP (POST audit /internal/v1/records), шина
+    "user-admin",  # спринт 2: сверка с identity-consent и learning-plan (GET /admin/v1/users|plans)
     "identity-consent",
     "learning-plan",
     "social",
