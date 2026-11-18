@@ -1,5 +1,13 @@
 # Деплой TilHero на Railway
 
+## Prod (развёрнут 18.11.2026)
+Проект Railway **TilHero**, окружение `production`, регион `europe-west4` (ближе к Узбекистану и серверам Telegram).
+- Mini App: https://telegram-miniapp-production-c38e67a1.up.railway.app — адрес для @BotFather `/newapp` (short name `app`).
+- BFF: https://telegram-bff-production-76baa800.up.railway.app; webhook бота: https://telegram-bot-gateway-production-c5712e9c.up.railway.app/telegram/webhook.
+- Бот: @TilHero_bot; ссылки `https://t.me/TilHero_bot/app?startapp=…`.
+- `BOT_TOKEN` — общая переменная проекта (Project Settings → Shared Variables), её вводит владелец; сервисы ссылаются `${{shared.BOT_TOKEN}}`.
+- Роли и схемы БД созданы разовым сервисом `db-bootstrap` (образ `postgres:18-alpine`, `psql` с `infra/db/bootstrap.sql` и паролями из `setup.py`); после `BOOTSTRAP_OK` в логе сервис удаляется вместе с переменными.
+
 Одна среда Railway = один проект: `stage` и `prod` — разные проекты с одинаковым набором сервисов. Код приходит из GitHub (`igorsh0981-gif/tilhero`), ветка `main` — только через PR с зелёным CI.
 
 ## 1. Подготовка (один раз на среду)

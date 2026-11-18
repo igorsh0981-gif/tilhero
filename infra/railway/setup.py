@@ -11,7 +11,8 @@
    - db-passwords.sql — пароли ролей; выполнить ПОСЛЕ infra/db/bootstrap.sql под владельцем БД;
    - services.md — таблица: Dockerfile, публичный домен, Pre-Deploy Command, healthcheck.
 Ссылки ${{…}} Railway подставляет сам: адреса приватной сети, Redis, публичные домены.
-BOT_TOKEN вводится вручную в Railway (telegram-bot-gateway и telegram-bff) — скрипт его не знает.
+BOT_TOKEN скрипт не знает: сервисы ссылаются на общую переменную ${{shared.BOT_TOKEN}}, её вводят вручную
+(Railway → Project Settings → Shared Variables).
 """
 
 from __future__ import annotations
@@ -110,29 +111,37 @@ class Secrets:
     session_jwt: str
     invite_key: str
     webhook: str
+    n8n_key: str  # N8N_ENCRYPTION_KEY: n8n записывает его в том при первом запуске и с другим не стартует
+    internal_hmac: str  # INTERNAL_JWT_SECRET — обязателен Python-сервисам в stage/prod (>= 32), отличен от session_jwt
 
     @classmethod
     def new(cls) -> Secrets:
         roles = [r for s in SERVICES if s.schema for r in (s.schema, f"{s.schema}_owner")]
         return cls(seeds={n: os.urandom(32) for n in JWT_ISSUERS},
                    passwords={r: secrets.token_hex(24) for r in roles},
-                   scheduler=token(), session_jwt=token(48), invite_key=token(), webhook=secrets.token_hex(32))
+                   scheduler=token(), session_jwt=token(48), invite_key=token(), webhook=secrets.token_hex(32),
+                   n8n_key=token(), internal_hmac=token(48))
 
     def public_keys(self) -> str:
         return json.dumps({n: b64e(public_raw(private_from_seed(s))) for n, s in self.seeds.items()},
                           separators=(",", ":"))
 
 
-def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str) -> list[str]:
-    lines: list[str] = [f"ENV={env}", f"PORT={svc.port}"]
-    if svc.name == "telegram-miniapp":
-        return [*lines, "BFF_ORIGIN=https://${{telegram-bff.RAILWAY_PUBLIC_DOMAIN}}",
-                "# build args: VITE_BFF_URL=https://${{telegram-bff.RAILWAY_PUBLIC_DOMAIN}}"]
-    if svc.name == "n8n":
-        lines = ["PORT=5678", f"SCHEDULER_TOKEN={sec.scheduler}"]
-        return lines + [f"{url_var('n8n', c)}={private_url(c)}" for c in svc.calls]
+def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_username: str = "") -> list[str]:
+    dockerfile = f"RAILWAY_DOCKERFILE_PATH={svc.dockerfile}"
+    lines: list[str] = [dockerfile, f"ENV={env}", f"PORT={svc.port}"]
+    if svc.name == "telegram-miniapp":  # VITE_* — build args (Railway передаёт переменные сервиса в сборку)
+        return [dockerfile, f"PORT={svc.port}", "VITE_BFF_URL=https://${{telegram-bff.RAILWAY_PUBLIC_DOMAIN}}",
+                f"VITE_BOT_USERNAME={bot_username}", "BFF_ORIGIN=https://${{telegram-bff.RAILWAY_PUBLIC_DOMAIN}}"]
+    if svc.name == "n8n":  # как в aievent: sqlite в томе /home/node/.n8n, том Railway монтируется от root
+        return [dockerfile, "PORT=5678", "N8N_PORT=5678", f"SCHEDULER_TOKEN={sec.scheduler}",
+                *(f"{url_var('n8n', c)}={private_url(c)}" for c in svc.calls),
+                f"N8N_ENCRYPTION_KEY={sec.n8n_key}", "N8N_PROXY_HOPS=1", "GENERIC_TIMEZONE=UTC", "TZ=UTC",
+                "DB_TYPE=sqlite", "N8N_RUNNERS_ENABLED=true", "N8N_BLOCK_ENV_ACCESS_IN_NODE=false",
+                "N8N_DIAGNOSTICS_ENABLED=false", "N8N_PERSONALIZATION_ENABLED=false",
+                "N8N_VERSION_NOTIFICATIONS_ENABLED=false", "RAILWAY_RUN_UID=0", "N8N_USER_FOLDER=/home/node"]
     if svc.name == "telegram-bff":
-        lines = ["NODE_ENV=production", f"PORT={svc.port}", "HOST=::"]
+        lines = [dockerfile, "NODE_ENV=production", f"PORT={svc.port}", "HOST=::", "TRUST_PROXY_HOPS=1"]
     if svc.schema:
         lines += [f"DATABASE_URL={pg_url(svc.schema, sec.passwords[svc.schema])}",
                   f"MIGRATION_DATABASE_URL={pg_url(svc.schema + '_owner', sec.passwords[svc.schema + '_owner'])}"]
@@ -142,6 +151,8 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str) -> list[
     if svc.name in JWT_ISSUERS:
         lines += [f"INTERNAL_JWT_PRIVATE_KEY={b64e(sec.seeds[svc.name])}",
                   f"INTERNAL_JWT_PUBLIC_KEYS={sec.public_keys()}"]
+    if svc.name != "telegram-bff":  # Python: проверка ServiceSettings в stage/prod; BFF в prod его не использует
+        lines.append(f"INTERNAL_JWT_SECRET={sec.internal_hmac}")
     lines += [f"{url_var(svc.name, c)}={private_url(c)}" for c in svc.calls]
     if svc.name in SCHEDULED:
         lines.append(f"SCHEDULER_TOKEN={sec.scheduler}")
@@ -150,13 +161,13 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str) -> list[
     if svc.name == "telegram-bff":
         lines += [f"SESSION_JWT_SECRET={sec.session_jwt}", f"TELEGRAM_APP_LINK={app_link}",
                   "MINIAPP_ORIGIN=https://${{telegram-miniapp.RAILWAY_PUBLIC_DOMAIN}}",
-                  "BOT_TOKEN=  # ввести вручную: токен бота от @BotFather"]
+                  "BOT_TOKEN=${{shared.BOT_TOKEN}}"]
     if svc.name == "telegram-bot-gateway":
         lines += [f"INTERNAL_PORT={BOT_INTERNAL_PORT}", "HOST=::", f"TELEGRAM_WEBHOOK_SECRET={sec.webhook}",
                   "TELEGRAM_WEBHOOK_URL=https://${{telegram-bot-gateway.RAILWAY_PUBLIC_DOMAIN}}/telegram/webhook",
                   "MINIAPP_URL=https://${{telegram-miniapp.RAILWAY_PUBLIC_DOMAIN}}",
                   f"TELEGRAM_APP_LINK={app_link}", "BOT_AUTO_SETUP=true",
-                  "BOT_TOKEN=  # ввести вручную: токен бота от @BotFather"]
+                  "BOT_TOKEN=${{shared.BOT_TOKEN}}"]
     return lines
 
 
@@ -181,7 +192,8 @@ def build(sec: Secrets, *, env: str, bot_username: str, app_name: str) -> dict[s
     if not _USERNAME_RE.match(bot_username) or not _APP_RE.match(app_name):
         raise ValueError("bot username / app short name: латиница, цифры, _")
     app_link = f"https://t.me/{bot_username}/{app_name}"
-    files = {f"{s.name}.env": "\n".join(service_env(s, sec, env=env, app_link=app_link)) + "\n" for s in SERVICES}
+    files = {f"{s.name}.env": "\n".join(service_env(s, sec, env=env, app_link=app_link, bot_username=bot_username))
+             + "\n" for s in SERVICES}
     files["db-passwords.sql"] = db_passwords_sql(sec)
     files["services.md"] = services_table()
     return files
