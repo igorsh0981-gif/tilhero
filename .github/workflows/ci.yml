@@ -33,6 +33,7 @@ jobs:
           - services/experience-config
           - apps/telegram-bot-gateway
           - infra/n8n
+          - infra/railway
           - infra/scripts
     services:
       postgres:
@@ -95,6 +96,7 @@ jobs:
           - services/experience-config
           - apps/telegram-bot-gateway
           - infra/n8n
+          - infra/railway
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
