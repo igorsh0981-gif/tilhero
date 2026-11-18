@@ -26,6 +26,7 @@ from tilhero_admin_identity.domain.store import (
 from tilhero_admin_identity.schemas import (
     ApprovalDecisionOut,
     ApprovalEnvelope,
+    ApprovalGrantEnvelope,
     ApprovalOut,
     ApprovalPage,
     ApprovalStatus,
@@ -109,7 +110,8 @@ async def create_staff(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> JSONResponse:
     """Idempotency-Key обязателен (admin.ts): повтор с тем же ключом и телом от того же сотрудника возвращает
-    сохранённый ответ без временного пароля (он выдаётся один раз и нигде не хранится)."""
+    сохранённый ответ без временного пароля (он выдаётся один раз и нигде не хранится). Привилегированная роль —
+    temporary_password: null (пароль получит решающий в ответе approve; при waived — автор), ревью P2-1."""
     actor = require_actor(principal)
     async with rt.transaction() as session:  # права — до idempotency (кэш не отдаётся без права)
         await authorize(session, actor, STAFF_MANAGE)
@@ -120,12 +122,10 @@ async def create_staff(
     if cached is not None:
         return JSONResponse(cached, status_code=201, headers=NO_STORE)
     try:
-        s = idn.settings
         async with rt.transaction() as session:
             requester = await authorize(session, actor, STAFF_MANAGE)
-            res = await staff_domain.create_staff(session, body, requester, passwords=idn.passwords,
-                                                  temp_ttl_hours=s.temp_password_ttl_hours,
-                                                  approval_ttl_hours=s.approval_ttl_hours)
+            res = await staff_domain.create_staff(session, body, requester, ctx=idn.reset_ctx,
+                                                  approval_ttl_hours=idn.settings.approval_ttl_hours)
             approval = await approvals_domain.approval_out(session, res.approval) if res.approval else None
             out = StaffCreated(staff=staff_out(res.staff), temporary_password=res.temporary_password,
                                approval=approval)
@@ -137,23 +137,30 @@ async def create_staff(
     return JSONResponse(body_json, status_code=201, headers=NO_STORE)
 
 
-@router.patch("/staff/{staff_id}", response_model=StaffOut, responses={202: {"model": ApprovalEnvelope}})
+@router.patch("/staff/{staff_id}", response_model=StaffOut, responses={202: {"model": ApprovalGrantEnvelope}})
 async def patch_staff(staff_id: uuid.UUID, body: StaffPatch, principal: Principal = Depends(bff_only),
                       rt: Runtime = Depends(get_runtime), idn: Identity = Depends(get_identity)) -> JSONResponse:
+    """200 Staff — применено сразу; 202 {approval} — заявка (role_grant, privileged_revoke, reactivate_privileged).
+    Заявка применена сразу (waived) с выпуском учётных данных — 202 {approval, temporary_password}: пароль цели
+    получает автор как единственный решающий (P2-1/P2-2), один раз, no-store."""
     actor = require_actor(principal)
     async with rt.transaction() as session:
         requester = await authorize(session, actor, STAFF_MANAGE)
-        res = await staff_domain.patch_staff(session, staff_id, body, requester,
+        res = await staff_domain.patch_staff(session, staff_id, body, requester, ctx=idn.reset_ctx,
                                              approval_ttl_hours=idn.settings.approval_ttl_hours)
         if res.approval is not None:
-            payload = ApprovalEnvelope(approval=await approvals_domain.approval_out(session, res.approval))
+            envelope = ApprovalGrantEnvelope(approval=await approvals_domain.approval_out(session, res.approval),
+                                             temporary_password=res.temporary_password)
+            # ключ temporary_password — только когда пароль действительно выдан
+            payload = envelope.model_dump(mode="json", exclude={"temporary_password"}
+                                          if res.temporary_password is None else None)
             status = 202
         else:
-            payload = staff_out(res.staff)  # type: ignore[assignment]
+            payload = staff_out(res.staff).model_dump(mode="json")
             status = 200
     if res.changed_email:
         await idn.unlock_login(rt, res.changed_email, res.staff.staff_id)
-    return JSONResponse(payload.model_dump(mode="json"), status_code=status)
+    return JSONResponse(payload, status_code=status, headers=NO_STORE)
 
 
 async def _reset(staff_id: uuid.UUID, body: ReasonIn, principal: Principal, rt: Runtime, idn: Identity,
@@ -242,8 +249,9 @@ async def _decide(approval_id: uuid.UUID, body: DecisionIn, principal: Principal
         a, deferred, temp = await approvals_domain.decide(session, approval_id, decider, approve=approve,
                                                           note=body.note, ctx=idn.reset_ctx)
         out = await approvals_domain.approval_out(session, a) if a is not None else None
-        reset = (a.payload["action"], uuid.UUID(a.payload["staff_id"]), a.summary["staff"]["email"]) \
-            if a is not None and a.kind == approvals_domain.RESET and a.status == "APPLIED" else None
+        # сброс применён (N1) или учётные данные цели выпущены заново (P2-1/P2-2) — счётчики попыток цели с нуля
+        reset = (a.payload.get("action"), uuid.UUID(a.payload["staff_id"]), a.summary["staff"]["email"]) \
+            if a is not None and a.kind in approvals_domain.UNLOCK_KINDS and a.status == "APPLIED" else None
     if deferred is not None:
         raise deferred
     assert out is not None
@@ -251,8 +259,10 @@ async def _decide(approval_id: uuid.UUID, body: DecisionIn, principal: Principal
         action, target_id, email = reset
         if action == "password":
             await idn.unlock_login(rt, email)
-        else:
+        elif action == "mfa":
             await idn.unlock_mfa(rt, target_id)
+        else:
+            await idn.unlock_login(rt, email, target_id)
     payload = out.model_dump(mode="json")
     if temp is not None:
         # ApprovalDecision: временный пароль — только решающему, один раз (N1); не кэшируется

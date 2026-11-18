@@ -168,10 +168,18 @@ class Env:
         return await self.c.post("/admin/v1/staff", json={"email": email, "display_name": name, "role": role},
                                  headers=self.h(actor, **headers))
 
-    async def onboard(self, actor: Actor, email: str, role: str, name: str = "Сотрудник") -> Person:
+    async def onboard(self, actor: Actor, email: str, role: str, name: str = "Сотрудник",
+                      approver: Actor | None = None) -> Person:
+        """Создать и выполнить первый вход. Привилегированная роль при двух super_admin — заявка: её согласует
+        approver, временный пароль приходит ему в ответе approve (P2-1)."""
         r = await self.create_staff(actor, email, role, name)
         assert r.status_code == 201, r.text
         temp = r.json()["temporary_password"]
+        if temp is None:
+            assert approver is not None and r.json()["approval"]["status"] == "PENDING", r.text
+            ok = await self.approve(approver, r.json()["approval"]["approval_id"])
+            assert ok.status_code == 200, ok.text
+            temp = ok.json()["temporary_password"]
         assert temp
         return await self.first_login(email, temp)
 

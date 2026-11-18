@@ -167,15 +167,19 @@ async def test_four_eyes_role_grant(env: Env, root: Person, root2: Person) -> No
     ok = await env.approve(root2.actor, a["approval_id"], note="Согласовано")
     assert ok.status_code == 200, ok.text
     assert ok.json()["status"] == "APPLIED" and ok.json()["decided_by"]["staff_id"] == root2.staff_id
-    assert ok.json()["decision_note"] == "Согласовано"
+    assert ok.json()["decision_note"] == "Согласовано" and ok.headers["cache-control"] == "no-store"
+    temp = ok.json()["temporary_password"]  # P2-1: учётные данные цели выпущены заново — решающему
+    env.leaks.append(temp)
     p = (await env.principal(created.staff_id)).json()
     assert p["staff"]["role"] == "communications" and "whatsnew.publish" in p["permissions"]
-    assert p["session_version"] == sv + 1
+    assert p["session_version"] == sv + 1 and p["must_change_password"] is True and p["mfa_enabled"] is False
     twice = await env.approve(root2.actor, a["approval_id"])
     assert _err(twice) == (409, "APPROVAL_NOT_PENDING")
     assert _err(await env.approve(root2.actor, str(uuid.uuid4()))) == (404, "APPROVAL_NOT_FOUND")
-    # привилегированная роль → при следующем входе обязательное подключение MFA
-    assert (await env.login(created.email, created.password)).json()["next"] == "mfa_enroll"
+    # прежний пароль не действует; вход по новому — смена пароля и обязательное подключение MFA
+    assert (await env.login(created.email, created.password)).status_code == 401
+    again = await env.first_login(created.email, temp, new_password="Comm-Passw0rd-New")
+    assert again.secret is not None and again.principal["staff"]["role"] == "communications"
     actions = await env.actions()
     assert {"approval.approved", "approval.applied"} <= set(actions)
     lst = (await env.c.get("/admin/v1/approvals?status=APPLIED", headers=env.h(root.actor))).json()
@@ -187,12 +191,15 @@ async def test_four_eyes_reject_and_create_privileged(env: Env, root: Person, ro
     assert r.status_code == 201
     body = r.json()
     assert body["staff"]["role"] == "read_only" and body["approval"]["status"] == "PENDING"
-    assert body["approval"]["kind"] == "staff.create_privileged" and body["temporary_password"]
+    assert body["approval"]["kind"] == "staff.create_privileged" and body["temporary_password"] is None
     rej = await env.approve(root2.actor, body["approval"]["approval_id"], note="Не нужен", action="reject")
     assert rej.status_code == 200 and rej.json()["status"] == "REJECTED"
     p = (await env.principal(body["staff"]["staff_id"])).json()
     assert p["staff"]["role"] == "read_only"
     assert "approval.rejected" in await env.actions()
+    # у отклонённой учётки пароля нет: войти нельзя, пока администратор не выдаст его сбросом
+    assert (await env.sql("SELECT password_hash FROM staff WHERE staff_id = :i",
+                          i=body["staff"]["staff_id"]))[0][0] is None
 
 
 async def test_approval_expiry(env: Env, root: Person, root2: Person) -> None:
@@ -226,7 +233,12 @@ async def test_waived_when_single_super_admin(env: Env, root: Person) -> None:
     target = await env.onboard(root.actor, new_email("an"), "analyst")
     up = await env.patch(root.actor, target.staff_id, {"role": "communications", "reason": "Повышение"})
     assert up.status_code == 202 and up.json()["approval"]["waived"] == "single_super_admin"
+    assert up.headers["cache-control"] == "no-store"
+    temp = up.json()["temporary_password"]  # waived: автор — единственный решающий, пароль ему
+    env.leaks.append(temp)
     assert (await env.principal(target.staff_id)).json()["staff"]["role"] == "communications"
+    assert (await env.login(target.email, target.password)).status_code == 401
+    assert (await env.login(target.email, temp)).json()["next"] == "password_change"
     rec = [e.payload for e in await env.audit() if e.payload["action"] == "approval.waived"]
     assert len(rec) == 2 and rec[0]["actor_id"] == root.staff_id
 

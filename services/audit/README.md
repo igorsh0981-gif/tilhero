@@ -13,8 +13,10 @@
 игнорируются с предупреждением в логе.
 
 **По HTTP** (`POST /internal/v1/records`, синхронный аудит — запись до выдачи результата; спринт 2,
-docs/sprint2/INTERNAL_API.md §3): только `admin-identity` и `identity-consent` (`api/routes.py WRITERS`); любой другой
-сервис → 403 `CALLER_NOT_ALLOWED` (проверка вызывающего — до разбора тела). `actor_*` в теле запрещены (422), актор —
+docs/sprint2/INTERNAL_API.md §3): только `identity-consent` и `admin-bff` (`api/routes.py WRITERS`); admin-bff — только
+свои действия `dev.impersonate`, `auth.logout` и только с actor сотрудника (`ONLY_ACTIONS`, иначе 403
+`ACTION_NOT_ALLOWED`). `admin-identity` пишет только событием через outbox, HTTP-права у него нет (ревью спринта 2).
+Любой другой сервис → 403 `CALLER_NOT_ALLOWED` (проверка вызывающего — до разбора тела). `actor_*` в теле запрещены (422), актор —
 только из токена (сервис-издатель, ученик из `sub`). Сотрудник в теле (`on_behalf_of`) — только по списку `DELEGATION`
 (издатель → действия): `identity-consent` → `sensitive.view`, `sensitive.view_rate_limited` (раскрытие Telegram ID
 ученика сотрудником: claim `actor` audit принимает только от admin-bff, поэтому домен передаёт сотрудника из своего
@@ -24,7 +26,7 @@ actor-токена); иное → 403 `DELEGATION_NOT_ALLOWED`. Повтор `re
 ## API
 | Метод | Путь | Кто вызывает | Право |
 |---|---|---|---|
-| POST | `/internal/v1/records` | admin-identity, identity-consent | — (идемпотентно по `record_id`) |
+| POST | `/internal/v1/records` | identity-consent, admin-bff (только `dev.impersonate`, `auth.logout`) | — (идемпотентно по `record_id`) |
 | GET | `/admin/v1/audit/records?action=&actor_id=&object_type=&object_id=&date_from=&date_to=&limit=&cursor=` | admin-bff | `audit.read` |
 | GET | `/admin/v1/audit/records/{record_id}` | admin-bff | `audit.read` |
 | GET | `/admin/v1/audit/verify` | admin-bff | `audit.read` |

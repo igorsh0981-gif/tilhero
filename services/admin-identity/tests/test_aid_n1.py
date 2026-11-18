@@ -16,9 +16,10 @@ def _err(r) -> tuple[int, str]:
 async def _third_super_admin(env: Env, root: Person, root2: Person) -> Person:
     email = new_email("sa3")
     c = await env.create_staff(root.actor, email, "super_admin", "Third Admin")
-    assert c.json()["approval"]["status"] == "PENDING"
-    assert (await env.approve(root2.actor, c.json()["approval"]["approval_id"])).status_code == 200
-    return await env.first_login(email, c.json()["temporary_password"])
+    assert c.json()["approval"]["status"] == "PENDING" and c.json()["temporary_password"] is None
+    ok = await env.approve(root2.actor, c.json()["approval"]["approval_id"])
+    assert ok.status_code == 200
+    return await env.first_login(email, ok.json()["temporary_password"])
 
 
 async def _dump(env: Env) -> str:
@@ -84,11 +85,12 @@ async def test_n1_super_admin_cannot_take_over_another(env: Env, root: Person, r
 async def test_n1_no_waiver_for_super_admin_target(env: Env, root: Person, root2: Person) -> None:
     ops_email = new_email("ops")
     c = await env.create_staff(root.actor, ops_email, "operations")  # двое super_admin → заявка
-    assert (await env.approve(root2.actor, c.json()["approval"]["approval_id"])).status_code == 200
+    ok = await env.approve(root2.actor, c.json()["approval"]["approval_id"])
+    assert ok.status_code == 200
     ops_id = c.json()["staff"]["staff_id"]
-    env.leaks.append(c.json()["temporary_password"])
+    env.leaks.append(ok.json()["temporary_password"])
     # уже входил — перевыпуск автором до первого входа здесь не применяется, проверяем именно исключение waived
-    await env.first_login(ops_email, c.json()["temporary_password"])
+    await env.first_login(ops_email, ok.json()["temporary_password"])
     off = await env.patch(root.actor, root2.staff_id, {"status": "DISABLED", "reason": "Отпуск"})
     assert (await env.approve(root2.actor, off.json()["approval"]["approval_id"])).status_code == 200
     await env.sql("UPDATE approvals SET decided_at = now() - interval '73 hours' RETURNING approval_id")
@@ -201,8 +203,9 @@ async def test_no_reissue_when_another_decider_exists(env: Env, root: Person, ro
     """Ревью M-1: есть третий активный super_admin — перевыпуск автором не действует, только заявка (N1)."""
     email = new_email("sa-new2")
     c = await env.create_staff(root.actor, email, "super_admin", "New Admin")
-    assert (await env.approve(root2.actor, c.json()["approval"]["approval_id"])).status_code == 200
-    env.leaks.append(c.json()["temporary_password"])
+    ok = await env.approve(root2.actor, c.json()["approval"]["approval_id"])
+    assert ok.status_code == 200
+    env.leaks.append(ok.json()["temporary_password"])
     sid = c.json()["staff"]["staff_id"]
     for who in (root, root2):
         r = await env.c.post(f"/admin/v1/staff/{sid}/reset-password", json={"reason": "Потерян пароль"},

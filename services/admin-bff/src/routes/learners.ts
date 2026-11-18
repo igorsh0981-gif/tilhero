@@ -29,7 +29,7 @@ import {
   str,
 } from "../schemas.js";
 import { DOMAIN } from "../upstream.js";
-import { out, shaped } from "./common.js";
+import { out, redactUsernames, shaped } from "./common.js";
 
 interface ListQuery {
   q?: string;
@@ -71,7 +71,7 @@ export function learnerRoutes(app: App, ctx: BffContext): void {
         actor: auth.actor,
         query: { q: q?.trim(), kind, age_band, status, locale, has_open_tickets, ...pageQuery(req.query) },
       });
-      return shaped(ctx, auth, DOMAIN.userAdmin, LEARNER_PAGE, body);
+      return redactUsernames(auth, await shaped(ctx, auth, DOMAIN.userAdmin, LEARNER_PAGE, body));
     },
   );
 
@@ -101,7 +101,7 @@ export function learnerRoutes(app: App, ctx: BffContext): void {
         tickets,
       ]);
       const card = parseDomain(ctx, DOMAIN.userAdmin, LEARNER_CARD_DOMAIN, cardBody);
-      return { ...card, tickets: ticketItems };
+      return redactUsernames(auth, { ...card, tickets: ticketItems });
     },
   );
 

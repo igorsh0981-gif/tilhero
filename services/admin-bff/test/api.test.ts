@@ -16,6 +16,7 @@ import {
   approvalRow,
   browser,
   campaignBody,
+  campaignRow,
   closeRedis,
   domainError,
   json,
@@ -25,6 +26,7 @@ import {
   makeHarness,
   releaseNoteBody,
   releaseNoteRow,
+  staffRow as staffRowLike,
   stepUp,
   ticketDetail,
   type Harness,
@@ -75,6 +77,35 @@ describe("ученики: реестр и карточка", () => {
     const card = await get(s, `/admin/v1/learners/${LEARNER_ID}`);
     expect(card.json().telegram_id_masked).toBeNull();
     expect(card.body).not.toContain(TG_FULL);
+  });
+
+  it("username (ревью T2-3): маска домена проходит; полный — только при users.sensitive.read, иначе BFF маскирует сам", async () => {
+    const sup = await loginAs(h, "support");
+    const list = await get(sup.s, "/admin/v1/learners");
+    expect(list.json().items[0].username).toBe("az•••er");
+    expect(list.body).not.toContain("aziz_learner");
+    const card = await get(sup.s, `/admin/v1/learners/${LEARNER_ID}`);
+    expect(card.json().username).toBe("az•••er");
+    expect(card.json().children[0].username).toBeNull();
+    // короче 5 символов — «•••»
+    h.fake.on("userAdmin", "GET", "/admin/v1/learners", () => json(200, { items: [learnerRow({ username: "abcd" })], next_cursor: null }));
+    expect((await get(sup.s, "/admin/v1/learners")).json().items[0].username).toBe("•••");
+    // маски домена (обе формы) проходят без изменений
+    for (const masked of ["az•••er", "•••"]) {
+      h.fake.on("userAdmin", "GET", "/admin/v1/learners", () => json(200, { items: [learnerRow({ username: masked })], next_cursor: null }));
+      const r = await get(sup.s, "/admin/v1/learners");
+      expect(r.statusCode).toBe(200);
+      expect(r.json().items[0].username).toBe(masked);
+    }
+    // «@» в username не бывает — испорченный ответ
+    h.fake.on("userAdmin", "GET", "/admin/v1/learners", () => json(200, { items: [learnerRow({ username: "@aziz" })], next_cursor: null }));
+    expect((await get(sup.s, "/admin/v1/learners")).statusCode).toBe(503);
+    h.fake.overrides.delete("userAdmin GET /admin/v1/learners");
+    const admin = await loginAs(h, "super_admin");
+    expect((await get(admin.s, "/admin/v1/learners")).json().items[0].username).toBe("aziz_learner");
+    // поиск q=@username передаётся домену как есть (точное совпадение — по полному username)
+    await get(sup.s, "/admin/v1/learners?q=%40aziz_learner");
+    expect(h.fake.callsTo("userAdmin", "GET", "/admin/v1/learners").at(-1)!.query.q).toBe("@aziz_learner");
   });
 
   it("карточка (support.read): user-admin + последние 20 обращений support по user_id; служебные поля отброшены", async () => {
@@ -278,7 +309,7 @@ describe("поддержка", () => {
     expect(t.learner).toEqual({
       user_id: LEARNER_ID,
       kind: "account",
-      username: "aziz_learner",
+      username: "az•••er", // support без users.sensitive.read — маска (ревью T2-3)
       telegram_id_masked: "••••••789",
       locale: "uz",
       age_band: "18+",
@@ -509,6 +540,38 @@ describe("шаблоны уведомлений и рассылки", () => {
   });
 });
 
+describe("рассылки: ревью P2-7", () => {
+  it("last_error {code, since, attempts} передаётся; домен без поля → null", async () => {
+    const { s } = await loginAs(h, "communications");
+    h.fake.on("notifications", "GET", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`, () =>
+      json(200, campaignRow({ status: "sending", last_error: { code: "AUDIENCE_UNAVAILABLE", since: "2026-11-18T09:00:00Z", attempts: 3 } })),
+    );
+    expect((await get(s, `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`)).json().last_error).toEqual({
+      code: "AUDIENCE_UNAVAILABLE",
+      since: "2026-11-18T09:00:00Z",
+      attempts: 3,
+    });
+    h.fake.on("notifications", "GET", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`, () => {
+      const { last_error: _drop, ...old } = campaignRow();
+      return json(200, old);
+    });
+    const old = await get(s, `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`);
+    expect(old.statusCode).toBe(200);
+    expect(old.json().last_error).toBeNull();
+    h.fake.on("notifications", "GET", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`, () => json(200, campaignRow({ last_error: { code: "X" } })));
+    expect((await get(s, `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`)).statusCode).toBe(503);
+  });
+
+  it("стоп черновика → 409 CAMPAIGN_NOT_ACTIVE домена — как есть", async () => {
+    const { s } = await loginAs(h, "communications");
+    await stepUp(h, s);
+    h.fake.on("notifications", "POST", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/stop`, () => domainError(409, "CAMPAIGN_NOT_ACTIVE"));
+    const res = await send(s, "POST", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/stop`, { reason: "ошибка" });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("CAMPAIGN_NOT_ACTIVE");
+  });
+});
+
 describe("сотрудники и роли", () => {
   it("PATCH с повышением до привилегированной роли → 202 + approval (статус домена сохраняется)", async () => {
     const { s } = await loginAs(h, "super_admin");
@@ -557,6 +620,63 @@ describe("сотрудники и роли", () => {
     );
     expect((await send(s, "POST", `/admin/v1/approvals/${APPROVAL_ID}/approve`, { note: "ок" })).statusCode).toBe(200);
     expect(await redis().exists(key)).toBe(0);
+  });
+
+  it("approve staff.create_privileged / role_grant / reactivate_privileged → temporary_password решающему (один раз, no-store, не в логах)", async () => {
+    const { s } = await loginAs(h, "super_admin");
+    await stepUp(h, s);
+    for (const kind of ["staff.create_privileged", "staff.role_grant", "staff.reactivate_privileged"]) {
+      h.fake.on("adminIdentity", "POST", `/admin/v1/approvals/${APPROVAL_ID}/approve`, () =>
+        json(200, { ...approvalRow({ kind, status: "APPLIED", summary: { staff: { staff_id: OPERATOR_ID } } }), temporary_password: "Decider-Only-Pass-42" }),
+      );
+      const res = await send(s, "POST", `/admin/v1/approvals/${APPROVAL_ID}/approve`, { note: "ок" });
+      expect(res.statusCode, kind).toBe(200);
+      expect(res.json()).toMatchObject({ kind, status: "APPLIED", temporary_password: "Decider-Only-Pass-42" });
+      expect(res.headers["cache-control"]).toBe("no-store");
+    }
+    expect(h.logs.text).not.toContain("Decider-Only-Pass-42");
+  });
+
+  it("создание привилегированного: temporary_password null автору + approval; включение привилегированного → 202 reactivate_privileged", async () => {
+    const { s } = await loginAs(h, "super_admin");
+    await stepUp(h, s);
+    h.fake.on("adminIdentity", "POST", "/admin/v1/staff", () =>
+      json(201, { staff: { ...staffRowLike(), role: "read_only" }, temporary_password: null, approval: approvalRow({ kind: "staff.create_privileged" }) }),
+    );
+    const created = await send(s, "POST", "/admin/v1/staff", { email: "ops@tilhero.test", display_name: "Опс", role: "operations" }, { "idempotency-key": "staff-key-0003" });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ temporary_password: null, approval: { kind: "staff.create_privileged" } });
+    h.fake.on("adminIdentity", "PATCH", `/admin/v1/staff/${OPERATOR_ID}`, () => json(202, { approval: approvalRow({ kind: "staff.reactivate_privileged" }) }));
+    const patch = await send(s, "PATCH", `/admin/v1/staff/${OPERATOR_ID}`, { status: "ACTIVE", reason: "вернулся из отпуска" });
+    expect(patch.statusCode).toBe(202);
+    expect(patch.json().approval.kind).toBe("staff.reactivate_privileged");
+  });
+
+  it("PATCH → 202 StaffPatchPending: temporary_password, если заявка применилась сразу (single_super_admin); no-store, не в логах", async () => {
+    const { s } = await loginAs(h, "super_admin");
+    await stepUp(h, s);
+    h.fake.on("adminIdentity", "PATCH", `/admin/v1/staff/${OPERATOR_ID}`, () =>
+      json(202, { approval: approvalRow({ kind: "staff.role_grant", status: "APPLIED", waived: "single_super_admin" }), temporary_password: "Waived-Grant-Pass-77" }),
+    );
+    const applied = await send(s, "PATCH", `/admin/v1/staff/${OPERATOR_ID}`, { role: "operations", reason: "повышение" });
+    expect(applied.statusCode).toBe(202);
+    expect(applied.json()).toMatchObject({ approval: { waived: "single_super_admin", status: "APPLIED" }, temporary_password: "Waived-Grant-Pass-77" });
+    expect(applied.headers["cache-control"]).toBe("no-store");
+    expect(h.logs.text).not.toContain("Waived-Grant-Pass-77");
+    // заявка ждёт второго super_admin: пароля нет (null домена → ключа нет)
+    h.fake.on("adminIdentity", "PATCH", `/admin/v1/staff/${OPERATOR_ID}`, () =>
+      json(202, { approval: approvalRow({ kind: "staff.reactivate_privileged" }), temporary_password: null }),
+    );
+    const pending = await send(s, "PATCH", `/admin/v1/staff/${OPERATOR_ID}`, { status: "ACTIVE", reason: "вернулся" });
+    expect(pending.statusCode).toBe(202);
+    expect(pending.json()).not.toHaveProperty("temporary_password");
+    // сброс пароля привилегированного (202 {approval}) — пароля в ответе автору нет никогда
+    h.fake.on("adminIdentity", "POST", `/admin/v1/staff/${OPERATOR_ID}/reset-password`, () =>
+      json(202, { approval: approvalRow({ kind: "staff.privileged_reset" }), temporary_password: "Must-Not-Leak-11" }),
+    );
+    const reset = await send(s, "POST", `/admin/v1/staff/${OPERATOR_ID}/reset-password`, { reason: "забыл" });
+    expect(reset.statusCode).toBe(202);
+    expect(reset.body).not.toContain("Must-Not-Leak-11");
   });
 
   it("four-eyes ошибки домена пробрасываются (409 FOUR_EYES_SAME_PERSON)", async () => {

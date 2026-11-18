@@ -149,6 +149,8 @@ export interface ConfirmProps {
   reasonPlaceholder?: string;
   minReason?: number;
   extra?: ReactNode;
+  /** the confirm button is inactive while `extra` holds an invalid choice (its own error is shown at the field) */
+  okDisabled?: boolean;
   onConfirm: (reason: string) => Promise<void | string | null>;
   onClose: () => void;
   testId?: string;
@@ -165,7 +167,7 @@ export function ConfirmCommand(p: ConfirmProps) {
   const [busy, setBusy] = useState(false);
   const min = p.minReason ?? 5;
   const submit = async () => {
-    if (busy) return;
+    if (busy || p.okDisabled) return;
     if (reason.trim().length < min) {
       setErr(t("cmd.errReason", { n: min }));
       return;
@@ -196,7 +198,7 @@ export function ConfirmCommand(p: ConfirmProps) {
       footer={
         <>
           <Btn label={t("common.cancel")} onClick={p.onClose} disabled={busy} />
-          <Btn label={p.ok} kind={p.okKind ?? "primary"} onClick={submit} busy={busy} testId="confirm-ok" />
+          <Btn label={p.ok} kind={p.okKind ?? "primary"} onClick={submit} busy={busy} disabled={p.okDisabled} testId="confirm-ok" />
         </>
       }
     >

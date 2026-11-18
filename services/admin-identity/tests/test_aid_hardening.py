@@ -163,8 +163,8 @@ async def test_totp_isolation_and_enroll_code_replay(env: Env, root: Person, roo
     # код, которым только что подтвердили подключение MFA, нельзя повторить при входе
     email = new_email("ops")
     created = await env.create_staff(root.actor, email, "operations")  # двое super_admin → PENDING
-    await env.approve(root2.actor, created.json()["approval"]["approval_id"])
-    temp = created.json()["temporary_password"]
+    assert created.json()["temporary_password"] is None  # P2-1: автору пароль не выдаётся
+    temp = (await env.approve(root2.actor, created.json()["approval"]["approval_id"])).json()["temporary_password"]
     step = (await env.login(email, temp)).json()
     step = (await env.post("/auth/password", {"challenge": step["challenge"], "new_password": "Ops-Passw0rd-123"})
             ).json()

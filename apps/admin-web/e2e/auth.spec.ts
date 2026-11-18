@@ -18,7 +18,8 @@ test("no session → sign-in screen; password + TOTP → the shell with the role
   // the password and the code never travel outside the sign-in calls; the challenge is one-time
   const mfa = bff.calls("POST", "/auth/mfa");
   expect(mfa.at(-1)!.body).toMatchObject({ code: TOTP });
-  expect(bff.calls("GET", "/experience/admin/current")).toHaveLength(1);
+  // the admin theme is requested right after the phase change (async): poll instead of a one-shot read (review T2-4)
+  await expect.poll(() => bff.calls("GET", "/experience/admin/current").length).toBe(1);
 });
 
 test("wrong password counts down and 5 failures lock the sign-in for 15 minutes", async ({ page }) => {

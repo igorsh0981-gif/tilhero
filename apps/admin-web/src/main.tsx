@@ -10,6 +10,7 @@ import "./styles/screens.css";
 import { App } from "./App";
 import { I18nProvider, normLang, type Lang } from "./i18n";
 import { prefs } from "./lib/storage";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { ToastProvider } from "./ui/toasts";
 
 /** UI language: the viewer's saved choice → Russian (the working language of the admin team). The browser
@@ -24,9 +25,11 @@ if (root) {
   createRoot(root).render(
     <StrictMode>
       <I18nProvider initial={initialLang()} onChange={(l) => prefs.set("lang", l)}>
-        <ToastProvider>
-          <App />
-        </ToastProvider>
+        <ErrorBoundary scope="app">
+          <ToastProvider>
+            <App />
+          </ToastProvider>
+        </ErrorBoundary>
       </I18nProvider>
     </StrictMode>,
   );

@@ -9,7 +9,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import func, select
-from user_admin_testkit import ID, LP, iso, now
+from user_admin_testkit import ID, LP, iso, now, snapshot
 
 from tilhero_common.messaging import make_envelope
 from tilhero_common.messaging.store import inbox_table
@@ -384,3 +384,119 @@ async def test_profile_events_wake_identity_reconcile(env) -> None:
     await env.emit("user.profile.created.v1", {"user_id": str(uuid.uuid4()), "kind": "account",
                                                "created_at": iso(now())}, producer=ID)
     assert sync._wake.is_set()
+
+
+# ---------------------------------------------------------------- согласие подростка и допуск часов (ревью P2-3)
+
+ALL_PURPOSES = ["terms", "privacy", "voice_recording", "social", "product_news"]
+
+
+def own_consent(at, purposes=("terms", "privacy")) -> dict:
+    return {"policy_version": "1.0", "purposes": list(purposes), "accepted_at": iso(at), "revoked_at": None,
+            "basis": "self"}
+
+
+async def test_teen_consent_card_equals_identity_snapshot(env) -> None:
+    """Подросток принял политику сам; родитель разрешил, затем отозвал. В карточке аккаунта — собственное согласие
+    подростка (как в снимке identity), решение родителя — в guardian_consent. Версия снимка (момент изменения строки
+    identity) чуть раньше occurred_at событий той же транзакции — снимок всё равно авторитетен."""
+    uid = str(uuid.uuid4())
+    t0 = now() - timedelta(minutes=10)
+    snap = env.identity.put(snapshot(uid, updated_at=t0, age_band="14-17", guardian_consent="pending",
+                                     consent=own_consent(t0)))
+    await env.reconciler.identity.run_once()
+
+    async def card() -> dict:
+        r = await env.get(f"/admin/v1/learners/{uid}")
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    # родитель разрешил: identity пишет запись basis=guardian со всеми целями политики
+    t1 = now() - timedelta(minutes=5)
+    await env.emit("consent.accepted.v1", {"user_id": uid, "consent_id": str(uuid.uuid4()), "policy_version": "1.0",
+                                           "purposes": ALL_PURPOSES, "basis": "guardian",
+                                           "granted_by_user_id": str(uuid.uuid4())}, producer=ID, occurred_at=t1)
+    await env.emit("user.profile.updated.v1", {"user_id": uid, "changed_fields": ["guardian_consent"],
+                                               "age_band": "14-17", "is_minor": True, "locale": "ru",
+                                               "guardian_consent": "granted"}, producer=ID, occurred_at=t1)
+    r = await row(env, uid)  # проекция и без снимка не подменяет согласие подростка согласием родителя
+    assert r.consent["basis"] == "self" and r.consent["purposes"] == ["terms", "privacy"]
+    assert r.guardian_consent == "granted"
+    snap.update(updated_at=iso(t1 - timedelta(milliseconds=30)), guardian_consent="granted")
+    c = await card()
+    assert c["consent"] == snap["consent"] and c["guardian_consent"] == "granted"
+
+    # родитель отозвал: запись guardian закрыта, своё согласие подростка сужено (consent.accepted self) и действует
+    t2 = now() - timedelta(minutes=1)
+    await env.emit("consent.revoked.v1", {"user_id": uid, "consent_id": str(uuid.uuid4()), "policy_version": "1.0",
+                                          "basis": "guardian", "revoked_by_user_id": str(uuid.uuid4())},
+                   producer=ID, occurred_at=t2)
+    await env.emit("consent.accepted.v1", {"user_id": uid, "consent_id": str(uuid.uuid4()), "policy_version": "1.0",
+                                           "purposes": ["terms", "privacy"], "basis": "self"},
+                   producer=ID, occurred_at=t2)
+    await env.emit("user.profile.updated.v1", {"user_id": uid, "changed_fields": ["guardian_consent"],
+                                               "age_band": "14-17", "guardian_consent": "declined"},
+                   producer=ID, occurred_at=t2)
+    r = await row(env, uid)
+    assert r.consent["basis"] == "self" and r.consent["revoked_at"] is None and r.guardian_consent == "declined"
+    snap.update(updated_at=iso(t2 - timedelta(milliseconds=30)), guardian_consent="declined",
+                consent=own_consent(t0))
+    c = await card()
+    assert c["consent"] == snap["consent"] and c["consent"]["revoked_at"] is None
+    assert c["guardian_consent"] == "declined"
+
+
+async def test_consent_basis_by_kind(env) -> None:
+    """Аккаунт — только своё согласие; детский профиль — только согласие опекуна."""
+    parent, kid = str(uuid.uuid4()), str(uuid.uuid4())
+    await env.emit("user.profile.created.v1", {"user_id": parent, "kind": "account", "created_at": iso(now())},
+                   producer=ID)
+    await env.emit("user.profile.created.v1", {"user_id": kid, "kind": "child", "guardian_user_id": parent,
+                                               "age_band": "6-9", "created_at": iso(now())}, producer=ID)
+    for uid, basis in ((parent, "guardian"), (kid, "self")):  # чужое основание — блок не трогается
+        await env.emit("consent.accepted.v1", {"user_id": uid, "consent_id": str(uuid.uuid4()),
+                                               "policy_version": "1.0", "purposes": ALL_PURPOSES, "basis": basis},
+                       producer=ID)
+        assert (await row(env, uid)).consent["basis"] is None
+    for uid, basis in ((parent, "self"), (kid, "guardian")):
+        await env.emit("consent.accepted.v1", {"user_id": uid, "consent_id": str(uuid.uuid4()),
+                                               "policy_version": "1.0", "purposes": ["terms"], "basis": basis},
+                       producer=ID)
+        await env.emit("consent.revoked.v1", {"user_id": uid, "consent_id": str(uuid.uuid4()),
+                                              "basis": "self" if basis == "guardian" else "guardian"}, producer=ID)
+        r = await row(env, uid)
+        assert r.consent["basis"] == basis and r.consent["revoked_at"] is None
+        await env.emit("consent.revoked.v1", {"user_id": uid, "consent_id": str(uuid.uuid4()), "basis": basis},
+                       producer=ID)
+        assert (await row(env, uid)).consent["revoked_at"] is not None
+
+
+async def test_snapshot_within_clock_skew_is_authoritative(env) -> None:
+    """Снимок авторитетен, если не старше версии события больше чем на 2 с; старше — событие новее, не затирается.
+    Версия после снимка не уменьшается: запоздавшее более старое событие снимок не перетирает."""
+    uid = str(uuid.uuid4())
+    t = now()
+    env.identity.put(snapshot(uid, updated_at=t - timedelta(minutes=1), consent=own_consent(t - timedelta(minutes=1))))
+    await env.reconciler.identity.run_once()
+    await env.emit("consent.accepted.v1", {"user_id": uid, "consent_id": str(uuid.uuid4()), "policy_version": "1.0",
+                                           "purposes": ["terms", "privacy", "social"], "basis": "self"},
+                   producer=ID, occurred_at=t)
+    await env.emit("user.status.changed.v1", {"user_id": uid, "status": "DISABLED", "previous_status": "ACTIVE"},
+                   producer=ID, occurred_at=t)
+    # снимок той же транзакции (версия на 1,5 с раньше — часы БД и приложения) — авторитетен
+    env.identity.put(snapshot(uid, updated_at=t - timedelta(milliseconds=1500), status="DISABLED",
+                              consent=own_consent(t, ("terms", "privacy"))))
+    await env.reconciler.identity.run_once()
+    r = await row(env, uid)
+    assert r.consent["purposes"] == ["terms", "privacy"] and r.status == "DISABLED" and r.consent_at == t
+    # снимок старше допуска (прочитан до события) — события новее не затирает
+    env.identity.put(snapshot(uid, updated_at=t - timedelta(seconds=3), status="ACTIVE",
+                              consent=own_consent(t, ("terms",))))
+    await env.reconciler.identity.run_once()
+    r = await row(env, uid)
+    assert r.consent["purposes"] == ["terms", "privacy"] and r.status == "DISABLED"
+    # запоздавшее событие старше версии (уже учтено снимком) — без изменений
+    await env.emit("consent.accepted.v1", {"user_id": uid, "consent_id": str(uuid.uuid4()), "policy_version": "1.0",
+                                           "purposes": ALL_PURPOSES, "basis": "self"},
+                   producer=ID, occurred_at=t - timedelta(milliseconds=10))
+    assert (await row(env, uid)).consent["purposes"] == ["terms", "privacy"]

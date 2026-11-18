@@ -162,3 +162,8 @@ fieldset.test-send>legend{padding:0 4px}
   .aud-date{width:100%}
   .aud-date .input{flex:1}
 }
+
+/* review fixes: stalled campaign line in the list, app-level crash page */
+.stalled-line{display:flex;gap:4px;align-items:flex-start;max-width:280px;white-space:normal;margin-top:4px;color:var(--err)}
+.stalled-line svg{flex-shrink:0;margin-top:2px}
+.crash-page{max-width:560px;margin:15vh auto;padding:0 16px}

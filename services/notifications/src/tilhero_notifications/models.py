@@ -1,4 +1,4 @@
-"""Модели notifications — зеркало миграций 0001, 0002 (сверка — tests/test_notifications_schema.py).
+"""Модели notifications — зеркало миграций 0001–0003 (сверка — tests/test_notifications_schema.py).
 
 `notifications` — журнал доставки и одновременно центр уведомлений в приложении (INTERNAL_API §4): каждая запись
 хранит категорию, отрисованные title/body на языке ученика, startapp, telegram_status и read_at; срок — 90 дней.
@@ -212,6 +212,7 @@ class Campaign(Base):
     __table_args__ = (
         CheckConstraint(_in("status", CAMPAIGN_STATUSES), name="ck_campaigns_status"),
         CheckConstraint("version >= 1", name="ck_campaigns_version"),
+        CheckConstraint("error_attempts >= 0", name="ck_campaigns_error_attempts"),
         Index("ix_campaigns_created", "created_at", "campaign_id"),
         Index("ix_campaigns_status_send_at", "status", "send_at"),
         Index(
@@ -246,12 +247,18 @@ class Campaign(Base):
     stop_reason: Mapped[str | None] = mapped_column(String(300))
     idempotency_key: Mapped[str | None] = mapped_column(String(128))
     request_hash: Mapped[str | None] = mapped_column(String(64))
+    # Ревью P2-7 (миграция 0003): серия неудач шага отправки (запуск, выборка аудитории) — код последней ошибки,
+    # начало серии, число неудач подряд; error_reported — аудит campaign.failed для серии уже записан
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    error_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    error_reported: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
 
 class CampaignRecipient(Base):
     """Получатель рассылки: pending (выбран из аудитории) → created (создана запись уведомления) |
     skipped_frequency (лимит частоты) | cancelled (остановка, ученик удалён). Лимит частоты — по `created` за
-    CAMPAIGN_MIN_INTERVAL_DAYS (`processed_at`)."""
+    CAMPAIGN_MIN_INTERVAL_DAYS (`processed_at`), чья запись журнала дошла до ученика или ещё в пути (ревью P2-8)."""
 
     __tablename__ = "campaign_recipients"
     __table_args__ = (

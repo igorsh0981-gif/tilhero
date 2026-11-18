@@ -42,7 +42,7 @@ import {
   str,
 } from "../schemas.js";
 import { DOMAIN, type DomainResponse } from "../upstream.js";
-import { out, relay, shaped } from "./common.js";
+import { out, redactUsernames, relay, shaped } from "./common.js";
 
 const SERVICE = DOMAIN.support;
 const STAFF_REF = str(1, 64, { pattern: "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,63}$" });
@@ -80,7 +80,7 @@ export function supportRoutes(app: App, ctx: BffContext): void {
         }),
       );
       const row = page.items.find((r) => r.user_id === userId.toLowerCase());
-      return row ? TICKET_LEARNER.parse(row, "$") : null;
+      return row ? redactUsernames(auth, TICKET_LEARNER.parse(row, "$")) : null;
     } catch (err) {
       ctx.log.warn({ upstream: DOMAIN.userAdmin, err_code: (err as AppError)?.code }, "ticket learner summary unavailable");
       return null;

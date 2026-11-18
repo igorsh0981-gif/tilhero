@@ -51,6 +51,7 @@ import type {
   SlaState,
   Staff,
   StaffCreated,
+  StaffPatchPending,
   StaffSummary,
   StaffTicket,
   StaffTicketMessage,
@@ -73,6 +74,15 @@ import type {
 } from "@tilhero/contracts/admin";
 import type { Ticket as ClientTicket, TicketContext, TicketMessage } from "@tilhero/contracts/bff";
 import { C, bad, itemsOf, pageOf, type Codec } from "./codec.js";
+
+/**
+ * Маска username для сотрудника без users.sensitive.read — как user-admin (`mask_username`, admin.ts AdminLearnerRow):
+ * `ig•••81` — первые 2 и последние 2 символа; короче 5 — `•••`. Без «@» (username его не содержит).
+ */
+export function maskUsername(u: string): string {
+  if (u.includes("•")) return u; // уже маска домена
+  return u.length < 5 ? "•••" : `${u.slice(0, 2)}•••${u.slice(-2)}`;
+}
 import { ALL_PERMISSIONS, ROLE_CODES } from "./rbac.js";
 
 // ---------------------------------------------------------------- общие
@@ -133,9 +143,17 @@ export const STAFF: Codec<Staff> = C.obj<Staff>({
 });
 export const STAFF_PAGE = pageOf(STAFF);
 
-const APPROVAL_KINDS: readonly ApprovalKind[] = [
-  "staff.role_grant", "staff.create_privileged", "role.permissions_change", "staff.privileged_revoke", "staff.privileged_reset",
-];
+const APPROVAL_KINDS = [
+  "staff.role_grant",
+  "staff.create_privileged",
+  "role.permissions_change",
+  "staff.privileged_revoke",
+  "staff.privileged_reset",
+  "staff.reactivate_privileged",
+] as const satisfies readonly ApprovalKind[];
+type MissingApprovalKinds = Exclude<ApprovalKind, (typeof APPROVAL_KINDS)[number]>;
+const _approvalKindsListed: [MissingApprovalKinds] extends [never] ? true : MissingApprovalKinds = true;
+void _approvalKindsListed;
 const APPROVAL_STATUSES: readonly ApprovalStatus[] = ["PENDING", "APPROVED", "REJECTED", "EXPIRED", "APPLIED"];
 const APPROVAL_PROPS = {
   approval_id: C.uuid,
@@ -154,7 +172,18 @@ const APPROVAL_PROPS = {
 export const APPROVAL: Codec<Approval> = C.obj<Approval>(APPROVAL_PROPS);
 export const APPROVAL_PAGE = pageOf(APPROVAL);
 export const APPROVAL_ENVELOPE = C.obj<{ approval: Approval }>({ approval: APPROVAL });
-/** temporary_password — только у применённой заявки staff.privileged_reset; null домена → ключа нет. */
+/**
+ * PATCH staff → 202 StaffPatchPending: temporary_password — только если заявка применилась сразу (waived
+ * single_super_admin) и выпущен временный пароль цели; один раз, no-store, не в логах. null/нет → ключа нет.
+ */
+export const STAFF_PATCH_PENDING: Codec<StaffPatchPending> = C.obj<StaffPatchPending>(
+  { approval: APPROVAL, temporary_password: C.str(256, 8) },
+  "temporary_password",
+);
+/**
+ * temporary_password — решающему, один раз (no-store, не в логах): у применённых заявок staff.privileged_reset,
+ * staff.create_privileged, staff.role_grant и staff.reactivate_privileged; null домена → ключа нет.
+ */
 export const APPROVAL_DECISION: Codec<ApprovalDecision> = C.obj<ApprovalDecision>(
   { ...APPROVAL_PROPS, temporary_password: C.str(256, 8) },
   "temporary_password",
@@ -194,7 +223,9 @@ const LEARNER_ROW_PROPS = {
   kind: C.oneOf<LearnerKind>(["account", "child"]),
   guardian_user_id: C.nullable(C.uuid),
   display_name: C.optText(120),
-  username: C.nullable(C.id(/^[A-Za-z0-9_]{1,64}$/, 64)),
+  // полный username (без «@») — только сотруднику с users.sensitive.read; остальным домен отдаёт маску `ig•••81`
+  // (короче 5 символов — `•••`), ревью T2-3
+  username: C.nullable(C.id(/^(?:[A-Za-z0-9_]{1,64}|[A-Za-z0-9_]{2}•••[A-Za-z0-9_]{2}|•••)$/, 64)),
   telegram_id_masked: TG_MASK,
   locale: C.nullable(C.oneOf(UI_LANGS)),
   age_band: C.nullable(C.oneOf(AGE_BANDS)),
@@ -698,6 +729,11 @@ export const CAMPAIGN: Codec<Campaign> = C.obj<Campaign>({
   stopped_at: N_TIME,
   stop_reason: C.nullable(C.str(500)),
   stats: CAMPAIGN_STATS,
+  // ревью P2-7; домен прошлой версии поля не отдаёт → null
+  last_error: C.fallback(
+    C.nullable(C.obj<NonNullable<Campaign["last_error"]>>({ code: C.id(/^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/, 64), since: C.time, attempts: C.int(0) })),
+    null,
+  ),
 });
 export const CAMPAIGN_PAGE = pageOf(CAMPAIGN, 100);
 export const CAMPAIGN_ESTIMATE: Codec<CampaignEstimate> = C.obj<CampaignEstimate>({

@@ -8,8 +8,10 @@
 Ученик (learner) — строка `admin_learner_summary`: `kind=account` — аккаунт Telegram (сам ученик 14+ или опекун),
 `kind=child` — детский профиль 6–13 под опекуном (`guardian_user_id`), без Telegram ID и username.
 
-PII: копия `username`/`display_name` — только для поиска (`search_text`); полный Telegram ID не хранится и не отдаётся —
-только маска `••••••789` (CHECK `ck_learner_mask`; источник по ошибке прислал полный ID — маскируется до записи).
+PII: копия `username`/`display_name`; полный Telegram ID не хранится и не отдаётся — только маска `••••••789` (CHECK
+`ck_learner_mask`; источник по ошибке прислал полный ID — маскируется до записи). `username` в ответах (строки,
+карточка, её `children` и `guardian`) — маска `ig•••81` (первые 2 и последние 2 символа; короче 5 — `•••`; без «@», как и полный username), полностью —
+только сотруднику с `users.sensitive.read` (ревью T2-3). `display_name` отдаётся как есть — поддержке для обращения.
 Раскрытие — `POST identity-consent /admin/v1/users/{id}/reveal` через admin-bff. В логах — только тип события/ошибки,
 без username, имени и user_id.
 
@@ -20,11 +22,12 @@ PII: копия `username`/`display_name` — только для поиска (
 | GET | `/admin/v1/learners/stats?period=today\|7d\|30d` | `dashboard.read` | `DashboardLearners` |
 | GET | `/admin/v1/learners/{id}` | `users.read` | `AdminLearnerCard` без `tickets` (их добавляет admin-bff) |
 
-- `q`: UUID ученика; `@username` (префикс, без регистра); `TCK-3081` → автор обращения — **только при праве
-  `support.read`** у сотрудника (без него поиск по номеру не выполняется, пустой результат); иначе — часть имени или
-  username (`ILIKE` по `search_text`, `%`, `_` и `\` — литералы). Номер ищется по проекции `ticket_refs`
-  (события support), а не вызовом support: staff API support принимает только admin-bff, actor от user-admin
-  не принимается (`ACTOR_NOT_ALLOWED`).
+- `q`: UUID ученика; `@username` — **точное** совпадение полного username без регистра (маска в ответе не мешает;
+  префикс и подстрока не ищутся — иначе username раскрывался бы по буквам); `TCK-3081` → автор обращения — **только
+  при праве `support.read`** у сотрудника (без него поиск по номеру не выполняется, пустой результат); иначе — часть
+  отображаемого имени (`ILIKE` по `search_text` = lower(display_name), `%`, `_` и `\` — литералы). Номер ищется по
+  проекции `ticket_refs` (события support), а не вызовом support: staff API support принимает только admin-bff, actor
+  от user-admin не принимается (`ACTOR_NOT_ALLOWED`).
 - Фильтры: `kind=account|child`; `age_band=6-9,10-13,14-17,18+,unknown` (`18+` без `%2B` приходит как `18 ` —
   принимается); `status=ACTIVE,DISABLED,…`; `locale=ru|uz`; `has_open_tickets=true|false`; `limit` 1..100 (20).
   Сортировка `(created_at, user_id)` по убыванию; `created_at` фиксируется один раз, когда профиль подтверждён
@@ -47,8 +50,8 @@ PII: копия `username`/`display_name` — только для поиска (
 ### Сверка для n8n
 `POST /internal/v1/reconcile` — `Authorization: Bearer <SCHEDULER_TOKEN>` (постоянное время; пустой токен — вход
 выключен, 401 `SCHEDULER_TOKEN_INVALID`; внутренний JWT сервиса → 403 `CALLER_NOT_ALLOWED`). Прогоняет обе сверки →
-200 `{identity: {ok, applied, error}, plans: {…}}`; источник недоступен → 503 `RECONCILE_FAILED {failed, applied}`.
-Повтор безопасен.
+200 `{identity: {ok, applied, skipped, error}, plans: {…}}` (`skipped: true` — прогон источника уже идёт, без
+ожидания); источник недоступен → 503 `RECONCILE_FAILED {failed, applied}`. Повтор безопасен.
 
 ## События
 Потребляет (durable `user-admin.projection`, inbox-дедупликация; принимаются только от домена-владельца, остальные —
@@ -58,7 +61,7 @@ warning без данных). Не публикует.
 | `user.profile.created.v1` | identity-consent | строка: `kind`, `guardian_user_id`, `locale`, `age_band`, `created_at`; досрочная сверка (имя и username есть только в источнике) |
 | `user.profile.updated.v1` | identity-consent | `locale`, `age_band`, `guardian_consent`; смена имени → досрочная сверка |
 | `user.status.changed.v1`, `user.deletion.requested.v1` | identity-consent | статус (`DELETION_REQUESTED`) |
-| `consent.accepted.v1`, `consent.revoked.v1` | identity-consent | блок `consent` (отзыв согласия другого основания — родитель у подростка — блок не меняет) |
+| `consent.accepted.v1`, `consent.revoked.v1` | identity-consent | блок `consent`: у аккаунта — только `basis=self` (собственное согласие; решение родителя о подростке — `guardian_consent`), у детского профиля — только `basis=guardian` (ревью P2-3); вид ещё не известен — принимается, исправит снимок |
 | `user.notification_settings.changed.v1` | identity-consent | блок `notifications` |
 | `user.security.changed.v1` | identity-consent | `pin_enabled`, `pin_reset_pending` (pin_set/changed/reset/removed, pin_reset_requested/cancelled) |
 | `user.domain.deleted.v1` (`domain=identity-consent`) | identity-consent | DELETED: стереть имя, username, маску, `search_text`, связь с опекуном, возраст, план, настройки, активность; отвязать обращения |
@@ -68,15 +71,24 @@ warning без данных). Не публикует.
 
 Порядок доставки не гарантирован: у каждой группы полей своя версия (`*_at`: `source_updated_at`, `profile_at`,
 `status_at`, `consent_at`, `pin_at`, `pin_reset_at`, `notifications_at`, `plan_at`), старое событие не перезаписывает
-новое состояние; DELETED — конечный.
+новое состояние; DELETED — конечный. Снимок источника против версии, выставленной событием, — с допуском 2 с
+(`SNAPSHOT_CLOCK_SKEW`): версия снимка — момент изменения строки источника (часы БД), а `occurred_at` события той же
+транзакции чуть позже (часы приложения); без допуска снимок не исправлял бы блок, искажённый событием. Версия после
+снимка не уменьшается (max). Снимок, прочитанный до события и попавший в допуск, скрывает событие только до следующей
+сверки (окно с перекрытием) или открытия карточки.
 
 ## Сверка с источниками
 При старте (фоновые задачи, старт не ждёт источники) и каждые `RECONCILE_INTERVAL_SECONDS` (600), досрочно — после
 событий без нужных данных (не чаще `RECONCILE_MIN_GAP_SECONDS`) и по `POST /internal/v1/reconcile`:
 identity-consent `GET /admin/v1/users?updated_after=&cursor=&limit=500` и learning-plan
-`GET /admin/v1/plans?updated_after=&cursor=&limit=500` постранично; водяной знак `updated_at` — в `reconcile_state`
-(`identity`, `plans`) после каждой страницы, окно с перекрытием `RECONCILE_OVERLAP_SECONDS` (120). Снимок применяется
-по версии (`updated_at` источника): событие новее не затирается. Сбой источника не роняет сервис и не влияет на
+`GET /admin/v1/plans?updated_after=&cursor=&limit=` постранично (`RECONCILE_PAGE_SIZE`, 200); водяной знак
+`updated_at` — в `reconcile_state` (`identity`, `plans`) после каждой страницы, окно с перекрытием
+`RECONCILE_OVERLAP_SECONDS` (120). Снимок применяется по версии (`updated_at` источника): событие новее не затирается.
+Страница — пачкой (ревью P2-6): одна вставка, одна выборка FOR UPDATE по возрастанию `user_id`, один запрос счётчиков
+новых строк, одно отвязывание обращений удалённых, UPDATE строк — executemany (10 тыс. снимков ≈ 4 с вместо 48 с).
+Один прогон источника за раз во всём сервисе: сессионная `pg_try_advisory_lock` (класс `UARC`, объект — схема +
+источник) на выделенном соединении, на нём же транзакции страниц — прогон занимает одно соединение пула. Прогон уже
+идёт (в процессе или на другой реплике) — новый не ждёт: `skipped`. Сбой источника не роняет сервис и не влияет на
 readiness: тип ошибки — в лог и `reconcile_state.last_error`. Источники должны принимать вызывающего `user-admin`.
 
 ## Данные (схема `user_admin`, миграция 0001)
@@ -92,7 +104,7 @@ readiness: тип ошибки — в лог и `reconcile_state.last_error`. И
 `DATABASE_URL`, `MIGRATION_DATABASE_URL`, `NATS_URL`, `INTERNAL_JWT_*` (общие), `IDENTITY_CONSENT_URL`
 (`http://127.0.0.1:8101`), `LEARNING_PLAN_URL` (`http://127.0.0.1:8102`), `UPSTREAM_TIMEOUT_SECONDS` (5),
 `SCHEDULER_TOKEN` (stage/prod: пусто или ≥ 32 символов), `RECONCILE_ENABLED`, `RECONCILE_INTERVAL_SECONDS`,
-`RECONCILE_MIN_GAP_SECONDS`, `RECONCILE_OVERLAP_SECONDS`, `RECONCILE_PAGE_SIZE` (≤ 500), `STATS_TIMEZONE`.
+`RECONCILE_MIN_GAP_SECONDS`, `RECONCILE_OVERLAP_SECONDS`, `RECONCILE_PAGE_SIZE` (200, ≤ 500), `STATS_TIMEZONE`.
 
 ## Runbook
 - Миграции: `alembic -c alembic.ini upgrade head` (Railway preDeploy).

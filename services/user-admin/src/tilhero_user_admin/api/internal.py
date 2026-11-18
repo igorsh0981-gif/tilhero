@@ -2,7 +2,8 @@
 
 Вход только по `Authorization: Bearer <SCHEDULER_TOKEN>` (сравнение за постоянное время; пустой токен в настройках
 выключает вход). Внутренний JWT любого сервиса → 403 CALLER_NOT_ALLOWED. Токен не логируется.
-Ответ: 200 ReconcileOut, если оба источника сверены; иначе 503 RECONCILE_FAILED {failed, applied} (n8n видит сбой).
+Ответ: 200 ReconcileOut, если оба источника сверены или их прогон уже идёт (`skipped: true` — здесь или на другой
+реплике, без ожидания); иначе 503 RECONCILE_FAILED {failed, applied} (n8n видит сбой).
 """
 
 from __future__ import annotations
@@ -47,10 +48,11 @@ async def reconcile(request: Request, _: str = Depends(scheduler_only)) -> Recon
     """Повтор безопасен: снимки применяются по версиям, прогоны одного источника сериализуются."""
     reconciler = cast(Reconciler, request.app.state.reconciler)
     results = await reconciler.run_all()
-    out = ReconcileOut(**{name: ReconcileSourceOut(ok=error is None, applied=applied, error=error)
+    out = ReconcileOut(**{name: ReconcileSourceOut(ok=error is None, applied=applied or 0, skipped=applied is None,
+                                                   error=error)
                           for name, (applied, error) in results.items()})
     failed = [name for name, (_, error) in results.items() if error is not None]
     if failed:
         raise unavailable("RECONCILE_FAILED", "Сверка с источником не выполнена",
-                          {"failed": failed, "applied": {name: applied for name, (applied, _) in results.items()}})
+                          {"failed": failed, "applied": {name: applied or 0 for name, (applied, _) in results.items()}})
     return out

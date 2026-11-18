@@ -52,3 +52,27 @@ async def apply_mfa_reset(session: AsyncSession, target: Staff, by: Staff, reaso
         after["approval_id"] = str(approval_id)
     await audit.record(session, "staff.mfa_reset", actor_id=by.staff_id, actor_role=by.role, object_type="staff",
                        object_id=target.staff_id, before=before, after=after, reason=reason)
+
+
+async def apply_credentials_reset(session: AsyncSession, target: Staff, by: Staff, reason: str, ctx: ResetContext,
+                                  *, approval_id: uuid.UUID, cause: str) -> str:
+    """Ревью P2-1/P2-2: при применении staff.create_privileged, staff.role_grant и staff.reactivate_privileged
+    прежние учётные данные цели аннулируются — новый временный пароль (must_change_password), MFA сброшена,
+    сессии отозваны. Иначе автор заявки, знавший пароль (сам создал учётку, сбросил ей пароль до согласования или
+    помнит его до отключения), вошёл бы под ставшей привилегированной учёткой и получил второй голос four-eyes.
+    Временный пароль возвращается применившему (решающему; при waived — автору как единственному решающему)."""
+    before = {"mfa_enabled": target.mfa_enabled, "must_change_password": target.must_change_password}
+    temp = temporary_password()
+    target.password_hash = await ctx.passwords.hash(temp)
+    target.must_change_password = True
+    target.temp_password_expires_at = now() + timedelta(hours=ctx.temp_ttl_hours)
+    target.mfa_secret_enc = None
+    target.mfa_enabled = False
+    target.mfa_last_step = None
+    bump_session(target)
+    await audit.record(session, "staff.credentials_reset", actor_id=by.staff_id, actor_role=by.role,
+                       object_type="staff", object_id=target.staff_id, before=before,
+                       after={"must_change_password": True, "mfa_enabled": False, "sessions_revoked": True,
+                              "temporary_password_ttl_hours": ctx.temp_ttl_hours, "approval_id": str(approval_id),
+                              "cause": cause}, reason=reason)
+    return temp

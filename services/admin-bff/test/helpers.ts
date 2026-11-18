@@ -451,6 +451,7 @@ export function campaignRow(p: Record<string, unknown> = {}) {
     stopped_at: null,
     stop_reason: null,
     stats: { audience: 0, created: 0, sent: 0, in_app_only: 0, deferred: 0, skipped_frequency: 0, failed: 0 },
+    last_error: null,
     // служебное поле домена — не уходит клиенту
     cursor: "opaque",
     ...p,

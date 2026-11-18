@@ -275,6 +275,8 @@ class DashboardLearners(BaseModel):
 class ReconcileSourceOut(BaseModel):
     ok: bool
     applied: int
+    # прогон этого источника уже шёл (в этом процессе или на другой реплике) — новый не запускался
+    skipped: bool
     error: str | None
 
 

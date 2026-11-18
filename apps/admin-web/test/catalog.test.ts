@@ -20,7 +20,9 @@ import {
   validateCampaign,
   validateNote,
   emptyCampaign,
+  checkSendAt,
 } from "../src/screens/news/catalog";
+import { canStop } from "../src/screens/news/Campaigns";
 
 const CATALOG = JSON.parse(readFileSync(resolve(__dirname, "../../../packages/contracts/release-notes.json"), "utf8")) as {
   locales: string[];
@@ -125,5 +127,32 @@ describe("campaigns", () => {
   it("segment normalisation never carries children", () => {
     expect(normalizeSegment({ ui_lang: ["uz", "ru"], age: ["adults", "teens"], onboarded: false, active_days: 0 })).toEqual({ ui_lang: ["ru", "uz"], age: ["teens", "adults"], onboarded: false });
     expect(normalizeSegment({ age: ["kids" as never, "adults"] })).toEqual({ age: ["adults"] });
+  });
+});
+
+describe("scheduling (review T2-2)", () => {
+  const now = Date.parse("2026-11-18T12:00:00Z");
+  const local = (ms: number) => {
+    const d = new Date(ms);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  it("a chosen time is at least 2 minutes ahead and within 30 days", () => {
+    expect(checkSendAt(local(now - 8 * 3_600_000), now)).toBe("in_past");
+    expect(checkSendAt(local(now + 60_000), now)).toBe("in_past");
+    expect(checkSendAt(local(now + 3 * 60_000), now)).toBeNull();
+    expect(checkSendAt(local(now + 86_400_000), now)).toBeNull();
+    expect(checkSendAt(local(now + 31 * 86_400_000), now)).toBe("too_far");
+    expect(checkSendAt("", now)).toBe("invalid_format");
+    expect(checkSendAt("2026-13-45T99:99", now)).toBe("invalid_format");
+  });
+  it("stop: scheduled, sending, finished with deferred messages — never a draft (P2-7)", () => {
+    const st = (deferred = 0) => ({ audience: 10, created: 10, sent: 5, in_app_only: 0, deferred, skipped_frequency: 0, failed: 0 });
+    expect(canStop({ status: "draft", stats: st() })).toBe(false);
+    expect(canStop({ status: "scheduled", stats: st() })).toBe(true);
+    expect(canStop({ status: "sending", stats: st() })).toBe(true);
+    expect(canStop({ status: "done", stats: st() })).toBe(false);
+    expect(canStop({ status: "done", stats: st(3) })).toBe(true);
+    expect(canStop({ status: "stopped", stats: st(3) })).toBe(false);
   });
 });

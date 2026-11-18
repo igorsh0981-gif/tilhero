@@ -94,6 +94,16 @@ export class PrincipalCache {
     return p;
   }
 
+  /** Только кэш (без admin-identity): для резервного аудита logout, когда admin-identity недоступен. */
+  async peek(staffId: string): Promise<Principal | null> {
+    try {
+      const cached = await this.redis.get(this.key(staffId));
+      return cached ? parsePrincipal(JSON.parse(cached)) : null;
+    } catch {
+      return null;
+    }
+  }
+
   async put(p: Principal): Promise<void> {
     if (this.ttlSeconds <= 0) return;
     await this.store(() => this.redis.set(this.key(p.staff.staff_id), JSON.stringify(p), "EX", this.ttlSeconds));
@@ -158,11 +168,14 @@ export interface AuditEntry {
   reason?: string | null;
 }
 
-/** Аудит действий самого BFF (dev.impersonate, резервная запись auth.logout) — синхронно в audit. */
+/**
+ * Аудит действий самого BFF — синхронно в audit. audit принимает от admin-bff только dev.impersonate и auth.logout
+ * и только с actor сотрудника в токене (иначе 403 ACTION_NOT_ALLOWED).
+ */
 export async function writeAudit(
   ctx: BffContext,
-  auth: StaffAuth,
-  entry: AuditEntry,
+  auth: Pick<StaffAuth, "actor" | "publicSessionId">,
+  entry: AuditEntry & { action: "dev.impersonate" | "auth.logout" },
   ip: string | undefined,
 ): Promise<void> {
   await ctx.domains.audit.post("/internal/v1/records", {

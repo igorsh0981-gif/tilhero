@@ -35,6 +35,10 @@ SCHEDULER_TOKEN = "s" * 43
 
 VIEWER = Actor(id=str(uuid.uuid4()), role="support", name="Оператор Тест",
                permissions=frozenset({"users.read", "dashboard.read", "support.read"}))
+SUPER = Actor(id=str(uuid.uuid4()), role="super_admin",
+              permissions=frozenset({"users.read", "users.sensitive.read", "dashboard.read", "support.read"}))
+OPERATIONS = Actor(id=str(uuid.uuid4()), role="operations",
+                   permissions=frozenset({"users.read", "dashboard.read", "support.read", "audit.read"}))
 METHODIST = Actor(id=str(uuid.uuid4()), role="methodist", permissions=frozenset({"users.read", "dashboard.read"}))
 ANALYST = Actor(id=str(uuid.uuid4()), role="read_only", permissions=frozenset({"dashboard.read"}))
 OUTSIDER = Actor(id=str(uuid.uuid4()), role="auditor", permissions=frozenset({"audit.read"}))

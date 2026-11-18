@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -15,7 +16,9 @@ from user_admin_testkit import (
     LP,
     MASK,
     METHODIST,
+    OPERATIONS,
     OUTSIDER,
+    SUPER,
     VIEWER,
     fake_identity,
     iso,
@@ -81,7 +84,7 @@ async def test_list_rows_match_contract(env) -> None:
     assert r.status_code == 200
     [item] = r.json()["items"]
     assert set(item) == ROW_KEYS
-    assert item["user_id"] == a["user_id"] and item["username"] == "tester_1" and item["kind"] == "account"
+    assert item["user_id"] == a["user_id"] and item["username"] == "te•••_1" and item["kind"] == "account"
     assert item["telegram_id_masked"] == MASK * 6 + "001" and item["guardian_user_id"] is None
     assert (item["locale"], item["age_band"], item["guardian_consent"]) == ("ru", "18+", "not_required")
     assert (item["open_tickets"], item["tickets_total"], item["children_count"]) == (1, 2, 0)  # не из снимка (99)
@@ -105,25 +108,56 @@ async def test_account_and_children_in_list(env) -> None:
 async def test_search_by_uuid_username_name_and_ticket(env) -> None:
     ivan = await env.seed(1, username="ivan_petrov", display_name="Иван Петров")
     maria = await env.seed(2, username="maria_s", display_name="Мария Сидорова")
-    other = await env.seed(3, username="ivanova_x", display_name="Ольга Иванова")
+    other = await env.seed(3, username="ivanova_x", display_name="Ольга Иванова (o_k)")
     await ticket(env, maria["user_id"], 3081)
 
     assert await ids(env, f"q={ivan['user_id']}") == [ivan["user_id"]]
     assert await ids(env, f"q={uuid.uuid4()}") == []
-    assert sorted(await ids(env, "q=@ivan")) == sorted([ivan["user_id"], other["user_id"]])  # префикс username
-    assert await ids(env, "q=@IVAN_P") == [ivan["user_id"]]
+    # @username — только точное совпадение полного username (без регистра): префикс не раскрывает его по буквам
+    assert await ids(env, "q=@ivan_petrov") == [ivan["user_id"]]
+    assert await ids(env, "q=@IVAN_PETROV") == [ivan["user_id"]]
+    assert await ids(env, "q=@ivan") == [] and await ids(env, "q=@ivan_p") == []
     assert await ids(env, "q=@bad name") == []
     assert set(await ids(env, "q=иван")) == {ivan["user_id"], other["user_id"]}  # часть имени без регистра
     assert await ids(env, "q=СИДОРОВ") == [maria["user_id"]]
-    assert await ids(env, "q=maria_s") == [maria["user_id"]]  # username тоже в search_text
+    assert await ids(env, "q=maria_s") == [] and await ids(env, "q=petrov") == []  # username не в search_text
     assert await ids(env, "q=TCK-3081") == [maria["user_id"]]
     assert await ids(env, "q=tck-3081") == [maria["user_id"]]
     assert await ids(env, "q=TCK-9999") == []
-    # спецсимволы LIKE экранируются: «_» — литерал, а не «любой символ» («v_n» совпало бы с «ivan»)
+    # спецсимволы LIKE экранируются: «_» — литерал, а не «любой символ» (иначе совпало бы с «ольга иванова»)
     assert await ids(env, "q=%25") == []
-    assert await ids(env, "q=v_n") == []
-    assert await ids(env, "q=a_s") == [maria["user_id"]]
+    assert await ids(env, "q=ольга_иванова") == []
+    assert await ids(env, "q=o_k") == [other["user_id"]]
     assert await ids(env, "q=%5C") == []  # обратная косая — тоже литерал
+
+
+async def test_username_masked_unless_sensitive_read(env) -> None:
+    """username — маска `ig•••81` без «@» (короче 5 — `•••`) в списке, карточке, детях и опекуне; полностью — только с
+    users.sensitive.read (ревью T2-3). Поиск q=@username — точный по полному username и с маской."""
+    parent = await env.seed(1, username="igor_tester_81", display_name="Родитель Тестовый")
+    short = await env.seed(2, username="abcd")
+    five = await env.seed(3, username="abcde")
+    kid = env.identity.put(snapshot(n=4, kind="child", guardian=parent["user_id"], display_name="Ребёнок Тестовый"))
+    await env.reconciler.identity.run_once()
+    masked = {parent["user_id"]: "ig•••81", short["user_id"]: "•••", five["user_id"]: "ab•••de",
+              kid["user_id"]: None}
+    full = {parent["user_id"]: "igor_tester_81", short["user_id"]: "abcd", five["user_id"]: "abcde",
+            kid["user_id"]: None}
+    for actor, expected in ((VIEWER, masked), (METHODIST, masked), (OPERATIONS, masked), (SUPER, full)):
+        listing = await env.get("/admin/v1/learners", actor)
+        assert {i["user_id"]: i["username"] for i in listing.json()["items"]} == expected, actor.role
+        names = {i["user_id"]: i["display_name"] for i in listing.json()["items"]}
+        assert names[parent["user_id"]] == "Родитель Тестовый"  # отображаемое имя — для обращения поддержки
+        card = (await env.get(f"/admin/v1/learners/{parent['user_id']}", actor)).json()
+        assert card["username"] == expected[parent["user_id"]]
+        assert [c["username"] for c in card["children"]] == [None]
+        child = (await env.get(f"/admin/v1/learners/{kid['user_id']}", actor)).json()
+        assert child["guardian"]["username"] == expected[parent["user_id"]]
+        assert await ids(env, "q=@igor_tester_81", actor) == [parent["user_id"]]
+        assert await ids(env, "q=@igor", actor) == [] and await ids(env, "q=tester_81", actor) == []
+        if actor is not SUPER:
+            for body in (listing.text, json.dumps(card), json.dumps(child)):
+                assert "igor_tester_81" not in body and "abcde" not in body
 
 
 async def test_ticket_search_requires_support_read(env) -> None:
@@ -132,7 +166,7 @@ async def test_ticket_search_requires_support_read(env) -> None:
     await ticket(env, maria["user_id"], 4242)
     assert await ids(env, "q=TCK-4242", VIEWER) == [maria["user_id"]]
     assert await ids(env, "q=TCK-4242", METHODIST) == []
-    assert await ids(env, "q=maria", METHODIST) == [maria["user_id"]]
+    assert await ids(env, "q=@maria_s", METHODIST) == [maria["user_id"]]  # маска поиску не мешает
 
 
 async def test_filters_and_pagination(env) -> None:
@@ -251,7 +285,7 @@ async def test_card_refreshes_from_identity(env) -> None:
     assert r.status_code == 200, r.text
     card = r.json()
     assert set(card) == CARD_KEYS and "tickets" not in card  # обращения добавляет admin-bff
-    assert card["username"] == "tester_4" and card["telegram_id_masked"] == MASK * 6 + "004"
+    assert card["username"] == "te•••_4" and card["telegram_id_masked"] == MASK * 6 + "004"
     assert (card["age_band"], card["guardian_consent"]) == ("14-17", "granted")
     assert card["security"] == {"pin_enabled": True, "pin_reset_pending": True}
     assert card["consent"] == {"policy_version": "1.0", "purposes": ["terms", "privacy"],
@@ -269,7 +303,7 @@ async def test_card_refreshes_from_identity(env) -> None:
     env.identity.put(snapshot(uid, n=4, username="renamed_4"))
     calls = len(env.identity.calls)
     again = (await env.get(f"/admin/v1/learners/{uid}")).json()
-    assert len(env.identity.calls) == calls + 1 and again["username"] == "renamed_4"
+    assert len(env.identity.calls) == calls + 1 and again["username"] == "re•••_4"
 
 
 async def test_card_children_and_guardian(env) -> None:
@@ -290,7 +324,7 @@ async def test_card_serves_projection_when_identity_down(env) -> None:
     await stale(env)
     env.identity.down = True
     r = await env.get(f"/admin/v1/learners/{u['user_id']}")
-    assert r.status_code == 200 and r.json()["username"] == "tester_5"
+    assert r.status_code == 200 and r.json()["display_name"] == "Тестовый Ученик 5"
     refreshed = datetime.fromisoformat(r.json()["refreshed_at"].replace("Z", "+00:00"))
     assert now() - refreshed > timedelta(minutes=9)  # честный момент последнего чтения
     env.identity.status_on_down = 500
@@ -324,7 +358,7 @@ async def test_card_rejects_snapshot_of_another_learner(env) -> None:
     other = snapshot(n=7)
     env.identity.items[u["user_id"]] = other  # источник по ошибке вернул чужой снимок
     card = (await env.get(f"/admin/v1/learners/{u['user_id']}")).json()
-    assert card["user_id"] == u["user_id"] and card["username"] == "tester_6"
+    assert card["user_id"] == u["user_id"] and card["display_name"] == "Тестовый Ученик 6"
     assert await ids(env, f"q={other['user_id']}") == []
 
 
@@ -338,7 +372,7 @@ async def test_card_of_deleted_learner_has_no_pii(env) -> None:
     card = r.json()
     assert card["status"] == "DELETED" and card["username"] is None and card["display_name"] is None
     assert card["telegram_id_masked"] is None and card["plan"] is None and card["notifications"] is None
-    assert await ids(env, "q=tester_6") == []
+    assert await ids(env, "q=@tester_6", SUPER) == [] and await ids(env, "q=Тестовый", SUPER) == []
 
 
 async def test_full_telegram_id_never_exposed(env) -> None:

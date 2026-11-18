@@ -78,3 +78,18 @@ test("reveal: 503 AUDIT_UNAVAILABLE → no value", async ({ page }) => {
   await expect(page.locator("#rv-err")).toContainText("Журнал аудита недоступен");
   await expect(page.getByTestId("reveal-value")).toHaveCount(0);
 });
+
+test("username exactly as user-admin sends it: the mask without users.sensitive.read — «@» added once", async ({ page }) => {
+  await openAs(page, "support@tilhero.local", "#/users/a1000000-0000-4000-8000-000000000001");
+  await expect(page.getByTestId("lc-username")).toHaveText("@ma•••_k");
+  await expect(page.getByText("madina_k")).toHaveCount(0);
+  await expect(page.getByText(/@@/)).toHaveCount(0);
+  // a child profile names its guardian by the masked username as well
+  await page.goto("/#/users/a1000000-0000-4000-8000-000000000003");
+  await expect(page.getByTestId("lc-guardian")).toContainText("@bo•••_r");
+});
+
+test("username: a super_admin (users.sensitive.read) gets the full name", async ({ page }) => {
+  await openAs(page, "admin@tilhero.local", "#/users/a1000000-0000-4000-8000-000000000001");
+  await expect(page.getByTestId("lc-username")).toHaveText("@madina_k");
+});

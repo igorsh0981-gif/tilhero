@@ -36,6 +36,7 @@ import type {
   StaffCreate,
   StaffCreated,
   StaffPatch,
+  StaffPatchPending,
   StaffReleaseNote,
   StaffResetResponse,
   StaffTicket,
@@ -143,7 +144,7 @@ export const StaffApi = {
   list: (f: { q?: string; role?: string; status?: string; cursor?: string | null }) =>
     api.get<Page<Staff>>("/staff", { query: { q: f.q, role: f.role, status: f.status, cursor: f.cursor, limit: 50 } }),
   create: (body: StaffCreate) => api.post<StaffCreated>("/staff", body, { idempotencyKey: true }),
-  patch: (id: string, body: StaffPatch) => api.patch<Staff | { approval: Approval }>(`/staff/${enc(id)}`, body),
+  patch: (id: string, body: StaffPatch) => api.patch<Staff | StaffPatchPending>(`/staff/${enc(id)}`, body),
   resetPassword: (id: string, reason: string) => api.post<StaffResetResponse>(`/staff/${enc(id)}/reset-password`, { reason }),
   resetMfa: (id: string, reason: string) => api.post<Staff | { approval: Approval }>(`/staff/${enc(id)}/reset-mfa`, { reason }),
   roles: () => api.get<{ items: Role[]; permissions?: Permission[] }>("/roles"),

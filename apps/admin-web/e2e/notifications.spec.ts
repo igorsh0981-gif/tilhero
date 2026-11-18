@@ -1,7 +1,16 @@
 /** AT-20 / AT-21 / AT-22: notification templates and campaigns. */
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { openAs, typeOtp } from "./helpers";
-import { TOTP } from "./fixtures/data";
+import { DAY, HOUR, MIN, TOTP } from "./fixtures/data";
+
+/** «YYYY-MM-DDTHH:mm» for <input type="datetime-local"> in the BROWSER's time zone (Asia/Tashkent in the config). */
+const localAt = (page: Page, offsetMs: number) =>
+  page.evaluate((o) => {
+    const d = new Date(Date.now() + o);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }, offsetMs);
+const sendAtOf = (b: unknown) => Date.parse(String((b as { send_at?: unknown }).send_at));
 
 test("template: edit → unknown placeholder highlighted → fix → save version → activate with TOTP", async ({ page }) => {
   const bff = await openAs(page, "comms@tilhero.local", "#/news/templates");
@@ -125,4 +134,88 @@ test("new campaign: RU and UZ required, only {learner_name}, children never in t
   const c = bff.calls("POST", "/notifications/campaigns")[0]!;
   expect(c.headers["idempotency-key"]).toBeTruthy();
   expect((c.body as { segment: { age?: string[] } }).segment.age).not.toContain("kids");
+});
+
+test("schedule (T2-2): explicit choice; a past time → error at the field, inactive button; «Send now» passes now", async ({ page }) => {
+  const bff = await openAs(page, "comms@tilhero.local", "#/news/campaigns");
+  await expect(page.getByTestId("cmp-detail")).toBeVisible();
+  await page.getByTestId("cmp-schedule").click();
+  const ok = page.getByTestId("confirm-ok");
+  // nothing is preselected: the operator has to choose
+  await expect(page.getByTestId("cmp-when-hint")).toBeVisible();
+  await expect(ok).toBeDisabled();
+
+  // the review scenario: only the hours were changed on a date that is already today → the time has passed
+  await page.getByTestId("cmp-when-at").check();
+  await page.getByTestId("cmp-at").fill(await localAt(page, -8 * HOUR));
+  await expect(page.getByTestId("cmp-at")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.locator("#cmp-at-err")).toContainText("уже прошло");
+  await expect(page.getByTestId("cmp-starts")).toHaveCount(0);
+  await expect(ok).toBeDisabled();
+  // less than 2 minutes ahead is refused too (notifications would send it «now»)
+  await page.getByTestId("cmp-at").fill(await localAt(page, 1 * MIN));
+  await expect(page.locator("#cmp-at-err")).toContainText("уже прошло");
+  await expect(ok).toBeDisabled();
+  // beyond 30 days
+  await page.getByTestId("cmp-at").fill(await localAt(page, 31 * DAY));
+  await expect(page.locator("#cmp-at-err")).toContainText("30 дней");
+  await expect(ok).toBeDisabled();
+  // tomorrow: valid, the summary says when sending starts
+  await page.getByTestId("cmp-at").fill(await localAt(page, DAY));
+  await expect(page.locator("#cmp-at-err")).toHaveCount(0);
+  await expect(page.getByTestId("cmp-starts")).toContainText("Отправка начнётся");
+  await expect(ok).toBeEnabled();
+
+  // explicit «Send now» → send_at = now
+  await page.getByTestId("cmp-when-now").check();
+  await expect(page.getByTestId("cmp-starts")).toContainText("сразу после подтверждения");
+  await page.locator("#cmd-reason").fill("Срочно: новые уроки уже доступны");
+  await ok.click();
+  await typeOtp(page, "stepup", TOTP);
+  await expect(page.getByTestId("cmp-detail")).toContainText("в расписании");
+  const sch = bff.calls("POST", /\/schedule$/);
+  expect(sch.length).toBeGreaterThan(0);
+  for (const c of sch) expect(Math.abs(sendAtOf(c.body) - Date.now())).toBeLessThan(2 * MIN);
+});
+
+test("schedule (T2-2): 422 CAMPAIGN_INVALID {send_at: in_past} from the domain lands at the field; the retry is a new command", async ({ page }) => {
+  // the notifications clock runs 3 days ahead: tomorrow is «in the past» there
+  const bff = await openAs(page, "comms@tilhero.local", "#/news/campaigns", { serverClockAheadMs: 3 * DAY });
+  await expect(page.getByTestId("cmp-detail")).toBeVisible();
+  await page.getByTestId("cmp-schedule").click();
+  await page.getByTestId("cmp-when-at").check();
+  await page.getByTestId("cmp-at").fill(await localAt(page, DAY));
+  await page.locator("#cmd-reason").fill("Анонс голосовых уроков");
+  await page.getByTestId("confirm-ok").click();
+  await typeOtp(page, "stepup", TOTP);
+  await expect(page.getByTestId("cmp-confirm")).toBeVisible();
+  await expect(page.getByTestId("cmp-at")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.locator("#cmp-at-err")).toContainText("уже прошло");
+  await expect(page.getByTestId("cmp-confirm")).toContainText("Сервер не принял время отправки");
+  await expect(page.getByTestId("confirm-ok")).toBeDisabled();
+  // a later time → accepted; the refused attempt created nothing, so the retry carries a new Idempotency-Key
+  await page.getByTestId("cmp-at").fill(await localAt(page, 5 * DAY));
+  await expect(page.locator("#cmp-at-err")).toHaveCount(0);
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("cmp-detail")).toContainText("в расписании");
+  const sch = bff.calls("POST", /\/schedule$/);
+  expect(sch.at(-1)!.headers["idempotency-key"]).not.toBe(sch[0]!.headers["idempotency-key"]);
+});
+
+test("stalled campaign (P2-7): Campaign.last_error is visible in the list and the card; no stop for a draft", async ({ page }) => {
+  await openAs(page, "comms@tilhero.local", "#/news/campaigns", { stalled: true });
+  const id = "e1000000-0000-4000-8000-000000000002";
+  await expect(page.getByTestId(`cmp-row-${id}`)).toHaveClass(/sev-bad/);
+  await expect(page.getByTestId(`cmp-stalled-${id}`)).toContainText(/Отправка не идёт: INVALID_CURSOR, с .+, попыток 8/);
+  // the opened draft: nothing to stop
+  await expect(page.getByTestId("cmp-schedule")).toBeVisible();
+  await expect(page.getByTestId("cmp-stop")).toHaveCount(0);
+  await page.getByTestId(`cmp-open-${id}`).click();
+  await expect(page.getByTestId("cmp-stalled")).toContainText("попыток 8");
+  await expect(page.getByTestId("cmp-stop")).toBeVisible();
+  // a finished campaign without deferred messages has nothing to stop either
+  await page.getByTestId("cmp-open-e1000000-0000-4000-8000-000000000001").click();
+  await expect(page.getByTestId("cmp-stats")).toBeVisible();
+  await expect(page.getByTestId("cmp-stop")).toHaveCount(0);
+  await expect(page.getByTestId("cmp-stalled")).toHaveCount(0);
 });

@@ -13,8 +13,15 @@
    другой рассылке → `skipped_frequency`; удалён → `cancelled`; иначе запись журнала (`product`, kind `campaign`,
    dedup `campaign:<id>:<user>`, детерминированный id) → `created`;
 4) аудитория исчерпана и pending нет → `done` (`finished_at`), аудит `campaign.finished`.
-`stop`: `stopped`, pending → cancelled, неотправленные записи → `cancelled` (и их получатели); отправленные не
-отзываются. Плейсхолдер — только `{learner_name}`.
+`stop` (из scheduled | sending | done; draft → 409 CAMPAIGN_NOT_ACTIVE): `stopped`, pending → cancelled,
+неотправленные записи журнала → `cancelled` (и их получатели); отправленные не отзываются. Плейсхолдер — только
+`{learner_name}`.
+
+Ревью P2-7: неудача шага запуска или выборки аудитории (SEGMENT_INVALID, INVALID_CURSOR, identity недоступен …)
+записывается в `last_error {code, since, attempts}` и сбрасывается первым успешным шагом; после
+CAMPAIGN_FAILURE_ALERT_ATTEMPTS (6) неудач подряд — аудит `campaign.failed` (один раз на серию).
+Ревью P2-8: лимит частоты считает только получателей, чья запись рассылки дошла до ученика или ещё в пути
+(`sent | in_app_only | scheduled`); `skipped` (категория выключена, ученик неактивен), `failed`, `cancelled` — нет.
 """
 
 from __future__ import annotations
@@ -50,6 +57,9 @@ DEFAULT_AGES = ("adults",)
 ACTIVE_DAYS_MAX = 90
 CATEGORY = "product"
 KIND = "campaign"
+# Запись рассылки «дошла до ученика или ещё в пути» — участвует в лимите частоты (ревью P2-8)
+REACHED_STATUSES = ("sent", "in_app_only", "scheduled")
+STOPPABLE = ("scheduled", "sending", "done")
 
 
 def _s(rt: Runtime) -> Settings:
@@ -197,7 +207,28 @@ def view(c: Campaign, stats: dict[str, int] | None = None) -> dict[str, Any]:
         "stopped_at": iso(c.stopped_at),
         "stop_reason": c.stop_reason,
         "stats": stats or {**empty_stats(), "audience": c.audience_count or 0},
+        "last_error": (
+            {"code": c.error_code, "since": iso(c.error_since), "attempts": c.error_attempts}
+            if c.error_code is not None else None
+        ),
     }
+
+
+def clear_error(c: Campaign) -> None:
+    c.error_code = None
+    c.error_since = None
+    c.error_attempts = 0
+    c.error_reported = False
+
+
+def error_code_of(exc: BaseException) -> str:
+    """Код неудачи шага для last_error: код identity-consent (SEGMENT_INVALID, INVALID_CURSOR, UPSTREAM_UNAVAILABLE …)
+    или общий — без текста исключения (там могут быть данные)."""
+    if isinstance(exc, ApiError):
+        return exc.code[:64]
+    if isinstance(exc, ValidationError | ValueError | TypeError):
+        return "AUDIENCE_RESPONSE_INVALID"
+    return "INTERNAL_ERROR"
 
 
 async def view_one(session: AsyncSession, c: Campaign) -> dict[str, Any]:
@@ -297,11 +328,13 @@ async def recently_reached(
         return set()
     rows = await session.execute(
         select(CampaignRecipient.user_id)
+        .join(Notification, Notification.notification_id == CampaignRecipient.notification_id)
         .where(
             CampaignRecipient.user_id.in_(users),
             CampaignRecipient.status == "created",
             CampaignRecipient.processed_at >= since,
             CampaignRecipient.campaign_id != exclude,
+            Notification.telegram_status.in_(REACHED_STATUSES),
         )
         .distinct()
     )
@@ -442,6 +475,7 @@ async def schedule(
     require_draft(row, expected_version)
     row.status = "scheduled"
     row.send_at = send_at
+    clear_error(row)
     row.scheduled_by = actor.id[:64]
     row.scheduled_at = now
     row.version += 1
@@ -472,6 +506,7 @@ async def unschedule(
     row.send_at = None
     row.scheduled_by = None
     row.scheduled_at = None
+    clear_error(row)
     row.version += 1
     row.updated_at = now
     await session.flush()
@@ -489,11 +524,15 @@ async def unschedule(
 async def stop(
     session: AsyncSession, campaign_id: uuid.UUID, *, reason: str, actor: Actor, now: datetime
 ) -> tuple[Campaign, bool]:
-    """Экстренная остановка: новые записи не создаются (блокировка строки рассылки — та же, что у пачки
-    получателей), pending → cancelled, неотправленные записи журнала → cancelled. Повтор — без изменений."""
+    """Экстренная остановка (scheduled | sending | done): новые записи не создаются (блокировка строки рассылки —
+    та же, что у пачки получателей), pending → cancelled, неотправленные записи журнала (у done — отложенные тихими
+    часами) → cancelled. Повтор — без изменений; черновик — 409 CAMPAIGN_NOT_ACTIVE."""
     row = await load(session, campaign_id, for_update=True)
     if row.status == "stopped":
         return row, False
+    if row.status not in STOPPABLE:
+        raise conflict("CAMPAIGN_NOT_ACTIVE", "Остановить можно только запланированную или отправляемую рассылку",
+                       {"status": row.status})
     before = row.status
     pending = await session.execute(
         update(CampaignRecipient)
@@ -591,13 +630,8 @@ class Runner:
         for campaign_id, segment in due:
             try:
                 count = await audience_count(self.rt, segment or {})
-            except Exception as exc:  # identity-consent недоступен — запуск при следующем dispatch
-                rejected = isinstance(exc, ApiError) and segment_rejected(exc) is not None
-                (log.error if rejected else log.warning)(
-                    "campaign start postponed",
-                    extra={"error_type": type(exc).__name__, "error_code": getattr(exc, "code", None),
-                           "campaign_id": str(campaign_id)},
-                )
+            except Exception as exc:  # запуск — при следующем dispatch; неудача видна в last_error
+                await self.failed(campaign_id, "scheduled", exc, now)
                 continue
             async with self.rt.transaction() as session:
                 row = await load(session, campaign_id, for_update=True)
@@ -608,6 +642,7 @@ class Runner:
                 row.audience_count = count.count
                 row.version += 1
                 row.updated_at = now
+                clear_error(row)
                 started += 1
                 log.info("campaign started", extra={"campaign_id": str(campaign_id), "audience": count.count})
         return started
@@ -638,8 +673,7 @@ class Runner:
         try:
             page = await audience_page(self.rt, segment, cursor)
         except Exception as exc:
-            log.warning("campaign audience page unavailable", extra={"error_type": type(exc).__name__,
-                                                                     "campaign_id": str(campaign_id)})
+            await self.failed(campaign_id, "sending", exc, now)
             return "idle"
         async with self.rt.transaction() as session:
             row = await load(session, campaign_id, for_update=True)
@@ -659,7 +693,43 @@ class Runner:
             row.cursor = next_cursor
             row.audience_complete = next_cursor is None
             row.updated_at = now
+            clear_error(row)
         return "fetched"
+
+    async def failed(self, campaign_id: uuid.UUID, status: str, exc: BaseException, now: datetime) -> None:
+        """Неудача шага (ревью P2-7): last_error {code, since, attempts}; на CAMPAIGN_FAILURE_ALERT_ATTEMPTS-й
+        неудаче подряд — аудит campaign.failed (один раз на серию). Рассылка остаётся в своём статусе (повтор при
+        следующем dispatch; сотрудник видит причину и может остановить)."""
+        code = error_code_of(exc)
+        threshold = _s(self.rt).campaign_failure_alert_attempts
+        async with self.rt.transaction() as session:
+            row = await load(session, campaign_id, for_update=True)
+            if row.status != status:
+                return
+            if row.error_code is None:
+                row.error_since, row.error_attempts, row.error_reported = now, 0, False
+            row.error_code = code
+            row.error_attempts += 1
+            row.updated_at = now
+            alert = row.error_attempts >= threshold and not row.error_reported
+            if alert:
+                row.error_reported = True
+                await session.flush()
+                await audit.emit_audit(
+                    session,
+                    audit.record(
+                        "campaign.failed", audit.CAMPAIGN, str(campaign_id), actor=None,
+                        after={"status": row.status, "code": code, "attempts": row.error_attempts,
+                               "since": iso(row.error_since)},
+                        now=now,
+                    ),
+                )
+            attempts = row.error_attempts
+        (log.error if alert or code == "SEGMENT_INVALID" else log.warning)(
+            "campaign step failed",
+            extra={"campaign_id": str(campaign_id), "step": "start" if status == "scheduled" else "audience",
+                   "error_code": code, "attempts": attempts},
+        )
 
     async def create_batch(self, campaign_id: uuid.UUID, now: datetime) -> int:
         s = _s(self.rt)

@@ -29,7 +29,8 @@ class Settings(ServiceSettings):
     reconcile_min_gap_seconds: float = Field(default=2.0, ge=0)  # не чаще одного прогона за N секунд
     # Перекрытие окна updated_after: транзакция источника, начатая раньше, может зафиксироваться позже прогона
     reconcile_overlap_seconds: int = Field(default=120, ge=0)
-    reconcile_page_size: int = Field(default=500, ge=1, le=500)
+    # страница сверки (ревью P2-6: короче транзакция пачки под блокировкой строк)
+    reconcile_page_size: int = Field(default=200, ge=1, le=500)
 
     # Граница «сегодня» для stats (period=today) — часовой пояс заказчика
     stats_timezone: str = "Asia/Tashkent"

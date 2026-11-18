@@ -51,8 +51,22 @@ export interface Scenario {
   adminConfigDown?: boolean;
   /** the active admin config switches these menu sections off */
   menuOff?: string[];
+  /** campaign …0002 is sending but a step keeps failing (Campaign.last_error, review P2-7) */
+  stalled?: boolean;
+  /** the notifications clock runs ahead of the browser by this many ms (a valid chosen time is «in the past» there) */
+  serverClockAheadMs?: number;
   /** rewrites every successful JSON body (hostile strings) */
   transform?: (path: string, data: unknown) => unknown;
+}
+
+/** The mask of user-admin: first 2 and last 2 characters («ig•••81»), «•••» for short names; never with «@». */
+export function maskUsername(u: string): string {
+  return u.length > 4 ? `${u.slice(0, 2)}•••${u.slice(-2)}` : "•••";
+}
+function maskUsernames(x: unknown): unknown {
+  if (Array.isArray(x)) return x.map(maskUsernames);
+  if (x && typeof x === "object") return Object.fromEntries(Object.entries(x).map(([k, v]) => [k, k === "username" && typeof v === "string" ? maskUsername(v) : maskUsernames(v)]));
+  return x;
 }
 
 export interface Recorded {
@@ -143,6 +157,10 @@ export class MockBff {
     this.sc = sc;
     this.tickets = F.tickets(this.learners);
     if (sc.singleSuperAdmin) this.accounts = this.accounts.filter((a) => a.staff.staff_id !== F.ID.admin2);
+    if (sc.stalled) {
+      const c = this.campaigns.find((x) => x.campaign_id === "e1000000-0000-4000-8000-000000000002")!;
+      Object.assign(c, { status: "sending", started_at: F.iso(-50 * F.MIN), stats: { ...c.stats, created: 400, sent: 380 }, last_error: { code: "INVALID_CURSOR", since: F.iso(-40 * F.MIN), attempts: 8 } });
+    }
     const ver = (app: ConfigApp, version: string, payload: Record<string, unknown>, note: string, daysAgo: number, by = "system:seed"): ConfigVersion => ({
       version_id: `c0000000-0000-4000-8000-${app === "admin" ? "1" : "2"}${version.replace(/\./g, "").padStart(11, "0")}`,
       app,
@@ -359,8 +377,10 @@ export class MockBff {
     const q = url.searchParams;
 
     const tr = this.sc.transform;
+    // user-admin masks usernames by actor (review T2-3): without users.sensitive.read — «ma•••_k»
+    const masked = (data: unknown): unknown => (/^\/(learners|support\/tickets)/.test(path) && this.session && !this.perms().includes("users.sensitive.read") ? maskUsernames(data) : data);
     const json = (status: number, data?: unknown, extra?: Record<string, string>) =>
-      route.fulfill({ status, contentType: "application/json", body: data === undefined ? "" : JSON.stringify(tr && status < 300 ? tr(path, data) : data), ...(extra ? { headers: extra } : {}) });
+      route.fulfill({ status, contentType: "application/json", body: data === undefined ? "" : JSON.stringify(status < 300 ? (tr ? tr(path, masked(data)) : masked(data)) : data), ...(extra ? { headers: extra } : {}) });
     const err = (status: number, code: string, details: Record<string, unknown> = {}) => json(status, { code, message: code, trace_id: "e2e-trace-0001", details } satisfies ErrorBody);
 
     const isAuth = /^\/auth\/(login|mfa|password|logout)/.test(path) && !(path === "/auth/password" && !body.challenge);
@@ -636,10 +656,14 @@ export class MockBff {
         const email = String(body.email ?? "").toLowerCase();
         if (this.account(email)) return err(409, "STAFF_EMAIL_EXISTS");
         const role = body.role as RoleCode;
-        const s: Staff = { staff_id: `0b6c3e1a-7d2f-4f0e-9a51-${String(100 + ++this.seq).padStart(12, "0")}`, email, display_name: String(body.display_name), role: F.PRIVILEGED.includes(role) && !this.sc.singleSuperAdmin ? "read_only" : role, status: "ACTIVE", mfa_enabled: false, must_change_password: true, last_login_at: null, created_at: F.iso(0), created_by: me.staff_id };
+        const priv = F.PRIVILEGED.includes(role);
+        const s: Staff = { staff_id: `0b6c3e1a-7d2f-4f0e-9a51-${String(100 + ++this.seq).padStart(12, "0")}`, email, display_name: String(body.display_name), role: priv && !this.sc.singleSuperAdmin ? "read_only" : role, status: "ACTIVE", mfa_enabled: false, must_change_password: true, last_login_at: null, created_at: F.iso(0), created_by: me.staff_id };
         this.accounts.push({ staff: s, password: "Temp-Pass-9999" });
         this.record("staff.created", "staff", s.staff_id, { role });
-        return json(201, { staff: s, temporary_password: "Temp-Pass-9999", approval: null });
+        if (!priv) return json(201, { staff: s, temporary_password: "Temp-Pass-9999", approval: null });
+        // privileged: four-eyes; the password goes to the APPROVER (waived — to the single super_admin himself)
+        const a = this.newApproval("staff.create_privileged", { staff: this.ref(s), role }, "", me, this.sc.singleSuperAdmin);
+        return json(201, { staff: s, temporary_password: this.sc.singleSuperAdmin ? "Temp-Pass-9999" : null, approval: a });
       }
       case !!(m = path.match(/^\/staff\/([0-9a-f-]{36})$/)) && method === "PATCH": {
         const g = guard(["staff.manage"], true);
@@ -647,6 +671,18 @@ export class MockBff {
         const s = this.staffById(m![1]!);
         if (!s) return err(404, "STAFF_NOT_FOUND");
         if (s.staff_id === me.staff_id) return err(409, "SELF_ACTION");
+        const why = String(body.reason ?? "");
+        // re-enabling a privileged account (P2-2) and granting a privileged role (P2-1) — requests, not changes
+        // the single super_admin: applied at once (waived) — new credentials of the target come back to him once
+        const waived = !!this.sc.singleSuperAdmin;
+        const pendingReply = (a: Approval) => {
+          if (waived) Object.assign(s, { status: "ACTIVE", role: (a.summary as { to_role?: RoleCode }).to_role ?? s.role, mfa_enabled: false, must_change_password: true });
+          return json(202, waived ? { approval: a, temporary_password: "Temp-Pass-5555" } : { approval: a });
+        };
+        if (body.status === "ACTIVE" && s.status === "DISABLED" && F.PRIVILEGED.includes(s.role))
+          return pendingReply(this.newApproval("staff.reactivate_privileged", { staff: this.ref(s), role: s.role, to_role: null, from_status: s.status }, why, me, waived));
+        if (typeof body.role === "string" && body.role !== s.role && F.PRIVILEGED.includes(body.role as RoleCode))
+          return pendingReply(this.newApproval("staff.role_grant", { staff: this.ref(s), from_role: s.role, to_role: body.role }, why, me, waived));
         if (typeof body.status === "string") s.status = body.status as Staff["status"];
         if (typeof body.role === "string") s.role = body.role as RoleCode;
         if (typeof body.display_name === "string") s.display_name = body.display_name;
@@ -708,6 +744,13 @@ export class MockBff {
         a.decision_note = String(body.note ?? "");
         if (a.status === "APPLIED" && a.kind === "role.permissions_change") this.matrix[(a.summary as { role: RoleCode }).role] = (a.summary as { permissions: Permission[] }).permissions;
         this.record(`approval.${m![2] === "approve" ? "approved" : "rejected"}`, "approval", a.approval_id, null, a.decision_note);
+        if (a.status === "APPLIED" && a.kind !== "role.permissions_change" && a.kind !== "staff.privileged_revoke") {
+          const sum = a.summary as { staff?: { staff_id?: string }; role?: RoleCode; to_role?: RoleCode; action?: string };
+          const t = this.staffById(sum.staff?.staff_id ?? "");
+          if (t && a.kind !== "staff.privileged_reset") Object.assign(t, { role: sum.to_role ?? sum.role ?? t.role, status: "ACTIVE", mfa_enabled: false, must_change_password: true });
+          // the new credentials of the target go to the approver, once (ApprovalDecision.temporary_password)
+          if (a.kind !== "staff.privileged_reset" || sum.action !== "mfa") return json(200, { ...a, temporary_password: "Temp-Pass-5555" });
+        }
         return json(200, a);
       }
 
@@ -936,7 +979,7 @@ export class MockBff {
         const c = body as unknown as CampaignContent;
         const fields = checkTexts(c.texts, ["learner_name"]);
         if (fields.length) return err(422, "CAMPAIGN_INVALID", { fields });
-        const x: Campaign = { ...c, campaign_id: `e1000000-0000-4000-8000-${String(100 + ++this.seq).padStart(12, "0")}`, status: "draft", version: 1, send_at: null, created_by: me.staff_id, created_by_name: me.display_name, created_at: F.iso(0), updated_at: F.iso(0), scheduled_by: null, scheduled_at: null, started_at: null, finished_at: null, stopped_by: null, stopped_at: null, stop_reason: null, stats: { audience: 0, created: 0, sent: 0, in_app_only: 0, deferred: 0, skipped_frequency: 0, failed: 0 } };
+        const x: Campaign = { ...c, campaign_id: `e1000000-0000-4000-8000-${String(100 + ++this.seq).padStart(12, "0")}`, status: "draft", version: 1, send_at: null, created_by: me.staff_id, created_by_name: me.display_name, created_at: F.iso(0), updated_at: F.iso(0), scheduled_by: null, scheduled_at: null, started_at: null, finished_at: null, stopped_by: null, stopped_at: null, stop_reason: null, last_error: null, stats: { audience: 0, created: 0, sent: 0, in_app_only: 0, deferred: 0, skipped_frequency: 0, failed: 0 } };
         this.campaigns.unshift(x);
         this.record("campaign.created", "campaign", x.campaign_id, null);
         remember(idemKey, x);
@@ -993,8 +1036,11 @@ export class MockBff {
           if (c.status !== "draft") return err(409, "CAMPAIGN_NOT_DRAFT");
           if (body.expected_version !== c.version) return err(409, "CAMPAIGN_VERSION_CONFLICT", { current_version: c.version });
           const at = Date.parse(String(body.send_at ?? ""));
-          if (Number.isNaN(at) || at > Date.now() + 30 * F.DAY) return err(422, "VALIDATION_ERROR", { in: "body", field: "send_at", errors: [] });
-          Object.assign(c, { status: "scheduled", version: c.version + 1, send_at: new Date(Math.max(at, Date.now())).toISOString(), scheduled_by: me.staff_id, scheduled_at: F.iso(0), stats: { ...c.stats, audience: 1840 } });
+          const now = Date.now() + (this.sc.serverClockAheadMs ?? 0);
+          if (Number.isNaN(at)) return err(422, "VALIDATION_ERROR", { in: "body", field: "send_at", errors: [] });
+          if (at > now + 30 * F.DAY) return err(422, "CAMPAIGN_INVALID", { fields: [{ path: "send_at", reason: "too_far" }] });
+          if (at < now - 5 * 60_000) return err(422, "CAMPAIGN_INVALID", { fields: [{ path: "send_at", reason: "in_past" }] });
+          Object.assign(c, { status: "scheduled", version: c.version + 1, send_at: new Date(at - now < 60_000 ? now : at).toISOString(), scheduled_by: me.staff_id, scheduled_at: F.iso(0), stats: { ...c.stats, audience: 1840 } });
           this.record("campaign.scheduled", "campaign", c.campaign_id, null, String(body.reason ?? ""));
           remember(idemKey, c);
           return json(200, c);
@@ -1006,8 +1052,9 @@ export class MockBff {
           this.record("campaign.unscheduled", "campaign", c.campaign_id, null, String(body.reason ?? ""));
           return json(200, c);
         }
-        // stop: emergency, idempotent
-        if (c.status !== "stopped" && c.status !== "done") {
+        // stop: emergency, idempotent; scheduled | sending | done (cancels what quiet hours deferred), never a draft
+        if (c.status === "draft") return err(409, "CAMPAIGN_NOT_ACTIVE");
+        if (c.status !== "stopped") {
           Object.assign(c, { status: "stopped", version: c.version + 1, stopped_by: me.staff_id, stopped_at: F.iso(0), stop_reason: String(body.reason ?? "") });
           this.record("campaign.stopped", "campaign", c.campaign_id, null, c.stop_reason);
         }
@@ -1017,6 +1064,29 @@ export class MockBff {
       default:
         return err(404, "NOT_FOUND", { path });
     }
+  }
+
+  private ref(s: Staff) {
+    return { staff_id: s.staff_id, email: s.email, display_name: s.display_name };
+  }
+
+  private newApproval(kind: Approval["kind"], summary: Record<string, unknown>, reason: string, me: Staff, waived = false): Approval {
+    const a: Approval = {
+      approval_id: `ap000000-0000-4000-8000-${String(++this.seq).padStart(12, "0")}`,
+      kind,
+      status: waived ? "APPLIED" : "PENDING",
+      summary,
+      reason,
+      requested_by: { staff_id: me.staff_id, email: me.email, display_name: me.display_name, role: me.role },
+      requested_at: F.iso(0),
+      decided_by: null,
+      decided_at: null,
+      decision_note: null,
+      waived: waived ? "single_super_admin" : null,
+      expires_at: F.iso(72 * F.HOUR),
+    };
+    this.approvals.unshift(a);
+    return a;
   }
 
   /** e2e helper: the dispatcher picked the campaign up (scheduled → sending with progress) */

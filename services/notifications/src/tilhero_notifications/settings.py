@@ -64,6 +64,9 @@ class Settings(ServiceSettings):
     campaign_max_batches_per_call: int = Field(default=50, ge=1, le=1000)  # шагов рассылок в одном :dispatch
     campaign_max_schedule_days: int = Field(default=30, ge=1, le=365)  # send_at не дальше
     campaign_asap_seconds: int = Field(default=60, ge=0, le=3600)  # send_at ближе — «как можно скорее»
+    # send_at в прошлом не дальше — тоже «как можно скорее» (так UI передаёт «Отправить сейчас»); раньше — 422 in_past
+    campaign_past_tolerance_seconds: int = Field(default=300, ge=0, le=3600)
+    campaign_failure_alert_attempts: int = Field(default=6, ge=1, le=100)  # неудач шага подряд → аудит campaign.failed
 
     @field_validator("admin_test_chat_ids", mode="before")
     @classmethod

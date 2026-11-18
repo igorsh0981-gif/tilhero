@@ -240,7 +240,7 @@ async def test_migration_downgrade_and_reapply() -> None:
         assert tables <= {"alembic_version"}
         await migrate(SERVICE_DIR, settings)
         assert await conn.fetchval("SELECT count(*) FROM roles") == 8
-        assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0001"
+        assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0002"
     finally:
         await conn.close()
         await drop_schema(schema)

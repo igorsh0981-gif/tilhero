@@ -261,8 +261,9 @@ async def schedule_campaign(
     rt: Runtime = Depends(get_runtime),
     idempotency_key: str | None = IdempotencyKey,
 ) -> JSONResponse:
-    """send_at в прошлом или ближе CAMPAIGN_ASAP_SECONDS — «как можно скорее» (ближайший dispatch); дальше
-    CAMPAIGN_MAX_SCHEDULE_DAYS — 422; аудитория 0 — 422 CAMPAIGN_EMPTY_AUDIENCE."""
+    """send_at ближе CAMPAIGN_ASAP_SECONDS (в т. ч. до CAMPAIGN_PAST_TOLERANCE_SECONDS в прошлом — так UI передаёт
+    «Отправить сейчас») — «как можно скорее» (ближайший dispatch); раньше — 422 CAMPAIGN_INVALID send_at in_past
+    (ревью T2-2); дальше CAMPAIGN_MAX_SCHEDULE_DAYS — 422 too_far; аудитория 0 — 422 CAMPAIGN_EMPTY_AUDIENCE."""
     actor = principal.require_permission(SEND)
     reason = _reason(body.reason)
     s = _s(rt)
@@ -272,6 +273,8 @@ async def schedule_campaign(
         send_at = body.send_at if body.send_at.tzinfo else body.send_at.replace(tzinfo=UTC)
         if send_at > now + timedelta(days=s.campaign_max_schedule_days):
             raise cmp.campaign_invalid([{"path": "send_at", "reason": "too_far"}])
+        if send_at < now - timedelta(seconds=s.campaign_past_tolerance_seconds):
+            raise cmp.campaign_invalid([{"path": "send_at", "reason": "in_past"}])  # ревью T2-2
         if send_at - now < timedelta(seconds=s.campaign_asap_seconds):
             send_at = now
         current = await _get(rt, campaign_id)
@@ -304,12 +307,12 @@ async def unschedule_campaign(
         return await cmp.view_one(session, row)
 
 
-@router.post("/{campaign_id}/stop")
+@router.post("/{campaign_id}/stop", responses={409: {"description": "CAMPAIGN_NOT_ACTIVE"}})
 async def stop_campaign(
     campaign_id: uuid.UUID, body: ReasonIn, principal: Principal = Depends(staff), rt: Runtime = Depends(get_runtime)
 ) -> dict:
-    """Экстренная остановка (step-up — admin-bff): новые записи не создаются, неотправленные отменяются; повтор —
-    200 без изменений."""
+    """Экстренная остановка (step-up — admin-bff) из scheduled | sending | done: новые записи не создаются,
+    неотправленные отменяются; повтор — 200 без изменений; черновик — 409 CAMPAIGN_NOT_ACTIVE."""
     actor = principal.require_permission(SEND)
     reason = _reason(body.reason)
     async with rt.transaction() as session:

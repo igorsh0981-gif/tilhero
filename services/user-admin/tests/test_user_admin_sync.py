@@ -7,12 +7,14 @@ import asyncio
 import uuid
 from datetime import datetime, timedelta
 
+import asyncpg
 import pytest
 from sqlalchemy import select
 from user_admin_testkit import ID, LP, MASK, SCHEDULER_TOKEN, fake_identity, fake_plans, iso, now, plan, snapshot
 
 from tilhero_common.http_client import UpstreamError
-from tilhero_common.testing import internal_headers
+from tilhero_common.testing import TEST_ADMIN_URL, internal_headers
+from tilhero_user_admin.domain.sync import RECONCILE_LOCK_CLASS, lock_object
 from tilhero_user_admin.models import LearnerSummary, ReconcileState
 
 SCHED = {"authorization": f"Bearer {SCHEDULER_TOKEN}"}
@@ -44,7 +46,7 @@ async def test_identity_sync_pages_and_keeps_watermark(make_env) -> None:
     for n, snap in enumerate(snaps):
         r = await summary(env, snap["user_id"])
         assert r.username == f"tester_{n}" and r.display_name == f"Тестовый Ученик {n}"
-        assert r.search_text == f"тестовый ученик {n} tester_{n}"
+        assert r.search_text == f"тестовый ученик {n}"  # username — не в поиске по подстроке (T2-3)
         assert r.telegram_id_masked == MASK * 6 + f"{n:03d}" and r.refreshed_at and r.profile_known
         assert r.consent["policy_version"] == "1.0" and r.notifications["enabled"] is True
     st = await state(env)
@@ -223,12 +225,81 @@ async def test_invalid_snapshot_is_skipped(env) -> None:
     assert (await summary(env, ok["user_id"])).plan is not None
 
 
-async def test_concurrent_runs_are_serialized(env) -> None:
+async def test_concurrent_run_is_skipped_not_queued(env) -> None:
+    """Прогон источника уже идёт — второй не ждёт (повтор n8n по таймауту не копит ожидающих) и ничего не делает."""
     for n in range(4):
         env.identity.put(snapshot(n=n))
     results = await asyncio.gather(env.reconciler.identity.run_once(), env.reconciler.identity.run_once())
-    assert sorted(results) == [4, 4]
-    assert (await state(env)).synced_total == 8
+    assert sorted(results, key=lambda r: r is None) == [4, None]
+    assert (await state(env)).synced_total == 4
+    # источники независимы: прогон identity не мешает прогону планов
+    env.plans.put(plan(uuid.uuid4()))
+    results = await asyncio.gather(env.reconciler.identity.run_once(), env.reconciler.plans.run_once())
+    assert results == [4, 1]
+
+
+async def test_run_on_other_replica_is_skipped(env) -> None:
+    """Межрепликовая блокировка: advisory-блокировку держит другое соединение (другая реплика) — прогон пропускается
+    без ожидания; после её снятия — идёт. Соединение прогона возвращается в пул без блокировки."""
+    env.identity.put(snapshot(n=1))
+    key = {"c": RECONCILE_LOCK_CLASS, "o": lock_object(env.settings.db_schema, "identity")}
+    conn = await asyncpg.connect(TEST_ADMIN_URL)
+    try:
+        assert await conn.fetchval("SELECT pg_try_advisory_lock($1, $2)", key["c"], key["o"])
+        assert await env.reconciler.identity.run_once() is None
+        assert await env.reconciler.plans.run_once() == 0  # другой источник — другой ключ
+        r = await env.client.post("/internal/v1/reconcile", headers=SCHED)
+        assert r.status_code == 200 and r.json()["identity"] == {"ok": True, "applied": 0, "skipped": True,
+                                                                 "error": None}
+        assert await conn.fetchval("SELECT pg_advisory_unlock($1, $2)", key["c"], key["o"])
+        assert await env.reconciler.identity.run_once() == 1
+        # блокировка прогона снята: другая «реплика» берёт её сразу
+        assert await conn.fetchval("SELECT pg_try_advisory_lock($1, $2)", key["c"], key["o"])
+    finally:
+        await conn.close()
+
+
+async def test_lock_released_after_source_failure(env) -> None:
+    env.identity.down = True
+    with pytest.raises(UpstreamError):
+        await env.reconciler.identity.run_once()
+    env.identity.down = False
+    env.runtime.client(ID).breaker.success()
+    env.identity.put(snapshot(n=1))
+    assert await env.reconciler.identity.run_once() == 1
+
+
+async def test_page_is_applied_with_bounded_number_of_statements(make_env) -> None:
+    """Пачка вместо N+1 (ревью P2-6): число SQL-вызовов на страницу не растёт с её размером (UPDATE строк —
+    executemany одним вызовом на набор изменённых колонок)."""
+    from sqlalchemy import event
+
+    async def statements(n: int, **kw) -> int:
+        identity = fake_identity()
+        for i in range(n):
+            identity.put(snapshot(n=i, **kw))
+        env = await make_env(identity, reconcile_page_size=500)
+        count = 0
+
+        def on_execute(*_args) -> None:
+            nonlocal count
+            count += 1
+
+        engine = env.runtime.db.engine.sync_engine
+        event.listen(engine, "before_cursor_execute", on_execute)
+        try:
+            assert await env.reconciler.identity.run_once() == n
+        finally:
+            event.remove(engine, "before_cursor_execute", on_execute)
+        return count
+
+    small, large = await statements(5), await statements(150)
+    assert large <= small + 2, (small, large)
+    # повторная сверка тех же учеников (строки уже есть) — тоже без N+1
+    deleted_small = await statements(5, status="DELETED", username=None, display_name=None, telegram_id_masked=None)
+    deleted_large = await statements(150, status="DELETED", username=None, display_name=None,
+                                     telegram_id_masked=None)
+    assert deleted_large <= deleted_small + 2, (deleted_small, deleted_large)
 
 
 # ---------------------------------------------------------------- POST /internal/v1/reconcile
@@ -238,8 +309,8 @@ async def test_reconcile_endpoint_runs_both_sources(env) -> None:
     env.plans.put(plan(snap["user_id"]))
     r = await env.client.post("/internal/v1/reconcile", headers=SCHED)
     assert r.status_code == 200, r.text
-    assert r.json() == {"identity": {"ok": True, "applied": 1, "error": None},
-                        "plans": {"ok": True, "applied": 1, "error": None}}
+    assert r.json() == {"identity": {"ok": True, "applied": 1, "skipped": False, "error": None},
+                        "plans": {"ok": True, "applied": 1, "skipped": False, "error": None}}
     row = await summary(env, snap["user_id"])
     assert row.username == "tester_1" and row.goal == "travel"
     # повтор безопасен

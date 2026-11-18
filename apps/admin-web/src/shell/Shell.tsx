@@ -27,6 +27,7 @@ import { ConfigPage } from "../screens/config/Config";
 import { Roles, ROLE_CODES } from "../screens/roles/Roles";
 import { AuditPage } from "../screens/audit/Audit";
 import { Soon } from "../screens/soon/Soon";
+import { ErrorBoundary } from "../ui/ErrorBoundary";
 
 export const APP_VERSION = "admin-web 0.2.0";
 
@@ -324,23 +325,25 @@ export function Shell() {
           </header>
           <main className="main" tabIndex={-1} ref={mainRef} id="main" data-testid={page ? `page-${page}` : undefined}>
             <RateWaitNotice scope={[]} testId="staff-rate-wait" />
-            {item?.soon ? (
-              <Soon page={item.id} sprint={item.soon} />
-            ) : page === "overview" ? (
-              <Overview />
-            ) : page === "users" ? (
-              <LearnersPage openId={route.id} />
-            ) : page === "support" ? (
-              <SupportPage ticketRef={route.id} onStats={loadStats} />
-            ) : page === "news" ? (
-              <NewsPage routeId={route.id} />
-            ) : page === "config" ? (
-              <ConfigPage />
-            ) : page === "roles" ? (
-              <Roles />
-            ) : page === "audit" ? (
-              <AuditPage />
-            ) : null}
+            <ErrorBoundary scope="section" resetKey={`${page}/${route.id ?? ""}`}>
+              {item?.soon ? (
+                <Soon page={item.id} sprint={item.soon} />
+              ) : page === "overview" ? (
+                <Overview />
+              ) : page === "users" ? (
+                <LearnersPage openId={route.id} />
+              ) : page === "support" ? (
+                <SupportPage ticketRef={route.id} onStats={loadStats} />
+              ) : page === "news" ? (
+                <NewsPage routeId={route.id} />
+              ) : page === "config" ? (
+                <ConfigPage />
+              ) : page === "roles" ? (
+                <Roles />
+              ) : page === "audit" ? (
+                <AuditPage />
+              ) : null}
+            </ErrorBoundary>
           </main>
         </div>
       </div>

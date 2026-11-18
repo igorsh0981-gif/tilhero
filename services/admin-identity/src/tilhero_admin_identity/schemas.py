@@ -14,9 +14,10 @@ from tilhero_admin_identity.domain.policy import is_valid_email, normalize_email
 StaffStatus = Literal["ACTIVE", "LOCKED", "DISABLED"]
 LoginNext = Literal["done", "mfa", "mfa_enroll", "password_change"]
 # staff.privileged_revoke — понижение/отключение super_admin при ≥ 2 активных (B1);
-# staff.privileged_reset — сброс пароля/MFA привилегированного сотрудника (N1)
+# staff.privileged_reset — сброс пароля/MFA привилегированного сотрудника (N1);
+# staff.reactivate_privileged — включение (DISABLED → ACTIVE) сотрудника с привилегированной ролью (P2-2)
 ApprovalKind = Literal["staff.role_grant", "staff.create_privileged", "role.permissions_change",
-                       "staff.privileged_revoke", "staff.privileged_reset"]
+                       "staff.privileged_revoke", "staff.privileged_reset", "staff.reactivate_privileged"]
 ApprovalStatus = Literal["PENDING", "APPROVED", "REJECTED", "EXPIRED", "APPLIED"]
 
 Challenge = Field(min_length=20, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
@@ -153,14 +154,21 @@ class ApprovalOut(BaseModel):
 
 
 class ApprovalDecisionOut(ApprovalOut):
-    """ApprovalDecision (admin.ts): temporary_password — только в ответе approve заявки staff.privileged_reset
-    (action "password"), решающему, один раз."""
+    """ApprovalDecision (admin.ts): temporary_password — только в ответе approve заявок staff.privileged_reset
+    (action "password"), staff.create_privileged, staff.role_grant, staff.reactivate_privileged; решающему, один раз."""
 
     temporary_password: str | None = None
 
 
 class ApprovalEnvelope(BaseModel):
     approval: ApprovalOut
+
+
+class ApprovalGrantEnvelope(ApprovalEnvelope):
+    """PATCH staff → 202: заявка применена сразу (waived) с выпуском учётных данных цели — temporary_password автору
+    как единственному решающему (P2-1/P2-2); ключ есть только когда пароль выдан."""
+
+    temporary_password: str | None = None
 
 
 class ApprovalPage(BaseModel):

@@ -41,7 +41,7 @@ class DelegatedActor(BaseModel):
 
 
 class RecordWriteIn(BaseModel):
-    """HTTP-запись в журнал (писатели — api/routes.py WRITERS: admin-identity, identity-consent). Кто действовал
+    """HTTP-запись в журнал (писатели — api/routes.py WRITERS: identity-consent, admin-bff). Кто действовал
     (actor_*), сервис берёт ТОЛЬКО из внутреннего токена (ревью P4): сотрудник — из claim actor (его выпускает только
     admin-bff), иначе — пользователь из sub или сам сервис-издатель. Поля actor_* в теле → 422.
 

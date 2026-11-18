@@ -19,16 +19,16 @@ router = APIRouter()
 # Синхронный аудит (запись ДО выдачи результата). Доменные сервисы TilHero пишут аудит событием
 # admin.audit.recorded.v1 через outbox (consumers.AUDIT_EVENT_PRODUCERS); по HTTP — только перечисленные здесь,
 # явно, по принципу минимальных прав (остальные → 403 CALLER_NOT_ALLOWED до разбора тела).
-# Спринт 2 (docs/sprint2/INTERNAL_API.md §3 «audit»): admin-identity и identity-consent (раскрытие Telegram ID).
+# Спринт 2 (docs/sprint2/INTERNAL_API.md §3 «audit»): identity-consent (раскрытие Telegram ID — запись до выдачи
+# значения). admin-identity пишет аудит только событием через outbox — HTTP-права у него нет (ревью спринта 2).
 # admin-bff — только собственные действия BFF от имени сотрудника из actor-токена (dev.impersonate в ENV=dev,
 # резервная запись auth.logout, когда admin-identity недоступен) — список ONLY_ACTIONS.
-WRITERS: frozenset[str] = frozenset({"admin-identity", "identity-consent", "admin-bff"})
+WRITERS: frozenset[str] = frozenset({"identity-consent", "admin-bff"})
 ONLY_ACTIONS: dict[str, frozenset[str]] = {"admin-bff": frozenset({"dev.impersonate", "auth.logout"})}
 # Делегирование (сотрудник в теле, on_behalf_of) — узкое исключение: издатель + перечисленные действия, которые он
 # пишет синхронно от имени сотрудника (claim actor принимается только от admin-bff, поэтому домен передаёт сотрудника
 # из своего actor-токена в теле). identity-consent: раскрытие Telegram ID ученика (`sensitive.view`, без записи значение
-# не выдаётся) и отказ по лимиту раскрытий (`sensitive.view_rate_limited`). admin-identity пишет от своего имени или
-# событием — делегирование ему не нужно.
+# не выдаётся) и отказ по лимиту раскрытий (`sensitive.view_rate_limited`).
 DELEGATION: dict[str, frozenset[str]] = {
     "identity-consent": frozenset({"sensitive.view", "sensitive.view_rate_limited"}),
 }

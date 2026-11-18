@@ -5,7 +5,8 @@
 import type { FastifyReply } from "fastify";
 import { parseDomain, withNames, type Codec } from "../codec.js";
 import type { BffContext } from "../context.js";
-import { passReplayed, type StaffAuth } from "../http.js";
+import { maskUsername } from "../contract.js";
+import { hasPermission, passReplayed, type StaffAuth } from "../http.js";
 import type { DomainResponse } from "../upstream.js";
 
 export interface RespondOptions {
@@ -36,3 +37,21 @@ export async function relay<T>(
 
 /** Схема ответа маршрута из кодека: `{"2xx": schema}` или по статусам. */
 export const out = (c: Codec<unknown>) => ({ "2xx": c.schema });
+
+/**
+ * Защита в глубину (ревью T2-3, admin.ts AdminLearnerRow): полный @username — только сотруднику с
+ * users.sensitive.read. Маскирует домен user-admin по actor; если он вернул полный username сотруднику без права,
+ * BFF маскирует сам (`ig•••81`, короче 5 — `•••`). Обходит строки реестра, детей, опекуна и сводку ученика в тикете.
+ */
+export function redactUsernames<T>(auth: StaffAuth, value: T): T {
+  if (hasPermission(auth, "users.sensitive.read")) return value;
+  const visit = (v: unknown): void => {
+    if (Array.isArray(v)) return v.forEach(visit);
+    if (!v || typeof v !== "object") return;
+    const o = v as Record<string, unknown>;
+    if (typeof o.username === "string" && "user_id" in o) o.username = maskUsername(o.username);
+    for (const x of Object.values(o)) visit(x);
+  };
+  visit(value);
+  return value;
+}

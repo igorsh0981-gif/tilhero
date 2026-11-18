@@ -10,6 +10,7 @@ import { Campaigns } from "../../api/endpoints";
 import { ApiError } from "../../api/errors";
 import { useI18n } from "../../i18n";
 import { uuid } from "../../lib/ids";
+import { useNow } from "../../lib/useNow";
 import { useSession } from "../../state/session";
 import { Icon } from "../../ui/Icon";
 import { LoadError } from "../../ui/LoadError";
@@ -17,7 +18,7 @@ import { Btn, Callout, cx, Empty, FieldErr, Pill, Reveal, Select, Spinner, TabPa
 import { ConfirmCommand } from "../../ui/overlays";
 import { useToast } from "../../ui/toasts";
 import { errText } from "../../ui/errors";
-import { CAMPAIGN_PLACEHOLDERS, CAMPAIGN_TITLE_MAX, campaignContent, emptyCampaign, issuesIn, LANGS, normalizeSegment, normalizeTexts, NOTE_ROUTES, sameJson, serverIssues, substitute, TEXT_LIMITS, validateCampaign, type Issues } from "./catalog";
+import { CAMPAIGN_PLACEHOLDERS, CAMPAIGN_TITLE_MAX, campaignContent, checkSendAt, emptyCampaign, issuesIn, LANGS, normalizeSegment, normalizeTexts, NOTE_ROUTES, sameJson, SEND_AT_MAX_AHEAD_MS, SEND_AT_MIN_LEAD_MS, serverIssues, substitute, TEXT_LIMITS, validateCampaign, type Issues, type SendAtProblem } from "./catalog";
 import { PreviewControls, TelegramMessage, TextInput, useInsertAtCaret } from "./parts";
 import { TestSend } from "./Templates";
 
@@ -112,7 +113,7 @@ export function CampaignsTab({ openId }: { openId: string | null }) {
                 {items.map((c) => {
                   const active = sel?.kind === "c" && sel.id === c.campaign_id;
                   return (
-                    <tr key={c.campaign_id} className={active ? "is-sel" : undefined} data-testid={`cmp-row-${c.campaign_id}`}>
+                    <tr key={c.campaign_id} className={cx(active && "is-sel", c.last_error && "sev-bad")} data-testid={`cmp-row-${c.campaign_id}`}>
                       <td>
                         <button type="button" className="tr" aria-current={active ? "true" : undefined} onClick={() => setSel({ kind: "c", id: c.campaign_id })} data-testid={`cmp-open-${c.campaign_id}`}>
                           {c.title}
@@ -124,6 +125,7 @@ export function CampaignsTab({ openId }: { openId: string | null }) {
                       <td className="r num">{c.status === "draft" ? "—" : `${fmt.num(c.stats.sent)} / ${fmt.num(c.stats.audience)}`}</td>
                       <td>
                         <CampaignStatusPill s={c.status} />
+                        {c.last_error && <StalledNote e={c.last_error} compact testId={`cmp-stalled-${c.campaign_id}`} />}
                       </td>
                     </tr>
                   );
@@ -304,6 +306,7 @@ function CampaignDetail({ id, onSaved, onChanged }: { id: string | null; onSaved
         </span>
       </div>
 
+      {c?.last_error && <StalledNote e={c.last_error} testId="cmp-stalled" />}
       {c && c.status !== "draft" && <CampaignProgress c={c} />}
       {conflict && (
         <Reveal dep={conflict}>
@@ -447,7 +450,7 @@ function CampaignDetail({ id, onSaved, onChanged }: { id: string | null; onSaved
           <Btn kind="primary" icon="calendar" label={t("cmp.schedule")} perm="notif.campaigns.send" disabled={dirty} title={dirty ? t("wn.saveFirst") : undefined} onClick={() => setCmd({ kind: "schedule", c, key: uuid() })} testId="cmp-schedule" />
         )}
         {c?.status === "scheduled" && can("notif.campaigns.send") && <Btn icon="rollback" label={t("cmp.unschedule")} perm="notif.campaigns.send" onClick={() => setCmd({ kind: "unschedule", c, key: uuid() })} testId="cmp-unschedule" />}
-        {(c?.status === "scheduled" || c?.status === "sending") && can("notif.campaigns.send") && <Btn kind="danger" icon="stop" label={t("cmp.stop")} perm="notif.campaigns.send" onClick={() => setCmd({ kind: "stop", c, key: uuid() })} testId="cmp-stop" />}
+        {c && canStop(c) && can("notif.campaigns.send") && <Btn kind="danger" icon="stop" label={t("cmp.stop")} perm="notif.campaigns.send" onClick={() => setCmd({ kind: "stop", c, key: uuid() })} testId="cmp-stop" />}
       </div>
       {c && c.status !== "done" && c.status !== "stopped" && !can("notif.campaigns.send") && (
         <p className="xs muted row" data-testid="cmp-no-send">
@@ -462,6 +465,29 @@ function CampaignDetail({ id, onSaved, onChanged }: { id: string | null; onSaved
 
       {cmd && <CampaignCommand cmd={cmd} est={est} onClose={() => setCmd(null)} onDone={(x) => { apply(x); onChanged(); }} />}
     </section>
+  );
+}
+
+/**
+ * Emergency stop (contract, review P2-7): scheduled | sending, and a finished campaign while messages deferred by quiet
+ * hours are still waiting. Never a draft — the domain answers 409 CAMPAIGN_NOT_ACTIVE.
+ */
+export const canStop = (c: Pick<Campaign, "status" | "stats">): boolean => c.status === "scheduled" || c.status === "sending" || (c.status === "done" && c.stats.deferred > 0);
+
+/** Campaign.last_error (review P2-7): a sending step keeps failing — shown to staff, not only in the service logs. */
+function StalledNote({ e, compact, testId }: { e: NonNullable<Campaign["last_error"]>; compact?: boolean; testId: string }) {
+  const { t, fmt } = useI18n();
+  const line = t("cmp.stalled", { code: e.code, t: fmt.dateTime(e.since), n: e.attempts });
+  if (compact)
+    return (
+      <div className="cell-sub bad-ink stalled-line" data-testid={testId}>
+        <Icon name="alertCircle" /> {line}
+      </div>
+    );
+  return (
+    <Callout kind="bad" icon="alertCircle" testId={testId}>
+      <b>{line}</b> {t("cmp.stalledM")}
+    </Callout>
   );
 }
 
@@ -553,43 +579,80 @@ function CampaignProgress({ c }: { c: Campaign }) {
   );
 }
 
-/** schedule (step-up, Idempotency-Key, send_at) / unschedule / emergency stop (step-up). */
+/**
+ * schedule (step-up, Idempotency-Key, send_at) / unschedule / emergency stop (step-up).
+ * Schedule asks for an explicit choice (review T2-2): «Send now» passes send_at = now (the domain treats it as «as soon
+ * as possible»), «At a chosen time» must be at least 2 min ahead and within 30 days — otherwise the field shows the
+ * error and the confirm button stays inactive. A 422 CAMPAIGN_INVALID {send_at} from the domain lands at the same field.
+ */
 function CampaignCommand({ cmd, est, onClose, onDone }: { cmd: NonNullable<Cmd>; est: CampaignEstimate | null; onClose: () => void; onDone: (c: Campaign) => void }) {
   const i = useI18n();
   const { t, fmt } = i;
   const toast = useToast();
-  const [when, setWhen] = useState<"asap" | "at">("asap");
-  const [at, setAt] = useState(() => localInput(new Date(Date.now() + 60 * 60_000)));
-  const [atErr, setAtErr] = useState<string | null>(null);
   const k = cmd.kind;
+  const [when, setWhen] = useState<"now" | "at" | null>(null);
+  const [at, setAt] = useState(() => localInput(new Date(Date.now() + 60 * 60_000)));
+  const [srvAt, setSrvAt] = useState<SendAtProblem | "server" | null>(null);
+  // a refused attempt created nothing: the next one is a new command with its own Idempotency-Key
+  const [key, setKey] = useState(cmd.key);
+  const now = useNow(k === "schedule" && when === "at");
+  const atProblem = k === "schedule" && when === "at" ? (srvAt ?? checkSendAt(at, now)) : null;
+  const atText = (x: SendAtProblem | "server" | null) => (x === "in_past" ? t("cmp.errPast") : x === "too_far" ? t("cmp.errAt") : x ? t("cmp.errAtFormat") : null);
   return (
     <ConfirmCommand
       title={k === "schedule" ? t("cmp.scheduleT", { x: cmd.c.title }) : k === "stop" ? t("cmp.stopT", { x: cmd.c.title }) : t("cmp.unscheduleT", { x: cmd.c.title })}
-      text={k === "schedule" ? t("cmp.scheduleM") : k === "stop" ? t("cmp.stopM") : t("cmp.unscheduleM")}
+      text={k === "schedule" ? t("cmp.scheduleM") : k === "stop" ? (cmd.c.status === "done" ? t("cmp.stopDoneM") : t("cmp.stopM")) : t("cmp.unscheduleM")}
       icon={k === "schedule" ? "calendar" : k === "stop" ? "stop" : "rollback"}
       tone={k === "stop" ? "bad" : "warn"}
       ok={k === "schedule" ? t("cmp.schedule") : k === "stop" ? t("cmp.stop") : t("cmp.unschedule")}
       okKind={k === "stop" ? "danger" : "primary"}
+      okDisabled={k === "schedule" && (when === null || atProblem !== null)}
       testId="cmp-confirm"
       extra={
         <>
           {k === "schedule" && (
             <fieldset className="fs stack sm" data-testid="cmp-when">
-              <legend className="field-label">{t("cmp.when")}</legend>
+              <legend className="field-label req">{t("cmp.when")}</legend>
               <label className="check">
-                <input type="radio" name="cmp-when" checked={when === "asap"} onChange={() => setWhen("asap")} data-testid="cmp-when-asap" />
+                <input type="radio" name="cmp-when" checked={when === "now"} onChange={() => { setWhen("now"); setSrvAt(null); }} data-testid="cmp-when-now" />
                 <span>{t("cmp.asapLong")}</span>
               </label>
               <label className="check">
-                <input type="radio" name="cmp-when" checked={when === "at"} onChange={() => setWhen("at")} data-testid="cmp-when-at" />
+                <input type="radio" name="cmp-when" checked={when === "at"} onChange={() => { setWhen("at"); setSrvAt(null); }} data-testid="cmp-when-at" />
                 <span>{t("cmp.atLong")}</span>
               </label>
               {when === "at" && (
                 <div className="field">
                   <label htmlFor="cmp-at">{t("cmp.at")}</label>
-                  <input id="cmp-at" type="datetime-local" className={cx("input", atErr && "is-invalid")} value={at} onChange={(e) => setAt(e.target.value)} data-testid="cmp-at" />
-                  <FieldErr msg={atErr} />
+                  <input
+                    id="cmp-at"
+                    type="datetime-local"
+                    className={cx("input", atProblem && "is-invalid")}
+                    value={at}
+                    min={localInput(new Date(now + SEND_AT_MIN_LEAD_MS))}
+                    max={localInput(new Date(now + SEND_AT_MAX_AHEAD_MS))}
+                    aria-invalid={!!atProblem || undefined}
+                    aria-describedby={atProblem ? "cmp-at-err" : undefined}
+                    onChange={(e) => {
+                      setAt(e.target.value);
+                      setSrvAt(null);
+                    }}
+                    data-testid="cmp-at"
+                  />
+                  <FieldErr id="cmp-at-err" msg={atText(atProblem)} />
                 </div>
+              )}
+              {when === null ? (
+                <p className="xs muted" data-testid="cmp-when-hint">
+                  {t("cmp.whenPick")}
+                </p>
+              ) : (
+                !atProblem && (
+                  <p className="small" data-testid="cmp-starts">
+                    <Icon name="calendar" /> {when === "now" ? t("cmp.startsNow") : t("cmp.startsAt", { t: fmt.dateTime(new Date(at).toISOString()) })}
+                    {est ? ` · ${t("cmp.estShort", { n: fmt.num(est.audience) })}` : ""}
+                  </p>
+                )
               )}
               {est && <p className="small">{t("cmp.estLine", { n: fmt.num(est.audience), c: fmt.num(est.frequency_capped) })}</p>}
               <p className="xs muted">{t("cmp.quiet")}</p>
@@ -605,19 +668,18 @@ function CampaignCommand({ cmd, est, onClose, onDone }: { cmd: NonNullable<Cmd>;
       onClose={onClose}
       onConfirm={async (reason) => {
         let sendAt = new Date().toISOString();
-        if (k === "schedule" && when === "at") {
-          const d = new Date(at);
-          if (Number.isNaN(d.getTime()) || d.getTime() > Date.now() + 30 * 86_400_000) {
-            setAtErr(t("cmp.errAt"));
-            return t("cmp.errAt");
+        if (k === "schedule") {
+          if (when === null) return t("cmp.whenPick");
+          if (when === "at") {
+            const p = checkSendAt(at, Date.now());
+            if (p) return atText(p);
+            sendAt = new Date(at).toISOString();
           }
-          setAtErr(null);
-          sendAt = d.toISOString();
         }
         try {
           const x =
             k === "schedule"
-              ? await Campaigns.schedule(cmd.c.campaign_id, cmd.c.version, sendAt, reason, cmd.key)
+              ? await Campaigns.schedule(cmd.c.campaign_id, cmd.c.version, sendAt, reason, key)
               : k === "stop"
                 ? await Campaigns.stop(cmd.c.campaign_id, reason)
                 : await Campaigns.unschedule(cmd.c.campaign_id, reason);
@@ -625,7 +687,21 @@ function CampaignCommand({ cmd, est, onClose, onDone }: { cmd: NonNullable<Cmd>;
           onDone(x);
           return null;
         } catch (e) {
-          return (e as ApiError).cancelled ? t("stepup.cancelled") : errText(i, e);
+          if ((e as ApiError).cancelled) return t("stepup.cancelled");
+          if (k === "schedule" && e instanceof ApiError && e.status === 422) {
+            setKey(uuid());
+            const p = serverIssues(e.details).send_at;
+            if (p) {
+              const r = (e.details as { fields?: Array<{ path?: unknown; reason?: unknown }> }).fields?.find((f) => f.path === "send_at")?.reason;
+              const problem: SendAtProblem | "server" = r === "in_past" || r === "too_far" ? r : "server";
+              if (when === "at") {
+                setSrvAt(problem);
+                return t("cmp.errAtSee");
+              }
+              return problem === "in_past" ? t("cmp.errNowStale") : atText(problem);
+            }
+          }
+          return errText(i, e);
         }
       }}
     />

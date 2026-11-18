@@ -289,6 +289,57 @@ describe("session lifecycle", () => {
   });
 });
 
+describe("выход безотказный (ревью T2-1)", () => {
+  it("admin-identity недоступен и кэш principal истёк → 204, cookie стёрта, сессия удалена; та же cookie потом → 401", async () => {
+    const { staff, s } = await loginAs(h, "support");
+    await redis().del(`${h.config.redisKeyPrefix}principal:${staff.staff_id}`); // кэш principal истёк (> 30 с)
+    h.fake.down.add("adminIdentity");
+    const res = await h.app.inject({ method: "POST", url: "/admin/v1/auth/logout", headers: browser(s) });
+    expect(res.statusCode).toBe(204);
+    expect(String(res.headers["set-cookie"])).toMatch(/^__Host-tilhero_admin=; Path=\/; Max-Age=0/);
+    expect(await redis().keys(`${h.config.redisKeyPrefix}sess:*`)).toHaveLength(0);
+    // резервная запись auth.logout в audit — с actor сотрудника (из сессии: principal недоступен)
+    const rec = h.fake.callsTo("audit", "POST", "/internal/v1/records").at(-1)!;
+    expect(rec.body).toMatchObject({ action: "auth.logout", object_type: "staff", object_id: staff.staff_id });
+    expect(rec.actor?.id).toBe(staff.staff_id);
+    h.fake.down.delete("adminIdentity");
+    h.clock.advance(5 * 60_000);
+    const me = await h.app.inject({ url: "/admin/v1/me", headers: browser(s) });
+    expect(me.statusCode).toBe(401);
+    expect(me.json().code).toBe("UNAUTHORIZED");
+  });
+
+  it("и admin-identity, и audit недоступны → всё равно 204 и сессии нет", async () => {
+    const { s } = await loginAs(h, "support");
+    h.fake.down.add("adminIdentity");
+    h.fake.down.add("audit");
+    expect((await h.app.inject({ method: "POST", url: "/admin/v1/auth/logout", headers: browser(s) })).statusCode).toBe(204);
+    h.fake.down.clear();
+    expect((await h.app.inject({ url: "/admin/v1/me", headers: browser(s) })).statusCode).toBe(401);
+  });
+
+  it("лимит команд (adm.command) и лимит сотрудника выход не блокируют; admin-identity при выходе не опрашивается о principal", async () => {
+    await h.close();
+    h = await makeHarness({ RATE_LIMIT_STAFF_PER_MIN: "3", PRINCIPAL_CACHE_SECONDS: "0" });
+    const { s } = await loginAs(h, "support");
+    for (let i = 0; i < 3; i++) await h.app.inject({ url: "/admin/v1/me", headers: browser(s) });
+    expect((await h.app.inject({ url: "/admin/v1/me", headers: browser(s) })).statusCode).toBe(429);
+    const principalCalls = h.fake.callsTo("adminIdentity", "GET", "/internal/v1/staff/").length;
+    expect((await h.app.inject({ method: "POST", url: "/admin/v1/auth/logout", headers: browser(s) })).statusCode).toBe(204);
+    expect(h.fake.callsTo("adminIdentity", "GET", "/internal/v1/staff/")).toHaveLength(principalCalls);
+  });
+
+  it("CSRF и Origin по-прежнему обязательны: без токена → 403, сессия жива", async () => {
+    const { s } = await loginAs(h, "support");
+    const { "x-csrf-token": _drop, ...noToken } = browser(s);
+    const res = await h.app.inject({ method: "POST", url: "/admin/v1/auth/logout", headers: noToken });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("CSRF_INVALID");
+    expect((await h.app.inject({ method: "POST", url: "/admin/v1/auth/logout", headers: browser(s, { origin: "https://evil.example" }) })).statusCode).toBe(403);
+    expect((await h.app.inject({ url: "/admin/v1/me", headers: browser(s) })).statusCode).toBe(200);
+  });
+});
+
 describe("step-up", () => {
   it("маршрут с requireStepUp: 403 STEP_UP_REQUIRED → step-up → проходит → через 5 мин снова 403", async () => {
     const { s } = await loginAs(h, "super_admin");

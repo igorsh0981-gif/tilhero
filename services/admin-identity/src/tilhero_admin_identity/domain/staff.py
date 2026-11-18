@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tilhero_admin_identity.domain import approvals, audit
 from tilhero_admin_identity.domain.catalog import DEFAULT_ROLE, PERMISSIONS, ROLE_CODES, SUPER_ADMIN, privileged_by
-from tilhero_admin_identity.domain.crypto import Passwords, temporary_password
+from tilhero_admin_identity.domain.crypto import temporary_password
 from tilhero_admin_identity.domain.policy import mask_email
 from tilhero_admin_identity.domain.resets import ResetContext, apply_mfa_reset, apply_password_reset
 from tilhero_admin_identity.domain.store import (
@@ -52,7 +52,7 @@ def self_action() -> Exception:
 @dataclass
 class CreateResult:
     staff: Staff
-    temporary_password: str
+    temporary_password: str | None  # null — привилегированная роль ждёт решения (пароль получит решающий, P2-1)
     approval: Approval | None
 
 
@@ -61,6 +61,7 @@ class PatchResult:
     staff: Staff
     approval: Approval | None
     changed_email: str | None  # учётка разблокирована → сбросить счётчик попыток входа
+    temporary_password: str | None = None  # заявка применена сразу (waived) — автору как единственному решающему
 
 
 async def list_staff(session: AsyncSession, *, q: str | None, role: str | None, status: str | None,
@@ -82,8 +83,11 @@ async def list_staff(session: AsyncSession, *, q: str | None, role: str | None, 
     return StaffPage(items=[staff_out(s) for s in page], next_cursor=nxt)
 
 
-async def create_staff(session: AsyncSession, body: StaffCreate, requester: Staff, *, passwords: Passwords,
-                       temp_ttl_hours: int, approval_ttl_hours: int) -> CreateResult:
+async def create_staff(session: AsyncSession, body: StaffCreate, requester: Staff, *, ctx: ResetContext,
+                       approval_ttl_hours: int) -> CreateResult:
+    """Непривилегированная роль — сразу, временный пароль автору. Привилегированная (P2-1) — учётка в роли
+    read_only БЕЗ пароля (войти под ней до решения нельзя) + заявка staff.create_privileged; пароль выпускается
+    при применении и выдаётся решающему (при waived — автору, он и есть единственный решающий)."""
     await lock_identity(session)
     email = body.email
     if (await session.execute(select(Staff.staff_id).where(Staff.email == email))).scalar_one_or_none():
@@ -94,12 +98,13 @@ async def create_staff(session: AsyncSession, body: StaffCreate, requester: Staf
     privileged = await is_privileged(session, role.code)  # по коду и текущим правам роли (M2)
     if not privileged:  # привилегированную роль решает super_admin (four-eyes)
         await ensure_no_escalation(session, requester, role.code)
-    temp = temporary_password()
+    temp = None if privileged else temporary_password()
     at = now()
     s = Staff(
         staff_id=uuid.uuid4(), email=email, display_name=body.display_name,
         role=DEFAULT_ROLE if privileged else role.code,
-        password_hash=await passwords.hash(temp), temp_password_expires_at=at + timedelta(hours=temp_ttl_hours),
+        password_hash=await ctx.passwords.hash(temp) if temp is not None else None,
+        temp_password_expires_at=at + timedelta(hours=ctx.temp_ttl_hours) if temp is not None else None,
         must_change_password=True, mfa_enabled=False, status="ACTIVE", session_version=1,
         created_at=at, updated_at=at, created_by=requester.staff_id,
     )
@@ -108,20 +113,22 @@ async def create_staff(session: AsyncSession, body: StaffCreate, requester: Staf
     await audit.record(session, "staff.created", actor_id=requester.staff_id, actor_role=requester.role,
                        object_type="staff", object_id=s.staff_id,
                        after={"email": mask_email(email), "display_name": s.display_name, "role": s.role,
-                              "requested_role": role.code, "must_change_password": True})
+                              "requested_role": role.code, "must_change_password": True,
+                              "temporary_password_issued": temp is not None})
     approval = None
     if privileged:
-        approval = await approvals.create(
-            session, kind="staff.create_privileged", target=f"staff:{s.staff_id}",
+        approval, temp = await approvals.create_ex(
+            session, kind=approvals.CREATE_PRIVILEGED, target=f"staff:{s.staff_id}",
             payload={"staff_id": str(s.staff_id), "placeholder_role": DEFAULT_ROLE, "role": role.code},
             summary={"staff": approvals.staff_brief(s), "role": role.code},
             reason=f"Создание сотрудника с ролью {role.code}", requester=requester, ttl_hours=approval_ttl_hours,
+            ctx=ctx,
         )
     return CreateResult(s, temp, approval)
 
 
 async def patch_staff(session: AsyncSession, staff_id: uuid.UUID, body: StaffPatch, requester: Staff, *,
-                      approval_ttl_hours: int) -> PatchResult:
+                      ctx: ResetContext, approval_ttl_hours: int) -> PatchResult:
     await lock_identity(session)
     target = await require_staff(session, staff_id, for_update=True)
     role_change = body.role is not None and body.role != target.role
@@ -129,30 +136,39 @@ async def patch_staff(session: AsyncSession, staff_id: uuid.UUID, body: StaffPat
     name_change = body.display_name is not None and body.display_name.strip() != target.display_name
     if target.staff_id == requester.staff_id and (role_change or status_change):
         raise self_action()
-    # Понижение/отключение super_admin (B1): последнего — нельзя; при ≥ 2 активных — только four-eyes
-    revoke = target.role == SUPER_ADMIN and (role_change or (status_change and body.status == "DISABLED"))
-    if revoke:
-        await ensure_not_last_super_admin(session, target)
-    await ensure_no_escalation(session, requester, target.role)
-    needs_approval = False
+    new_role: Role | None = None
     if role_change:
         new_role = await get_role(session, body.role)  # type: ignore[arg-type]
         if new_role is None:
             raise not_found("ROLE_NOT_FOUND", "Роль не найдена")
-        if not revoke:
-            needs_approval = await is_privileged(session, new_role.code)
-            if not needs_approval:
-                await ensure_no_escalation(session, requester, new_role.code)
+    # Включение (DISABLED → ACTIVE) сотрудника с привилегированной ролью — до или после смены роли в той же
+    # команде — только заявкой staff.reactivate_privileged (P2-2): иначе решение двух людей об отключении
+    # отменяет один. Роль из той же команды входит в заявку.
+    reactivate = status_change and body.status == "ACTIVE"
+    reactivate_privileged = reactivate and (
+        await is_privileged(session, target.role)
+        or (new_role is not None and await is_privileged(session, new_role.code)))
+    # Понижение/отключение super_admin (B1): последнего — нельзя; при ≥ 2 активных — только four-eyes
+    revoke = not reactivate_privileged and target.role == SUPER_ADMIN and (
+        role_change or (status_change and body.status == "DISABLED"))
+    if revoke:
+        await ensure_not_last_super_admin(session, target)
+    await ensure_no_escalation(session, requester, target.role)
+    needs_approval = False
+    if new_role is not None and not revoke and not reactivate_privileged:
+        needs_approval = await is_privileged(session, new_role.code)
+        if not needs_approval:
+            await ensure_no_escalation(session, requester, new_role.code)
     # status=ACTIVE снимает и временную блокировку входа/MFA (счётчики в Redis), даже если статус в БД уже
-    # ACTIVE — так администратор разблокирует сотрудника, не дожидаясь 15 минут
-    unlock = body.status == "ACTIVE" and target.staff_id != requester.staff_id
+    # ACTIVE — так администратор разблокирует сотрудника, не дожидаясь 15 минут (прямой командой)
+    unlock = body.status == "ACTIVE" and target.staff_id != requester.staff_id and not reactivate_privileged
     before: dict[str, Any] = {}
     after: dict[str, Any] = {}
     if name_change:
         before["display_name"], after["display_name"] = target.display_name, body.display_name.strip()  # type: ignore[union-attr]
         target.display_name = after["display_name"]
-    apply_status = status_change and not revoke
-    apply_role = role_change and not needs_approval and not revoke
+    apply_status = status_change and not revoke and not reactivate_privileged
+    apply_role = role_change and not needs_approval and not revoke and not reactivate_privileged
     if apply_status:
         before["status"], after["status"] = target.status, body.status
         target.status = body.status  # type: ignore[assignment]
@@ -171,8 +187,19 @@ async def patch_staff(session: AsyncSession, staff_id: uuid.UUID, body: StaffPat
                            reason=body.reason)
     if apply_status and body.status == "DISABLED":
         await approvals.reject_pending_of(session, target, requester, cause="author_disabled")
-    approval = None
-    if revoke:
+    approval: Approval | None = None
+    temp: str | None = None
+    if reactivate_privileged:
+        to_role = body.role if role_change else None
+        approval, temp = await approvals.create_ex(
+            session, kind=approvals.REACTIVATE, target=f"staff:{target.staff_id}",
+            payload={"staff_id": str(target.staff_id), "role": target.role, "to_role": to_role,
+                     "from_status": target.status},
+            summary={"staff": approvals.staff_brief(target), "role": target.role, "to_role": to_role,
+                     "from_status": target.status},
+            reason=body.reason, requester=requester, ttl_hours=approval_ttl_hours, ctx=ctx,
+        )
+    elif revoke:
         to_status = "DISABLED" if status_change and body.status == "DISABLED" else None
         to_role = body.role if role_change else None
         approval = await approvals.create(
@@ -184,14 +211,16 @@ async def patch_staff(session: AsyncSession, staff_id: uuid.UUID, body: StaffPat
             reason=body.reason, requester=requester, ttl_hours=approval_ttl_hours,
         )
     elif needs_approval:
-        approval = await approvals.create(
-            session, kind="staff.role_grant", target=f"staff:{target.staff_id}",
+        approval, temp = await approvals.create_ex(
+            session, kind=approvals.ROLE_GRANT, target=f"staff:{target.staff_id}",
             payload={"staff_id": str(target.staff_id), "from_role": target.role, "to_role": body.role},
             summary={"staff": approvals.staff_brief(target), "from_role": target.role, "to_role": body.role},
-            reason=body.reason, requester=requester, ttl_hours=approval_ttl_hours,
+            reason=body.reason, requester=requester, ttl_hours=approval_ttl_hours, ctx=ctx,
         )
     await session.flush()
-    return PatchResult(target, approval, target.email if unlock else None)
+    applied = approval is None or approval.status == "APPLIED"
+    changed_email = target.email if (unlock or (approval is not None and applied and temp is not None)) else None
+    return PatchResult(target, approval, changed_email, temp)
 
 
 @dataclass

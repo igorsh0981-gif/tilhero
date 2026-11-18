@@ -9,6 +9,9 @@
 - Понижение/отключение super_admin при ≥ 2 активных — только заявкой staff.privileged_revoke.
 - Сброс пароля/MFA привилегированного сотрудника — заявкой staff.privileged_reset (N1): временный пароль
   генерируется при применении и выдаётся только решающему; для цели-super_admin исключение не действует никогда.
+- Включение (DISABLED → ACTIVE) сотрудника с привилегированной ролью — заявкой staff.reactivate_privileged (P2-2).
+- При применении staff.create_privileged, staff.role_grant и staff.reactivate_privileged учётные данные цели
+  аннулируются (новый временный пароль, сброс MFA и сессий, P2-1): пароль — решающему, при waived — автору.
 - Заявку автора, который уже не ACTIVE, согласовать нельзя; при отключении сотрудника его PENDING-заявки → REJECTED.
 - Не больше одной PENDING-заявки на объект (частичный UNIQUE по target).
 """
@@ -25,7 +28,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tilhero_admin_identity.domain import audit
 from tilhero_admin_identity.domain.catalog import SUPER_ADMIN, privileged_by
 from tilhero_admin_identity.domain.policy import mask_email
-from tilhero_admin_identity.domain.resets import ResetContext, apply_mfa_reset, apply_password_reset
+from tilhero_admin_identity.domain.resets import (
+    ResetContext,
+    apply_credentials_reset,
+    apply_mfa_reset,
+    apply_password_reset,
+)
 from tilhero_admin_identity.domain.store import (
     active_super_admin_ids,
     bump_session,
@@ -46,6 +54,13 @@ from tilhero_common.errors import ApiError, conflict, forbidden, not_found
 WAIVED = "single_super_admin"
 REVOKE = "staff.privileged_revoke"
 RESET = "staff.privileged_reset"
+REACTIVATE = "staff.reactivate_privileged"
+CREATE_PRIVILEGED = "staff.create_privileged"
+ROLE_GRANT = "staff.role_grant"
+# Заявки, при применении которых у цели аннулируются учётные данные и выдаётся новый временный пароль (P2-1, P2-2)
+CREDENTIAL_KINDS = frozenset({CREATE_PRIVILEGED, ROLE_GRANT, REACTIVATE})
+# Заявки, после применения которых сбрасываются счётчики попыток входа/MFA цели
+UNLOCK_KINDS = CREDENTIAL_KINDS | {RESET}
 
 
 def audit_summary(summary: dict[str, Any]) -> dict[str, Any]:
@@ -188,7 +203,7 @@ def not_applicable(message: str) -> ApiError:
 
 
 async def _apply(session: AsyncSession, a: Approval, decider: Staff, ctx: ResetContext | None) -> str | None:
-    """→ временный пароль (только staff.privileged_reset/password) — отдаётся тому, кто применил."""
+    """→ временный пароль (staff.privileged_reset/password и CREDENTIAL_KINDS) — отдаётся тому, кто применил."""
     p = a.payload
     if a.kind == RESET:
         target = await get_staff(session, uuid.UUID(p["staff_id"]), for_update=True)
@@ -200,19 +215,42 @@ async def _apply(session: AsyncSession, a: Approval, decider: Staff, ctx: ResetC
         await apply_mfa_reset(session, target, decider, a.reason, approval_id=a.approval_id)
         await session.flush()
         return None
-    if a.kind in ("staff.role_grant", "staff.create_privileged"):
+    if a.kind in (ROLE_GRANT, CREATE_PRIVILEGED):
+        assert ctx is not None, "ResetContext is required to apply a privileged grant"
         target = await get_staff(session, uuid.UUID(p["staff_id"]), for_update=True)
-        expected = p["from_role"] if a.kind == "staff.role_grant" else p["placeholder_role"]
+        expected = p["from_role"] if a.kind == ROLE_GRANT else p["placeholder_role"]
         if target is None or target.role != expected:
             raise not_applicable("Сотрудник изменился после подачи заявки — подайте новую")
-        if target.status == "DISABLED":
+        if target.status != "ACTIVE":
             raise not_applicable("Сотрудник отключён")
-        new_role = p["to_role"] if a.kind == "staff.role_grant" else p["role"]
+        new_role = p["to_role"] if a.kind == ROLE_GRANT else p["role"]
         if target.role == SUPER_ADMIN and new_role != SUPER_ADMIN:
             await ensure_not_last_super_admin(session, target)
         target.role = new_role
-        bump_session(target)
-    elif a.kind == REVOKE:
+        temp = await apply_credentials_reset(session, target, decider, a.reason, ctx, approval_id=a.approval_id,
+                                             cause=a.kind)
+        await session.flush()
+        return temp
+    if a.kind == REACTIVATE:
+        assert ctx is not None, "ResetContext is required to apply a reactivation"
+        target = await get_staff(session, uuid.UUID(p["staff_id"]), for_update=True)
+        if target is None or target.status == "ACTIVE" or target.role != p["role"]:
+            raise not_applicable("Сотрудник изменился после подачи заявки — подайте новую")
+        new_role = p.get("to_role") or target.role
+        if await get_role(session, new_role) is None:
+            raise not_applicable("Роль не найдена")
+        before = {"status": target.status, "role": target.role}
+        target.status = "ACTIVE"
+        target.role = new_role
+        await audit.record(session, "staff.updated", actor_id=decider.staff_id, actor_role=decider.role,
+                           object_type="staff", object_id=target.staff_id, before=before,
+                           after={"status": "ACTIVE", "role": new_role, "approval_id": str(a.approval_id)},
+                           reason=a.reason)
+        temp = await apply_credentials_reset(session, target, decider, a.reason, ctx, approval_id=a.approval_id,
+                                             cause=a.kind)
+        await session.flush()
+        return temp
+    if a.kind == REVOKE:
         target = await get_staff(session, uuid.UUID(p["staff_id"]), for_update=True)
         if target is None or target.role != SUPER_ADMIN or target.status != "ACTIVE":
             raise not_applicable("Сотрудник изменился после подачи заявки — подайте новую")

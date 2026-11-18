@@ -196,7 +196,9 @@ export interface Staff extends StaffSummary {
 
 /** GET /admin/v1/staff?q=&role=&status=&cursor=&limit= → Page<Staff>; GET /admin/v1/staff/{id} → Staff.
  *  POST /admin/v1/staff {email, display_name, role} (Idempotency-Key обязателен) → StaffCreated. Временный пароль
- *  показывается ОДИН раз, действует 24 ч, must_change_password=true. Привилегированная роль → four-eyes. */
+ *  показывается ОДИН раз, действует 24 ч, must_change_password=true. Привилегированная роль → four-eyes: учётка
+ *  создаётся в роли read_only, `temporary_password: null` автору (ревью P2-1), пароль получает РЕШАЮЩИЙ в ответе approve;
+ *  при `waived: "single_super_admin"` — автор (он же единственный решающий). */
 export interface StaffCreate {
   email: string;
   display_name: string;
@@ -209,12 +211,20 @@ export interface StaffCreated {
 }
 /** PATCH /admin/v1/staff/{id} {role?, status?, display_name?, reason}. Нельзя: снять или заблокировать последнего
  * активного super_admin (409 LAST_SUPER_ADMIN), заблокировать или понизить себя (409 SELF_ACTION).
- * Повышение до привилегированной роли → 202 + approval (four-eyes). Нужен step-up. */
+ * Повышение до привилегированной роли → 202 + approval (four-eyes); при применении у цели сбрасываются пароль, MFA
+ * и сессии, новый временный пароль — решающему (P2-1). Включение (DISABLED → ACTIVE) сотрудника с привилегированной
+ * ролью → 202 + approval `staff.reactivate_privileged` с тем же сбросом (P2-2). Нужен step-up. */
 export interface StaffPatch {
   role?: RoleCode;
   status?: "ACTIVE" | "DISABLED";
   display_name?: string;
   reason: string;
+}
+/** Ответ PATCH: 200 Staff — применено сразу; 202 StaffPatchPending — заявка four-eyes. Если заявка применилась
+ * сразу (waived single_super_admin) и при этом выпущен временный пароль цели — он в temporary_password (один раз). */
+export interface StaffPatchPending {
+  approval: Approval;
+  temporary_password?: string;
 }
 /** POST /admin/v1/staff/{id}/reset-password {reason} → StaffResetResponse; POST …/reset-mfa {reason} → Staff | {approval}.
  * Обе — step-up; сессии сотрудника отзываются. Цель — привилегированный сотрудник → 202 {approval}
@@ -233,7 +243,8 @@ export type ApprovalKind =
   | "staff.create_privileged"
   | "role.permissions_change"
   | "staff.privileged_revoke"
-  | "staff.privileged_reset";
+  | "staff.privileged_reset"
+  | "staff.reactivate_privileged";
 export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "APPLIED";
 
 /** Four-eyes: исполняет второй super_admin (≠ автор) со step-up. Пока активный super_admin один — изменение
@@ -253,7 +264,8 @@ export interface Approval {
   expires_at: string;
 }
 /** GET /admin/v1/approvals?status= → Page<Approval>; POST /admin/v1/approvals/{id}/approve|reject {note} → ApprovalDecision.
- * temporary_password — только в ответе approve заявки staff.privileged_reset (action "password"). */
+ * temporary_password — только в ответе approve заявок staff.privileged_reset (action "password"),
+ * staff.create_privileged, staff.role_grant и staff.reactivate_privileged; показывается решающему один раз. */
 export type ApprovalDecision = Approval & { temporary_password?: string };
 
 // =====================================================================================================================
@@ -274,7 +286,10 @@ export type NotificationCategory = "reminders" | "missed" | "social" | "support"
 /** Цели согласия (identity-consent): обязательные и необязательные (social, product_news, voice_recording). */
 export type ConsentPurpose = string;
 
-/** Строка реестра. Telegram ID — только маска (полный — reveal); у детского профиля Telegram ID и username нет. */
+/** Строка реестра. Telegram ID — только маска (полный — reveal); у детского профиля Telegram ID и username нет.
+ *  username — без «@» (как в Telegram API); маска `ig•••81` (первые 2 и последние 2 символа; короче 5 — `•••`), полностью — только сотруднику с users.sensitive.read
+ *  (маскирует домен user-admin по actor; ревью T2-3). display_name — отображаемое имя Telegram или имя профиля ребёнка,
+ *  нужно поддержке для обращения к ученику. Поиск q=@username — точное совпадение по полному username. */
 export interface AdminLearnerRow {
   user_id: string;
   kind: LearnerKind;
@@ -863,6 +878,9 @@ export interface Campaign extends CampaignContent {
   stopped_at: string | null;
   stop_reason: string | null;
   stats: CampaignStats;
+  /** шаг отправки не удаётся (например, identity-consent отклоняет сегмент): код последней ошибки, с какого момента
+   *  и сколько попыток; null — всё в порядке. После 6 неудач подряд — аудит campaign.failed (ревью P2-7). */
+  last_error: { code: string; since: string; attempts: number } | null;
 }
 
 export interface CampaignEstimate {
@@ -884,13 +902,16 @@ export interface CampaignEstimate {
  *  POST  /admin/v1/notifications/campaigns/{id}/preview TemplatePreviewRequest → TemplatePreview
  *  POST  /admin/v1/notifications/campaigns/{id}/test TestSendRequest → TestSendResult
  *  POST  /admin/v1/notifications/campaigns/{id}/schedule CampaignScheduleInput (notif.campaigns.send, step-up,
- *        Idempotency-Key) → Campaign (scheduled); send_at в прошлом или ближе 1 мин → «как можно скорее»; позже 30 дней →
- *        422; 409 CAMPAIGN_NOT_DRAFT | CAMPAIGN_VERSION_CONFLICT; аудитория 0 → 422 CAMPAIGN_EMPTY_AUDIENCE
+ *        Idempotency-Key) → Campaign (scheduled); send_at ближе 1 мин (в т. ч. до 5 мин в прошлом) → «как можно
+ *        скорее» — так UI передаёт «Отправить сейчас»; раньше now−5 мин → 422 CAMPAIGN_INVALID {send_at: in_past}
+ *        (ревью T2-2); позже 30 дней → 422; 409 CAMPAIGN_NOT_DRAFT | CAMPAIGN_VERSION_CONFLICT; аудитория 0 → 422 CAMPAIGN_EMPTY_AUDIENCE
  *  POST  /admin/v1/notifications/campaigns/{id}/unschedule {reason} (notif.campaigns.send) → Campaign (draft) —
  *        только до начала отправки; 409 CAMPAIGN_ALREADY_SENDING
  *  POST  /admin/v1/notifications/campaigns/{id}/stop CampaignStopInput (notif.campaigns.send, step-up) → Campaign
  *        (stopped) — экстренная остановка: новые записи не создаются, неотправленные отменяются. Повтор — 200.
- *  Отправка: в местное время ученика вне тихих часов; не чаще 1 рассылки в 7 дней на ученика (CAMPAIGN_MIN_INTERVAL_DAYS).
+ *        Допустимо из scheduled | sending | done (у done отменяются отложенные тихими часами); draft → 409
+ *        CAMPAIGN_NOT_ACTIVE (ревью P2-7).
+ *  Отправка: в момент send_at; ученикам в тихих часах — после их окончания по местному времени ученика; не чаще 1 рассылки в 7 дней на ученика (CAMPAIGN_MIN_INTERVAL_DAYS).
  *  Аудит: campaign.created | updated | scheduled | unscheduled | stopped | finished | test_sent.
  */
 export interface CampaignScheduleInput {
@@ -912,7 +933,8 @@ export type NotificationsErrorCode =
   | "CAMPAIGN_NOT_DRAFT"
   | "CAMPAIGN_VERSION_CONFLICT"
   | "CAMPAIGN_EMPTY_AUDIENCE"
-  | "CAMPAIGN_ALREADY_SENDING";
+  | "CAMPAIGN_ALREADY_SENDING"
+  | "CAMPAIGN_NOT_ACTIVE";
 
 // =====================================================================================================================
 // Dev

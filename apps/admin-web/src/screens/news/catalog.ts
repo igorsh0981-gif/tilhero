@@ -289,6 +289,25 @@ export function validateCampaign(c: CampaignContent): Issues {
   return out;
 }
 
+/**
+ * Scheduling «at a chosen time» (review T2-2). notifications treats send_at closer than 1 min (and up to 5 min in the
+ * past) as «as soon as possible» and refuses anything older (422 CAMPAIGN_INVALID {send_at: in_past}). A chosen time
+ * therefore has to be at least SEND_AT_MIN_LEAD_MS ahead, otherwise a forgotten date (today 09:00 typed at 17:00) would
+ * silently go out now. «Send now» is a separate, explicit choice.
+ */
+export const SEND_AT_MIN_LEAD_MS = 2 * 60_000;
+export const SEND_AT_MAX_AHEAD_MS = 30 * 86_400_000;
+export type SendAtProblem = "invalid_format" | "in_past" | "too_far";
+
+/** `local` — the value of <input type="datetime-local"> in the viewer's time zone. */
+export function checkSendAt(local: string, now: number): SendAtProblem | null {
+  const ms = local ? new Date(local).getTime() : NaN;
+  if (Number.isNaN(ms)) return "invalid_format";
+  if (ms < now + SEND_AT_MIN_LEAD_MS) return "in_past";
+  if (ms > now + SEND_AT_MAX_AHEAD_MS) return "too_far";
+  return null;
+}
+
 export const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** Issues of one language (badge on the RU/UZ tab). */

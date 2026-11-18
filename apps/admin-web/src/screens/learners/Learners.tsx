@@ -10,11 +10,12 @@ import { Learners, type LearnerFilters } from "../../api/endpoints";
 import { ApiError } from "../../api/errors";
 import { useI18n, fmtCountdown } from "../../i18n";
 import { shortId } from "../../lib/ids";
+import { tgHandle } from "../../lib/tg";
 import { useNav } from "../../shell/navctx";
 import { useSession } from "../../state/session";
 import { Icon } from "../../ui/Icon";
 import { LoadError } from "../../ui/LoadError";
-import { Btn, Callout, CopyBtn, cx, Empty, FieldErr, Pill, Select, Spinner, TabPanel, Tabs, type Tone } from "../../ui/kit";
+import { Btn, Callout, cx, Empty, FieldErr, Pill, Select, Spinner, TabPanel, Tabs, type Tone } from "../../ui/kit";
 import { Drawer } from "../../ui/overlays";
 import { useToast } from "../../ui/toasts";
 import { errMeta, errText } from "../../ui/errors";
@@ -44,7 +45,7 @@ function KindTag({ r }: { r: Pick<AdminLearnerRow, "kind" | "age_band"> }) {
   );
 }
 
-const nameOf = (r: Pick<AdminLearnerRow, "display_name" | "username">, fallback: string) => r.display_name || (r.username ? `@${r.username}` : fallback);
+const nameOf = (r: Pick<AdminLearnerRow, "display_name" | "username">, fallback: string) => r.display_name || (r.username ? tgHandle(r.username) : fallback);
 
 /* ---------------------------------------------------------------- page: list + card */
 
@@ -252,7 +253,6 @@ export function RevealTelegramId({ card }: { card: Pick<AdminLearnerCard, "user_
         <span className="mono" data-testid="reveal-value">
           {shown.value}
         </span>
-        <CopyBtn value={shown.value} label="Telegram ID" />
         <span className="xs cd">
           {t("rv.hidesIn")}{" "}
           <b className="mono" data-testid="reveal-countdown">
@@ -392,7 +392,7 @@ export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () =
                 {card.kind === "account" && (
                   <>
                     <dt>Telegram</dt>
-                    <dd>{card.username ? `@${card.username}` : <span className="muted">—</span>}</dd>
+                    <dd data-testid="lc-username">{card.username ? tgHandle(card.username) : <span className="muted">—</span>}</dd>
                     <dt>Telegram ID</dt>
                     <dd>
                       <RevealTelegramId card={card} />
@@ -455,7 +455,7 @@ export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () =
                         <button type="button" className="tr" onClick={() => onOpen(card.guardian!.user_id)}>
                           {nameOf(card.guardian, t("lr.noName"))}
                         </button>
-                        {card.guardian.username && <span className="small muted">@{card.guardian.username}</span>}
+                        {card.guardian.username && <span className="small muted">{tgHandle(card.guardian.username)}</span>}
                         <span className="masked">{card.guardian.telegram_id_masked}</span>
                         <LearnerStatusPill s={card.guardian.status} />
                       </li>

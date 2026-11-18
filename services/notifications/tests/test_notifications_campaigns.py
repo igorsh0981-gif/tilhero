@@ -15,6 +15,7 @@ from notif_testkit import SCHEDULER_TOKEN, STAFF_ID, quiet_around_now
 from sqlalchemy import select, update
 
 from tilhero_common.testing import assert_event_conforms, internal_headers
+from tilhero_notifications.delivery import forget
 from tilhero_notifications.models import Campaign, CampaignRecipient, Notification
 
 CBASE = "/admin/v1/notifications/campaigns"
@@ -95,6 +96,7 @@ async def test_create_get_list_patch(env) -> None:
     assert c["created_by"] == STAFF_ID and c["created_by_name"] is None and c["send_at"] is None
     assert c["stats"] == {"audience": 0, "created": 0, "sent": 0, "in_app_only": 0, "deferred": 0,
                           "skipped_frequency": 0, "failed": 0}
+    assert c["last_error"] is None
     replay = await create(env)
     assert replay.status_code == 201 and replay.json() == c
     reused = await create(env, content(title="Другая"))
@@ -230,8 +232,12 @@ async def test_estimate(env) -> None:
                        status="done", version=1, created_by="s", created_at=datetime.now(UTC),
                        updated_at=datetime.now(UTC)))
         await s.flush()
-        s.add(CampaignRecipient(campaign_id=other, user_id=a, status="created", created_at=datetime.now(UTC),
-                                processed_at=datetime.now(UTC)))
+        reached = uuid.uuid4()
+        s.add(Notification(notification_id=reached, user_id=a, category="product", kind="campaign",
+                           template="campaign", dedup_key=f"campaign:{other}:{a}", telegram_status="sent",
+                           created_at=datetime.now(UTC), updated_at=datetime.now(UTC)))
+        s.add(CampaignRecipient(campaign_id=other, user_id=a, status="created", notification_id=reached,
+                                created_at=datetime.now(UTC), processed_at=datetime.now(UTC)))
     est = (await env.client.post(f"{CBASE}/{campaign['campaign_id']}/estimate", headers=env.staff())).json()
     assert est["frequency_capped"] == 1
     env.identity.audience_fail.extend([503, 503, 503])  # GET повторяется клиентом сервисов 3 раза
@@ -314,8 +320,13 @@ async def test_schedule_rules(env) -> None:
     again = await env.client.post(f"{CBASE}/{campaign['campaign_id']}/unschedule", json={"reason": "Перенос"},
                                   headers=env.staff())
     assert again.status_code == 200 and again.json()["version"] == 3
-    # в прошлом или ближе минуты — «как можно скорее»
-    r = await schedule(env, await get(env, campaign["campaign_id"]), send_at=datetime.now(UTC) - timedelta(hours=3))
+    # раньше now−5 мин — 422 in_past (ревью T2-2); до 5 мин в прошлом или ближе минуты — «как можно скорее»
+    draft = await get(env, campaign["campaign_id"])
+    r = await schedule(env, draft, send_at=datetime.now(UTC) - timedelta(minutes=6))
+    assert (r.status_code, r.json()["code"]) == (422, "CAMPAIGN_INVALID")
+    assert r.json()["details"]["fields"] == [{"path": "send_at", "reason": "in_past"}]
+    r = await schedule(env, draft, send_at=datetime.now(UTC) - timedelta(minutes=4))
+    assert r.status_code == 200, r.text
     assert abs(datetime.fromisoformat(r.json()["send_at"]) - datetime.now(UTC)) < timedelta(seconds=30)
     assert [a["action"] for a in await env.audit() if a["action"] != "campaign.created"] == [
         "campaign.scheduled", "campaign.unscheduled", "campaign.scheduled"]
@@ -457,6 +468,107 @@ async def test_stop_cancels_unsent(env) -> None:
     assert (r.status_code, r.json()["code"]) == (409, "CAMPAIGN_ALREADY_SENDING")
     r = await env.client.post(f"{CBASE}/{uuid.uuid4()}/stop", json={"reason": "Нет такой"}, headers=env.staff())
     assert (r.status_code, r.json()["code"]) == (404, "CAMPAIGN_NOT_FOUND")
+
+
+async def test_stop_rules_draft_and_done(env) -> None:
+    """Ревью P2-7: черновик — 409 CAMPAIGN_NOT_ACTIVE; done — можно: отменяются отложенные тихими часами записи."""
+    draft = await new_campaign(env)
+    r = await env.client.post(f"{CBASE}/{draft['campaign_id']}/stop", json={"reason": "Не нужна"},
+                              headers=env.staff())
+    assert (r.status_code, r.json()["code"], r.json()["details"]) == (409, "CAMPAIGN_NOT_ACTIVE",
+                                                                      {"status": "draft"})
+    assert (await get(env, draft["campaign_id"]))["status"] == "draft"
+    quiet, ok = env.add_user(quiet=quiet_around_now()), env.add_user()
+    env.to_audience(quiet, ok)
+    done = await new_campaign(env, title="Завершённая")
+    await schedule(env, done)
+    await dispatch(env)
+    state = await get(env, done["campaign_id"])
+    assert state["status"] == "done" and (state["stats"]["sent"], state["stats"]["deferred"]) == (1, 1)
+    r = await env.client.post(f"{CBASE}/{done['campaign_id']}/stop", json={"reason": "Ошибка в тексте"},
+                              headers=env.staff())
+    assert r.status_code == 200 and r.json()["status"] == "stopped"
+    assert {(row.telegram_status, row.reason) for row in await campaign_rows(env, quiet)} == {
+        ("cancelled", "campaign_stopped")}
+    assert {row.telegram_status for row in await campaign_rows(env, ok)} == {"sent"}  # отправленное не отзывается
+    [record] = await env.audit("campaign.stopped")
+    assert record["before"] == {"status": "done"} and record["after"]["cancelled_notifications"] == 1
+
+
+async def test_last_error_series_and_failed_audit(env) -> None:
+    """Ревью P2-7: identity отклоняет сегмент при запуске → рассылка остаётся scheduled, last_error растёт с каждым
+    dispatch; на 6-й неудаче — аудит campaign.failed (один раз на серию); успех сбрасывает last_error."""
+    env.to_audience(env.add_user())
+    campaign = await new_campaign(env)
+    await schedule(env, campaign)
+    env.identity.audience_fail.extend([(422, "SEGMENT_INVALID", {"field": "age", "reason": "invalid"})] * 7)
+    await dispatch(env)
+    state = await get(env, campaign["campaign_id"])
+    assert state["status"] == "scheduled"
+    first = state["last_error"]
+    assert (first["code"], first["attempts"]) == ("SEGMENT_INVALID", 1) and first["since"].endswith("Z")
+    for _ in range(4):
+        await dispatch(env)
+    assert (await get(env, campaign["campaign_id"]))["last_error"]["attempts"] == 5
+    assert await env.audit("campaign.failed") == []
+    await dispatch(env)
+    await dispatch(env)
+    state = await get(env, campaign["campaign_id"])
+    assert state["last_error"] == {**first, "attempts": 7}  # since — начало серии
+    [failed] = await env.audit("campaign.failed")
+    assert failed["actor_type"] == "system" and failed["object_id"] == campaign["campaign_id"]
+    assert failed["after"] == {"status": "scheduled", "code": "SEGMENT_INVALID", "attempts": 6,
+                               "since": first["since"]}
+    for e in await env.events("admin.audit.recorded.v1"):
+        assert_event_conforms(e)
+    await dispatch(env)  # identity снова принимает сегмент
+    state = await get(env, campaign["campaign_id"])
+    assert state["status"] == "done" and state["last_error"] is None and state["stats"]["sent"] == 1
+
+
+async def test_last_error_on_audience_page_cleared_by_success(env) -> None:
+    """Сбой выборки аудитории посреди отправки (400 INVALID_CURSOR после смены формата курсора) виден сотруднику;
+    следующая удачная страница сбрасывает last_error."""
+    env.settings.campaign_audience_page = 1
+    env.settings.campaign_max_batches_per_call = 2  # первая страница + пачка получателей
+    a, b = env.add_user(), env.add_user()
+    env.to_audience(a, b)
+    campaign = await new_campaign(env)
+    await schedule(env, campaign)
+    await dispatch(env)
+    assert (await get(env, campaign["campaign_id"]))["status"] == "sending"
+    env.identity.audience_fail.append((400, "INVALID_CURSOR", {}))
+    await dispatch(env)
+    state = await get(env, campaign["campaign_id"])
+    assert state["status"] == "sending"
+    assert (state["last_error"]["code"], state["last_error"]["attempts"]) == ("INVALID_CURSOR", 1)
+    env.settings.campaign_max_batches_per_call = 50
+    await dispatch(env)
+    state = await get(env, campaign["campaign_id"])
+    assert state["status"] == "done" and state["last_error"] is None and state["stats"]["sent"] == 2
+    assert await env.audit("campaign.failed") == []
+
+
+async def test_frequency_counts_only_reached_learners(env) -> None:
+    """Ревью P2-8: ученик выключил «Новости» перед рассылкой A — запись skipped, ничего не получил; включил обратно —
+    рассылка B через пару дней до него доходит. Получивший A — пропущен лимитом."""
+    off, got = env.add_user(categories=("support", "reminders")), env.add_user()
+    env.to_audience(off, got)
+    first = await new_campaign(env)
+    await schedule(env, first)
+    await dispatch(env)
+    assert {r.telegram_status for r in await campaign_rows(env, off)} == {"skipped"}
+    env.set(off, categories=["support", "reminders", "product"])
+    await forget(env.runtime, prefix=env.settings.redis_key_prefix, user_id=off)
+    async with env.runtime.transaction() as s:  # прошло 3 дня
+        await s.execute(update(CampaignRecipient).values(processed_at=datetime.now(UTC) - timedelta(days=3)))
+    second = await new_campaign(env, title="Вторая")
+    est = (await env.client.post(f"{CBASE}/{second['campaign_id']}/estimate", headers=env.staff())).json()
+    assert (est["audience"], est["frequency_capped"]) == (2, 1)
+    await schedule(env, second)
+    await dispatch(env)
+    assert await recipients(env, second["campaign_id"]) == {off: "created", got: "skipped_frequency"}
+    assert len(env.gateway.to(env.telegram_id(off))) == 1 and len(env.gateway.to(env.telegram_id(got))) == 1
 
 
 async def test_stopped_campaign_record_is_cancelled_at_send_time(env) -> None:

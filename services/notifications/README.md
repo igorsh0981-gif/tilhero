@@ -39,13 +39,13 @@ admin.ts, `*_name` сотрудников — `null` (заполняет admin-b
 | PATCH | `…/campaigns/{id}` | то же | `Partial<CampaignContent> & {expected_version}` → `Campaign`; 409 `CAMPAIGN_NOT_DRAFT` \| `CAMPAIGN_VERSION_CONFLICT {current_version}` |
 | POST | `…/campaigns/{id}/estimate` | то же | `CampaignEstimate` (identity-consent `/audience/count`; `frequency_capped` — пересечение до 10 страниц аудитории с получателями других рассылок за 7 дней, дальше пропорционально); 503 `UPSTREAM_UNAVAILABLE` |
 | POST | `…/campaigns/{id}/preview`, `…/test` | то же | как у шаблонов; плейсхолдер — только `{learner_name}` |
-| POST | `…/campaigns/{id}/schedule` | `notif.campaigns.send` | `{expected_version, send_at, reason}` (+ `Idempotency-Key`, Redis) → scheduled; ближе 60 с или в прошлом — «как можно скорее»; дальше 30 дней — 422 `CAMPAIGN_INVALID send_at too_far`; аудитория 0 — 422 `CAMPAIGN_EMPTY_AUDIENCE` |
+| POST | `…/campaigns/{id}/schedule` | `notif.campaigns.send` | `{expected_version, send_at, reason}` (+ `Idempotency-Key`, Redis) → scheduled; от now−5 мин до now+1 мин — «как можно скорее» (так UI передаёт «Отправить сейчас»); раньше now−5 мин — 422 `CAMPAIGN_INVALID send_at in_past` (ревью T2-2); дальше 30 дней — 422 `too_far`; аудитория 0 — 422 `CAMPAIGN_EMPTY_AUDIENCE` |
 | POST | `…/campaigns/{id}/unschedule` | то же | `{reason}` → draft; черновик — 200 без изменений; `sending/done/stopped` — 409 `CAMPAIGN_ALREADY_SENDING` |
-| POST | `…/campaigns/{id}/stop` | то же | `{reason}` → stopped (из любого статуса): pending → cancelled, неотправленные записи → `cancelled`; повтор — 200 без изменений |
+| POST | `…/campaigns/{id}/stop` | то же | `{reason}` → stopped из `scheduled\|sending\|done` (у `done` отменяются отложенные тихими часами): pending → cancelled, неотправленные записи → `cancelled`; повтор — 200 без изменений; `draft` — 409 `CAMPAIGN_NOT_ACTIVE` (ревью P2-7) |
 
 Коды `reason` в `fields`: `required`, `too_long`, `too_short` (note), `unknown_placeholder`, `invalid_placeholder`
 (непарная скобка, формат, индекс, атрибут), `control_chars`, `pressure_words` (детские шаблоны), `invalid`,
-`kids_not_allowed`, `out_of_range`, `too_far`.
+`kids_not_allowed`, `out_of_range`, `too_far`, `in_past`.
 
 Исходящие (внутренний JWT, `iss=notifications`):
 - `GET identity-consent /internal/v1/users/{id}/delivery` → `DeliveryInfo` (§1: для ребёнка адресат — опекун, его
@@ -74,7 +74,8 @@ admin.ts, `*_name` сотрудников — `null` (заполняет admin-b
 (конечная неудача, в т.ч. блокировка бота — запись при этом остаётся в центре), `user.domain.deleted.v1`,
 `admin.audit.recorded.v1` (outbox, в транзакции изменения; `source` = notifications): `template.version_created |
 activated | reset | test_sent` (object_type `notification_template`, object_id — ключ), `campaign.created | updated |
-scheduled | unscheduled | stopped | finished | test_sent` (object_type `campaign`; `finished` — `actor_type=system`).
+scheduled | unscheduled | stopped | finished | failed | test_sent` (object_type `campaign`; `finished` и `failed` —
+`actor_type=system`).
 Тексты шаблонов и рассылок в аудит не пишутся; тестовый получатель — только индекс.
 
 ## Политика (в момент отправки, порядок §4)
@@ -150,6 +151,13 @@ id) → `created`; 4) аудитория исчерпана → `done` + ауд�
 segment_mismatch`. Статистика: `created`/`skipped_frequency` — по получателям, `sent`/`in_app_only`/`failed` — по
 журналу, `deferred` — `scheduled` с причиной `quiet_hours`.
 
+Ревью P2-7: неудача шага запуска или выборки аудитории (`SEGMENT_INVALID`, `INVALID_CURSOR`, `UPSTREAM_UNAVAILABLE`,
+`AUDIENCE_RESPONSE_INVALID` …) → `Campaign.last_error {code, since, attempts}` (рассылка остаётся в своём статусе,
+повтор при следующем `:dispatch`); первый успешный шаг, `schedule` и `unschedule` сбрасывают. На
+`CAMPAIGN_FAILURE_ALERT_ATTEMPTS` (6) неудач подряд — аудит `campaign.failed` (один раз на серию) и ERROR в логе.
+Ревью P2-8: лимит частоты считает только получателей другой рассылки, чья запись журнала `sent | in_app_only |
+scheduled` (дошла или в пути); `skipped`, `failed`, `cancelled` в лимит не идут.
+
 ## «Что нового» в центре
 `experience.release_note.published.v1` без адресатов: заметка хранится в `broadcasts`; при чтении центра
 (`inbox`, `unread-count`, `inbox:read`) ученику создаются записи по заметкам, полученным после его водяного знака
@@ -158,7 +166,7 @@ segment_mismatch`. Статистика: `created`/`skipped_frequency` — по 
 Telegram-рассылки нет (кампании — спринт 2).
 
 ## Данные
-Схема `notifications` (миграции 0001, 0002): `notifications` (`notification_id` PK, `user_id` — ученик, `category`,
+Схема `notifications` (миграции 0001–0003): `notifications` (`notification_id` PK, `user_id` — ученик, `category`,
 `kind standard|transactional|campaign`, `template`, `params` JSONB, `subject_user_id`, `title`, `body`, `startapp`,
 `dedup_key` UNIQUE, `telegram_status scheduled|sent|in_app_only|failed|skipped|cancelled` (cancelled — рассылка
 остановлена; в центре не видна), `reason`, `center_only`,
@@ -169,7 +177,8 @@ Telegram-рассылки нет (кампании — спринт 2).
 `status draft|active|archived`, `texts` JSONB, `note`, `created_by/at`, `activated_by/at`, `archived_at`,
 `idempotency_key` + `request_hash`; частичные уникальные индексы — одна активная на ключ, ключ идемпотентности на
 сотрудника), `campaigns` (поля `Campaign`, `segment`/`texts` JSONB, `version`, `cursor`, `audience_complete`,
-`audience_count`, идемпотентность создания), `campaign_recipients` (PK (campaign_id, user_id), `status
+`audience_count`, идемпотентность создания; 0003 — серия неудач `error_code`, `error_since`, `error_attempts`,
+`error_reported`), `campaign_recipients` (PK (campaign_id, user_id), `status
 pending|created|skipped_frequency|cancelled`, `notification_id`, `processed_at`; удаляются сагой удаления ученика). Срок хранения журнала/центра — 90 дней (`RETENTION_DAYS`, чистка в
 `:dispatch`). Telegram ID в БД не хранится (только кэш Redis 5 мин). Модели — зеркало миграций
 (`tests/test_notifications_schema.py`).
@@ -188,7 +197,7 @@ pending|created|skipped_frequency|cancelled`, `notification_id`, `processed_at`;
 Спринт 2: `ADMIN_TEST_CHAT_IDS` (chat id через запятую; пусто — тест недоступен), `TEST_SENDS_PER_MINUTE` (10),
 `TEMPLATE_CACHE_TTL_SECONDS` (30, ≤ 30), `CAMPAIGN_MIN_INTERVAL_DAYS` (7), `CAMPAIGN_AUDIENCE_PAGE` (500),
 `CAMPAIGN_RECIPIENT_BATCH` (200), `CAMPAIGN_MAX_BATCHES_PER_CALL` (50), `CAMPAIGN_MAX_SCHEDULE_DAYS` (30),
-`CAMPAIGN_ASAP_SECONDS` (60).
+`CAMPAIGN_ASAP_SECONDS` (60), `CAMPAIGN_PAST_TOLERANCE_SECONDS` (300), `CAMPAIGN_FAILURE_ALERT_ATTEMPTS` (6).
 
 ## Runbook
 - Тесты: `infra/dev/stack.sh up`, `source .dev/testenv.sh`, `uv run pytest services/notifications -q`
@@ -201,7 +210,8 @@ pending|created|skipped_frequency|cancelled`, `notification_id`, `processed_at`;
 - Новый текст шаблона не применился: `notification_template_versions` (`status=active` по ключу); другие реплики
   подхватят не позже `TEMPLATE_CACHE_TTL_SECONDS`; WARNING `template version render failed, code text used` —
   версия не подставилась (плейсхолдер убран из кода) — активировать исправленную версию или сбросить.
-- Рассылка висит в `sending`: шаги идут только в `:dispatch` (n8n); WARNING `campaign audience page unavailable` —
-  identity-consent; `campaigns.cursor`/`audience_complete` показывают прогресс выборки. Экстренно — `stop`.
+- Рассылка висит в `scheduled`/`sending`: шаги идут только в `:dispatch` (n8n); причина — `last_error` в карточке
+  рассылки и `campaign step failed` в логе (`error_code`); после 6 неудач — аудит `campaign.failed`.
+  `campaigns.cursor`/`audience_complete` показывают прогресс выборки. Экстренно — `stop`.
 - Тестовая отправка: `test-recipients` пуст — не задан `ADMIN_TEST_CHAT_IDS`; `sent=false` с кодом bot-gateway
   (`TELEGRAM_BLOCKED` — тестовый чат не начал диалог с ботом), поиск по `delivery_id` в логах.

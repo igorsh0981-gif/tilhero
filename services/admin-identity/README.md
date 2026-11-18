@@ -51,8 +51,8 @@ TOTP: issuer «TilHero Admin», RFC 6238 (SHA-1, 6 цифр, 30 с, окно ±1
 |---|---|---|---|
 | GET | `staff?q=&role=&status=&cursor=&limit=` | staff.manage | `Page<Staff>` |
 | GET | `staff/{id}` | staff.manage | `Staff`; 404 `STAFF_NOT_FOUND` |
-| POST | `staff` (`Idempotency-Key` **обязателен**: нет → 422 `IDEMPOTENCY_KEY_REQUIRED`, не `[A-Za-z0-9_\-:.]{8,128}` → 422 `IDEMPOTENCY_KEY_INVALID`) | staff.manage | 201 `StaffCreated` (временный пароль — один раз; повтор по ключу — тот же ответ с `null`; ключ с другим телом → 422 `IDEMPOTENCY_KEY_REUSED`) |
-| PATCH | `staff/{id}` | staff.manage | `Staff` или 202 `{approval}` (привилегированная роль) |
+| POST | `staff` (`Idempotency-Key` **обязателен**: нет → 422 `IDEMPOTENCY_KEY_REQUIRED`, не `[A-Za-z0-9_\-:.]{8,128}` → 422 `IDEMPOTENCY_KEY_INVALID`) | staff.manage | 201 `StaffCreated` (временный пароль — один раз; привилегированная роль — `null`, пароль получит решающий; повтор по ключу — тот же ответ с `null`; ключ с другим телом → 422 `IDEMPOTENCY_KEY_REUSED`) |
+| PATCH | `staff/{id}` | staff.manage | `Staff` или 202 `{approval}` (привилегированная роль; включение привилегированного; понижение/отключение super_admin); заявка применена сразу (waived) с выпуском пароля — 202 `{approval, temporary_password}` |
 | POST | `staff/{id}/reset-password` | staff.manage | `{temporary_password}` или 202 `{approval}` (привилегированная цель) |
 | POST | `staff/{id}/reset-mfa` | staff.manage | `Staff` или 202 `{approval}` (привилегированная цель) |
 | GET | `staff/lookup?ids=a,b` (≤100) | любой активный сотрудник | `{items: StaffSummary[]}` |
@@ -81,8 +81,19 @@ TOTP: issuer «TilHero Admin», RFC 6238 (SHA-1, 6 цифр, 30 с, окно ±1
 без заявки, только если согласовать некому (нет третьего входившего активного super_admin).
 
 **Four-eyes:** назначение привилегированной роли (`staff.role_grant`, `staff.create_privileged` — сотрудник создаётся
-с ролью `read_only`), изменение матрицы (`role.permissions_change`), понижение/отключение super_admin при ≥ 2 активных
-(`staff.privileged_revoke`). Заявку автора, который уже не ACTIVE, согласовать нельзя (409 `APPROVAL_NOT_APPLICABLE`);
+с ролью `read_only` и **без пароля**, автору `temporary_password: null`), изменение матрицы (`role.permissions_change`),
+понижение/отключение super_admin при ≥ 2 активных (`staff.privileged_revoke`), включение (DISABLED → ACTIVE)
+сотрудника с привилегированной ролью — текущей или назначаемой в той же команде (`staff.reactivate_privileged`,
+summary `{staff, role, to_role, from_status}`). Разблокировка входа уже активного сотрудника (`{status: ACTIVE}`) —
+прямой командой, как раньше; непривилегированного включают сразу.
+
+**Учётные данные при применении (ревью P2-1, P2-2):** при применении `staff.create_privileged`, `staff.role_grant`
+и `staff.reactivate_privileged` у цели выпускается новый временный пароль (`must_change_password`, 24 ч), MFA
+сбрасывается, сессии отзываются (аудит `staff.credentials_reset {cause, approval_id}`), счётчики попыток — с нуля.
+Пароль — **решающему** в ответе approve (`ApprovalDecision.temporary_password`, no-store); при waived — автору
+(он же единственный решающий): в `StaffCreated.temporary_password` или в 202 `{approval, temporary_password}` PATCH.
+Так тот, кто знал прежние учётные данные (создал учётку, сбросил ей пароль до согласования, помнит их до
+отключения), не получает второго голоса four-eyes. Заявку автора, который уже не ACTIVE, согласовать нельзя (409 `APPROVAL_NOT_APPLICABLE`);
 при отключении сотрудника его PENDING-заявки → `REJECTED`. Решает другой активный super_admin; применение — в той же
 транзакции. Срок — 72 ч (истёкшие помечаются `EXPIRED` при обращении). Если автор — единственный активный super_admin
 и сам не понижал/отключал super_admin за последние 72 ч, заявка применяется сразу (`status=APPLIED`,
@@ -93,15 +104,16 @@ TOTP: issuer «TilHero Admin», RFC 6238 (SHA-1, 6 цифр, 30 с, окно ±1
 audit принимает издателя `admin-identity` — `services/audit` `AUDIT_EVENT_PRODUCERS`):
 `auth.login`, `auth.login_failed` (email — только HMAC), `auth.locked` (вход и step-up), `auth.mfa_enrolled`,
 `auth.mfa_failed`, `auth.password_changed`, `auth.step_up`, `auth.logout` (id сессии — только префикс sha256),
-`staff.created`, `staff.updated`, `staff.password_reset`, `staff.mfa_reset`, `staff.bootstrap`,
+`staff.created`, `staff.updated`, `staff.password_reset`, `staff.mfa_reset`, `staff.credentials_reset`, `staff.bootstrap`,
 `role.permissions_requested`, `approval.requested` (заявка по сотруднику), `approval.approved|rejected|applied|waived`
 (email сотрудника в сводке заявки — только маской). Пароли, коды, секреты MFA, challenge, временные пароли в события,
-outbox и логи не попадают (тест `test_no_secrets_in_logs_or_audit`). HTTP-писатель audit (`POST /internal/v1/records`)
-разрешён (INTERNAL_API §3), но сервис пишет аудит событием. Не потребляет.
+outbox и логи не попадают (тест `test_no_secrets_in_logs_or_audit`). В audit пишет только через шину — права
+HTTP-записи (`POST /internal/v1/records`) у сервиса нет. Не потребляет.
 
 ## Данные
-Одна миграция `0001`: `staff` (email хранится нормализованным, `CHECK email = lower(email)` вместо citext), `roles`
-(названия RU/EN), `role_permissions` (сид матрицы), `approvals` (частичный UNIQUE `target` для PENDING), `outbox`/`inbox`.
+Миграция `0001`: `staff` (email хранится нормализованным, `CHECK email = lower(email)` вместо citext), `roles`
+(названия RU/EN), `role_permissions` (сид матрицы), `approvals` (частичный UNIQUE `target` для PENDING), `outbox`/`inbox`;
+`0002` — вид заявки `staff.reactivate_privileged` в `ck_approval_kind` (ревью P2-2).
 Все изменения учёток/ролей/заявок сериализуются `pg_advisory_xact_lock`. Redis: счётчики попыток
 (`{ns}:login:*` по HMAC email, `{ns}:mfa:*` по staff_id), challenge (`{ns}:ch:<sha256>` — сам challenge не хранится),
 idempotency создания сотрудника (без временного пароля).

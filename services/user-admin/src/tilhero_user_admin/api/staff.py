@@ -4,6 +4,7 @@ GET /admin/v1/learners          users.read       Page<AdminLearnerRow>
 GET /admin/v1/learners/stats    dashboard.read   DashboardLearners
 GET /admin/v1/learners/{id}     users.read       AdminLearnerCard без tickets (их добавляет admin-bff); перечитывает
                                                  identity-consent, недоступен — из проекции
+username в строках и карточке (с детьми и опекуном) — маска `ig•••81` без «@», полностью — с users.sensitive.read.
 """
 
 from __future__ import annotations
@@ -29,6 +30,8 @@ from tilhero_user_admin.settings import Settings
 log = logging.getLogger("tilhero.user_admin.api")
 router = APIRouter(prefix="/admin/v1/learners", tags=["staff"])
 admin_bff = InternalAuth({"admin-bff"})
+# полный username — только с этим правом, иначе маска `ig•••81` (admin.ts AdminLearnerRow, ревью T2-3)
+SENSITIVE = "users.sensitive.read"
 
 
 def _cfg(rt: Runtime) -> Settings:
@@ -64,6 +67,7 @@ async def list_learners(
             session, q=q, kind=kind, age_bands=bands, statuses=statuses, locale=locale,
             has_open_tickets=has_open_tickets, limit=limit, cursor=cursor,
             can_search_tickets="support.read" in actor.permissions,
+            full_username=SENSITIVE in actor.permissions,
         )
     return AdminLearnerPage(items=items, next_cursor=nxt)
 
@@ -92,7 +96,8 @@ async def get_learner(
     """Карточка всегда перечитывается из identity-consent (`refreshed_at` — момент чтения). Источник недоступен —
     данные проекции, `refreshed_at` — момент последнего чтения или обновления проекции; ученик, которого проекция
     не знает, при недоступном источнике — 503, а не 404."""
-    principal.require_permission("users.read")
+    actor = principal.require_permission("users.read")
+    full_username = SENSITIVE in actor.permissions
     row = await _load(rt, user_id)
     try:
         data = await rt.client(IDENTITY_CLIENT).get(f"/admin/v1/users/{user_id}")
@@ -113,6 +118,6 @@ async def get_learner(
     if row is None or not row.profile_known:
         raise _identity_unavailable()
     async with rt.transaction() as session:
-        children, guardian = await queries.load_card_relations(session, row)
+        children, guardian = await queries.load_card_relations(session, row, full_username=full_username)
     return queries.card_view(row, children=children, guardian=guardian,
-                             refreshed_at=row.refreshed_at or row.updated_at)
+                             refreshed_at=row.refreshed_at or row.updated_at, full_username=full_username)

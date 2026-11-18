@@ -14,6 +14,7 @@ import { Btn, Callout, CopyBtn, cx, Empty, FieldErr, Pill, Seg, Select, Spinner,
 import { ConfirmCommand, Drawer, MenuButton, MenuItem } from "../../ui/overlays";
 import { useToast } from "../../ui/toasts";
 import { errMeta, errText } from "../../ui/errors";
+import { tgHandle } from "../../lib/tg";
 import { CATEGORIES, liveSla, PRIORITIES, sortQueue, STAFF_TRANSITIONS, TICKET_STATUSES } from "./sla";
 
 /* ---------------------------------------------------------------- pills & chips */
@@ -652,7 +653,7 @@ function Thread({ refId, onChanged }: { refId: string; onChanged: () => void }) 
 
 function userTag(tk: StaffTicket, t: (k: MessageKey) => string): string {
   if (tk.anonymized) return t("sup.anonymized");
-  if (tk.learner?.username) return `@${tk.learner.username}`;
+  if (tk.learner?.username) return tgHandle(tk.learner.username);
   return tk.user_id ? shortId(tk.user_id, 8, 4) : t("sup.client");
 }
 
@@ -1018,7 +1019,7 @@ function Context({ tk, onUpdate, onReload }: { tk: StaffTicket; onUpdate: (x: St
             </dd>
             <dt>Telegram</dt>
             <dd>
-              {tk.learner.username ? `@${tk.learner.username} · ` : ""}
+              {tk.learner.username ? `${tgHandle(tk.learner.username)} · ` : ""}
               <span className="masked">{tk.learner.telegram_id_masked ?? "—"}</span>
             </dd>
             <dt>{t("lr.f.lang")}</dt>

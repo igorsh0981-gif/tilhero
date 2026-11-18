@@ -82,7 +82,8 @@ class Approval(Base):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('staff.role_grant','staff.create_privileged','role.permissions_change',"
-            "'staff.privileged_revoke','staff.privileged_reset')", name="ck_approval_kind"
+            "'staff.privileged_revoke','staff.privileged_reset','staff.reactivate_privileged')",
+            name="ck_approval_kind",
         ),
         CheckConstraint(
             "status IN ('PENDING','APPROVED','REJECTED','EXPIRED','APPLIED')", name="ck_approval_status"

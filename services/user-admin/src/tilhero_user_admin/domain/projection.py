@@ -6,7 +6,15 @@
   событие старше версии ничего не меняет (`_newer`);
 - DELETED — конечный статус: имя, username, маска, связь с опекуном, план и настройки стёрты, связь с обращениями
   разорвана, ничто не возвращает ученика в другой статус;
-- события принимаются только от домена-владельца (иначе — предупреждение без данных, событие отмечено в inbox).
+- события принимаются только от домена-владельца (иначе — предупреждение без данных, событие отмечено в inbox);
+- снимок источника сравнивается с версией, выставленной событием, с допуском SNAPSHOT_CLOCK_SKEW (2 с): версия
+  снимка — момент изменения строки источника (часы БД), `occurred_at` события той же транзакции — чуть позже (часы
+  приложения). Без допуска снимок, уже включающий событие, не исправлял бы блок, искажённый событием (ревью P2-3).
+  Версия группы после снимка не уменьшается (max): более старое запоздавшее событие снимок не перетрёт;
+- блок `consent` аккаунта — только собственное согласие (basis=self), детского профиля — согласие опекуна
+  (basis=guardian); решение родителя о подростке видно по `guardian_consent` (ревью P2-3);
+- сверка применяет страницу снимков пачкой: одна вставка, одна выборка FOR UPDATE (по возрастанию user_id),
+  один запрос счётчиков новых строк, одно отвязывание обращений удалённых (ревью P2-6).
 PII (username, имя) в логи не попадает: в логах только тип события.
 """
 
@@ -16,7 +24,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -86,6 +94,7 @@ PRESET_DAYS: dict[str, tuple[int, ...]] = {
 _TCK = re.compile(r"^TCK-(\d{1,12})$")
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _PIN_ON = ("pin_set", "pin_changed", "pin_reset")
+SNAPSHOT_CLOCK_SKEW = timedelta(seconds=2)
 
 
 @dataclass(frozen=True)
@@ -109,6 +118,17 @@ def utcnow() -> datetime:
 def _newer(at: datetime, version: datetime | None) -> bool:
     """Событие/снимок не старше текущей версии полей (равные — та же правда, применять безопасно)."""
     return version is None or at >= version
+
+
+def _snapshot_wins(v: datetime, version: datetime | None) -> bool:
+    """Снимок источника против версии группы (её могло выставить событие — другие часы): снимок авторитетен, если
+    не старше версии больше чем на SNAPSHOT_CLOCK_SKEW. Снимок, прочитанный до события и попавший в допуск, лишь
+    временно скрывает событие: следующая сверка (окно с перекрытием) или открытие карточки приносят новый снимок."""
+    return version is None or v >= version - SNAPSHOT_CLOCK_SKEW
+
+
+def _bump(version: datetime | None, v: datetime) -> datetime:
+    return v if version is None else max(version, v)
 
 
 def _uuid(value: Any) -> uuid.UUID | None:
@@ -139,34 +159,50 @@ def ticket_number(value: Any) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def search_text(display_name: str | None, username: str | None) -> str | None:
-    text = " ".join(p for p in (display_name, username) if p).strip().lower()
+def search_text(display_name: str | None) -> str | None:
+    """Поиск по части имени — только отображаемое имя: username маскируется для большинства ролей (ревью T2-3), и
+    подстрочный поиск по нему раскрывал бы его по буквам; username ищется только точным `q=@username`."""
+    text = (display_name or "").strip().lower()
     return text or None
 
 
 # ---------------------------------------------------------------- строки и счётчики
 
+async def lock_summaries(session: AsyncSession, created: dict[uuid.UUID, datetime]
+                         ) -> dict[uuid.UUID, LearnerSummary]:
+    """Строки учеников под FOR UPDATE (создаются при первом упоминании): одна вставка ON CONFLICT DO NOTHING, одна
+    выборка (блокировки — по возрастанию user_id: пачки сверки и события не блокируют друг друга встречно), счётчики
+    обращений новых строк — одним запросом."""
+    ids = sorted(created)
+    if not ids:
+        return {}
+    inserted = set((await session.execute(
+        insert(LearnerSummary)
+        .values([{"user_id": u, "created_at": created[u], "status": "ACTIVE"} for u in ids])
+        .on_conflict_do_nothing(index_elements=[LearnerSummary.user_id])
+        .returning(LearnerSummary.user_id)
+    )).scalars().all())
+    rows = {r.user_id: r for r in (await session.execute(
+        select(LearnerSummary)
+        .where(LearnerSummary.user_id.in_(ids))
+        .order_by(LearnerSummary.user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalars().all()}
+    if inserted:  # обращения могли прийти раньше профиля
+        for uid, open_count, total in (await session.execute(
+            select(TicketRef.user_id, func.count().filter(TicketRef.status.in_(OPEN_TICKET_STATUSES)), func.count())
+            .where(TicketRef.user_id.in_(inserted))
+            .group_by(TicketRef.user_id)
+        )).all():
+            if uid in rows:
+                rows[uid].open_tickets, rows[uid].tickets_total = int(open_count), int(total)
+    return rows
+
+
 async def lock_summary(session: AsyncSession, user_id: uuid.UUID, *, created_at: datetime) -> LearnerSummary:
     """Строка ученика под FOR UPDATE (создаётся при первом упоминании)."""
-    inserted = (
-        await session.execute(
-            insert(LearnerSummary)
-            .values(user_id=user_id, created_at=created_at, status="ACTIVE")
-            .on_conflict_do_nothing(index_elements=[LearnerSummary.user_id])
-            .returning(LearnerSummary.user_id)
-        )
-    ).first()
-    row = (
-        await session.execute(
-            select(LearnerSummary)
-            .where(LearnerSummary.user_id == user_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one()
-    if inserted is not None:
-        await refresh_ticket_counters(session, user_id)
-    return row
+    return (await lock_summaries(session, {user_id: created_at}))[user_id]
 
 
 async def refresh_ticket_counters(session: AsyncSession, user_id: uuid.UUID | None) -> None:
@@ -189,9 +225,9 @@ async def refresh_ticket_counters(session: AsyncSession, user_id: uuid.UUID | No
     )
 
 
-async def erase(session: AsyncSession, row: LearnerSummary, at: datetime) -> None:
-    """Удаление завершено (TG-FR-006): стираем копии PII, связь с опекуном, план, настройки и связь с обращениями.
-    Согласие (без PII) остаётся как в identity-consent — доказательство."""
+def _erase_fields(row: LearnerSummary, at: datetime) -> None:
+    """Удаление завершено (TG-FR-006): стираем копии PII, связь с опекуном, план, настройки. Согласие (без PII)
+    остаётся как в identity-consent — доказательство. Связь с обращениями — unlink_tickets."""
     row.status = "DELETED"
     row.status_at = max(at, row.status_at) if row.status_at else at
     row.display_name = None
@@ -207,18 +243,29 @@ async def erase(session: AsyncSession, row: LearnerSummary, at: datetime) -> Non
     row.notifications = None
     row.security = dict(EMPTY_SECURITY)
     row.last_activity_at = None
+    row.open_tickets = 0
+    row.tickets_total = 0
     if row.erased_at is None:
         row.erased_at = utcnow()
+
+
+async def unlink_tickets(session: AsyncSession, user_ids: list[uuid.UUID]) -> None:
+    """Обращения удалённых учеников обезличиваются в проекции: TCK-поиск к ним больше не ведёт."""
+    if not user_ids:
+        return
     # flush до UPDATE ticket_refs: autoflush строки в середине стирания нарушил бы CHECK ck_learner_deleted_erased
     await session.flush()
     await session.execute(
         update(TicketRef)
-        .where(TicketRef.user_id == row.user_id)
+        .where(TicketRef.user_id.in_(user_ids))
         .values(user_id=None, anonymized=True)
         .execution_options(synchronize_session=False)
     )
-    row.open_tickets = 0
-    row.tickets_total = 0
+
+
+async def erase(session: AsyncSession, row: LearnerSummary, at: datetime) -> None:
+    _erase_fields(row, at)
+    await unlink_tickets(session, [row.user_id])
 
 
 async def apply_status(
@@ -310,7 +357,7 @@ def _apply_profile_created(row: LearnerSummary, p: dict[str, Any], at: datetime,
         if row.kind == "child":
             row.username = None
             row.telegram_id_masked = None
-            row.search_text = search_text(row.display_name, None)
+            row.search_text = search_text(row.display_name)
     _apply_profile(row, p, at)
     if row.status_at is None:
         row.status_at = at  # профиль создан ACTIVE; любое более позднее событие статуса победит
@@ -330,10 +377,19 @@ def _apply_profile(row: LearnerSummary, p: dict[str, Any], at: datetime) -> None
     row.profile_at = at
 
 
+def _consent_basis_fits(row: LearnerSummary, basis: Any) -> bool:
+    """Блок `consent` аккаунта — только своё согласие (basis=self), детского профиля — опекуна (basis=guardian).
+    Вид ещё не известен (профиль не подтверждён) — принимаем: снимок identity-consent, который придёт по
+    user.profile.created.v1, исправит блок."""
+    if not row.profile_known or basis not in ("self", "guardian"):
+        return True
+    return basis == ("self" if row.kind == "account" else "guardian")
+
+
 def _apply_consent_accepted(row: LearnerSummary, p: dict[str, Any], at: datetime) -> None:
-    if not _newer(at, row.consent_at):
-        return
     basis = p.get("basis") if p.get("basis") in ("self", "guardian") else None
+    if not _newer(at, row.consent_at) or not _consent_basis_fits(row, basis):
+        return
     row.consent = {
         "policy_version": str(p.get("policy_version") or "")[:20] or None,
         "purposes": [str(x)[:32] for x in (p.get("purposes") or [])][:20],
@@ -345,11 +401,11 @@ def _apply_consent_accepted(row: LearnerSummary, p: dict[str, Any], at: datetime
 
 
 def _apply_consent_revoked(row: LearnerSummary, p: dict[str, Any], at: datetime) -> None:
-    """Отзыв действующего согласия. Отзыв согласия другого основания (родитель отозвал своё у подростка, а действует
-    согласие самого подростка) блок согласия не меняет — это видно по guardian_consent (user.profile.updated.v1)."""
-    if not _newer(at, row.consent_at):
-        return
+    """Отзыв согласия того основания, что в блоке. Родитель отозвал своё согласие у подростка — блок (своё согласие
+    подростка) не меняется: решение родителя видно по guardian_consent (user.profile.updated.v1)."""
     basis = p.get("basis")
+    if not _newer(at, row.consent_at) or not _consent_basis_fits(row, basis):
+        return
     current = row.consent.get("basis")
     if basis in ("self", "guardian") and current in ("self", "guardian") and basis != current:
         return
@@ -500,60 +556,97 @@ async def _apply_ticket(session: AsyncSession, env: Envelope, at: datetime) -> A
     return DONE
 
 
-# ---------------------------------------------------------------- снимки источников
+# ---------------------------------------------------------------- снимки источников (пачкой)
 
-async def apply_snapshot(session: AsyncSession, snap: IdentitySnapshot, *, read_at: datetime) -> LearnerSummary:
-    """Authoritative-снимок identity-consent. Версия — users.updated_at источника: событие новее снимка не
-    затирается, событие старше — уже учтено в снимке."""
+def _latest(snaps: list[Any]) -> dict[uuid.UUID, Any]:
+    """Один снимок на ученика — самый новый (на странице источника дублей нет, защита в глубину)."""
+    out: dict[uuid.UUID, Any] = {}
+    for snap in snaps:
+        prev = out.get(snap.user_id)
+        if prev is None or snap.updated_at >= prev.updated_at:
+            out[snap.user_id] = snap
+    return out
+
+
+def _apply_identity(row: LearnerSummary, snap: IdentitySnapshot, read_at: datetime) -> bool:
+    """Authoritative-снимок identity-consent (версия — момент изменения строки источника). → стёрт сейчас."""
     v = snap.updated_at.astimezone(UTC)
-    row = await lock_summary(session, snap.user_id, created_at=snap.created_at)
     row.refreshed_at = read_at
     if row.erased_at is not None:
-        return row
+        return False
     if not row.profile_known:
         row.created_at = snap.created_at  # см. _apply_profile_created: дальше не меняется
         row.profile_known = True
     if snap.status == "DELETED":
-        await apply_status(session, row, "DELETED", v, force=True)
-        return row
-    if _newer(v, row.source_updated_at):
+        _erase_fields(row, v)
+        return True
+    if _newer(v, row.source_updated_at):  # имя, username, маска, вид, опекун — только из снимков (одни часы)
         row.kind = snap.kind
         row.guardian_user_id = snap.guardian_user_id
         row.display_name = snap.display_name
         row.username = snap.username
         row.telegram_id_masked = snap.telegram_id_masked
-        row.search_text = search_text(snap.display_name, snap.username)
+        row.search_text = search_text(snap.display_name)
         row.source_updated_at = v
-    if _newer(v, row.profile_at):
+    if _snapshot_wins(v, row.profile_at):
         row.locale = snap.locale
         row.age_band = snap.age_band
         row.guardian_consent = snap.guardian_consent
-        row.profile_at = v
-    await apply_status(session, row, snap.status, v)
-    if _newer(v, row.consent_at):
+        row.profile_at = _bump(row.profile_at, v)
+    if _snapshot_wins(v, row.status_at):
+        row.status = snap.status
+        row.status_at = _bump(row.status_at, v)
+    if _snapshot_wins(v, row.consent_at):
         c = snap.consent
         row.consent = {"policy_version": c.policy_version, "purposes": list(c.purposes),
                        "accepted_at": _iso(c.accepted_at), "revoked_at": _iso(c.revoked_at), "basis": c.basis}
-        row.consent_at = v
+        row.consent_at = _bump(row.consent_at, v)
     security = dict(row.security)
-    if _newer(v, row.pin_at):
-        security["pin_enabled"], row.pin_at = snap.security.pin_enabled, v
-    if _newer(v, row.pin_reset_at):
-        security["pin_reset_pending"], row.pin_reset_at = snap.security.pin_reset_pending, v
+    if _snapshot_wins(v, row.pin_at):
+        security["pin_enabled"], row.pin_at = snap.security.pin_enabled, _bump(row.pin_at, v)
+    if _snapshot_wins(v, row.pin_reset_at):
+        security["pin_reset_pending"], row.pin_reset_at = snap.security.pin_reset_pending, _bump(row.pin_reset_at, v)
     row.security = security
-    if snap.notifications is not None and _newer(v, row.notifications_at):
+    if snap.notifications is not None and _snapshot_wins(v, row.notifications_at):
         row.notifications = snap.notifications.as_json()
-        row.notifications_at = v
-    return row
+        row.notifications_at = _bump(row.notifications_at, v)
+    return False
+
+
+async def apply_snapshots(session: AsyncSession, snaps: list[IdentitySnapshot], *, read_at: datetime
+                          ) -> list[LearnerSummary]:
+    """Страница снимков identity-consent — фиксированное число запросов (плюс пакетный UPDATE при flush)."""
+    latest = _latest(snaps)
+    rows = await lock_summaries(session, {u: s.created_at for u, s in latest.items()})
+    erased = [u for u, snap in latest.items() if _apply_identity(rows[u], snap, read_at)]
+    await unlink_tickets(session, erased)
+    return [rows[u] for u in latest]
+
+
+async def apply_snapshot(session: AsyncSession, snap: IdentitySnapshot, *, read_at: datetime) -> LearnerSummary:
+    """Один снимок (карточка)."""
+    return (await apply_snapshots(session, [snap], read_at=read_at))[0]
+
+
+def _apply_plan(row: LearnerSummary, snap: PlanSnapshot) -> None:
+    v = snap.updated_at.astimezone(UTC)
+    if row.erased_at is not None or not _snapshot_wins(v, row.plan_at):
+        return
+    schedule = snap.schedule.model_dump() if snap.schedule is not None else None
+    _set_plan(row, {"goal": snap.goal, "level_self": snap.level_self, "ui_lang": snap.ui_lang, "schedule": schedule,
+                    "onboarding_completed_at": _iso(snap.onboarding_completed_at), "updated_at": _iso(v)},
+              _bump(row.plan_at, v))
+
+
+async def apply_plan_snapshots(session: AsyncSession, snaps: list[PlanSnapshot], *, read_at: datetime
+                               ) -> list[LearnerSummary]:
+    """Страница снимков планов learning-plan (версия — plans.updated_at)."""
+    latest = _latest(snaps)
+    rows = await lock_summaries(session, dict.fromkeys(latest, read_at))
+    for u, snap in latest.items():
+        _apply_plan(rows[u], snap)
+    return [rows[u] for u in latest]
 
 
 async def apply_plan_snapshot(session: AsyncSession, snap: PlanSnapshot, *, read_at: datetime) -> LearnerSummary:
-    """Authoritative-снимок плана learning-plan (версия — plans.updated_at)."""
-    v = snap.updated_at.astimezone(UTC)
-    row = await lock_summary(session, snap.user_id, created_at=read_at)
-    if row.erased_at is not None or not _newer(v, row.plan_at):
-        return row
-    schedule = snap.schedule.model_dump() if snap.schedule is not None else None
-    _set_plan(row, {"goal": snap.goal, "level_self": snap.level_self, "ui_lang": snap.ui_lang, "schedule": schedule,
-                    "onboarding_completed_at": _iso(snap.onboarding_completed_at), "updated_at": _iso(v)}, v)
-    return row
+    return (await apply_plan_snapshots(session, [snap], read_at=read_at))[0]

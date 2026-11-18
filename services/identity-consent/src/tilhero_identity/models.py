@@ -27,6 +27,7 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     func,
+    literal_column,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
@@ -36,6 +37,7 @@ from tilhero_identity.base import USER_FK, Base
 
 USER_STATUSES = ("ACTIVE", "DISABLED", "DELETION_REQUESTED", "DELETED")
 TS = DateTime(timezone=True)
+USERS_UPDATED_AT = literal_column("users.updated_at", TS)  # прежнее значение в SET … = greatest(users.updated_at, …)
 
 # SQL-фрагменты CHECK — общие для моделей и миграции 0001 (сверка schema_drift сравнивает имена ограничений)
 AGE_BANDS_SQL = "('6-9','10-13','14-17','18+')"
@@ -104,8 +106,10 @@ class User(Base):
     bot_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
+    # Версия строки для сверки read-модели админки (GET /admin/v1/users?updated_after=). Не убывает: обновление
+    # ставит max(прежняя, now()); в конце транзакции с событиями — не раньше их occurred_at (stamp_versions).
     updated_at: Mapped[datetime] = mapped_column(
-        TS, nullable=False, server_default=func.now(), onupdate=func.now()
+        TS, nullable=False, server_default=func.now(), onupdate=func.greatest(USERS_UPDATED_AT, func.now())
     )
 
 

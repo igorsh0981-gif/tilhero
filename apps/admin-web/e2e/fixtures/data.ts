@@ -68,6 +68,7 @@ export const ID = {
   ops: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a06",
   comms: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a07",
   methodist: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a08",
+  former: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a09",
 };
 
 function staff(id: string, email: string, display_name: string, role: RoleCode, extra: Partial<Staff> = {}): Staff {
@@ -99,6 +100,8 @@ export function accounts(): Account[] {
     { staff: staff(ID.methodist, "methodist@tilhero.local", "Гульнора", "methodist", { mfa_enabled: false }), password: PASSWORD },
     { staff: staff(ID.auditor, "auditor@tilhero.local", "Сардор", "auditor", { mfa_enabled: false }), password: PASSWORD },
     { staff: staff(ID.newbie, "newbie@tilhero.local", "Новый сотрудник", "operations", { mfa_enabled: false, must_change_password: true, last_login_at: null }), password: "Temp-Pass-0001" },
+    // disabled privileged account: re-enabling it is a four-eyes request (review P2-2)
+    { staff: staff(ID.former, "former@tilhero.local", "Бахром", "communications", { status: "DISABLED", last_login_at: iso(-30 * DAY) }), password: PASSWORD },
   ];
 }
 
@@ -468,6 +471,7 @@ export function campaigns(): Campaign[] {
     stopped_by: null as string | null,
     stopped_at: null as string | null,
     stop_reason: null as string | null,
+    last_error: null as Campaign["last_error"],
   };
   return [
     {

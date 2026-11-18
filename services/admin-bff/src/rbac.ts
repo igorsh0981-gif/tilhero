@@ -21,6 +21,8 @@ export interface AccessConfig {
   guard?: Guard;
   stepUp?: boolean;
   rate?: RateClass;
+  /** Только сессия (cookie → Redis → UA → CSRF/Origin), без principal admin-identity и без лимитов — logout. */
+  sessionOnly?: boolean;
 }
 
 /** Шаг входа до сессии: обязательна проверка Origin, лимит по IP. */
@@ -32,6 +34,12 @@ export const authenticated = (rate?: RateClass): AccessConfig => ({
   guard: { kind: "authenticated" },
   ...(rate ? { rate } : {}),
 });
+
+/**
+ * Выход (ревью T2-1): безотказный — нужны только cookie, сессия в Redis, привязка к User-Agent и CSRF/Origin.
+ * Без principal (admin-identity может быть недоступен) и без лимитов команд: сессия удаляется всегда.
+ */
+export const sessionOnly = (): AccessConfig => ({ access: "session", guard: { kind: "authenticated" }, sessionOnly: true });
 
 /** Нужно хотя бы одно из перечисленных прав (эффективных, с учётом имперсонации). */
 export const requirePermission = (...anyOf: [Permission, ...Permission[]]): AccessConfig => ({

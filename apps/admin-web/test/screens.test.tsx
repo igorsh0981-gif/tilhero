@@ -11,6 +11,11 @@ import { TemplatesTab } from "../src/screens/news/Templates";
 import { RevealTelegramId } from "../src/screens/learners/Learners";
 import { Overview } from "../src/screens/overview/Overview";
 import { emptyNote } from "../src/screens/news/catalog";
+import { approvalLabel, issuesPassword } from "../src/screens/roles/Roles";
+import { translate } from "../src/i18n";
+import { ErrorBoundary } from "../src/ui/ErrorBoundary";
+import { tgHandle } from "../src/lib/tg";
+import { useState } from "react";
 
 /* Component tests of the TilHero screens against a fake admin-bff (fetch). */
 
@@ -180,6 +185,8 @@ describe("Telegram ID reveal", () => {
     fireEvent.change(screen.getByTestId("reveal-reason"), { target: { value: "TCK-1042 — сверяем аккаунт" } });
     fireEvent.click(screen.getByTestId("reveal-confirm"));
     expect(await screen.findByTestId("reveal-value")).toHaveTextContent("5120934417");
+    // no copy button: the OS clipboard would keep the ID longer than 60 s (review T2-8)
+    expect(within(screen.getByTestId("reveal-box")).queryByRole("button", { name: /копир/i })).toBeNull();
     expect(calls[0]!.body).toMatchObject({ field: "telegram_user_id" });
     await act(async () => {
       vi.advanceTimersByTime(61_000);
@@ -212,5 +219,60 @@ describe("overview", () => {
     expect(screen.getByTestId("block-support-empty")).toHaveTextContent("Обращений нет");
     expect(screen.getByTestId("block-campaigns-empty")).toBeInTheDocument();
     expect(screen.getByTestId("dw-views")).toHaveTextContent("812");
+  });
+});
+
+describe("error boundary (review T2-9)", () => {
+  function Boom({ when }: { when: boolean }): JSX.Element {
+    if (when) throw new Error("render failed: learner Мадина");
+    return <p>ok</p>;
+  }
+  function Harness() {
+    const [bad, setBad] = useState(true);
+    return (
+      <>
+        <button onClick={() => setBad(false)}>fix</button>
+        <ErrorBoundary scope="section">
+          <Boom when={bad} />
+        </ErrorBoundary>
+      </>
+    );
+  }
+  it("a render error shows «Раздел не открылся» with a retry instead of a blank page; nothing of the error is shown", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    ui(<Harness />, ["dashboard.read"]);
+    const box = screen.getByTestId("section-crash");
+    expect(box).toHaveTextContent("Раздел не открылся");
+    expect(box).not.toHaveTextContent("Мадина");
+    fireEvent.click(screen.getByText("fix"));
+    fireEvent.click(screen.getByTestId("crash-retry"));
+    expect(screen.getByText("ok")).toBeInTheDocument();
+    spy.mockRestore();
+  });
+});
+
+describe("staff four-eyes and usernames", () => {
+  const a = (kind: string, summary: Record<string, unknown> = {}) => ({ kind, summary }) as Parameters<typeof issuesPassword>[0];
+  it("the approver gets a temporary password for create / role grant / re-enable / password reset (P2-1, P2-2)", () => {
+    expect(issuesPassword(a("staff.create_privileged"))).toBe(true);
+    expect(issuesPassword(a("staff.role_grant"))).toBe(true);
+    expect(issuesPassword(a("staff.reactivate_privileged"))).toBe(true);
+    expect(issuesPassword(a("staff.privileged_reset", { action: "password" }))).toBe(true);
+    expect(issuesPassword(a("staff.privileged_reset", { action: "mfa" }))).toBe(false);
+    expect(issuesPassword(a("staff.privileged_revoke"))).toBe(false);
+    expect(issuesPassword(a("role.permissions_change"))).toBe(false);
+  });
+  it("the re-enable request reads «Доступ отозван → Активен · role» with the admin-identity summary", () => {
+    const tr = (k: Parameters<typeof translate>[1], v?: Record<string, string | number>) => translate("ru", k, v);
+    const ap = (summary: Record<string, unknown>) => ({ kind: "staff.reactivate_privileged", summary }) as Parameters<typeof approvalLabel>[0];
+    const staff = { staff_id: "x", email: "former@tilhero.local", display_name: "Бахром" };
+    expect(approvalLabel(ap({ staff, role: "communications", to_role: null, from_status: "DISABLED" }), (r) => r, tr)).toBe("Бахром: Доступ отозван → Активен · communications");
+    expect(approvalLabel(ap({ staff, role: "communications", to_role: "operations", from_status: "DISABLED" }), (r) => r, tr)).toBe("Бахром: Доступ отозван → Активен · communications → operations");
+  });
+  it("username: shown as received with one «@» (the mask too)", () => {
+    expect(tgHandle("ig•••81")).toBe("@ig•••81");
+    expect(tgHandle("•••")).toBe("@•••");
+    expect(tgHandle("madina_k")).toBe("@madina_k");
+    expect(tgHandle("@madina_k")).toBe("@madina_k");
   });
 });

@@ -13,8 +13,8 @@ import { parseDomain } from "../codec.js";
 import { MFA_ENROLL } from "../contract.js";
 import { clearSessionCookie, sessionCookie } from "../cookies.js";
 import { parsePrincipal, writeAudit, type BffContext } from "../context.js";
-import { staffOf, validationError, type App, type Principal } from "../http.js";
-import { authenticated, canImpersonate, publicAuth } from "../rbac.js";
+import { sessionOf, staffOf, validationError, type App, type Principal } from "../http.js";
+import { authenticated, canImpersonate, effectiveAccess, publicAuth, sessionOnly } from "../rbac.js";
 import { CHALLENGE, ROLE, TOTP, nullable, obj, str } from "../schemas.js";
 import { buildMe, finishStep, iso, ROTATION_GRACE_MS, type AuthStep } from "../session.js";
 import { ok, ME, LOGIN_STEP, MFA_ENROLL_START, NO_CONTENT, STEP_UP_RESULT } from "../responses.js";
@@ -158,18 +158,29 @@ export function authRoutes(app: App, ctx: BffContext): void {
     },
   );
 
-  app.post("/admin/v1/auth/logout", { config: authenticated(), schema: { response: NO_CONTENT } }, async (req, reply) => {
-    const auth = staffOf(req);
-    await ctx.store(() => ctx.sessions.delete(auth.sessionId));
+  /**
+   * Выход безотказный (ревью T2-1): уровень sessionOnly — без principal и лимитов. Сессия (вместе со связанным
+   * ротацией id) удаляется и cookie стирается ДО обращения к admin-identity; аудит auth.logout пишет admin-identity
+   * (best effort), при его недоступности — резервная запись в audit (actor — из кэша principal или по сессии).
+   */
+  app.post("/admin/v1/auth/logout", { config: sessionOnly(), schema: { response: NO_CONTENT } }, async (req, reply) => {
+    const auth = sessionOf(req);
+    const staffId = auth.session.staff_id;
     void reply.header("set-cookie", clearSessionCookie());
+    await ctx.store(() => ctx.sessions.delete(auth.sessionId));
     try {
-      // аудит auth.logout пишет admin-identity
       await idp.call("POST", "/internal/v1/auth/logout", {
-        body: { staff_id: auth.principal.staff.staff_id, session_id: auth.publicSessionId },
+        body: { staff_id: staffId, session_id: auth.publicSessionId },
+        timeoutMs: Math.min(config.upstreamTimeoutMs, 2000),
+        retries: 0,
       });
     } catch {
       try {
-        await writeAudit(ctx, auth, { action: "auth.logout", object_type: "staff", object_id: auth.principal.staff.staff_id }, req.ip);
+        const p = await ctx.principals.peek(staffId);
+        const actor = p
+          ? { id: staffId, role: p.staff.role, name: p.staff.display_name, permissions: effectiveAccess({ role: p.staff.role, permissions: p.permissions }, null).permissions }
+          : { id: staffId, role: "unknown", permissions: [] as string[] };
+        await writeAudit(ctx, { actor, publicSessionId: auth.publicSessionId }, { action: "auth.logout", object_type: "staff", object_id: staffId }, req.ip);
       } catch {
         ctx.log.warn({ event: "logout_audit_failed" }, "logout audit record was not written");
       }

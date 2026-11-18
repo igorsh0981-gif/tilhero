@@ -17,7 +17,9 @@ LEARNER_ACTIVITY = activity.CONSUMER
 
 def deletion_ack_handler(runtime: Runtime) -> Callable[[AsyncSession, Envelope], Awaitable[None]]:
     async def handle(session: AsyncSession, env: Envelope) -> None:
-        await IdentityService(runtime).on_domain_deleted(session, env)
+        svc = IdentityService(runtime)
+        await svc.on_domain_deleted(session, env)
+        await svc.stamp_versions(session)  # обезличивание: версия снимка не раньше событий (ревью P2-3)
 
     return handle
 

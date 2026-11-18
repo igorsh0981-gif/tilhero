@@ -95,6 +95,24 @@ def test_catalog_mirrors_admin_ts() -> None:
     assert not {"billing", "agent_manager"} & set(ROLE_CODES)
 
 
+def test_approval_kinds_equal_admin_ts() -> None:
+    from typing import get_args
+
+    from tilhero_admin_identity.models import Approval
+    from tilhero_admin_identity.schemas import ApprovalKind
+
+    kinds = _ts_union(_ts_source(), "ApprovalKind")
+    assert list(get_args(ApprovalKind)) == kinds
+    check = next(c for c in Approval.__table__.constraints if c.name == "ck_approval_kind")
+    assert set(re.findall(r"'([^']+)'", str(check.sqltext))) == set(kinds)  # type: ignore[attr-defined]
+    m2 = importlib.util.spec_from_file_location("aid_migration_0002",
+                                                MIGRATION.parent / "0002_reactivate_privileged.py")
+    assert m2 is not None and m2.loader is not None
+    mod = importlib.util.module_from_spec(m2)
+    m2.loader.exec_module(mod)
+    assert set(re.findall(r"'([^']+)'", mod._KINDS_NEW)) == set(kinds)
+
+
 def test_migration_seed_equals_contract() -> None:
     src, m = _ts_source(), _migration()
     seeded = {p for _, _, _, perms in m.ROLES for p in perms}

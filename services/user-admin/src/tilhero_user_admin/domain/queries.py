@@ -21,6 +21,7 @@ from tilhero_user_admin.models import (
     EMPTY_CONSENT,
     EMPTY_SECURITY,
     LOCALES,
+    MASK,
     STATUSES,
     LearnerSummary,
     TicketRef,
@@ -54,13 +55,24 @@ def children_count_expr() -> ColumnElement[int]:
     )
 
 
-def row_view(r: LearnerSummary, children_count: int = 0) -> AdminLearnerRow:
+def mask_username(value: str | None) -> str | None:
+    """`ig•••81` — первые 2 и последние 2 символа; короче 5 — `•••`. Без «@», как и полный username (admin.ts
+    AdminLearnerRow, ревью T2-3)."""
+    if not value:
+        return None
+    if len(value) < 5:
+        return MASK * 3
+    return value[:2] + MASK * 3 + value[-2:]
+
+
+def row_view(r: LearnerSummary, children_count: int = 0, *, full_username: bool = False) -> AdminLearnerRow:
+    """`full_username` — у сотрудника есть users.sensitive.read; иначе username маскируется."""
     return AdminLearnerRow(
         user_id=r.user_id,
         kind=r.kind,  # type: ignore[arg-type]  # CHECK ck_learner_kind
         guardian_user_id=r.guardian_user_id,
         display_name=r.display_name,
-        username=r.username,
+        username=r.username if full_username else mask_username(r.username),
         telegram_id_masked=r.telegram_id_masked,
         locale=r.locale,  # type: ignore[arg-type]  # CHECK ck_learner_locale
         age_band=r.age_band,  # type: ignore[arg-type]  # CHECK ck_learner_age_band
@@ -78,11 +90,11 @@ def row_view(r: LearnerSummary, children_count: int = 0) -> AdminLearnerRow:
 
 
 def card_view(r: LearnerSummary, *, children: list[AdminLearnerRow], guardian: AdminLearnerRow | None,
-              refreshed_at: datetime) -> AdminLearnerCard:
+              refreshed_at: datetime, full_username: bool = False) -> AdminLearnerCard:
     consent: dict[str, Any] = {**EMPTY_CONSENT, **(r.consent or {})}
     security: dict[str, Any] = {**EMPTY_SECURITY, **(r.security or {})}
     return AdminLearnerCard(
-        **row_view(r, len(children)).model_dump(),
+        **row_view(r, len(children), full_username=full_username).model_dump(),
         consent=CardConsent.model_validate(consent),
         security=CardSecurity.model_validate(security),
         notifications=CardNotifications.model_validate(r.notifications) if r.notifications else None,
@@ -93,22 +105,23 @@ def card_view(r: LearnerSummary, *, children: list[AdminLearnerRow], guardian: A
     )
 
 
-async def load_card_relations(session: AsyncSession, r: LearnerSummary
+async def load_card_relations(session: AsyncSession, r: LearnerSummary, *, full_username: bool = False
                               ) -> tuple[list[AdminLearnerRow], AdminLearnerRow | None]:
-    """Детские профили аккаунта (кроме удалённых, старые первыми) или опекун детского профиля."""
+    """Детские профили аккаунта (кроме удалённых, старые первыми) или опекун детского профиля (username — по
+    праву сотрудника, как у самой карточки)."""
     if r.kind == "account":
         rows = (await session.execute(
             select(L, children_count_expr())
             .where(L.guardian_user_id == r.user_id, L.kind == "child", L.profile_known, L.status != "DELETED")
             .order_by(L.created_at, L.user_id)
         )).all()
-        return [row_view(c, int(n)) for c, n in rows], None
+        return [row_view(c, int(n), full_username=full_username) for c, n in rows], None
     if r.guardian_user_id is None:
         return [], None
     found = (await session.execute(
         select(L, children_count_expr()).where(L.user_id == r.guardian_user_id, L.profile_known)
     )).first()
-    return [], (row_view(found[0], int(found[1])) if found else None)
+    return [], (row_view(found[0], int(found[1]), full_username=full_username) if found else None)
 
 
 # ---------------------------------------------------------------- список
@@ -164,8 +177,9 @@ def parse_age_bands(raw: str | None) -> list[str] | None:
 
 
 def apply_query(stmt: Select, q: str | None, *, can_search_tickets: bool) -> Select:
-    """q: UUID ученика | @username (префикс) | TCK-номер (→ автор обращения; только с правом support.read) |
-    часть имени или username (ILIKE по search_text, `%`/`_` — литералы)."""
+    """q: UUID ученика | @username (точное совпадение полного username без регистра — маска в ответе поиску не
+    мешает, подбор по префиксу или подстроке не раскрывает username по буквам) | TCK-номер (→ автор обращения;
+    только с правом support.read) | часть отображаемого имени (ILIKE по search_text, `%`/`_` — литералы)."""
     if q is None or not q.strip():
         return stmt
     q = q.strip()
@@ -183,7 +197,7 @@ def apply_query(stmt: Select, q: str | None, *, can_search_tickets: bool) -> Sel
         name = q[1:]
         if not _USERNAME_CHARS.match(name):
             return stmt.where(false())  # такого username быть не может
-        return stmt.where(func.lower(L.username).like(like_escape(name.lower()) + "%", escape="\\"))
+        return stmt.where(func.lower(L.username) == name.lower())
     return stmt.where(L.search_text.ilike("%" + like_escape(q.lower()) + "%", escape="\\"))
 
 
@@ -199,6 +213,7 @@ async def list_learners(
     limit: int,
     cursor: str | None,
     can_search_tickets: bool,
+    full_username: bool = False,
 ) -> tuple[list[AdminLearnerRow], str | None]:
     # Строка, созданная событием другого домена раньше профиля (profile_known=false), в списке не показывается:
     # до первого user.profile.created.v1 или снимка identity-consent о ученике ничего достоверного не известно.
@@ -226,7 +241,7 @@ async def list_learners(
     stmt = stmt.order_by(L.created_at.desc(), L.user_id.desc()).limit(limit + 1)
     rows = (await session.execute(stmt)).all()
     nxt = _encode_cursor(rows[limit - 1][0].created_at, rows[limit - 1][0].user_id) if len(rows) > limit else None
-    return [row_view(r, int(n)) for r, n in rows[:limit]], nxt
+    return [row_view(r, int(n), full_username=full_username) for r, n in rows[:limit]], nxt
 
 
 # ---------------------------------------------------------------- статистика

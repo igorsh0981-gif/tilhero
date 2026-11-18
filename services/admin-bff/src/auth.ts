@@ -2,6 +2,7 @@
  * Авторизация запросов admin-web (onRequest — до разбора тела, валидации и вызова домена):
  *
  *   public  (шаги входа до сессии) — проверка Origin/Sec-Fetch-Site (только ADMIN_ORIGIN) → лимит по IP;
+ *   sessionOnly (logout) — cookie → сессия → срок → User-Agent → CSRF/Origin; без principal и лимитов (ревью T2-1);
  *   session — cookie → сессия в Redis → бездействие 30 мин / абсолют 8 ч (401 SESSION_EXPIRED) → привязка к
  *             User-Agent → CSRF (не-GET: Origin + X-CSRF-Token) → лимиты adm.staff (300/мин), для команд
  *             (не-GET) adm.command (60/мин), для step-up adm.mfa (5/мин) → principal
@@ -13,7 +14,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { AppError, currentContext, pseudonymize } from "@tilhero/ts-common";
 import { clearSessionCookie, readSessionCookie } from "./cookies.js";
 import type { BffContext } from "./context.js";
-import type { App, Principal, StaffAuth } from "./http.js";
+import type { App, Principal, SessionAuth, StaffAuth } from "./http.js";
 import { effectiveAccess, guardAllows, guardLabel, type Guard, type RateClass } from "./rbac.js";
 import { commandPolicies, rateLimited } from "./rateLimit.js";
 import { isSessionId, publicSessionId, sha256hex, type SessionData } from "./sessions.js";
@@ -65,13 +66,16 @@ async function drop(ctx: BffContext, reply: FastifyReply, id: string): Promise<v
   await ctx.store(() => ctx.sessions.delete(id));
 }
 
-export async function authenticate(
+/**
+ * Первая часть проверки любого сессионного запроса — только cookie и Redis: id из cookie → сессия → срок →
+ * замещённый id → User-Agent → CSRF/Origin (не-GET). Без principal и без лимитов.
+ */
+async function loadSession(
   ctx: BffContext,
   req: FastifyRequest,
   reply: FastifyReply,
-  need: SessionRequirement,
-): Promise<StaffAuth> {
-  const { config, sessions, limiter } = ctx;
+): Promise<{ id: string; s: SessionData; now: number; superseded: boolean }> {
+  const { sessions } = ctx;
   const id = readSessionCookie(req.headers.cookie);
   if (!isSessionId(id)) {
     if (id !== undefined) void reply.header("set-cookie", clearSessionCookie());
@@ -105,6 +109,23 @@ export async function authenticate(
     const token = req.headers["x-csrf-token"];
     if (typeof token !== "string" || !sameSecret(token, s.csrf_token)) throw csrfInvalid();
   }
+  return { id, s, now, superseded };
+}
+
+/** Уровень sessionOnly (logout, ревью T2-1): сессия и CSRF — без admin-identity и без лимитов. */
+export async function authenticateSession(ctx: BffContext, req: FastifyRequest, reply: FastifyReply): Promise<SessionAuth> {
+  const { id, s } = await loadSession(ctx, req, reply);
+  return { sessionId: id, publicSessionId: publicSessionId(id), session: s };
+}
+
+export async function authenticate(
+  ctx: BffContext,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  need: SessionRequirement,
+): Promise<StaffAuth> {
+  const { config, sessions, limiter } = ctx;
+  const { id, s, now, superseded } = await loadSession(ctx, req, reply);
 
   // единый лимитер (ts-common) — 429 RATE_LIMITED {policy, retry_after}; сбой Redis — по режиму политики
   const rate = await limiter.check("adm.staff", s.staff_id);
@@ -191,6 +212,10 @@ export function registerAuth(app: App, ctx: BffContext): void {
       return;
     }
     if (!rc.guard) throw new AppError(500, "INTERNAL_ERROR", "Маршрут без объявленного права"); // недостижимо: onRoute
+    if (rc.sessionOnly) {
+      req.sessionAuth = await authenticateSession(ctx, req, reply);
+      return;
+    }
     req.staff = await authenticate(ctx, req, reply, { guard: rc.guard, stepUp: rc.stepUp, rate: rc.rate });
   });
 }

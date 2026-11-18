@@ -2,7 +2,7 @@
  * Сотрудники, роли, заявки four-eyes — прокси в admin-identity (staff API, actor обязателен).
  * Step-up (повторный TOTP ≤ 5 мин) проверяет admin-bff ДО вызова — на всех командах (admin.ts): создание и
  * изменение сотрудника, сбросы, изменение роли, approve/reject. Статус ответа домена сохраняется
- * (201 создание, 202 заявка four-eyes). Изменения сотрудника (в т. ч. применённые approve) сбрасывают кэш его
+ * (201 создание, 202 заявка four-eyes; у PATCH — StaffPatchPending). Изменения сотрудника (в т. ч. применённые approve) сбрасывают кэш его
  * principal — отзыв сессий без ожидания 30 с. Временный пароль — только в ответе, no-store, не в логах.
  */
 import type { FastifyReply } from "fastify";
@@ -15,6 +15,7 @@ import {
   STAFF,
   STAFF_CREATED,
   STAFF_PAGE,
+  STAFF_PATCH_PENDING,
   TEMPORARY_PASSWORD,
 } from "../contract.js";
 import type { BffContext } from "../context.js";
@@ -85,7 +86,8 @@ export function staffRoutes(app: App, ctx: BffContext): void {
     {
       config: { ...requirePermission("staff.manage"), ...requireStepUp() },
       schema: {
-        response: { 200: STAFF.schema, 202: APPROVAL_ENVELOPE.schema },
+        // 202 StaffPatchPending: заявка four-eyes; temporary_password — если применилась сразу (single_super_admin)
+        response: { 200: STAFF.schema, 202: STAFF_PATCH_PENDING.schema },
         params: ID_PARAMS,
         body: obj(
           { role: ROLE, status: enumOf(["ACTIVE", "DISABLED"]), display_name: str(1, 120), reason: REASON },
@@ -99,7 +101,8 @@ export function staffRoutes(app: App, ctx: BffContext): void {
       const id = req.params.id.toLowerCase();
       const res = await idp.call("PATCH", `/admin/v1/staff/${id}`, { actor: auth.actor, body: req.body });
       await ctx.principals.invalidate(id);
-      return send(auth, reply, res, STAFF);
+      if (res.status === 202) return relay(ctx, auth, reply, SERVICE, STAFF_PATCH_PENDING, res);
+      return relay(ctx, auth, reply, SERVICE, STAFF, res);
     },
   );
 
@@ -181,7 +184,8 @@ export function staffRoutes(app: App, ctx: BffContext): void {
         };
         const targetId = typeof target.staff?.staff_id === "string" ? target.staff.staff_id : target.staff_id;
         if (decision === "approve" && typeof targetId === "string") await ctx.principals.invalidate(targetId.toLowerCase());
-        // ApprovalDecision: temporary_password — только у применённой заявки staff.privileged_reset (null → ключа нет)
+        // ApprovalDecision: temporary_password — решающему у применённых privileged_reset, create_privileged,
+        // role_grant, reactivate_privileged (null → ключа нет)
         return relay(ctx, auth, reply, SERVICE, APPROVAL_DECISION, res);
       },
     );

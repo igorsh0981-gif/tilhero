@@ -44,8 +44,8 @@ type Tr = (k: MessageKey, v?: Record<string, string | number>) => string;
 
 /**
  * Human one-liner of an approval summary (admin-identity): staff.create_privileged / staff.role_grant /
- * role.permissions_change / staff.privileged_revoke / staff.privileged_reset. Statuses and actions come from the
- * dictionaries — never raw codes like "DISABLED".
+ * role.permissions_change / staff.privileged_revoke / staff.privileged_reset / staff.reactivate_privileged. Statuses and
+ * actions come from the dictionaries — never raw codes like "DISABLED".
  */
 export function approvalLabel(a: Approval, roleName: (r: string) => string, t: Tr): string {
   const s = a.summary as {
@@ -54,6 +54,7 @@ export function approvalLabel(a: Approval, roleName: (r: string) => string, t: T
     from_role?: string;
     to_role?: string | null;
     status?: string | null;
+    from_status?: string;
     action?: string;
     added?: string[];
     removed?: string[];
@@ -68,10 +69,27 @@ export function approvalLabel(a: Approval, roleName: (r: string) => string, t: T
     return `${who}: ${parts.join(" · ") || roleName(s.from_role ?? "")}`;
   }
   if (a.kind === "staff.privileged_reset") return `${who}: ${t(s.action === "mfa" ? "apr.reset.mfa" : "apr.reset.password")}`;
+  if (a.kind === "staff.reactivate_privileged") {
+    // admin-identity: {staff, role, to_role (null unless the role changes too), from_status}
+    const from = s.from_status === "LOCKED" ? "LOCKED" : "DISABLED";
+    const role = s.to_role && s.to_role !== s.role ? `${roleName(s.role ?? "")} → ${roleName(s.to_role)}` : roleName(s.role ?? "");
+    return `${who}: ${t(`staff.st.${from}`)} → ${t("staff.st.ACTIVE")} · ${role}`;
+  }
   const add = (s.added ?? []).map((p) => `+${p}`);
   const rem = (s.removed ?? []).map((p) => `−${p}`);
   return `${roleName(s.role ?? "")}: ${[...add, ...rem].join(", ") || "—"}`;
 }
+
+/**
+ * Approvals whose approve response carries a one-time temporary password for the APPROVER (review P2-1/P2-2): the
+ * author of a privileged account / role grant / re-enable never learns the target's credentials.
+ */
+export function issuesPassword(a: Pick<Approval, "kind" | "summary">): boolean {
+  if (a.kind === "staff.privileged_reset") return (a.summary as { action?: string }).action !== "mfa";
+  return a.kind === "staff.create_privileged" || a.kind === "staff.role_grant" || a.kind === "staff.reactivate_privileged";
+}
+
+const targetOf = (a: Approval) => (a.summary as { staff?: { staff_id?: string } }).staff?.staff_id;
 
 type RolesTab = "matrix" | "staff";
 
@@ -145,7 +163,8 @@ function Approvals({ rev, onPending, onChanged }: { rev: number; onPending: (a: 
   const [items, setItems] = useState<Approval[] | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [decide, setDecide] = useState<{ a: Approval; kind: "approve" | "reject" } | null>(null);
-  // staff.privileged_reset (password): the temporary password is issued to the APPROVER, once, for 60 s
+  // create_privileged / role_grant / reactivate_privileged / privileged_reset (password): the temporary password is
+  // issued to the APPROVER, once, for 60 s
   const [issued, setIssued, issuedLeft] = useEphemeral<{ who: string; pwd: string }>();
   const roleName = (r: string) => ((ROLE_CODES as readonly string[]).includes(r) ? t(`role.${r as RoleCode}`) : r);
 
@@ -291,7 +310,18 @@ function Approvals({ rev, onPending, onChanged }: { rev: number; onPending: (a: 
           ok={t(decide.kind === "approve" ? "apr.approve" : "apr.reject")}
           okKind={decide.kind === "approve" ? "primary" : "danger"}
           reasonLabel={t("apr.note")}
-          extra={<Callout kind="warn" icon="smartphoneKey">{t("apr.stepUpNote")}</Callout>}
+          extra={
+            <>
+              {decide.kind === "approve" && issuesPassword(decide.a) && (
+                <Callout kind="info" icon="key" testId="apr-issues-pwd">
+                  {t("apr.issuesPwd")}
+                </Callout>
+              )}
+              <Callout kind="warn" icon="smartphoneKey">
+                {t("apr.stepUpNote")}
+              </Callout>
+            </>
+          }
           testId="apr-confirm"
           onClose={() => setDecide(null)}
           onConfirm={async (note) => {
@@ -468,6 +498,8 @@ function StaffTab({ roles, pending, onChanged }: { roles: Role[] | null; pending
   // the one-time password: hidden after 60 s, when the browser tab is hidden and when this tab/section is left
   const [temp, setTemp, tempLeft] = useEphemeral<{ who: string; pwd: string }>();
   const [resetReq, setResetReq] = useState<{ who: string; action: "password" | "mfa" } | null>(null);
+  // P2-2: re-enabling a privileged account is a four-eyes request (202), not an immediate change
+  const [reactReq, setReactReq] = useState<string | null>(null);
   const req = useRef(0);
 
   const roleName = (r: string) => {
@@ -497,7 +529,9 @@ function StaffTab({ roles, pending, onChanged }: { roles: Role[] | null; pending
     // q is part of fKey; the debounce only applies to typing
   }, [fKey, load, q]);
 
-  const pendingFor = (s: Staff) => pending.find((a) => a.kind === "staff.role_grant" && (a.summary as { staff?: { staff_id?: string } }).staff?.staff_id === s.staff_id);
+  // a pending role grant or privileged creation: the row shows the requested role and the role select is locked
+  const pendingFor = (s: Staff) => pending.find((a) => (a.kind === "staff.role_grant" || a.kind === "staff.create_privileged") && targetOf(a) === s.staff_id);
+  const pendingReactivate = (s: Staff) => pending.find((a) => a.kind === "staff.reactivate_privileged" && targetOf(a) === s.staff_id);
   const reload = () => {
     void load(filters, false);
     onChanged();
@@ -508,8 +542,15 @@ function StaffTab({ roles, pending, onChanged }: { roles: Role[] | null; pending
       if (c.kind === "role" || c.kind === "block" || c.kind === "unblock") {
         const body = c.kind === "role" ? { role: c.to, reason } : { status: c.kind === "block" ? ("DISABLED" as const) : ("ACTIVE" as const), reason };
         const res = await StaffApi.patch(c.s.staff_id, body);
-        if (res && "approval" in res) toast(t("staff.requested", { u: c.s.display_name }), "info", "four-eyes · PENDING");
-        else toast(t(c.kind === "role" ? "staff.roleChanged" : c.kind === "block" ? "staff.blocked" : "staff.unblocked", { u: c.s.display_name }), "ok", "session_version +1");
+        const pendingReq = res && "approval" in res ? res : null;
+        // the single super_admin: the request applied at once (waived) and the target's new password comes back here
+        if (pendingReq?.temporary_password) setTemp({ who: c.s.email, pwd: pendingReq.temporary_password });
+        if (pendingReq && pendingReq.approval.status === "PENDING") {
+          if (c.kind === "unblock") {
+            setReactReq(c.s.display_name);
+            toast(t("staff.reactivateRequested", { u: c.s.display_name }), "info", "four-eyes · staff.reactivate_privileged");
+          } else toast(t("staff.requested", { u: c.s.display_name }), "info", "four-eyes · PENDING");
+        } else toast(t(c.kind === "role" ? "staff.roleChanged" : c.kind === "block" ? "staff.blocked" : "staff.unblocked", { u: c.s.display_name }), "ok", "session_version +1");
       } else if (c.kind === "reset-password") {
         const res = await StaffApi.resetPassword(c.s.staff_id, reason);
         if ("approval" in res) {
@@ -559,6 +600,13 @@ function StaffTab({ roles, pending, onChanged }: { roles: Role[] | null; pending
         <div className="mb-12">
           <Callout kind="warn" icon="userCheck" testId="reset-requested">
             <b>{t("staff.resetRequestedT", { u: resetReq.who })}</b> {t(resetReq.action === "mfa" ? "staff.resetRequestedMfa" : "staff.resetRequestedPwd")}
+          </Callout>
+        </div>
+      )}
+      {reactReq && (
+        <div className="mb-12">
+          <Callout kind="warn" icon="userCheck" testId="reactivate-requested">
+            <b>{t("staff.reactivateRequested", { u: reactReq })}</b> {t("staff.reactivateRequestedM")}
           </Callout>
         </div>
       )}
@@ -634,7 +682,7 @@ function StaffTab({ roles, pending, onChanged }: { roles: Role[] | null; pending
                       ) : (
                         <span className="tag plain">{roleName(s.role)}</span>
                       )}
-                      {pend && <div className="cell-sub">{t("staff.pendingRole", { r: roleName((pend.summary as { to_role?: string }).to_role ?? "") })}</div>}
+                      {pend && <div className="cell-sub">{t("staff.pendingRole", { r: roleName((pend.summary as { to_role?: string; role?: string }).to_role ?? (pend.summary as { role?: string }).role ?? "") })}</div>}
                     </td>
                     <td className="nowrap">
                       <span className="tag plain">{t("staff.pwd")}</span>
@@ -649,6 +697,7 @@ function StaffTab({ roles, pending, onChanged }: { roles: Role[] | null; pending
                     <td className="nowrap">{s.last_login_at ? fmt.rel(s.last_login_at) : <span className="muted">{t("staff.never")}</span>}</td>
                     <td>
                       <Pill tone={s.status === "ACTIVE" ? "good" : s.status === "LOCKED" ? "warn" : "bad"}>{t(`staff.st.${s.status}`)}</Pill>
+                      {pendingReactivate(s) && <div className="cell-sub">{t("staff.pendingReactivate")}</div>}
                     </td>
                     <td className="actions-cell">
                       {!self && (
@@ -674,7 +723,7 @@ function StaffTab({ roles, pending, onChanged }: { roles: Role[] | null; pending
                                   {t("staff.block")}
                                 </MenuItem>
                               ) : (
-                                <MenuItem icon="unlock" onClick={() => { close(); setCmd({ kind: "unblock", s }); }} testId="staff-unblock">
+                                <MenuItem icon="unlock" disabled={!!pendingReactivate(s)} onClick={() => { close(); setCmd({ kind: "unblock", s }); }} testId="staff-unblock">
                                   {t("staff.unblock")}
                                 </MenuItem>
                               )}
@@ -724,16 +773,20 @@ function StaffConfirm({ cmd, roleName, onClose, onRun }: { cmd: StaffCmd; roleNa
   const { t } = useI18n();
   const u = cmd.s.display_name;
   const priv = cmd.kind === "role" && (isPrivileged(cmd.to) || isPrivileged(cmd.s.role));
+  const grant = cmd.kind === "role" && isPrivileged(cmd.to);
+  const privUnblock = cmd.kind === "unblock" && isPrivileged(cmd.s.role);
   const conf: Record<StaffCmd["kind"], { title: string; text: string; icon: "key" | "ban" | "unlock" | "smartphoneKey" | "users"; tone: "" | "warn" | "bad"; ok: string; danger?: boolean }> = {
     role: {
       title: t("staff.roleT", { u }),
-      text: `${roleName(cmd.s.role)} → ${cmd.kind === "role" ? roleName(cmd.to) : ""} — ${priv ? t("staff.roleFourEyes") : t("staff.roleSimple")}`,
+      text: `${roleName(cmd.s.role)} → ${cmd.kind === "role" ? roleName(cmd.to) : ""} — ${grant ? t("staff.roleGrantFourEyes") : priv ? t("staff.roleFourEyes") : t("staff.roleSimple")}`,
       icon: "users",
       tone: priv ? "bad" : "warn",
       ok: priv ? t("roles.send") : t("common.apply"),
     },
     block: { title: t("staff.blockT", { u }), text: t("staff.blockM"), icon: "ban", tone: "bad", ok: t("staff.block"), danger: true },
-    unblock: { title: t("staff.unblockT", { u }), text: t("staff.unblockM"), icon: "unlock", tone: "", ok: t("staff.unblock") },
+    unblock: privUnblock
+      ? { title: t("staff.unblockT", { u }), text: t("staff.unblockPrivM", { r: roleName(cmd.s.role) }), icon: "unlock", tone: "bad", ok: t("roles.send") }
+      : { title: t("staff.unblockT", { u }), text: t("staff.unblockM"), icon: "unlock", tone: "", ok: t("staff.unblock") },
     "reset-password": { title: t("staff.resetT", { u }), text: t("staff.resetM"), icon: "key", tone: "warn", ok: t("staff.resetPwd") },
     "reset-mfa": { title: t("staff.resetMfaT", { u }), text: t("staff.resetMfaM"), icon: "smartphoneKey", tone: "warn", ok: t("staff.resetMfa") },
   };
@@ -827,8 +880,13 @@ function AddStaff({ roleName, onClose, onCreated }: { roleName: (r: string) => s
             <b>{t("staff.created", { email: done.staff.email })}</b> {roleName(done.staff.role)}
           </Callout>
           {done.approval && (
-            <Callout kind="warn" icon="userCheck">
-              {t("staff.createdFourEyes", { r: roleName((done.approval.summary as { role?: string }).role ?? role) })}
+            <Callout kind="warn" icon="userCheck" testId="staff-created-four-eyes">
+              {t(done.approval.status === "PENDING" ? "staff.createdFourEyes" : "staff.createdWaived", { r: roleName((done.approval.summary as { role?: string }).role ?? role) })}
+              {!hadPwd && (
+                <b className="block mt-8" data-testid="pwd-to-approver">
+                  {t("staff.createdPwdToApprover")}
+                </b>
+              )}
             </Callout>
           )}
           {pwd ? (
@@ -849,7 +907,7 @@ function AddStaff({ roleName, onClose, onCreated }: { roleName: (r: string) => s
               {t("staff.pwdHidden")}
             </Callout>
           ) : null}
-          <p className="small ink2">{t("staff.createdM")}</p>
+          {hadPwd && <p className="small ink2">{t("staff.createdM")}</p>}
         </div>
       ) : (
         <div className="stack">

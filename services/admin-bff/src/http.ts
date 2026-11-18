@@ -33,21 +33,36 @@ export interface StaffAuth {
   actor: Actor;
 }
 
+/** Контекст запроса уровня sessionOnly (logout): сессия без principal. */
+export interface SessionAuth {
+  /** Непрозрачный id из cookie — секрет: не логировать, не отдавать в домены. */
+  sessionId: string;
+  publicSessionId: string;
+  session: SessionData;
+}
+
 declare module "fastify" {
   interface FastifyContextConfig {
     access?: "public" | "session";
     guard?: Guard;
     stepUp?: boolean;
     rate?: RateClass;
+    sessionOnly?: boolean;
   }
   interface FastifyRequest {
     staff?: StaffAuth;
+    sessionAuth?: SessionAuth;
   }
 }
 
 export function staffOf(req: { staff?: StaffAuth }): StaffAuth {
   if (!req.staff) throw new AppError(401, "UNAUTHORIZED", "Требуется вход");
   return req.staff;
+}
+
+export function sessionOf(req: { sessionAuth?: SessionAuth }): SessionAuth {
+  if (!req.sessionAuth) throw new AppError(401, "UNAUTHORIZED", "Требуется вход");
+  return req.sessionAuth;
 }
 
 export function hasPermission(auth: StaffAuth, p: Permission): boolean {
