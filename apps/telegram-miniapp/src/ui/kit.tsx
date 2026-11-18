@@ -4,6 +4,19 @@ import { Icon, type IconName } from "./Icon";
 /* Notebook components (prototype Main.dc.html). Every control has a visible label, a focus ring (ui-tokens) and a
  * tap target ≥ 44 px; a choice is never shown by colour alone (aria-pressed + a check mark). */
 
+/** Заголовок без переноса по дефису: «ИИ-коучем», «AI-murabbiy» не разрываются на «ИИ-» / «коучем»; однобуквенный
+ *  предлог или союз («с», «в», «и») не остаётся в конце строки — к следующему слову неразрывным пробелом.
+ *  Неразрывный дефис U+2011 не подходит: его нет в Onest и Unbounded. */
+export function NoBreakHyphens({ text }: { text: string }) {
+  const glued = text.replace(/(^|\s)([А-Яа-яЁёA-Za-z])\s+/gu, "$1$2\u00A0");
+  const parts = glued.split(/(\S*\p{L}-\p{L}\S*)/u);
+  return (
+    <>
+      {parts.map((part, i) => (i % 2 === 1 ? <span key={i} className="nobr">{part}</span> : part))}
+    </>
+  );
+}
+
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }

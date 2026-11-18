@@ -12,7 +12,7 @@ import { keyForDraft, type DraftKey } from "../../state/idempotency";
 import { optInPatch } from "../../state/reminders";
 import { requestWriteAccess, shareToTelegram } from "../../tg";
 import { Icon } from "../../ui/Icon";
-import { Btn, Check, Chip, Field, HERO, Hero, Opt, Pill, Seg, TextInput, ToggleRow } from "../../ui/kit";
+import { Btn, Check, Chip, Field, HERO, Hero, NoBreakHyphens, Opt, Pill, Seg, TextInput, ToggleRow } from "../../ui/kit";
 import { Sheet, showToast } from "../../ui/overlays";
 import { PinOffer } from "../profile/ParentCode";
 import { DaysPicker, DurationPicker, TimePicker, ZonePicker, daysText, timeError } from "../schedule/parts";
@@ -131,7 +131,7 @@ function LangStep({ lang, onLang, onNext }: { lang: Lang; onLang: (l: Lang) => v
           <Hero src={HERO.nilu} alt={t("hero.nilu")} />
           <Hero src={HERO.myatik} alt={t("hero.myatik")} />
         </div>
-        <h1 className="h1">{t("ob.welcome.title")}</h1>
+        <h1 className="h1"><NoBreakHyphens text={t("ob.welcome.title")} /></h1>
         <p className="sub lead">{t("ob.welcome.text")}</p>
         <div className="stack tight">
           <span className="lb" id="ob-lang-label">{t("ob.welcome.lang")}</span>
