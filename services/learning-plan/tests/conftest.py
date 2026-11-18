@@ -79,7 +79,9 @@ class Env:
         self.now = at
         r = await self.c.post("/internal/v1/plan:tick", headers=self.sched)
         assert r.status_code == 200, r.text
-        return r.json()
+        body = r.json()
+        assert body.pop("skipped") is False, body  # последовательные вызовы теста не пересекаются
+        return body
 
     async def onboard(self, user: uuid.UUID, *, at: datetime, preset: str = "daily", days: list[int] | None = None,
                       time: str = "19:00", tz: str = "Asia/Tashkent", reminders: bool = True,
@@ -101,6 +103,10 @@ class Env:
         self.now = at
         return await self.c.post("/internal/v1/me/activities", headers={
             **self.h(user), "Idempotency-Key": key or str(uuid.uuid4())}, json={"kind": "practice", "minutes": minutes})
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "slow: нагрузочные проверки (секунды); исключить: -m 'not slow'")
 
 
 @pytest.fixture

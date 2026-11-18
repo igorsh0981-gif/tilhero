@@ -86,3 +86,81 @@ async def test_concurrent_ticks_do_not_duplicate(env) -> None:
     results = await asyncio.gather(*[env.c.post("/internal/v1/invites:tick", headers=env.sched) for _ in range(3)])
     assert sum(r.json()["reminders"] for r in results) == 5
     assert len(await env.events("social.invite.reminder_due.v1")) == 5
+
+
+async def test_no_reminder_to_who_cannot_accept_now(env) -> None:
+    """D-02 / P-5: напоминание — только тому, у кого карточка сейчас показала бы can_accept=true (и есть согласие
+    с политикой). Подросток без согласия родителя, уже друзья, уже в семье, реферал уже использован, согласие
+    отозвано — без напоминания."""
+    inviter, other = env.identity.add("Азиза"), env.identity.add("Бобур")
+    teen = env.identity.add("Тимур", age="14-17")
+    friend, member, used, revoked, ok = (env.identity.add() for _ in range(5))
+    # подросток без согласия родителя открыл приглашение: карточка «принять нельзя»
+    _, t_tok = await env.invite(inviter, "friend")
+    r = await env.open(teen, t_tok)
+    assert r.json()["can_accept"] is False and r.json()["reason"] == "not_allowed"
+    # уже друзья: приняли одно приглашение, открыли второе
+    f1, f1_tok = await env.invite(inviter, "friend")
+    await env.open(friend, f1_tok)
+    assert (await env.accept(friend, f1)).status_code == 200
+    _, ref_tok = await env.invite(inviter, "referral")
+    assert (await env.open(friend, ref_tok)).json()["reason"] == "already_friends"
+    # уже в семье пригласившего: второе семейное приглашение
+    m1, m1_tok = await env.invite(inviter, "family")
+    await env.open(member, m1_tok)
+    assert (await env.accept(member, m1)).status_code == 200
+    _, m2_tok = await env.invite(inviter, "family")
+    assert (await env.open(member, m2_tok)).json()["reason"] == "already_member"
+    # реферал уже использован (принят чужой), открыт второй
+    o_ref, o_ref_tok = await env.invite(other, "referral")
+    await env.open(used, o_ref_tok)
+    assert (await env.accept(used, o_ref)).status_code == 200
+    assert (await env.open(used, ref_tok)).json()["reason"] == "already_used"
+    # согласие отозвано после открытия
+    await env.open(revoked, ref_tok)
+    env.identity.set_consent(revoked, False)
+    # и тот, кто может принять
+    await env.open(ok, ref_tok)
+    env.now += timedelta(hours=25)
+    assert await env.tick() == {"reminders": 1, "expired": 0}
+    [ev] = await env.events("social.invite.reminder_due.v1")
+    assert ev.payload["invitee_user_id"] == str(ok)
+    # отложенные не помечены: подросток получил согласие родителя — напоминание в следующий tick, одно
+    await env.grant_guardian_consent(teen)
+    env.now += timedelta(hours=1)
+    assert await env.tick() == {"reminders": 1, "expired": 0}
+    env.now += timedelta(hours=1)
+    assert await env.tick() == {"reminders": 0, "expired": 0}
+    reminded = [e.payload["invitee_user_id"] for e in await env.events("social.invite.reminder_due.v1")]
+    assert reminded == [str(ok), str(teen)]
+    [(n,)] = await env.sql("SELECT count(*) FROM invite_redemptions WHERE reminded_at IS NULL "
+                           "AND accepted_at IS NULL AND declined_at IS NULL")
+    assert n == 4  # друг, участник семьи, использованный реферал, отозванное согласие — ждут, не помечены
+
+
+async def test_identity_unavailable_defers_reminder(env) -> None:
+    inviter, guest = env.identity.add(), env.identity.add()
+    _, token = await env.invite(inviter, "friend")
+    await env.open(guest, token)
+    env.now += timedelta(hours=25)
+    env.identity.down = True
+    assert await env.tick() == {"reminders": 0, "expired": 0}  # без профиля — не напоминаем, tick не падает
+    env.identity.down = False
+    env.now += timedelta(hours=1)
+    assert await env.tick() == {"reminders": 1, "expired": 0}
+
+
+async def test_deferred_rows_do_not_starve_others(env) -> None:
+    """Отложенные строки не помечаются, поэтому tick просматривает кандидатов целиком, а не первые N."""
+    env.settings.tick_batch_size = 10
+    inviter = env.identity.add("Азиза")
+    _, token = await env.invite(inviter, "referral")
+    for _ in range(23):  # раньше всех открыли подростки без согласия родителя
+        await env.open(env.identity.add(age="14-17"), token)
+    env.now += timedelta(minutes=5)
+    late = env.identity.add()
+    await env.open(late, token)
+    env.now += timedelta(hours=25)
+    assert await env.tick() == {"reminders": 1, "expired": 0}
+    [ev] = await env.events("social.invite.reminder_due.v1")
+    assert ev.payload["invitee_user_id"] == str(late)

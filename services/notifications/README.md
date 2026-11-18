@@ -38,7 +38,7 @@
 | | `social.family.member_added.v1` | `role=owner` — проекция владельца семьи (`family_owners`); `child` — без сообщения (добавил сам родитель); `adult`/`teen` → `family.joined` владельцу, ключ `family.joined:<owner>:<member>`; владелец неизвестен → без сообщения (WARNING) |
 | `notifications.support` | `support.ticket.replied.v1`, `support.ticket.status.changed.v1` (→ RESOLVED) | `support.reply` / `support.resolved` (`support` — всегда включена), кнопка `ticket_<number>`; текст ответа в уведомление не кладётся |
 | `notifications.product` | `experience.release_note.published.v1` | сохраняется в `broadcasts`; запись центра (`release_note.published`, `product`, `in_app_only`) создаётся ученику при чтении центра — см. «Что нового» |
-| `notifications.user_deleted` | `user.deletion.requested.v1` | `deleted_users` + удаление журнала/центра ученика, записей других учеников с его именем (`subject_user_id`), `missed_state`, `inbox_state`, проекции семьи, кэшей → `user.domain.deleted.v1 {domain: notifications, mode: deleted}`; запоздавшие события для удалённого — без записи |
+| `notifications.user_deleted` | `user.deletion.requested.v1` (только от `identity-consent`, ревью P-7: от другого издателя — предупреждение в логе с типом события и издателем, без `user_id`; подтверждение шине без удаления и без ACK) | `deleted_users` + удаление журнала/центра ученика, записей других учеников с его именем (`subject_user_id`), `missed_state`, `inbox_state`, проекции семьи, кэшей → `user.domain.deleted.v1 {domain: notifications, mode: deleted}`; запоздавшие события для удалённого — без записи |
 | `notifications.delivery_cache` | `user.status.changed.v1`, `consent.revoked.v1`, `user.notification_settings.changed.v1`, `user.profile.updated.v1` | сброс кэша адресации и имени |
 
 Публикует: `notification.delivered.v1` (отправлено), `telegram.delivery.failed.v1 {reason: blocked|invalid_chat|rate_limited|error}`
@@ -109,7 +109,7 @@ Telegram-рассылки нет (кампании — спринт 2).
 
 ## Переменные окружения
 `DATABASE_URL`, `MIGRATION_DATABASE_URL`, `REDIS_URL`, `NATS_URL`, `IDENTITY_CONSENT_URL`, `BOTGW_URL`,
-`SCHEDULER_TOKEN`, `INTERNAL_JWT_PRIVATE_KEY` + `INTERNAL_JWT_PUBLIC_KEYS` (stage/prod), `DEFAULT_TIMEZONE`
+`SCHEDULER_TOKEN` (в stage/prod — пусто, т. е. вход выключен, или ≥ 32 символов; ревью P-8), `INTERNAL_JWT_PRIVATE_KEY` + `INTERNAL_JWT_PUBLIC_KEYS` (stage/prod), `DEFAULT_TIMEZONE`
 (Asia/Tashkent), `DAILY_LIMIT` (3), `REMINDER_STALE_HOURS` (3), `MISSED_STALE_TIME` (22:00), `COMEBACK_MIN_DAYS` (7),
 `KID_WINDOW_START`/`KID_WINDOW_END` (08:00/20:00), `RETENTION_DAYS` (90), `DELIVERY_CACHE_TTL_SECONDS` (300).
 

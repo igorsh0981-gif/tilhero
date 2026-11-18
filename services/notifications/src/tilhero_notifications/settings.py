@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 
 from tilhero_common.settings import ServiceSettings
+
+MIN_SCHEDULER_TOKEN_LEN = 32
 
 
 class Settings(ServiceSettings):
@@ -54,6 +56,14 @@ class Settings(ServiceSettings):
     @classmethod
     def _strip_token(cls, v: object) -> object:
         return v.strip() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _scheduler_token_guard(self) -> Settings:
+        # stage/prod: пусто (вход выключен) или не короче 32 символов (ревью P-8)
+        token = self.scheduler_token.get_secret_value()
+        if self.is_secure_env and token and len(token) < MIN_SCHEDULER_TOKEN_LEN:
+            raise ValueError(f"SCHEDULER_TOKEN must be empty or >= {MIN_SCHEDULER_TOKEN_LEN} chars in stage/prod")
+        return self
 
 
 @lru_cache

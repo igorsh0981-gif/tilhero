@@ -40,9 +40,13 @@ def make_settings(**kw: Any) -> Settings:
     return Settings(**base)
 
 
+DEFAULT_PURPOSES = ("terms", "privacy", "learning", "social")
+
+
 class IdentityStub:
     """identity-consent GET /internal/v1/users/{id}/public: проверяет внутренний JWT (iss=social,
-    aud=identity-consent) и отдаёт {user_id, display_name, kind, age_band, status}; неизвестный — 404."""
+    aud=identity-consent) и отдаёт {user_id, display_name, kind, age_band, status, consent_accepted, purposes}
+    (INTERNAL_API §11, P-3); `legacy=True` — ответ старой версии без полей согласия. Неизвестный — 404."""
 
     def __init__(self) -> None:
         self.users: dict[str, dict[str, Any]] = {}
@@ -50,11 +54,17 @@ class IdentityStub:
         self.down = False
 
     def add(self, name: str = "Азиза", *, age: str | None = "18+", kind: str = "account",
-            status: str = "ACTIVE") -> uuid.UUID:
+            status: str = "ACTIVE", consent: bool = True, purposes: tuple[str, ...] = DEFAULT_PURPOSES,
+            legacy: bool = False) -> uuid.UUID:
         user = uuid.uuid4()
         self.users[str(user)] = {"user_id": str(user), "display_name": name, "kind": kind, "age_band": age,
                                  "status": status}
+        if not legacy:
+            self.set_consent(user, consent, purposes)
         return user
+
+    def set_consent(self, user: uuid.UUID, accepted: bool, purposes: tuple[str, ...] = DEFAULT_PURPOSES) -> None:
+        self.users[str(user)].update({"consent_accepted": accepted, "purposes": list(purposes) if accepted else []})
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         principal = verify_token(request.headers[HEADER], SECRET, audience="identity-consent",

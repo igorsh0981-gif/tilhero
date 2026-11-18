@@ -108,23 +108,21 @@ class Friendship(Base):
 
 
 class Profile(Base):
-    """Проекция из user.profile.created/updated.v1: вид профиля, возрастная группа, согласие родителя (14–17).
-    Без имени и даты рождения. Источник истины — identity-consent; согласие родителя в `/users/{id}/public` нет,
-    поэтому оно берётся отсюда."""
+    """Проекция из user.profile.created/updated.v1: вид профиля и согласие родителя (14–17) — запасной источник,
+    если в ответе identity-consent `/users/{id}/public` нет `guardian_consent`. Возраст и опекуна social не хранит
+    (CONVENTIONS §8, ревью P-6): решения по возрасту — по ответу `/public`, опекун ребёнка берётся из события
+    user.profile.created.v1 в момент добавления в семью. Без имени и даты рождения."""
 
     __tablename__ = "profiles"
     __table_args__ = (
         CheckConstraint("kind IS NULL OR kind IN ('account','child')", name="ck_profiles_kind"),
-        CheckConstraint("age_band IS NULL OR age_band IN ('6-9','10-13','14-17','18+')", name="ck_profiles_age"),
         CheckConstraint("guardian_consent IS NULL OR guardian_consent IN "
                         "('not_required','pending','granted','declined')", name="ck_profiles_guardian_consent"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     kind: Mapped[str | None] = mapped_column(String(8))
-    age_band: Mapped[str | None] = mapped_column(String(8))
     guardian_consent: Mapped[str | None] = mapped_column(String(16))
-    guardian_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     updated_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
 
 

@@ -3,6 +3,9 @@
 Дети и подростки (CONVENTIONS §8, ARCHITECTURE «Приглашения»): ребёнок 6–13 приглашений не создаёт и не получает
 (только через родителя: детский профиль попадает в семью опекуна автоматически); подросток 14–17 — только после
 согласия родителя (`guardian_consent = granted`); семейное приглашение создаёт только 18+.
+Согласие (INTERNAL_API §11, P-3): открыть и посмотреть — при действующем согласии с политикой (`consent_accepted`),
+создать и принять — ещё и с необязательной целью `social`. Сначала проверяются правила профиля (дети, подростки,
+статус: INVITES_NOT_ALLOWED / ADULT_REQUIRED), затем согласие (CONSENT_REQUIRED).
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ KIDS: Final = frozenset({"6-9", "10-13"})
 TOKEN_LEN: Final = 32
 TOKEN_RE: Final = re.compile(r"^[A-Za-z0-9_-]{32}$")
 MAX_USES: Final[dict[str, int | None]] = {"family": 1, "friend": 1, "referral": None}
+SOCIAL_PURPOSE: Final = "social"  # необязательная цель согласия «Приглашения, семья и друзья»
 
 
 # ---------------------------------------------------------------- токен и ссылка
@@ -89,6 +93,22 @@ def can_receive(person: Person | None) -> bool:
     if person.age_band == "18+":
         return True
     return person.age_band == "14-17" and person.guardian_consent == "granted"
+
+
+def consent_required(purpose: str) -> ApiError:
+    return forbidden("CONSENT_REQUIRED", "Сначала примите условия использования и политику конфиденциальности"
+                     if purpose == "terms" else "Разрешите приглашения, семью и друзей в настройках согласия",
+                     {"purpose": purpose})
+
+
+def check_consent(person: Person | None, *, social: bool) -> None:
+    """INTERNAL_API §11 (P-3): открыть и посмотреть приглашение — при действующем согласии (terms, privacy), иначе
+    403 CONSENT_REQUIRED {purpose: terms}; создать и принять (`social=True`) — ещё и с целью social, иначе
+    403 CONSENT_REQUIRED {purpose: social}. Без согласия с политикой цель social не спрашиваем — сначала terms."""
+    if person is None or not person.consent_accepted:
+        raise consent_required("terms")
+    if social and SOCIAL_PURPOSE not in person.purposes:
+        raise consent_required("social")
 
 
 def member_role(person: Person) -> str:

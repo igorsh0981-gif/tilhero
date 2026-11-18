@@ -8,6 +8,11 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 
 from tilhero_common.settings import ServiceSettings
 
+# dev/test: совпадает с telegram-bff (config.ts DEV_DEFAULTS.TELEGRAM_APP_LINK) — ссылки приглашений и согласия
+# родителя ведут в одно приложение; в stage/prod значение по умолчанию запрещено
+DEV_TELEGRAM_APP_LINK = "https://t.me/tilhero_dev_bot/app"
+MIN_SCHEDULER_TOKEN_LEN = 32
+
 
 class Settings(ServiceSettings):
     service_name: str = "social"
@@ -22,8 +27,10 @@ class Settings(ServiceSettings):
     # (≥ 32 символов); смена ключа делает недействительными все выданные ссылки. dev/test — выводится из
     # INTERNAL_JWT_SECRET.
     invite_token_key: SecretStr | None = None
-    # Прямая ссылка Mini App: https://t.me/<bot>/<app>; ссылка приглашения = <link>?startapp=inv_<token>
-    telegram_app_link: str = "https://t.me/tilhero_bot/app"
+    # Прямая ссылка Mini App: https://t.me/<bot>/<app>; ссылка приглашения = <link>?startapp=inv_<token>.
+    # Обязательна в stage/prod (ревью P-2); в dev/test по умолчанию — то же значение, что у telegram-bff
+    # (services/telegram-bff/src/config.ts DEV_DEFAULTS.TELEGRAM_APP_LINK).
+    telegram_app_link: str = ""
     identity_consent_url: str = "http://127.0.0.1:8101"
 
     invite_family_ttl_days: int = Field(default=7, ge=1, le=90)
@@ -54,7 +61,7 @@ class Settings(ServiceSettings):
     @classmethod
     def _https_link(cls, v: str) -> str:
         v = v.strip().rstrip("/")
-        if not v.startswith("https://") or "?" in v or "#" in v or " " in v:
+        if v and (not v.startswith("https://") or "?" in v or "#" in v or " " in v):
             raise ValueError("TELEGRAM_APP_LINK must be https://t.me/<bot>/<app> without query")
         return v
 
@@ -64,6 +71,13 @@ class Settings(ServiceSettings):
             key = self.invite_token_key.get_secret_value() if self.invite_token_key else ""
             if len(key) < 32:
                 raise ValueError("INVITE_TOKEN_KEY must be set (>=32 chars) in stage/prod")
+            if not self.telegram_app_link:
+                raise ValueError("TELEGRAM_APP_LINK must be set in stage/prod (https://t.me/<bot>/<app>)")
+            token = self.scheduler_token.get_secret_value()
+            if token and len(token) < MIN_SCHEDULER_TOKEN_LEN:
+                raise ValueError(f"SCHEDULER_TOKEN must be empty or >= {MIN_SCHEDULER_TOKEN_LEN} chars in stage/prod")
+        elif not self.telegram_app_link:
+            self.telegram_app_link = DEV_TELEGRAM_APP_LINK
         return self
 
     def invite_key_bytes(self) -> bytes:

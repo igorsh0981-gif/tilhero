@@ -14,11 +14,22 @@ _TOKEN_RE = re.compile(r"\d{5,16}:[A-Za-z0-9_-]{30,64}")
 _APP_LINK_RE = re.compile(r"https://t\.me/[A-Za-z0-9_]{5,64}/[A-Za-z0-9_]{3,64}")
 
 
+DEV_MINIAPP_URL = "https://localhost:5173"
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1", "::"})  # noqa: S104 - список запретов
+
+
 def _is_https(url: str | None) -> bool:
     if not url:
         return False
     parts = urlsplit(url)
     return parts.scheme == "https" and bool(parts.hostname)
+
+
+def _is_local(url: str) -> bool:
+    """localhost и петлевые адреса (в т. ч. *.localhost, 127.x.x.x): кнопка web_app с таким адресом у пользователя
+    не откроется."""
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    return host in _LOCAL_HOSTS or host.endswith(".localhost") or host.startswith("127.")
 
 
 class Settings(ServiceSettings):
@@ -37,7 +48,9 @@ class Settings(ServiceSettings):
     # BOT_AUTO_SETUP=true: при каждом запуске идемпотентно настроить webhook, команду /start, кнопку меню и описания
     # (без drop_pending_updates) — шаг «выполнить setup в Shell» не нужен; ошибка Telegram не мешает старту.
     bot_auto_setup: bool = False
-    miniapp_url: str = "https://localhost:5173"  # MINIAPP_URL — кнопки web_app
+    # MINIAPP_URL — кнопки web_app. Обязателен в stage/prod: https и не localhost (ревью P-12); в dev/test по
+    # умолчанию — локальный Vite (DEV_MINIAPP_URL)
+    miniapp_url: str = ""
     # TELEGRAM_APP_LINK — прямая ссылка Mini App https://t.me/<bot>/<app> (как у social): с ней payload /start
     # (inv_…, gc_…, route_…) доходит до Mini App как start_param в initData. Пусто — кнопка web_app с ?startapp=.
     telegram_app_link: str | None = None
@@ -64,8 +77,15 @@ class Settings(ServiceSettings):
                 raise ValueError("TELEGRAM_APP_LINK: https://t.me/<bot>/<app> без параметров")
         return value
 
+    @field_validator("miniapp_url", mode="before")
+    @classmethod
+    def _strip_miniapp_url(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
     @model_validator(mode="after")
     def _validate(self) -> Settings:
+        if not self.miniapp_url and not self.is_secure_env:
+            self.miniapp_url = DEV_MINIAPP_URL
         if not self.telegram_webhook_url and self.railway_public_domain:
             self.telegram_webhook_url = f"https://{self.railway_public_domain.strip().rstrip('/')}/telegram/webhook"
         secret = self.telegram_webhook_secret.get_secret_value()
@@ -78,8 +98,12 @@ class Settings(ServiceSettings):
                 raise ValueError("BOT_TOKEN must be set in prod")
             if len(secret) < 32:
                 raise ValueError("TELEGRAM_WEBHOOK_SECRET must be >= 32 chars in prod")
+            if not self.miniapp_url:
+                raise ValueError("MINIAPP_URL must be set in stage/prod")
             if not _is_https(self.miniapp_url):
                 raise ValueError("MINIAPP_URL must be https in prod")
+            if _is_local(self.miniapp_url):
+                raise ValueError("MINIAPP_URL must not point to localhost in stage/prod")
             if not self.redis_url:
                 raise ValueError("REDIS_URL is required")
         return self

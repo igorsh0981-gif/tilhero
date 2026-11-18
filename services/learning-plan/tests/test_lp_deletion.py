@@ -86,3 +86,25 @@ async def test_invalid_payload_goes_to_dlq(env) -> None:
     await env.bus.publish(bad)
     assert [d for d, _ in env.bus.dlq] == [CONSUMER]
     assert await env.events("user.domain.deleted.v1") == []
+
+
+async def test_deletion_from_other_producer_is_ignored(env, caplog) -> None:
+    """P-7: сагу ведёт только identity-consent; событие чужого издателя подтверждается шине без действия и без ACK,
+    в логе — только тип события и издатель (без user_id)."""
+    user, rid = uuid.uuid4(), uuid.uuid4()
+    await seed(env, user)
+    before = await rows(env, user)
+    for producer in ("support", "notifications", "learning-plan"):
+        ev = make_envelope("user.deletion.requested.v1",
+                           {"user_id": str(user), "request_id": str(rid), "requested_at": "2026-11-18T09:00:00Z"},
+                           producer=producer)
+        await env.bus.publish(ev)
+    assert await env.events("user.domain.deleted.v1") == []
+    assert await rows(env, user) == before
+    assert env.bus.dlq == []
+    warned = [r for r in caplog.records if r.getMessage() == "deletion request from unexpected producer ignored"]
+    assert len(warned) == 3 and all(str(user) not in r.getMessage() + str(r.__dict__) for r in warned)
+    # тот же запрос от identity-consent исполняется
+    await env.bus.publish(requested(user, rid))
+    assert len(await env.events("user.domain.deleted.v1")) == 1
+    assert await rows(env, user) == {"plans": 0, "activities": 0, "slot_marks": 0}

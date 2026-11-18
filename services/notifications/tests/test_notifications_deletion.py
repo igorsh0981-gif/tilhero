@@ -131,3 +131,27 @@ async def test_parallel_retries_and_redelivery(env) -> None:
     await asyncio.gather(*[spec.handler(e) for e in events], spec.handler(events[0]))
     assert len(await acks(env, rid)) == 3  # по ACK на каждый event_id; повторная доставка — inbox
     assert await env.rows(user) == [] and env.bus.dlq == []
+
+
+async def test_deletion_from_other_producer_is_ignored(env, caplog) -> None:
+    """P-7: удаление ведёт только identity-consent; событие другого издателя — без удаления и без ACK, подтверждается
+    шине (не DLQ), в логе — тип события и издатель, без user_id."""
+    user, rid = env.add_user(), uuid.uuid4()
+    await env.reply_event(user)
+    before = await env.rows(user)
+    assert len(before) == 1
+    for producer in ("support", "social", "notifications"):
+        await env.bus.publish(make_envelope(
+            "user.deletion.requested.v1",
+            {"user_id": str(user), "request_id": str(rid), "requested_at": "2026-11-18T09:00:00.000Z", "attempt": 1},
+            producer=producer))
+    assert await acks(env, rid) == []
+    assert len(await env.rows(user)) == 1 and env.bus.dlq == []
+    async with env.runtime.transaction() as s:
+        marks = (await s.execute(text("SELECT count(*) FROM deleted_users WHERE user_id = :u"), {"u": user})).scalar()
+    assert marks == 0
+    warned = [r for r in caplog.records if r.getMessage() == "deletion request from unexpected producer ignored"]
+    assert len(warned) == 3 and all(str(user) not in str(r.__dict__) for r in warned)
+    await env.bus.publish(requested(user, rid, 1))
+    assert len(await acks(env, rid)) == 1 and await env.rows(user) == []
+

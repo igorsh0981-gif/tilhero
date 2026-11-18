@@ -158,3 +158,27 @@ def test_auto_setup_times_out(monkeypatch) -> None:
     monkeypatch.setattr(botgw_setup, "run_setup", slow)
     monkeypatch.setattr(botgw_setup, "AUTO_SETUP_TIMEOUT_SECONDS", 0.05)
     assert botgw_setup.auto_setup(make_settings("t_setup", telegram_webhook_url=WEBHOOK)) is False
+
+
+def test_miniapp_url_required_and_not_local_in_secure_env(monkeypatch) -> None:
+    """P-12: забытый MINIAPP_URL в stage/prod не подменяется localhost — сервис не стартует; localhost и петлевые
+    адреса запрещены; в dev/test по умолчанию — локальный Vite."""
+    monkeypatch.delenv("MINIAPP_URL", raising=False)
+    prod = {"internal_jwt_secret": "p" * 40, "internal_jwt_private_key": "A" * 43, "bot_token": TOKEN,
+            "telegram_webhook_secret": SECRET, "redis_url": "redis://r"}
+    for env_name in ("stage", "prod"):
+        with pytest.raises(ValidationError, match="MINIAPP_URL must be set"):
+            Settings(env=env_name, **prod)
+        with pytest.raises(ValidationError, match="MINIAPP_URL must be set"):
+            Settings(env=env_name, miniapp_url="  ", **prod)
+        for local in ("https://localhost:5173", "https://LOCALHOST/app", "https://app.localhost/",
+                      "https://127.0.0.1:5173", "https://127.1.2.3/", "https://[::1]:5173/", "https://0.0.0.0/"):
+            with pytest.raises(ValidationError, match="localhost"):
+                Settings(env=env_name, miniapp_url=local, **prod)
+        with pytest.raises(ValidationError, match="https"):
+            Settings(env=env_name, miniapp_url="http://app.tilhero.test", **prod)
+        assert Settings(env=env_name, miniapp_url=MINIAPP, **prod).miniapp_url == MINIAPP
+    for env_name in ("dev", "test"):
+        assert Settings(env=env_name).miniapp_url == "https://localhost:5173"
+    monkeypatch.setenv("MINIAPP_URL", "https://app.tilhero.uz/")
+    assert Settings(env="prod", **prod).miniapp_url == "https://app.tilhero.uz/"

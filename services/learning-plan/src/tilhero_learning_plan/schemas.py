@@ -116,3 +116,5 @@ class TickOut(BaseModel):
     plans_checked: int
     reminders: int
     missed: int
+    # true — предыдущий tick ещё идёт, этот вызов ничего не делал (повтор n8n не ждёт блокировку)
+    skipped: bool = False

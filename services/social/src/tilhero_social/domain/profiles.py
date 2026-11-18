@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +16,6 @@ from tilhero_social.models import DeletedUser, Family, FamilyMember, Friendship,
 
 DOMAIN_DELETED = "user.domain.deleted.v1"
 DELETION_DOMAIN = "social"
-AGE_BANDS = frozenset({"6-9", "10-13", "14-17", "18+"})
 GUARDIAN_CONSENTS = frozenset({"not_required", "pending", "granted", "declined"})
 KINDS = frozenset({"account", "child"})
 
@@ -37,22 +36,18 @@ def _valid(value: object, allowed: frozenset[str]) -> str | None:
 
 
 async def on_profile_created(session: AsyncSession, payload: dict[str, Any], now: datetime, producer: str) -> None:
-    """Проекция + детский профиль 6–13 попадает в семью опекуна (семья создаётся, если её нет)."""
+    """Проекция (вид профиля) + детский профиль 6–13 попадает в семью опекуна (семья создаётся, если её нет).
+    Возраст и опекун из события не сохраняются (P-6): опекун нужен только здесь, для семьи."""
     user_id = uuid.UUID(str(payload["user_id"]))
     kind = _valid(payload.get("kind"), KINDS)
     if await _deleted(session, user_id):
         return
-    values: dict[str, Any] = {"kind": kind, "age_band": _valid(payload.get("age_band"), AGE_BANDS)}
     guardian = payload.get("guardian_user_id")
     guardian_id = uuid.UUID(str(guardian)) if guardian else None
-    if guardian_id is not None:
-        values["guardian_user_id"] = guardian_id
-    stmt = insert(Profile).values(user_id=user_id, updated_at=now, **values)
-    # created мог прийти после updated (повторная доставка): уже известные возраст и опекуна не затираем
+    stmt = insert(Profile).values(user_id=user_id, kind=kind, updated_at=now)
+    # created мог прийти после updated (повторная доставка): известное согласие родителя не затираем
     await session.execute(stmt.on_conflict_do_update(index_elements=["user_id"], set_={
         "kind": stmt.excluded.kind,
-        "age_band": func.coalesce(Profile.age_band, stmt.excluded.age_band),
-        "guardian_user_id": func.coalesce(Profile.guardian_user_id, stmt.excluded.guardian_user_id),
         "updated_at": now,
     }))
     if kind != "child" or guardian_id is None or await _deleted(session, guardian_id):
@@ -67,14 +62,13 @@ async def on_profile_created(session: AsyncSession, payload: dict[str, Any], now
 
 
 async def on_profile_updated(session: AsyncSession, payload: dict[str, Any], now: datetime) -> None:
-    """Обновляет только поля из changed_fields, пришедшие в payload (возраст, согласие родителя)."""
+    """Обновляет согласие родителя, если оно в changed_fields и в payload; остальные поля (возраст и т. п.) не
+    хранятся."""
     user_id = uuid.UUID(str(payload["user_id"]))
     if await _deleted(session, user_id):
         return
     changed = set(payload.get("changed_fields") or [])
     values: dict[str, Any] = {}
-    if "age_band" in changed and "age_band" in payload:
-        values["age_band"] = _valid(payload["age_band"], AGE_BANDS)
     if "guardian_consent" in changed and "guardian_consent" in payload:
         values["guardian_consent"] = _valid(payload["guardian_consent"], GUARDIAN_CONSENTS)
     if values:

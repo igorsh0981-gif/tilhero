@@ -17,7 +17,7 @@
   проекция владельца семьи; role child — без сообщения (ребёнка добавляет сам родитель);
 - support.ticket.replied.v1 / status.changed→RESOLVED → support.reply / support.resolved (как aievent);
 - experience.release_note.published.v1 → broadcasts (запись центра — при чтении центра, broadcasts.py);
-- user.deletion.requested.v1 → удаление → user.domain.deleted.v1 {domain: notifications};
+- user.deletion.requested.v1 (только от identity-consent) → удаление → user.domain.deleted.v1 {domain: notifications};
 - user.status.changed / consent.revoked / user.notification_settings.changed / user.profile.updated — сброс кэша
   адресации.
 
@@ -58,6 +58,8 @@ TICKET_REPLIED = "support.ticket.replied.v1"
 TICKET_STATUS_CHANGED = "support.ticket.status.changed.v1"
 RELEASE_NOTE = "experience.release_note.published.v1"
 DELETION_REQUESTED = "user.deletion.requested.v1"
+# Сагу удаления ведёт только identity-consent: запрос от другого издателя не исполняется (защита в глубину, P-7)
+DELETION_PRODUCERS = frozenset({"identity-consent"})
 CACHE_EVENTS = [
     "user.status.changed.v1",
     "consent.revoked.v1",
@@ -383,6 +385,12 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
     # ---------------------------------------------------------------- identity-consent
 
     async def on_user_deleted(session: AsyncSession, env: Envelope) -> None:
+        """Сагу удаления ведёт только identity-consent (P-7): чужой издатель — лог без PII, подтверждение шине
+        без удаления и без ACK."""
+        if env.producer not in DELETION_PRODUCERS:
+            log.warning("deletion request from unexpected producer ignored",
+                        extra={"event_type": env.event_type, "producer": env.producer[:64]})
+            return
         d = DeletionRequested.model_validate(env.payload)
         await store.lock_user(session, d.user_id)
         await store.mark_deleted(session, d.user_id, d.request_id, datetime.now(UTC))

@@ -1,7 +1,10 @@
-"""Клиент identity-consent: `GET /internal/v1/users/{id}/public` → {user_id, display_name, kind, age_band, status}.
+"""Клиент identity-consent: `GET /internal/v1/users/{id}/public` → {user_id, display_name, kind, age_band, status,
+guardian_consent, consent_accepted, purposes} (INTERNAL_API §1, §10, §11 P-3).
 
-Имя — только для ответа (не хранится и не логируется). Согласия родителя (14–17) в ответе нет — оно берётся из
-проекции profiles (user.profile.updated.v1); если identity-consent начнёт отдавать `guardian_consent`, ответ главнее.
+Имя — только для ответа (не хранится и не логируется). `guardian_consent` (14–17): если его нет в ответе — из
+проекции profiles (user.profile.updated.v1). `consent_accepted` (действующее согласие с terms и privacy; у ребёнка —
+согласие родителя) и `purposes` (цели действующего согласия): если полей нет в ответе (identity-consent старой
+версии) — согласия нет (fail closed): приглашения недоступны, пока identity-consent не обновлён.
 """
 
 from __future__ import annotations
@@ -9,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel, ConfigDict
 
@@ -29,11 +32,15 @@ class PublicProfile(BaseModel):
     age_band: str | None = None
     status: str | None = None
     guardian_consent: str | None = None
+    # нет в ответе (старая версия identity-consent) — None: согласия нет (fail closed)
+    consent_accepted: bool | None = None
+    purposes: list[str] | None = None
 
 
 @dataclass(frozen=True)
 class Person:
-    """Что social знает о человеке для правил: вид профиля, возраст, статус, согласие родителя."""
+    """Что social знает о человеке для правил: вид профиля, возраст, статус, согласие родителя, согласие с политикой
+    (`consent_accepted`) и его цели (`purposes`)."""
 
     user_id: uuid.UUID
     display_name: str
@@ -41,6 +48,8 @@ class Person:
     age_band: str | None
     status: str | None
     guardian_consent: str | None
+    consent_accepted: bool = False
+    purposes: frozenset[str] = field(default_factory=frozenset)
 
 
 class IdentityGateway:

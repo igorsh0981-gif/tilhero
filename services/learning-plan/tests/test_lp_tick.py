@@ -8,7 +8,10 @@ import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from pydantic import SecretStr
+import pytest
+from pydantic import SecretStr, ValidationError
+
+from tilhero_learning_plan.settings import Settings
 
 # Ташкент UTC+5: слот 19:00 = 14:00Z, местная полночь = 19:00Z предыдущей даты UTC
 MON_MORNING = datetime(2026, 11, 16, 3, 0, tzinfo=UTC)  # пн 08:00 Ташкент
@@ -201,7 +204,7 @@ async def test_clock_behind_and_concurrent_ticks(env, user) -> None:
     await env.set_last_tick(z(16, 13, 0))
     env.now = z(16, 12, 0)  # часы позади last_tick_at
     r = await env.c.post("/internal/v1/plan:tick", headers=env.sched)
-    assert r.json() == {"plans_checked": 0, "reminders": 0, "missed": 0}
+    assert r.json() == {"plans_checked": 0, "reminders": 0, "missed": 0, "skipped": False}
     [(last,)] = await env.sql("SELECT last_tick_at FROM tick_state")
     assert last == z(16, 13, 0)  # назад не двигается
     env.now = z(16, 14, 1)
@@ -217,3 +220,15 @@ async def test_late_slot_before_midnight(env, user) -> None:
     await env.tick(z(16, 19, 0))  # 00:00 — пропуск
     assert [e.payload["local_date"] for e in await env.events("learning.reminder.due.v1", user)] == ["2026-11-16"]
     assert [e.payload["local_date"] for e in await env.events("learning.session.missed.v1", user)] == ["2026-11-16"]
+
+
+def test_scheduler_token_length_guard_in_secure_env() -> None:
+    """P-8: в stage/prod SCHEDULER_TOKEN пустой (вход выключен) или не короче 32 символов; dev/test — любой."""
+    prod = {"internal_jwt_secret": "p" * 40, "internal_jwt_private_key": "A" * 43}
+    for env_name in ("stage", "prod"):
+        for short in ("abc", "x" * 31, " " + "y" * 31 + " "):
+            with pytest.raises(ValidationError, match="SCHEDULER_TOKEN"):
+                Settings(env=env_name, scheduler_token=short, **prod)
+        assert Settings(env=env_name, scheduler_token="z" * 32, **prod).scheduler_token.get_secret_value() == "z" * 32
+        assert Settings(env=env_name, scheduler_token="", **prod).scheduler_token.get_secret_value() == ""
+    assert Settings(env="test", internal_jwt_secret="t" * 40, scheduler_token="abc").scheduler_token

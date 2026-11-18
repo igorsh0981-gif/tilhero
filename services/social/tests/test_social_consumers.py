@@ -1,5 +1,6 @@
-"""Потребители: дети попадают в семью опекуна (user.profile.created.v1), проекция возраста и согласия родителя,
-сага удаления (AT-14) с передачей семьи, ACK domain=social, inbox-дедупликация, DLQ."""
+"""Потребители: дети попадают в семью опекуна (user.profile.created.v1), проекция вида профиля и согласия родителя
+(без возраста и опекуна, P-6), сага удаления (AT-14) с передачей семьи, ACK domain=social, inbox-дедупликация, DLQ,
+удаление только от identity-consent (P-7)."""
 
 from __future__ import annotations
 
@@ -51,20 +52,33 @@ async def test_child_joins_guardian_family(env) -> None:
 
 
 async def test_profile_projection(env) -> None:
+    """P-6: проекция — только вид профиля и согласие родителя; возраст и опекун не хранятся."""
+    cols = await env.sql("SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() "
+                         "AND table_name = 'profiles' ORDER BY ordinal_position")
+    assert [c for (c,) in cols] == ["user_id", "kind", "guardian_consent", "updated_at"]
     teen = uuid.uuid4()
     await env.profile_event("user.profile.created.v1", {"user_id": str(teen), "kind": "account",
-                                                        "created_at": "2026-11-16T08:00:00Z"})
+                                                        "age_band": "14-17", "created_at": "2026-11-16T08:00:00Z"})
     await env.profile_event("user.profile.updated.v1", {"user_id": str(teen), "changed_fields": ["age_band"],
                                                         "age_band": "14-17", "is_minor": True,
                                                         "guardian_consent": "pending"})
-    rows = await env.sql("SELECT kind, age_band, guardian_consent FROM profiles WHERE user_id = :u", u=teen)
-    assert rows == [("account", "14-17", None)]  # guardian_consent не в changed_fields — не трогаем
+    rows = await env.sql("SELECT kind, guardian_consent FROM profiles WHERE user_id = :u", u=teen)
+    assert rows == [("account", None)]  # guardian_consent не в changed_fields — не трогаем
     await env.grant_guardian_consent(teen)
-    # created, доставленный позже updated, не затирает известный возраст
+    # created, доставленный позже updated, не затирает известное согласие родителя
     await env.profile_event("user.profile.created.v1", {"user_id": str(teen), "kind": "account",
                                                         "created_at": "2026-11-16T08:00:00Z"})
-    rows = await env.sql("SELECT kind, age_band, guardian_consent FROM profiles WHERE user_id = :u", u=teen)
-    assert rows == [("account", "14-17", "granted")]
+    rows = await env.sql("SELECT kind, guardian_consent FROM profiles WHERE user_id = :u", u=teen)
+    assert rows == [("account", "granted")]
+    # ребёнок: опекун из события используется для семьи, но не сохраняется в проекции
+    parent = env.identity.add("Мама")
+    child = env.identity.add("Мадина", age="6-9", kind="child")
+    await env.profile_event("user.profile.created.v1", child_created(child, parent))
+    rows = await env.sql("SELECT kind, guardian_consent FROM profiles WHERE user_id = :u", u=child)
+    assert rows == [("child", None)]
+    [(fam_owner,)] = await env.sql("SELECT f.owner_user_id FROM family_members m JOIN families f USING (family_id) "
+                                   "WHERE m.user_id = :u", u=child)
+    assert fam_owner == parent
 
 
 async def test_deletion_removes_user_data_and_transfers_family(env) -> None:
@@ -103,8 +117,11 @@ async def test_deletion_removes_user_data_and_transfers_family(env) -> None:
     # повтор саги снова подтверждается; запоздавшее событие профиля не воскрешает проекцию
     await env.bus.publish(deletion(owner, rid, attempt=2))
     assert len(await env.events("user.domain.deleted.v1")) == 2
-    await env.profile_event("user.profile.updated.v1", {"user_id": str(owner), "changed_fields": ["age_band"],
-                                                        "age_band": "18+"})
+    await env.profile_event("user.profile.updated.v1", {"user_id": str(owner),
+                                                        "changed_fields": ["guardian_consent"],
+                                                        "guardian_consent": "granted"})
+    await env.profile_event("user.profile.created.v1", {"user_id": str(owner), "kind": "account",
+                                                        "created_at": "2026-11-16T08:00:00Z"})
     assert await env.sql("SELECT 1 FROM profiles WHERE user_id = :u", u=owner) == []
     assert env.bus.dlq == []
 
@@ -143,3 +160,26 @@ async def test_parallel_redelivery_and_dlq(env) -> None:
     assert sorted(e.causation_id for e in acks) == sorted([first.event_id, retry.event_id])
     await env.bus.publish(make_envelope("user.deletion.requested.v1", {"user_id": "bad"}, producer="identity-consent"))
     assert [d for d, _ in env.bus.dlq] == ["social.user_deletion"]
+
+
+async def test_deletion_from_other_producer_is_ignored(env, caplog) -> None:
+    """P-7: событие удаления не от identity-consent — без удаления и без ACK, в логе без user_id."""
+    owner, guest = env.identity.add("Владелец"), env.identity.add("Гость")
+    iid, token = await env.invite(owner, "family")
+    await env.open(guest, token)
+    await env.accept(guest, iid)
+    rid = uuid.uuid4()
+    for producer in ("support", "social", "notifications"):
+        await env.bus.publish(make_envelope(
+            "user.deletion.requested.v1",
+            {"user_id": str(owner), "request_id": str(rid), "requested_at": "2026-11-18T09:00:00Z"},
+            producer=producer))
+    assert await env.events("user.domain.deleted.v1") == []
+    assert len(await env.sql("SELECT 1 FROM invites WHERE inviter_user_id = :u", u=owner)) == 1
+    fam = (await env.c.get("/internal/v1/me/family", headers=env.h(guest))).json()
+    assert [m["display_name"] for m in fam["members"]] == ["Владелец", "Гость"]
+    assert env.bus.dlq == []
+    warned = [r for r in caplog.records if r.getMessage() == "deletion request from unexpected producer ignored"]
+    assert len(warned) == 3 and all(str(owner) not in str(r.__dict__) for r in warned)
+    await env.bus.publish(deletion(owner, rid))
+    assert len(await env.events("user.domain.deleted.v1")) == 1

@@ -46,14 +46,16 @@ class IdempotencyReused(Exception):
 
 
 async def person_for(session: AsyncSession, user_id: uuid.UUID, pub: PublicProfile | None) -> Person | None:
-    """Ответ identity-consent + согласие родителя из проекции (в /public его нет)."""
+    """Ответ identity-consent; согласие родителя — из проекции, если его нет в ответе. Нет `consent_accepted` /
+    `purposes` в ответе — согласия нет (fail closed)."""
     if pub is None:
         return None
     consent = pub.guardian_consent
     if consent is None:
         row = await session.get(Profile, user_id)
         consent = row.guardian_consent if row is not None else None
-    return Person(user_id, pub.display_name, pub.kind, pub.age_band, pub.status, consent)
+    return Person(user_id, pub.display_name, pub.kind, pub.age_band, pub.status, consent,
+                  consent_accepted=pub.consent_accepted is True, purposes=frozenset(pub.purposes or ()))
 
 
 def to_out(inv: Invite, settings: Settings, now: datetime) -> InviteOut:
@@ -82,12 +84,14 @@ async def find_replay(session: AsyncSession, inviter: uuid.UUID, key: str, kind:
 
 async def create(session: AsyncSession, inviter: uuid.UUID, person: Person | None, kind: str, *, key: str,
                  now: datetime, settings: Settings) -> tuple[Invite, bool]:
-    """→ (приглашение, replayed). Правила возраста, ≤ N активных, ≤ M за сутки; social.invite.created.v1."""
+    """→ (приглашение, replayed). Правила возраста, согласие с целью social, ≤ N активных, ≤ M за сутки;
+    social.invite.created.v1."""
     await fam.lock_users(session, [inviter])
     replay = await find_replay(session, inviter, key, kind)
     if replay is not None:
         return replay, True
     rules.check_inviter(person, kind)
+    rules.check_consent(person, social=True)
     active = (await session.execute(
         select(func.count()).select_from(Invite).where(
             Invite.inviter_user_id == inviter, Invite.status == "active",
@@ -305,6 +309,7 @@ async def accept(session: AsyncSession, invite_id: uuid.UUID, inviter: uuid.UUID
         raise conflict("INVITE_ALREADY_USED", "Приглашение уже использовано")
     if not rules.can_receive(person):
         raise rules.invites_not_allowed()
+    rules.check_consent(person, social=True)
     assert person is not None
     family_id: uuid.UUID | None = None
     if inv.kind == "family":

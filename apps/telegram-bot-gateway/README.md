@@ -58,7 +58,9 @@
 
 ## Переменные окружения
 `ENV` (dev|test|stage|prod), `PORT`, `INTERNAL_PORT` (8108), `HOST` (`::`), `BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`
-(≥ 32 символов `[A-Za-z0-9_-]` в prod), `TELEGRAM_WEBHOOK_URL` (для setup), `MINIAPP_URL` (https),
+(≥ 32 символов `[A-Za-z0-9_-]` в prod), `TELEGRAM_WEBHOOK_URL` (для setup), `MINIAPP_URL` (https; **обязателен в
+stage/prod и не localhost** — `localhost`, `*.localhost`, `127.*`, `::1`, `0.0.0.0` запрещены, иначе сервис не стартует,
+ревью P-12; в dev/test по умолчанию `https://localhost:5173`),
 `TELEGRAM_APP_LINK` (`https://t.me/<bot>/<app>`, как у social; пусто — payload через `?startapp=` у `web_app`),
 `TELEGRAM_API_BASE` (по умолчанию `https://api.telegram.org`), `REDIS_URL`, `IDENTITY_CONSENT_URL`,
 `INTERNAL_JWT_PRIVATE_KEY` + `INTERNAL_JWT_PUBLIC_KEYS` (stage/prod; в dev/test ключи выводятся из

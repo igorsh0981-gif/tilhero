@@ -82,12 +82,9 @@ def upgrade() -> None:
         "profiles",
         sa.Column("user_id", UUID, primary_key=True),
         sa.Column("kind", sa.String(8)),
-        sa.Column("age_band", sa.String(8)),
         sa.Column("guardian_consent", sa.String(16)),
-        sa.Column("guardian_user_id", UUID),
         sa.Column("updated_at", TS, nullable=False, server_default=sa.func.now()),
         sa.CheckConstraint("kind IS NULL OR kind IN ('account','child')", name="ck_profiles_kind"),
-        sa.CheckConstraint("age_band IS NULL OR age_band IN ('6-9','10-13','14-17','18+')", name="ck_profiles_age"),
         sa.CheckConstraint("guardian_consent IS NULL OR guardian_consent IN "
                            "('not_required','pending','granted','declined')", name="ck_profiles_guardian_consent"),
     )

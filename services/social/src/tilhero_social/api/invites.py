@@ -6,7 +6,6 @@ user_id — только из внутреннего токена; чужое п
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
@@ -17,7 +16,8 @@ from tilhero_common.errors import not_found, unprocessable
 from tilhero_social.api.common import clock_of, current_user, gateway_of, idempotency_key, settings_of
 from tilhero_social.domain import family as fam
 from tilhero_social.domain import invites as inv
-from tilhero_social.identity import IdentityGateway
+from tilhero_social.domain import rules
+from tilhero_social.identity import IdentityGateway, PublicProfile
 from tilhero_social.models import Invite
 from tilhero_social.schemas import (
     CreateInviteIn,
@@ -54,14 +54,23 @@ async def family_view(rt: Runtime, gateway: IdentityGateway, family_id: uuid.UUI
     })
 
 
+async def _viewer(rt: Runtime, gateway: IdentityGateway, me: uuid.UUID) -> PublicProfile | None:
+    """Открыть и посмотреть приглашение — только при действующем согласии (P-3): иначе 403 CONSENT_REQUIRED
+    {purpose: terms}, до любых данных приглашения (и до записи открытия)."""
+    me_pub = await gateway.public(me)
+    async with rt.transaction() as session:
+        rules.check_consent(await inv.person_for(session, me, me_pub), social=False)
+    return me_pub
+
+
 async def _preview(rt: Runtime, gateway: IdentityGateway, invite_id: uuid.UUID, me: uuid.UUID,
-                   request: Request) -> InvitePreviewOut:
+                   request: Request, me_pub: PublicProfile | None) -> InvitePreviewOut:
     settings = settings_of(request)
     async with rt.transaction() as session:
         invite = await session.get(Invite, invite_id)
     if invite is None:
         raise inv.invite_not_found()
-    inviter_pub, me_pub = await asyncio.gather(gateway.public(invite.inviter_user_id), gateway.public(me))
+    inviter_pub = await gateway.public(invite.inviter_user_id)
     if inviter_pub is None:
         raise inv.invite_not_found()
     now = clock_of(request)()
@@ -75,7 +84,8 @@ async def _preview(rt: Runtime, gateway: IdentityGateway, invite_id: uuid.UUID, 
 
 
 @router.post("/me/invites", response_model=InviteOut, status_code=201,
-             responses={403: {"description": "ADULT_REQUIRED | INVITES_NOT_ALLOWED"},
+             responses={403: {"description": "ADULT_REQUIRED | INVITES_NOT_ALLOWED | "
+                                             "CONSENT_REQUIRED {purpose: terms | social}"},
                         409: {"description": "INVITES_LIMIT {limit, window}"}})
 async def create_invite(
     body: CreateInviteIn,
@@ -135,13 +145,17 @@ async def revoke_invite(
     return inv.to_out(invite, settings_of(request), now)
 
 
-@router.post("/invites:open", response_model=InvitePreviewOut, responses={404: {"description": "INVITE_NOT_FOUND"}})
+@router.post("/invites:open", response_model=InvitePreviewOut,
+             responses={403: {"description": "CONSENT_REQUIRED {purpose: terms}"},
+                        404: {"description": "INVITE_NOT_FOUND"}})
 async def open_invite(
     body: OpenInviteIn,
     request: Request,
     me: uuid.UUID = Depends(current_user),
     rt: Runtime = Depends(get_runtime),
 ) -> InvitePreviewOut:
+    gateway = gateway_of(request)
+    me_pub = await _viewer(rt, gateway, me)
     async with rt.transaction() as session:
         invite = await inv.find_by_token(session, body.token)
     if invite is None:
@@ -155,11 +169,12 @@ async def open_invite(
         if locked is None:
             raise inv.invite_not_found()
         await inv.record_open(session, locked, me, now, settings_of(request).service_name)
-    return await _preview(rt, gateway_of(request), invite.invite_id, me, request)
+    return await _preview(rt, gateway, invite.invite_id, me, request, me_pub)
 
 
 @router.get("/invites/{invite_id}/preview", response_model=InvitePreviewOut,
-            responses={404: {"description": "INVITE_NOT_FOUND"}})
+            responses={403: {"description": "CONSENT_REQUIRED {purpose: terms}"},
+                       404: {"description": "INVITE_NOT_FOUND"}})
 async def preview_invite(
     invite_id: str,
     request: Request,
@@ -168,14 +183,16 @@ async def preview_invite(
 ) -> InvitePreviewOut:
     """Повторный показ карточки (кнопка из напоминания startapp=invite_<id>) — только тому, кто уже открывал."""
     iid = _invite_uuid(invite_id)
+    gateway = gateway_of(request)
+    me_pub = await _viewer(rt, gateway, me)
     async with rt.transaction() as session:
         if await inv.redemption(session, iid, me) is None:
             raise inv.invite_not_found()
-    return await _preview(rt, gateway_of(request), iid, me, request)
+    return await _preview(rt, gateway, iid, me, request, me_pub)
 
 
 @router.post("/invites/{invite_id}/accept", response_model=InviteAcceptOut,
-             responses={403: {"description": "INVITES_NOT_ALLOWED"},
+             responses={403: {"description": "INVITES_NOT_ALLOWED | CONSENT_REQUIRED {purpose: terms | social}"},
                         404: {"description": "INVITE_NOT_FOUND"},
                         409: {"description": "INVITE_SELF | INVITE_ALREADY_USED | INVITE_EXPIRED | INVITE_REVOKED | "
                                              "FAMILY_ALREADY_MEMBER | FAMILY_FULL | ALREADY_FRIENDS"}})
@@ -203,7 +220,8 @@ async def accept_invite(
 
 
 @router.post("/invites/{invite_id}/decline", response_model=InvitePreviewOut,
-             responses={404: {"description": "INVITE_NOT_FOUND"}, 409: {"description": "INVITE_SELF"}})
+             responses={403: {"description": "CONSENT_REQUIRED {purpose: terms}"},
+                        404: {"description": "INVITE_NOT_FOUND"}, 409: {"description": "INVITE_SELF"}})
 async def decline_invite(
     invite_id: str,
     request: Request,
@@ -211,9 +229,11 @@ async def decline_invite(
     rt: Runtime = Depends(get_runtime),
 ) -> InvitePreviewOut:
     iid = _invite_uuid(invite_id)
+    gateway = gateway_of(request)
+    me_pub = await _viewer(rt, gateway, me)  # ответ — карточка приглашения: как «посмотреть»
     async with rt.transaction() as session:
         await inv.decline(session, iid, me, now=clock_of(request)(), producer=settings_of(request).service_name)
-    return await _preview(rt, gateway_of(request), iid, me, request)
+    return await _preview(rt, gateway, iid, me, request, me_pub)
 
 
 @router.get("/me/family", response_model=FamilyOut, responses={404: {"description": "FAMILY_NOT_FOUND"}})
