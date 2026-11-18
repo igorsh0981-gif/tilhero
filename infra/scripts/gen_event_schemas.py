@@ -42,9 +42,12 @@ CATALOG = {
     "user.security.changed.v1": ({"user_id": UUID, "change": enum("pin_set", "pin_changed", "pin_removed", "pin_reset",
                                                                    "pin_locked", "biometric_enabled", "biometric_disabled")},
                                  ["user_id", "change"]),
+    # basis: self — сам ученик; guardian — родитель за ребёнка 6–13 или подростка 14–17 (granted_by_user_id — родитель)
     "consent.accepted.v1": ({"user_id": UUID, "consent_id": UUID, "policy_version": STR, "purposes": arr(STR),
-                             "age_band": AGE_BAND}, ["user_id", "consent_id", "policy_version", "purposes"]),
-    "consent.revoked.v1": ({"user_id": UUID, "consent_id": UUID, "policy_version": STR}, ["user_id", "consent_id"]),
+                             "age_band": AGE_BAND, "basis": enum("self", "guardian"), "granted_by_user_id": UUID},
+                            ["user_id", "consent_id", "policy_version", "purposes"]),
+    "consent.revoked.v1": ({"user_id": UUID, "consent_id": UUID, "policy_version": STR,
+                            "basis": enum("self", "guardian"), "revoked_by_user_id": UUID}, ["user_id", "consent_id"]),
     # настройки уведомлений: категории и тихие часы (сброс кэша адресации в notifications)
     "user.notification_settings.changed.v1": ({"user_id": UUID, "enabled": BOOL, "categories": arr(STR, 10)},
                                               ["user_id", "enabled", "categories"]),

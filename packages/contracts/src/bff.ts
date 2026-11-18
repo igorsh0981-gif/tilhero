@@ -11,7 +11,10 @@
  * — к аккаунту. Переключение ученика — POST /v1/session/learner (для детского профиля нужен код родителя, если задан).
  *
  * Общие коды ошибок BFF:
- *  - 401 UNAUTHORIZED | TOKEN_INVALID | TOKEN_EXPIRED (→ POST /v1/session/refresh) | SESSION_REVOKED;
+ *  - 401 UNAUTHORIZED | TOKEN_INVALID | TOKEN_EXPIRED (→ POST /v1/session/refresh; {reason: "learner_switched"} —
+ *    ученик переключён в другой вкладке) | SESSION_REVOKED;
+ *  - 403 ADULT_REQUIRED — действие недоступно в детском профиле или до выбора возраста 18+;
+ *    403 INVITES_NOT_ALLOWED — приглашения в детском профиле; 403 CONSENT_REQUIRED {purpose} — нужна цель согласия;
  *  - 423 PIN_REQUIRED — сессия не подтверждена кодом родителя (security.pin_required=true);
  *  - 422 VALIDATION_ERROR {in, field, errors}; 400 INVALID_JSON; 404 NOT_FOUND;
  *  - 429 RATE_LIMITED {retry_after} + Retry-After; 503 UPSTREAM_UNAVAILABLE {service}; 500 INTERNAL_ERROR.
@@ -181,6 +184,41 @@ export interface GuardianConsentPreview {
   status: "pending" | "granted" | "declined" | "expired";
   expires_at: string;
 }
+/** Решение родителя по ссылке фиксируется как согласие подростка с основанием guardian (версия политики, хеш текста,
+ *  evidence) и событием consent.accepted.v1 / consent.revoked.v1. Решать может только взрослый с действующим своим
+ *  согласием (terms, privacy): иначе 403 CONSENT_REQUIRED {purpose: "terms"} — Mini App сначала показывает политику.
+ *  GET /v1/family/guardian-consents → {items: GuardianConsentGrant[]} — подростки, за которых решал этот родитель.
+ *  POST /v1/family/guardian-consents/{teen_user_id}/revoke → GuardianConsentGrant: согласие отзывается, у подростка
+ *  guardian_consent=declined и сняты необязательные цели. 404 GUARDIAN_CONSENT_NOT_FOUND (не этот родитель). */
+export interface GuardianConsentGrant {
+  teen_user_id: string;
+  teen_display_name: string;
+  status: "granted" | "declined";
+  decided_at: string;
+}
+
+// ---------- Код родителя (PIN) ----------
+/** Код родителя защищает выход из детского профиля, удаление и смену кода. Задаётся в профиле взрослого; Mini App
+ *  предлагает задать его при создании первого детского профиля.
+ *  PUT /v1/profile/security/pin → SecurityState: задать (без current_pin) или сменить (с current_pin). 401 PIN_INVALID.
+ *  DELETE /v1/profile/security/pin {current_pin} → SecurityState.
+ *  POST /v1/profile/security/pin/reset-request → {expires_in}: бот присылает 6-значный код в чат.
+ *  POST /v1/profile/security/pin/reset-confirm {code, new_pin} → SessionResponse (прежние сессии отозваны).
+ *  В детском профиле все эти маршруты → 403 ADULT_REQUIRED. */
+export interface PinSetRequest {
+  pin: string; // 4 или 6 цифр
+  current_pin?: string;
+}
+export interface PinRemoveRequest {
+  current_pin: string;
+}
+export interface PinResetRequestResponse {
+  expires_in: number;
+}
+export interface PinResetConfirmRequest {
+  code: string;
+  new_pin: string;
+}
 
 // ---------- Согласия ----------
 
@@ -196,7 +234,14 @@ export interface ConsentRequest {
   policy_version: string;
   purposes: string[]; // обязательные: terms, privacy, learning; необязательные: voice_recording, social, product_news
 }
-/** DELETE /v1/profile/consent → ConsentState (отзыв) */
+/** DELETE /v1/profile/consent → ConsentState (отзыв)
+ *  Повторный POST /v1/profile/consent с другим набором необязательных целей — новая запись согласия (добавить или
+ *  снять цель). Функции необязательных целей проверяются на сервере:
+ *   - social — приглашения и семья (создать, принять приглашение): 403 CONSENT_REQUIRED {purpose: "social"};
+ *     открыть и посмотреть приглашение можно после принятия terms и privacy;
+ *   - product_news — сообщения категории product (новости в центре и в Telegram);
+ *   - voice_recording — запись голоса (уроки, спринт 4).
+ *  Категории уведомлений social и product без соответствующей цели в доставке не учитываются. */
 
 // ---------- Учебный план и график (learning-plan) ----------
 

@@ -32,3 +32,15 @@ def test_required_fields_are_declared():
         payload = schema["properties"]["payload"] if "payload" in schema.get("properties", {}) else schema
         props = set(payload.get("properties", {}))
         assert set(payload.get("required", [])) <= props, name
+
+
+def test_internal_keys_cover_every_service():
+    """QA D-01: ключи внутреннего JWT — для каждого сервиса с каталогом в services/ и apps/telegram-bot-gateway."""
+    spec = importlib.util.spec_from_file_location("gen_internal_keys", HERE / "gen_internal_keys.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    root = HERE.parents[1]
+    services = {p.name for p in (root / "services").iterdir() if (p / "Dockerfile").exists()}
+    services |= {"telegram-bot-gateway", "admin-bff"}  # admin-bff — спринт 2, ключ заводится заранее
+    assert set(mod.SERVICES) == services
