@@ -6,6 +6,7 @@
   "description": "TilHero: контракты API и событий (TS-типы BFF, JSON Schema событий)",
   "exports": {
     "./bff": "./src/bff.ts",
+    "./admin": "./src/admin.ts",
     "./events/*": "./events/*"
   }
 }

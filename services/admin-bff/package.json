@@ -1,0 +1,28 @@
+{
+  "name": "@tilhero/admin-bff",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TilHero admin-bff: сессии сотрудников, CSRF, RBAC и агрегация API доменов для admin-web",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tilhero/ts-common": "0.1.0",
+    "fastify": "^5.6.0",
+    "ioredis": "^5.8.0",
+    "jose": "^6.1.0"
+  },
+  "devDependencies": {
+    "@tilhero/contracts": "0.1.0",
+    "@types/node": "^22.18.0",
+    "ajv": "^8.20.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

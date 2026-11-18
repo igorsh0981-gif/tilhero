@@ -1,0 +1,99 @@
+/* =====================================================================
+   theme.default.css — TilHero Admin default theme (prototype v2, 02-style.css).
+   Colours only. Light theme on bare :root, dark theme for the OS preference
+   (unless the viewer forced light) and for [data-theme="dark"] — identical values.
+   The light values equal experience-config admin 1.0.0 (seed); a config version
+   may override any whitelisted token at runtime (src/theme/config.ts) without a build.
+   ===================================================================== */
+:root{
+  color-scheme:light;
+  --bg:#F5F6F9; --surface:#FFFFFF; --surface-2:#F0F2F6; --surface-3:#E7EAF0; --surface-sunk:#F8F9FB;
+  --line:#E4E7EE; --line-strong:#D2D7E1;
+  --ink:#0E1324; --ink-2:#4A5168; --muted:#646B80; --faint:#A0A7B8; --field-line:#858EA1;
+  --nav:#0B1020; --nav-2:#161D33; --nav-3:#1E263F; --nav-ink:#AEB7CA; --nav-ink-strong:#FFFFFF; --nav-muted:#808BA6; --nav-line:rgba(174,183,202,.12);
+  --accent:#DFFF56; --accent-press:#CDEE3C; --accent-ink:#1A2200;
+  --primary:#0E1324; --primary-ink:#FFFFFF; --primary-hover:#262D45;
+  --info:#315EFB; --info-bg:#EDF2FF; --info-ink:#1D45D1; --info-line:#C9D6FF;
+  --good:#0F9F6E; --good-bg:#E5F6EF; --good-ink:#0A7552; --good-line:#BDE8D6;
+  --warn:#C27803; --warn-bg:#FDF2DE; --warn-ink:#8F5800; --warn-line:#F2D49B;
+  --bad:#D92D20; --bad-bg:#FDECEA; --bad-ink:#B42318; --bad-line:#F7C3BE;
+  --neutral-bg:#EEF0F4; --neutral-ink:#4A5168;
+  --note-bg:#FFF7DB; --note-line:#EED98C; --note-ink:#6B5300;
+  --focus:#315EFB;
+  --scrim:rgba(11,16,32,.42);
+  --shadow-pop:0 14px 36px -10px rgba(14,19,36,.28),0 2px 6px rgba(14,19,36,.08);
+  --shadow-drawer:-24px 0 48px -12px rgba(14,19,36,.24);
+  --chart-grid:#ECEEF3; --chart-axis:#8D96A8; --chart-label:#646B80;
+  --s1:#2A78D6; --s2:#D9541F; --s3:#178A61; --s4:#A86F00; --s-other:#7D8699; --s-single:#315EFB; --s-ghost:#E4E7EE;
+  --code-key:#1D45D1; --code-str:#0A7552; --code-num:#9A4A00; --code-bool:#8A2BB0;
+  --diff-add:#E5F6EF; --diff-add-ink:#0A7552; --diff-del:#FDECEA; --diff-del-ink:#B42318;
+  /* additional colour roles (not in the experience-config whitelist — fixed per theme) */
+  --on-solid:#FFFFFF; --knob:#FFFFFF; --knob-shadow:rgba(0,0,0,.25);
+  --shadow-seg:0 1px 2px rgba(14,19,36,.10);
+  --shadow-login:0 30px 60px -24px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.04);
+  --toast-ok:#4FD69C; --toast-err:#FF8A80; --toast-info:#A8BBFF;
+  --qr-bg:#FFFFFF; --qr-ink:#0E1324;
+  --tg-wall:#DCE6EE; --tg-own:#E1F7C8; --tg-own-ink:#0E1324; --tg-own-meta:#4E7A3A; --tg-svc:rgba(14,19,36,.42); --tg-svc-ink:#FFFFFF;
+  --phone-frame:#0B1020; --phone-bg:#F4F5F8; --phone-ink:#0E1324; --phone-card:#FFFFFF; --phone-chip:rgba(14,19,36,.06); --phone-line:rgba(14,19,36,.08); --phone-thumb:#E7EAF0;
+  --phone-media-a:#1C2A5A; --phone-media-b:#315EFB; --phone-media-c:#DFFF56; --phone-prov:rgba(0,0,0,.45); --phone-shadow:rgba(14,19,36,.45);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0A0D18; --surface:#111628; --surface-2:#171D33; --surface-3:#1F2641; --surface-sunk:#0D1121;
+    --line:rgba(154,170,230,.12); --line-strong:rgba(154,170,230,.22);
+    --ink:#EEF1F8; --ink-2:#B9C0D4; --muted:#8F97AC; --faint:#5E6680; --field-line:#6B7593;
+    --nav:#070A13; --nav-2:#121830; --nav-3:#1A2140; --nav-ink:#A3ACC2; --nav-ink-strong:#FFFFFF; --nav-muted:#7F8AA6; --nav-line:rgba(174,183,202,.10);
+    --accent:#DFFF56; --accent-press:#CDEE3C; --accent-ink:#1A2200;
+    --primary:#EEF1F8; --primary-ink:#0A0D18; --primary-hover:#D5DAE8;
+    --info:#7193FF; --info-bg:rgba(113,147,255,.14); --info-ink:#A8BBFF; --info-line:rgba(113,147,255,.32);
+    --good:#33C48F; --good-bg:rgba(51,196,143,.13); --good-ink:#6FE0B4; --good-line:rgba(51,196,143,.30);
+    --warn:#F0A63A; --warn-bg:rgba(240,166,58,.14); --warn-ink:#F7C47E; --warn-line:rgba(240,166,58,.32);
+    --bad:#F2685D; --bad-bg:rgba(242,104,93,.14); --bad-ink:#FF9D94; --bad-line:rgba(242,104,93,.32);
+    --neutral-bg:rgba(154,170,230,.10); --neutral-ink:#B9C0D4;
+    --note-bg:rgba(240,200,80,.09); --note-line:rgba(240,200,80,.28); --note-ink:#F2D27A;
+    --focus:#8FA8FF;
+    --scrim:rgba(3,5,12,.62);
+    --shadow-pop:0 18px 40px -10px rgba(0,0,0,.6),0 0 0 1px rgba(154,170,230,.10);
+    --shadow-drawer:-24px 0 48px -12px rgba(0,0,0,.6);
+    --chart-grid:rgba(154,170,230,.09); --chart-axis:rgba(154,170,230,.24); --chart-label:#8890A6;
+    --s1:#3987E5; --s2:#D95926; --s3:#199E70; --s4:#C98500; --s-other:#5D6680; --s-single:#7193FF; --s-ghost:rgba(154,170,230,.12);
+    --code-key:#A8BBFF; --code-str:#6FE0B4; --code-num:#F7C47E; --code-bool:#E3A6FF;
+    --diff-add:rgba(51,196,143,.13); --diff-add-ink:#6FE0B4; --diff-del:rgba(242,104,93,.14); --diff-del-ink:#FF9D94;
+    --on-solid:#FFFFFF; --knob:#FFFFFF; --knob-shadow:rgba(0,0,0,.4);
+    --shadow-seg:0 1px 2px rgba(0,0,0,.4);
+    --shadow-login:0 30px 60px -24px rgba(0,0,0,.7),0 0 0 1px rgba(154,170,230,.10);
+    --toast-ok:#0F9F6E; --toast-err:#D92D20; --toast-info:#315EFB;
+    --tg-wall:#0F1A24; --tg-own:#2B5278; --tg-own-ink:#EEF1F8; --tg-own-meta:#A8C7E8; --tg-svc:rgba(0,0,0,.45); --tg-svc-ink:#EEF1F8;
+    --phone-shadow:rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0A0D18; --surface:#111628; --surface-2:#171D33; --surface-3:#1F2641; --surface-sunk:#0D1121;
+  --line:rgba(154,170,230,.12); --line-strong:rgba(154,170,230,.22);
+  --ink:#EEF1F8; --ink-2:#B9C0D4; --muted:#8F97AC; --faint:#5E6680; --field-line:#6B7593;
+  --nav:#070A13; --nav-2:#121830; --nav-3:#1A2140; --nav-ink:#A3ACC2; --nav-ink-strong:#FFFFFF; --nav-muted:#7F8AA6; --nav-line:rgba(174,183,202,.10);
+  --accent:#DFFF56; --accent-press:#CDEE3C; --accent-ink:#1A2200;
+  --primary:#EEF1F8; --primary-ink:#0A0D18; --primary-hover:#D5DAE8;
+  --info:#7193FF; --info-bg:rgba(113,147,255,.14); --info-ink:#A8BBFF; --info-line:rgba(113,147,255,.32);
+  --good:#33C48F; --good-bg:rgba(51,196,143,.13); --good-ink:#6FE0B4; --good-line:rgba(51,196,143,.30);
+  --warn:#F0A63A; --warn-bg:rgba(240,166,58,.14); --warn-ink:#F7C47E; --warn-line:rgba(240,166,58,.32);
+  --bad:#F2685D; --bad-bg:rgba(242,104,93,.14); --bad-ink:#FF9D94; --bad-line:rgba(242,104,93,.32);
+  --neutral-bg:rgba(154,170,230,.10); --neutral-ink:#B9C0D4;
+  --note-bg:rgba(240,200,80,.09); --note-line:rgba(240,200,80,.28); --note-ink:#F2D27A;
+  --focus:#8FA8FF;
+  --scrim:rgba(3,5,12,.62);
+  --shadow-pop:0 18px 40px -10px rgba(0,0,0,.6),0 0 0 1px rgba(154,170,230,.10);
+  --shadow-drawer:-24px 0 48px -12px rgba(0,0,0,.6);
+  --chart-grid:rgba(154,170,230,.09); --chart-axis:rgba(154,170,230,.24); --chart-label:#8890A6;
+  --s1:#3987E5; --s2:#D95926; --s3:#199E70; --s4:#C98500; --s-other:#5D6680; --s-single:#7193FF; --s-ghost:rgba(154,170,230,.12);
+  --code-key:#A8BBFF; --code-str:#6FE0B4; --code-num:#F7C47E; --code-bool:#E3A6FF;
+  --diff-add:rgba(51,196,143,.13); --diff-add-ink:#6FE0B4; --diff-del:rgba(242,104,93,.14); --diff-del-ink:#FF9D94;
+  --on-solid:#FFFFFF; --knob:#FFFFFF; --knob-shadow:rgba(0,0,0,.4);
+  --shadow-seg:0 1px 2px rgba(0,0,0,.4);
+  --shadow-login:0 30px 60px -24px rgba(0,0,0,.7),0 0 0 1px rgba(154,170,230,.10);
+  --toast-ok:#0F9F6E; --toast-err:#D92D20; --toast-info:#315EFB;
+  --tg-wall:#0F1A24; --tg-own:#2B5278; --tg-own-ink:#EEF1F8; --tg-own-meta:#A8C7E8; --tg-svc:rgba(0,0,0,.45); --tg-svc-ink:#EEF1F8;
+  --phone-shadow:rgba(0,0,0,.6);
+}

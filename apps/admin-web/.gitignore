@@ -1,0 +1,5 @@
+# Playwright artifacts (screenshots of key screens live in e2e/shots and are kept)
+test-results/
+playwright-report/
+blob-report/
+dist/

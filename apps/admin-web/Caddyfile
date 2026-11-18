@@ -1,0 +1,73 @@
+# TilHero Admin web — статика Vite за Caddy + прокси /admin/v1/* на admin-bff (один origin, first-party cookie).
+# TLS терминирует платформа (Railway edge), поэтому здесь только HTTP на {$PORT}.
+# Env: PORT (по умолчанию 8080), ADMIN_BFF_URL — приватный адрес admin-bff без пути
+#      (Railway: http://${{admin-bff.RAILWAY_PRIVATE_DOMAIN}}:8002; публичного домена у admin-bff нет).
+{
+	admin off
+	persist_config off
+	auto_https off
+	servers {
+		# Доверяем входящему X-Forwarded-For/-Proto от ЛЮБОГО адреса: снаружи к этому Caddy можно попасть только
+		# через Railway edge (публичный порт контейнера не открыт), а адрес edge не обязательно лежит в private_ranges.
+		# С доверием Caddy ДОПИСЫВАЕТ адрес edge к XFF клиента, а не затирает XFF этим адресом — иначе admin-bff
+		# (TRUST_PROXY_HOPS=2: edge + этот Caddy) считал бы rate limit входа «на IP» по адресу edge, общему для всех.
+		# Подделка XFF клиентом безопасна: admin-bff берёт адрес на фиксированной глубине справа, а не крайний левый.
+		trusted_proxies static 0.0.0.0/0 ::/0
+		client_ip_headers X-Forwarded-For
+	}
+}
+
+:{$PORT:8080} {
+	root * /srv
+	encode zstd gzip
+
+	# Заголовки безопасности. Скрипты и стили — только свои файлы (никаких inline/eval; React задаёт
+	# style через CSSOM, это CSP не нарушает), шрифты лежат в бандле, сеть — только свой origin
+	# (/admin/v1 проксируется сюда же). Админку нельзя встроить в чужую страницу (frame-ancestors 'none').
+	# img-src https: — баннеры кандидатов в «Проверке событий» (спринт 4) грузятся с CDN источников; клиент рисует
+	# только https-картинки с referrerpolicy=no-referrer, а Referrer-Policy ниже — no-referrer для всего документа.
+	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; frame-src 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; manifest-src 'none'; worker-src 'none'"
+		Strict-Transport-Security "max-age=31536000"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		Permissions-Policy "accelerometer=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), clipboard-read=()"
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+
+	handle /healthz {
+		header Cache-Control "no-store"
+		respond "ok" 200
+	}
+
+	# API админки: тот же origin → cookie __Host-tilhero_admin first-party, CSRF-заголовок и Origin
+	# проверяет admin-bff. Ответы API не кэшируются нигде.
+	handle /admin/v1/* {
+		header Cache-Control "no-store"
+		reverse_proxy {$ADMIN_BFF_URL:http://admin-bff.railway.internal:8002} {
+			header_down -Server
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 30s
+			}
+		}
+	}
+
+	# Хэшированные бандлы Vite — навсегда; отсутствующий файл → честный 404, а не index.html.
+	handle /assets/* {
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	# Всё остальное (index.html, favicon, маршруты SPA) — всегда перепроверять: новый релиз подхватывается
+	# сразу (тема админки приходит из experience-config отдельно и без пересборки, A46).
+	handle {
+		header Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}
