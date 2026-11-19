@@ -39,6 +39,7 @@ ISSUERS = (
     "lessons",  # спринт 4: сессии урока (вызывает catalog, ai-gateway, assessment, learning-plan, diagnostics)
     "assessment",  # спринт 4: независимая оценка (вызывает catalog, ai-gateway)
     "ai-gateway",  # спринт 4: вызовы агентов (провайдер на стенде — fake)
+    "tts",  # релиз 4.1: озвучка (только проверяет токены telegram-bff; на стенде — fake-синтез без моделей)
 )
 
 

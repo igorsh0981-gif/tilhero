@@ -1503,15 +1503,29 @@ def s_qa_appeal(c: s2.Ctx) -> None:
         wait_for(lambda: (mp := skill_states(la)) and all(mp[k]["state"] == "learning" for k in demo), 30,
                  interval=1.0, what=f"навыки {demo} → learning после переоценки (assessment.reevaluated.v1 → diagnostics)")
 
-    def replanned() -> dict[str, Any] | None:
-        t = la.ok("GET", "/v1/plan/trajectory")
-        done = next((x for x in t["completed"] if x["lesson_id"] == m["lesson_id"]), None)
-        return t if done and done["evaluation_id"] == nid and done["passed"] is False else None
+    last: dict[str, Any] = {}
 
-    t = wait_for(replanned, 30, interval=1.0, what="переоценка в плане (assessment.reevaluated.v1 → learning-plan)")
-    rep_lessons = [x for x in ([t["next"]] if t["next"] else []) + t["mandatory"] if x["lesson_id"] == m["lesson_id"]]
-    check(rep_lessons and "repeat" in rep_lessons[0]["reason_codes"], f"урок без зачёта не предложен повторить: "
-          f"{[(x['lesson_id'], x['reason_codes']) for x in rep_lessons]}")
+    def repeat_of(t: dict[str, Any]) -> list[dict[str, Any]]:
+        return [x for x in ([t["next"]] if t["next"] else []) + t["mandatory"] if x["lesson_id"] == m["lesson_id"]]
+
+    def replanned() -> dict[str, Any] | None:
+        # план согласуется в конечном счёте: переоценка (learning-plan) и возврат навыка в learning (diagnostics →
+        # skills.state.changed → проекция learning-plan) приходят разными событиями — ждём обоих
+        t = la.ok("GET", "/v1/plan/trajectory")
+        last["t"] = t
+        done = next((x for x in t["completed"] if x["lesson_id"] == m["lesson_id"]), None)
+        rep = repeat_of(t)
+        return (t if done and done["evaluation_id"] == nid and done["passed"] is False and rep
+                and "repeat" in rep[0]["reason_codes"] else None)
+
+    try:
+        t = wait_for(replanned, 45, interval=1.0,
+                     what="переоценка в плане и урок «повторим» (assessment.reevaluated.v1 → learning-plan)")
+    except StepFailed:
+        t = last.get("t") or {}
+        done = next((x for x in t.get("completed", []) if x["lesson_id"] == m["lesson_id"]), None)
+        check(False, f"урок без зачёта не предложен повторить: пройден {done}; next {t.get('next')}; "
+              f"обязательные {[(x['lesson_id'], x['reason_codes']) for x in t.get('mandatory', [])][:5]}")
     # уведомление в Telegram — одно, без текста решения
     msgs = wait_for(lambda: s1.tg_sent(la.tg_id, seq, contains="оценк"), 30, interval=1.0,
                     what="уведомление о решении по апелляции")

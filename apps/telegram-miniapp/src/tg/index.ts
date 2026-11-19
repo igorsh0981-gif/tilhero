@@ -10,4 +10,5 @@ export * from "./store";
 export * from "./storage";
 export * from "./homeScreen";
 export * from "./speech";
+export * from "./tts";
 export type * from "./types";

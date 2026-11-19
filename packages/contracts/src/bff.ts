@@ -981,3 +981,16 @@ export interface LessonHistoryItem {
   started_at: string | null;
 }
 
+
+// ---------- Озвучка (release 4.1: серверный синтез речи вместо синтеза устройства) ----------
+/** POST /v1/speech SpeechRequest → 200 `audio/mpeg` (MP3, моно; Cache-Control: private, max-age=86400).
+ *  Озвучка английских фраз контента: аудирование теста на уровень, «Прослушать» в разговоре, медиа без файла.
+ *  Синтез речи устройства (Web Speech) во встроенном браузере Telegram на Android отсутствует, на iOS тихий —
+ *  поэтому звук приходит файлом и играет через `HTMLAudioElement`. Ошибки: 422 TEXT_INVALID (пусто, > 400 знаков,
+ *  нет латиницы); 429 RATE_LIMITED; 503 SPEECH_UNAVAILABLE — клиент откатывается на синтез устройства, если он есть.
+ *  BFF → tts `POST /internal/v1/speech` (то же тело; вызывающий — только telegram-bff). Кеш озвучки — у tts. */
+export interface SpeechRequest {
+  text: string; // 1–400 знаков, английский текст контента
+  variant: "en-GB" | "en-US"; // голос: en-US — мужской (ryan), en-GB — женский (southern english female)
+  speed?: "normal" | "slow"; // slow — для детей 6–13 и повторного прослушивания; по умолчанию normal
+}

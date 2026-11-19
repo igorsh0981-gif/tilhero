@@ -58,6 +58,17 @@
       "description": "Создание обращения в поддержку — на пользователя в час (новая)"
     },
     {
+      "policy": "tg.speech",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 120,
+      "window_s": 600,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Озвучка фраз контента (POST /v1/speech) — на пользователя за 10 минут (новая, релиз 4.1)"
+    },
+    {
       "policy": "adm.login_ip",
       "service": "admin-bff",
       "subject": "ip",

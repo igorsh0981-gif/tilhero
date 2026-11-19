@@ -145,7 +145,7 @@ export const uzLessons: Record<keyof typeof ruLessons, string> = {
   "pl.rp.hintNote": "Maslahat bahoda hisobga olinadi.",
   "pl.rp.hintCounted": "bahoda hisobga olinadi",
   "pl.rp.choicesOnly": "Keling, variantlardan javob tanlaymiz.",
-  "pl.rp.noVoice": "Qurilmada inglizcha ovoz yoʻq — replikani oʻqing.",
+  "pl.rp.noVoice": "Ovoz hozir mavjud emas — replikani oʻqing.",
   "pl.rp.sending": "Yuborilmoqda…",
 
   "pl.end.success": "Vazifa bajarildi",

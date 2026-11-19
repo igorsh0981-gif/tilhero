@@ -196,3 +196,19 @@ def test_lesson_services_sprint4():
     assert env_of(files, "n8n")["ASSESSMENT_URL"].endswith(":8113")
     assert assessment["SCHEDULER_TOKEN"] == sec.scheduler
 
+
+
+def test_tts_service_release_4_1():
+    """Релиз 4.1: tts — приватный, без БД и шины, проверяет только токены telegram-bff (закрытый ключ для
+    ServiceSettings, открытый никому не раздаётся); TTS_URL — у telegram-bff."""
+    sec = rs.Secrets.new()
+    files = rs.build(sec, env="prod", bot_username="TilHeroBot", app_name="app")
+    svc = rs.by_name("tts")
+    assert svc.port == 8115 and svc.schema is None and not svc.public and svc.calls == ()
+    tts = env_of(files, "tts")
+    assert tts["PORT"] == "8115" and tts["RAILWAY_DOCKERFILE_PATH"] == "services/tts/Dockerfile"
+    assert "DATABASE_URL" not in tts and "NATS_URL" not in tts and tts["REDIS_URL"]
+    assert tts["INTERNAL_JWT_PRIVATE_KEY"] and len(tts["INTERNAL_JWT_SECRET"]) >= 32
+    pub = json.loads(tts["INTERNAL_JWT_PUBLIC_KEYS"])
+    assert "telegram-bff" in pub and "tts" not in pub and "tts" not in json.loads(sec.public_keys())
+    assert env_of(files, "telegram-bff")["TTS_URL"].endswith(":8115")

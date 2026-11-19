@@ -186,9 +186,10 @@ export class ApiClient {
     return this.authed(opts, () => this.raw<T>(method, path, opts));
   }
 
-  /** Binary GET (audio of the media library: GET /v1/media/{id}/audio) with the same token refresh as JSON calls. */
-  blob(path: string, opts: RequestOptions = {}): Promise<Blob> {
-    return this.authed(opts, async () => (await this.send("GET", path, opts, "audio/*")).blob());
+  /** Binary answer (audio of the media library: GET /v1/media/{id}/audio; server speech: POST /v1/speech with a JSON
+   *  body) with the same token refresh as JSON calls. */
+  blob(path: string, opts: RequestOptions = {}, method: "GET" | "POST" = "GET"): Promise<Blob> {
+    return this.authed(opts, async () => (await this.send(method, path, opts, "audio/*")).blob());
   }
 
   private async authed<T>(opts: RequestOptions, call: () => Promise<T>): Promise<T> {
@@ -368,8 +369,9 @@ export class ApiClient {
   }
 }
 
-/** 503 codes that mean «BFF is reachable, one domain is down» — no connectivity banner. */
-const REACHABLE_503: ReadonlySet<string> = new Set(["UPSTREAM_UNAVAILABLE", "RATE_LIMIT_UNAVAILABLE", "CATALOG_UNAVAILABLE"]);
+/** 503 codes that mean «BFF is reachable, one domain is down» — no connectivity banner. SPEECH_UNAVAILABLE — the
+ *  server speech is down, the player falls back to the device voice (tts.ts). */
+const REACHABLE_503: ReadonlySet<string> = new Set(["UPSTREAM_UNAVAILABLE", "RATE_LIMIT_UNAVAILABLE", "CATALOG_UNAVAILABLE", "SPEECH_UNAVAILABLE"]);
 
 /** Idempotency-Key for creating commands (one per draft, reused on retries). */
 export function newIdempotencyKey(): string {

@@ -66,9 +66,9 @@ def main(argv: list[str] | None = None) -> int:
     if set(new) & set(pub):
         print(f"ключи сервисов {sorted(set(new) & set(pub))} уже есть в действующем наборе", file=sys.stderr)
         return 2
-    for n in new:
-        if n in rs.JWT_ISSUERS:
-            pub[n] = rs.b64e(rs.public_raw(rs.private_from_seed(sec.seeds[n])))
+    new_issuers = [n for n in new if n in rs.JWT_ISSUERS]  # VERIFY_ONLY (tts) ключ не раздают
+    for n in new_issuers:
+        pub[n] = rs.b64e(rs.public_raw(rs.private_from_seed(sec.seeds[n])))
     missing = set(rs.JWT_ISSUERS) ^ set(pub)
     if missing:
         print(f"набор открытых ключей не совпадает с JWT_ISSUERS: {sorted(missing)}", file=sys.stderr)
@@ -99,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         if svc.name in new:
             continue
         upd = {rs.url_var(svc.name, c): rs.private_url(c) for c in svc.calls if c in new}
-        if svc.name in rs.JWT_ISSUERS:
+        if new_issuers and svc.name in rs.JWT_ISSUERS:
             upd["INTERNAL_JWT_PUBLIC_KEYS"] = pub_json
         if upd:
             updates[svc.name] = upd

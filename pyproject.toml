@@ -37,7 +37,7 @@ select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "RUF"]
 ignore = ["S101", "RUF001", "RUF002", "RUF003", "B008"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["tilhero_common", "tilhero_audit", "tilhero_identity", "tilhero_learning_plan", "tilhero_support", "tilhero_notifications", "tilhero_experience", "tilhero_botgw", "tilhero_social", "tilhero_admin_identity", "tilhero_user_admin", "tilhero_catalog", "tilhero_diagnostics", "tilhero_lessons", "tilhero_assessment", "tilhero_ai_gateway"]
+known-first-party = ["tilhero_common", "tilhero_audit", "tilhero_identity", "tilhero_learning_plan", "tilhero_support", "tilhero_notifications", "tilhero_experience", "tilhero_botgw", "tilhero_social", "tilhero_admin_identity", "tilhero_user_admin", "tilhero_catalog", "tilhero_diagnostics", "tilhero_lessons", "tilhero_assessment", "tilhero_ai_gateway", "tilhero_tts"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["S105", "S106", "S311"]
@@ -57,6 +57,11 @@ strict_equality = true
 # Сторонние библиотеки без аннотаций (py.typed) и без пакетов stubs в зависимостях: их типы — Any.
 [[tool.mypy.overrides]]
 module = ["asyncpg", "asyncpg.*", "jsonschema", "jsonschema.*"]
+ignore_missing_imports = true
+
+# tts: piper и lameenc без аннотаций типов
+[[tool.mypy.overrides]]
+module = ["piper", "piper.*", "lameenc"]
 ignore_missing_imports = true
 
 # psycopg — не зависимость workspace: только infra/railway, ставится в CI через `uv run --with psycopg[binary]`.

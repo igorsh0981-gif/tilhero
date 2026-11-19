@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { errorText } from "../../api/errors";
 import { canTypeFreeText, chatBubbles, learnerLine, TEXT_MAX, type Bubble, type RoleplayStep } from "../../domain/lessons";
 import { useI18n } from "../../i18n";
-import { haptic, loadVoices, pickEnglishVoice, speak, type EnVariant } from "../../tg";
+import { useDelayedFlag } from "../../state/hooks";
+import { haptic, playSpeech, SpeechUnavailableError, type EnVariant } from "../../tg";
 import { Icon } from "../../ui/Icon";
 import { Btn, cx } from "../../ui/kit";
 import { showToast } from "../../ui/overlays";
@@ -17,10 +19,10 @@ export interface Character {
 export type Cast = Map<string, Character>;
 
 /**
- * The roleplay as a chat (AT-43): bubbles of the character (name, role, «Прослушать» by the device voice, translation
- * on tap), the learner's lines, the clarifying question after an unclear answer; the replies as buttons (always), a text
- * field only when free text is allowed (adults and teens, AI available, fewer than two unclear answers on the node; never
- * a child), «Подсказка» marked as counted.
+ * The roleplay as a chat (AT-43): bubbles of the character (name, role, «Прослушать» — server speech with the device
+ * voice as a fallback, translation on tap), the learner's lines, the clarifying question after an unclear answer; the
+ * replies as buttons (always), a text field only when free text is allowed (adults and teens, AI available, fewer than
+ * two unclear answers on the node; never a child), «Подсказка» marked as counted.
  */
 export function RoleplayView({ api, step, kid, top, error, cast }: StepProps<RoleplayStep> & { cast: Cast }) {
   const { t, l } = useI18n();
@@ -140,24 +142,30 @@ function LearnerBubble({ b }: { b: Bubble }) {
 }
 
 function CharacterBubble({ b, who }: { b: Bubble; who: Character | undefined }) {
-  const { t, l } = useI18n();
+  const { t, l, fmt } = useI18n();
   const [gloss, setGloss] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
-  const listen = async () => {
-    if (speaking) return;
-    setSpeaking(true);
-    try {
-      const voice = pickEnglishVoice(await loadVoices(1500), who?.voice);
-      if (!voice) {
-        showToast(t("pl.rp.noVoice"));
-        return;
-      }
-      await speak(b.text, { voice, variant: who?.voice ?? "en-GB" });
-    } catch {
-      showToast(t("pl.rp.noVoice"));
-    } finally {
-      setSpeaking(false);
-    }
+  const [phase, setPhase] = useState<"idle" | "waiting" | "playing">("idle");
+  const loading = useDelayedFlag(phase === "waiting");
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  /** Server speech in the character's voice; synchronous in the tap handler (iOS plays only from a gesture). */
+  const listen = () => {
+    if (phase !== "idle") return;
+    setPhase("waiting");
+    playSpeech(b.text, who?.voice ?? "en-GB", {
+      onStart: () => {
+        if (alive.current) setPhase("playing");
+      },
+    })
+      .catch((e: unknown) => showToast(e instanceof SpeechUnavailableError ? t("pl.rp.noVoice") : errorText(e, t, fmt.mmss)))
+      .finally(() => {
+        if (alive.current) setPhase("idle");
+      });
   };
   return (
     <div className={cx("bub ch", b.clarification && "clar")} data-testid={b.clarification ? "rp-clarify" : "rp-ch"}>
@@ -170,9 +178,9 @@ function CharacterBubble({ b, who }: { b: Bubble; who: Character | undefined }) 
       <span className="en" lang="en">{b.text}</span>
       {gloss && b.gloss ? <span className="gl" data-testid="rp-gloss">{l(b.gloss)}</span> : null}
       <span className="bub-acts">
-        <button type="button" className="lnk" onClick={() => void listen()} disabled={speaking} data-testid="rp-listen">
+        <button type="button" className="lnk" onClick={listen} disabled={phase !== "idle"} aria-busy={phase === "waiting"} data-testid="rp-listen">
           <Icon name="volume" size={16} />
-          {t("pl.rp.listen")}
+          {loading ? t("sp.loading") : t("pl.rp.listen")}
         </button>
         {b.gloss ? (
           <button type="button" className="lnk" aria-expanded={gloss} onClick={() => setGloss(!gloss)} data-testid="rp-translate">

@@ -24,6 +24,7 @@ import type {
   ScenarioCard,
   ScenarioDetail,
   SkillMap,
+  SpeechRequest,
   Trajectory,
   AgeRequest,
   ConsentRequest,
@@ -189,6 +190,8 @@ export function createBff(client: ApiClient) {
     media: (f: MediaFilters, cursor: string | null) => get<Page<MediaCard>>("/v1/media", { ...f, cursor, limit: 20 }),
     mediaItem: (id: string) => get<MediaDetail>(`/v1/media/${enc(id)}`),
     mediaAudio: (id: string) => client.blob(`/v1/media/${enc(id)}/audio`),
+    /** release 4.1: the phrase as MP3 (tts via the BFF); `quiet` — prefetch, never toggles «Нет связи» */
+    speech: (body: SpeechRequest, opts: { quiet?: boolean } = {}) => client.blob("/v1/speech", { body, quiet: opts.quiet }, "POST"),
     mediaRequests: () => get<{ items: MediaRequest[] }>("/v1/media/requests"),
     createMediaRequest: (body: MediaRequestCreate, key: string) => client.request<MediaRequest>("POST", "/v1/media/requests", { body, idempotencyKey: key }),
 

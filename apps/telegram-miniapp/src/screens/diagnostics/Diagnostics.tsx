@@ -6,7 +6,7 @@ import { canResume, hasAssessedArea, progressOf } from "../../domain/diagnostics
 import { useI18n, type MessageKey } from "../../i18n";
 import { useApp } from "../../state/app";
 import { useAction, useLoad } from "../../state/hooks";
-import { confirmPopup, haptic, loadVoices, pickEnglishVoice } from "../../tg";
+import { confirmPopup, haptic } from "../../tg";
 import { Icon } from "../../ui/Icon";
 import { Btn, ErrorLine, HERO, Hero, Margin, NoBreakHyphens, Skeleton } from "../../ui/kit";
 import { showToast } from "../../ui/overlays";
@@ -238,8 +238,6 @@ function Intro(props: { state: DiagnosticState | null; kid: boolean; busy: boole
 
 /* ---------------------------------------------------------------- items */
 
-type VoiceCheck = { status: "unknown" } | { status: "ok"; voice: SpeechSynthesisVoice } | { status: "none" };
-
 const FATAL = new Set(["DIAGNOSTIC_SESSION_EXPIRED", "DIAGNOSTIC_SESSION_CLOSED", "DIAGNOSTIC_SESSION_NOT_FOUND"]);
 
 function TestRunner(props: {
@@ -259,10 +257,11 @@ function TestRunner(props: {
   const [error, setError] = useState<string | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
   const [listenOff, setListenOff] = useState(false);
-  const [checkingVoice, setCheckingVoice] = useState(false);
   const [draft, setDraft] = useState<Answer>(null);
-  const voice = useRef<VoiceCheck>({ status: "unknown" });
   const listenOffRef = useRef(false);
+  /** listening-unavailable reached the server (it stops choosing listening items) */
+  const reported = useRef(false);
+  const reporting = useRef<Promise<void> | null>(null);
   const shownAt = useRef(Date.now());
   const alive = useRef(true);
   const latest = useRef(props);
@@ -296,33 +295,34 @@ function TestRunner(props: {
     }
   };
 
-  /** An English voice for listening; none → listening is reported unavailable once (the area becomes not_assessed). */
-  const voiceAvailable = async (): Promise<boolean> => {
-    if (voice.current.status === "unknown") {
-      setCheckingVoice(true);
-      const v = pickEnglishVoice(await loadVoices(1500));
-      if (alive.current) setCheckingVoice(false);
-      voice.current = v ? { status: "ok", voice: v } : { status: "none" };
-    }
-    if (voice.current.status === "ok") return true;
-    if (!listenOffRef.current) {
-      await bff.listeningUnavailable(id);
-      listenOffRef.current = true;
-      if (alive.current) setListenOff(true);
-    }
-    return false;
+  /**
+   * Release 4.1: listening is spoken by the server (MP3) and is available while the server answers; nothing is decided in
+   * advance by the device voices. Only when a play finds that neither the server speech nor an English device voice
+   * works, listening is blocked for this test and reported once (the area becomes not_assessed, the server stops
+   * choosing listening items). The blocked item is left with «Не знаю» (the server answers ITEM_NOT_CURRENT → the next
+   * item is loaded).
+   */
+  const listeningUnavailable = (): Promise<void> => {
+    listenOffRef.current = true;
+    setListenOff(true);
+    if (reported.current) return Promise.resolve();
+    reporting.current ??= bff
+      .listeningUnavailable(id)
+      .then(() => {
+        reported.current = true;
+      })
+      .catch((e: unknown) => fail(e))
+      .finally(() => {
+        reporting.current = null;
+      });
+    return reporting.current;
   };
 
-  /** Show an item; a listening item without a voice is reported and the next item is asked for (the server skips the
-   *  rest of listening; if it still sends one, it is shown with «Не знаю» only). */
+  /** Show an item. A listening item after an unreported failure retries the report; it is shown with «Не знаю» only. */
   const present = async (n: DiagnosticItem | { done: true }): Promise<void> => {
     if ("done" in n) return finish();
-    let it = n;
-    if (it.type === "listen_choice" && !listenOffRef.current && !(await voiceAvailable())) {
-      const again = await bff.diagnosticNext(id);
-      if ("done" in again) return finish();
-      it = again;
-    }
+    const it = n;
+    if (it.type === "listen_choice" && listenOffRef.current && !reported.current) void listeningUnavailable();
     if (!alive.current) return;
     shownAt.current = Date.now();
     setDraft(null);
@@ -412,7 +412,7 @@ function TestRunner(props: {
           </div>
         </div>
 
-        {listenOff ? (
+        {listenOff && item?.type !== "listen_choice" ? (
           <div className="card warn notice" role="status" data-testid="dx-listen-unavailable">
             <Icon name="info" size={20} />
             <p className="sub ink">{t("dx.listen.unavailable")}</p>
@@ -425,14 +425,14 @@ function TestRunner(props: {
             item={item}
             kid={kid}
             busy={busy}
-            voice={voice.current.status === "ok" ? voice.current.voice : null}
             listenBlocked={item.type === "listen_choice" && listenOff}
+            onListenUnavailable={() => void listeningUnavailable()}
             draft={draft}
             onDraft={setDraft}
           />
         ) : (
           <div className="stack" aria-busy="true">
-            <p className="sub" role="status">{phase === "finishing" ? t("dx.finishing") : checkingVoice ? t("dx.listen.checking") : t("dx.loadingItem")}</p>
+            <p className="sub" role="status">{phase === "finishing" ? t("dx.finishing") : t("dx.loadingItem")}</p>
             <Skeleton lines={3} />
           </div>
         )}

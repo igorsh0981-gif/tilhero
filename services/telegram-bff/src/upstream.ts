@@ -218,6 +218,29 @@ export function createDomains(o: DomainsOptions): Domains {
   }
 }
 
+/** aud внутреннего JWT к tts (release 4.1, озвучка фраз). Не в DOMAIN: адрес tts необязателен (config.ttsUrl). */
+export const TTS_SERVICE = "tts";
+
+/** Клиент tts: байты MP3 (RawClient), свой таймаут, без повторов; нет адреса — null (озвучка недоступна). */
+export function createTts(o: {
+  url: string | undefined;
+  key: InternalKey;
+  timeoutMs: number;
+  fetchImpl?: typeof fetch;
+  onFailure?: UpstreamLogger;
+}): RawClient | null {
+  if (!o.url) return null;
+  return new RawClient({
+    target: TTS_SERVICE,
+    baseUrl: o.url,
+    key: o.key,
+    timeoutMs: o.timeoutMs,
+    retries: 0,
+    fetchImpl: o.fetchImpl ?? ((...a) => fetch(...a)),
+    ...(o.onFailure ? { onFailure: o.onFailure } : {}),
+  });
+}
+
 export interface RawRequest {
   subject?: string | undefined;
   query?: Record<string, string | number | undefined | null>;

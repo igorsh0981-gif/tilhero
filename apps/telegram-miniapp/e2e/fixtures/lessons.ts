@@ -42,6 +42,8 @@ export interface LessonsScenario {
   /** the AI goes away on the first free text of the roleplay (budget reached): «Let's choose an answer», choices only,
    *  the session becomes ai_degraded (lessons flow.py) */
   aiDropsOnText?: boolean;
+  /** the listening step of a media session has the audio file (has_audio; the bytes — GET /v1/media/m-own-coffee/audio) */
+  listenFile?: boolean;
 }
 
 const L = (ru: string, uz: string): Localized => ({ ru, uz });
@@ -480,7 +482,7 @@ export class MockLessons {
           type: "listen",
           asset_id: "m-own-coffee",
           title: L("Кофе с собой", "Olib ketish uchun qahva"),
-          has_audio: false,
+          has_audio: !!this.sc.listenFile,
           transcript: [
             { speaker: "Barista", text_en: "Hi! What would you like?", gloss: L("Привет! Что будете?", "Salom! Nima olasiz?") },
             { speaker: "Aziz", text_en: "A latte to go, please.", gloss: L("Латте с собой, пожалуйста.", "Olib ketish uchun latte, iltimos.") },

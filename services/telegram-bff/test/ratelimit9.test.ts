@@ -28,6 +28,8 @@ describe("спринт 9: лимиты telegram-bff", () => {
       expect(pol[p.policy], p.policy).toMatchObject({ limit: p.limit, window_s: p.window_s, fail: p.fail });
     }
     expect(Object.keys(pol).sort()).toEqual(RATE_LIMIT_POLICIES.filter((x) => x.service === "telegram-bff").map((x) => x.policy).sort());
+    // release 4.1: POST /v1/speech
+    expect(pol["tg.speech"]).toMatchObject({ limit: 120, window_s: 600, subject: "user", fail: "open" });
     expect(telegramPolicies(testConfig({ RATE_LIMIT_USER_PER_MIN: "3", RATE_LIMIT_PIN_PER_MIN: "2" }))).toMatchObject({
       "tg.user": { limit: 3 },
       "tg.pin": { limit: 2 },

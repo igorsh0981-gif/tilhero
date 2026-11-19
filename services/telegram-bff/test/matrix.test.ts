@@ -28,7 +28,8 @@ afterAll(closeRedis);
 
 const ID = "8b0e1c3a-5d2f-4a6b-9c7d-1e2f3a4b5c6d";
 const TOKEN = "Q".repeat(43);
-type Sample = { payload?: object | (() => object); idem?: boolean; params?: Record<string, string>; noDomain?: boolean };
+/** speech — POST /v1/speech: любая ошибка tts (4xx, кроме 422, и 5xx) клиенту → 503 SPEECH_UNAVAILABLE {service: tts}. */
+type Sample = { payload?: object | (() => object); idem?: boolean; params?: Record<string, string>; noDomain?: boolean; speech?: boolean };
 
 /** Пример корректного запроса для каждого маршрута: ключ — "METHOD /openapi/path". */
 const SAMPLES: Record<string, Sample> = {
@@ -129,6 +130,8 @@ const SAMPLES: Record<string, Sample> = {
   "get /v1/evaluations/{id}": {},
   "post /v1/evaluations/{id}/appeal": { payload: { reason: "Ответ был верный" }, idem: true },
   "get /v1/appeals": {},
+  // release 4.1
+  "post /v1/speech": { payload: { text: "Could I have a cup of tea, please?", variant: "en-GB" }, speech: true },
 };
 
 interface Op {
@@ -207,6 +210,10 @@ describe("матрица маршрутов /v1", () => {
         expect(res.json().code, op.key).toBe("DOMAIN_SAYS_NO");
         continue;
       }
+      if (sample.speech) {
+        expect([res.statusCode, res.json().code, res.json().details], op.key).toEqual([503, "SPEECH_UNAVAILABLE", { service: "tts" }]);
+        continue;
+      }
       expect(res.statusCode, `${op.key}: ${res.body}`).toBe(409);
       expect(res.json(), op.key).toEqual({
         code: "DOMAIN_SAYS_NO",
@@ -226,7 +233,7 @@ describe("матрица маршрутов /v1", () => {
       const res = await call(op, bearer(s.access));
       h.fake.failAll = null;
       expect(res.statusCode, `${op.key}: ${res.body}`).toBe(503);
-      expect(res.json().code, op.key).toBe("UPSTREAM_UNAVAILABLE");
+      expect(res.json().code, op.key).toBe(sample.speech ? "SPEECH_UNAVAILABLE" : "UPSTREAM_UNAVAILABLE");
       expect(typeof res.json().details.service, op.key).toBe("string");
       expect(res.body, op.key).not.toContain("BOOM");
     }

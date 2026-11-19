@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import type { LessonsScenario } from "./fixtures/lessons";
 import * as F from "./fixtures/data";
 import type { Scenario } from "./fixtures/mock-bff";
-import { installSpeech, spoken } from "./fixtures/speech";
+import { installSpeech, played, sources, spoken } from "./fixtures/speech";
 import { CYRILLIC, open } from "./helpers";
 
 /**
@@ -98,8 +98,12 @@ test.describe("урок 20 минут", () => {
     // roleplay: free text (adult, AI on), the character answers, the scene ends by the graph
     await expect(page.getByTestId("pl-stage")).toHaveText("Разговор");
     await expect(page.getByTestId("rp-ch").first()).toContainText("Hi! What can I get you?");
+    // «Прослушать» — MP3 of the server speech in the character's voice (release 4.1), not the device voice
+    const before = await played(page);
     await page.getByTestId("rp-listen").first().click();
-    await expect.poll(async () => (await spoken(page)).map((s) => s.text)).toContain("Hi! What can I get you?");
+    await expect.poll(async () => (await played(page)) - before).toBe(1);
+    expect(bff.last("POST", "/v1/speech")?.body).toEqual({ text: "Hi! What can I get you?", variant: "en-GB", speed: "normal" });
+    expect((await spoken(page)).map((s) => s.text)).not.toContain("Hi! What can I get you?");
     await page.getByTestId("rp-input").fill("I want a latte");
     await page.getByTestId("rp-send").click();
     await expect(page.getByTestId("rp-me")).toHaveText(/I want a latte/);
@@ -316,6 +320,26 @@ test.describe("дети, упрощённый режим, практика ме�
     await expect(page.getByTestId("sm-task")).toHaveText("Задача выполнена");
   });
 
+  test("медиа: прослушивание в уроке с файлом — файл загружен при показе шага и играет в нажатии на общем аудиоэлементе", async ({ page }) => {
+    const bff = await start(page, { listenFile: true });
+    await page.getByTestId("home-practice").click();
+    await page.getByTestId("pr-tabs").getByRole("button", { name: "Медиатека" }).click();
+    await page.getByTestId("md-m-own-coffee").click();
+    const files = () => bff.calls("GET", "/v1/media/m-own-coffee/audio").length;
+    await expect.poll(files).toBe(1); // the media screen fetched it when shown
+    await page.getByTestId("md-exercises-start").click();
+    await expect(page.getByTestId("pl-stage")).toHaveText("Прослушивание");
+    // the step fetches the file when shown (the media screen's load finished long before), never in the tap
+    await expect.poll(files).toBe(2);
+    const before = await played(page);
+    await page.getByTestId("pl-play").click();
+    await expect.poll(() => played(page)).toBe(before + 1);
+    expect((await sources(page)).at(-1)).toMatch(/^blob:/);
+    await expect(page.getByTestId("pl-play")).toHaveText("Слушать"); // ended
+    expect(files()).toBe(2); // nothing fetched in the tap
+    expect(bff.calls("POST", "/v1/speech")).toHaveLength(0);
+  });
+
   test("медиа: «Упражнения» — прослушивание (синтез речи), понимание, порядок реплик, пропуск, значение фразы → итоги", async ({ page }) => {
     const bff = await start(page);
     await page.getByTestId("home-practice").click();
@@ -327,8 +351,16 @@ test.describe("дети, упрощённый режим, практика ме�
     await page.getByTestId("md-exercises-start").click();
     await expect(page.getByTestId("pl-listen")).toBeVisible();
     await expect(page.getByTestId("pl-stage")).toHaveText("Прослушивание");
+    // without a file: the lines as server speech, each in its speaker's voice, one after another (release 4.1)
+    const before = await played(page);
     await page.getByTestId("pl-play").click();
-    await expect.poll(async () => (await spoken(page)).length).toBeGreaterThan(0);
+    await expect.poll(async () => (await played(page)) - before).toBe(2);
+    // (the media screen before prefetched the first line of its own dialogue — only the lesson's lines are checked)
+    expect(bff.calls("POST", "/v1/speech").slice(-2).map((c) => c.body)).toEqual([
+      { text: "Hi! What would you like?", variant: "en-GB", speed: "normal" },
+      { text: "A latte to go, please.", variant: "en-US", speed: "normal" },
+    ]);
+    expect(await spoken(page)).toEqual([]);
     await page.getByTestId("pl-line-1").click();
     await expect(page.getByTestId("pl-transcript")).toContainText("Латте с собой, пожалуйста.");
     await page.getByTestId("pl-next").click();

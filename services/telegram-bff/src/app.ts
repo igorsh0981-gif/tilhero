@@ -24,11 +24,12 @@ import { notificationsRoutes } from "./routes/notifications.js";
 import { planRoutes } from "./routes/plan.js";
 import { profileRoutes } from "./routes/profile.js";
 import { sessionRoutes } from "./routes/session.js";
+import { speechRoutes } from "./routes/speech.js";
 import { supportRoutes } from "./routes/support.js";
 import { whatsNewRoutes } from "./routes/whatsNew.js";
 import { SessionStore } from "./sessions.js";
 import { AccessTokens } from "./tokens.js";
-import { SERVICE_NAME, createDomains } from "./upstream.js";
+import { SERVICE_NAME, createDomains, createTts } from "./upstream.js";
 
 export interface AppDeps {
   /** Внешний Redis (тесты); иначе создаётся по REDIS_URL и закрывается вместе с приложением. */
@@ -175,6 +176,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
           { name: "media" },
           { name: "lessons" },
           { name: "assessment" },
+          { name: "speech" },
         ],
       },
       hideUntagged: true,
@@ -217,9 +219,19 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
     pairs: new PairsCache(domains.catalog, config.pairsCacheSeconds * 1000, log),
     snapshots: new SnapshotCache(domains.catalogRaw, config.courseSnapshotRevalidateSeconds * 1000, log),
     audio: new AudioCache(config.audioCacheBytes),
+    tts: createTts({
+      url: config.ttsUrl,
+      key: keyRing,
+      timeoutMs: config.ttsTimeoutMs,
+      ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+      onFailure: (info) =>
+        log.warn({ upstream: info.service, upstream_status: info.status, upstream_code: info.code }, "domain unavailable"),
+    }),
     log,
     store: makeStoreGuard(log),
   };
+  // tts необязателен (BFF выкладывается раньше него): одно предупреждение при старте, маршрут отвечает 503
+  if (!ctx.tts) log.warn({ upstream: "tts" }, "TTS_URL is not set: POST /v1/speech answers 503 SPEECH_UNAVAILABLE");
 
   registerAuth(app, ctx);
 
@@ -254,6 +266,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   diagnosticsRoutes(app, ctx);
   contentRoutes(app, ctx);
   lessonsRoutes(app, ctx);
+  speechRoutes(app, ctx);
 
   if (!config.isSecure) {
     app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
