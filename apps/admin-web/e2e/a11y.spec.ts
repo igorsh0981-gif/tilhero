@@ -37,6 +37,18 @@ const SCREENS: Array<[string, string]> = [
   ["#/config", "config"],
   ["#/roles", "roles"],
   ["#/audit", "audit"],
+  // sprint 3
+  ["#/content/course", "course-tab"],
+  ["#/content/lessons/l-01-greetings", "ws-lesson"],
+  ["#/content/scenarios/sc-cafe-order", "ws-scenario"],
+  ["#/content/rubrics/r-media", "ws-rubric"],
+  ["#/content/media/m-own-train", "ws-media_asset"],
+  ["#/content/exercises/mx-coffee-1", "ws-media_exercise"],
+  ["#/content/requests", "requests"],
+  ["#/content/review", "review-queue"],
+  ["#/content/review/scenario/sc-hotel-checkin", "review-screen"],
+  ["#/content/diagnostics", "dx"],
+  ["#/langs", "langs"],
 ];
 
 for (const [hash, id] of SCREENS) {
@@ -62,7 +74,7 @@ test("keyboard: Tab reaches the menu with a visible focus ring; Enter opens a se
   expect(ring.style).not.toBe("none");
   expect(parseFloat(ring.width)).toBeGreaterThanOrEqual(2);
   await page.keyboard.press("Enter");
-  await expect(page.getByTestId("soon")).toBeVisible();
+  await expect(page.getByTestId("content")).toBeVisible();
   // WAI-ARIA tabs: arrows move the selection
   await page.evaluate(() => (window.location.hash = "#/news/whatsnew"));
   await page.getByTestId("news-tab-whatsnew").focus();
@@ -80,4 +92,28 @@ test("dialogs trap focus and close with Escape", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("wn-confirm")).toHaveCount(0);
   await expect(page.getByTestId("wn-publish")).toBeFocused();
+});
+
+test("sprint 3: the scenario graph is keyboard operable; the EN interface of content has no Russian chrome", async ({ page }) => {
+  await openAs(page, "methodist@tilhero.local", "#/content/scenarios/sc-cafe-order");
+  const node = page.getByTestId("sg-node-n_menu");
+  await expect(node).toHaveAttribute("role", "button");
+  await expect(node).toHaveAttribute("aria-label", /n_menu/);
+  await node.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("se-node-ed-n_menu")).toBeVisible();
+  await expect(node).toHaveAttribute("aria-pressed", "true");
+  // tabs of the editor move with arrows
+  await page.getByTestId("ws-lang-ru").focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByTestId("ws-lang-uz")).toHaveAttribute("aria-selected", "true");
+  // EN: labels, tabs, buttons and headings come from the EN dictionary (learner data stays as entered)
+  await page.getByTestId("lang-en").click();
+  await expect(page.getByTestId("ct-tab-lessons")).toHaveText(/Lessons/);
+  const chrome = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>("[role=tab], .ws-acts button, .ed-sec-h h3, .field-label, .field-top > label, th, .stepper li"))
+      .map((e) => e.innerText.trim())
+      .filter((s) => /[Ѐ-ӿ]/.test(s)),
+  );
+  expect(chrome).toEqual([]);
 });

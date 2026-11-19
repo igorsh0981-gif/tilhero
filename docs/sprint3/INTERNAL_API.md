@@ -32,6 +32,17 @@
 
 ### 1.5 Admin API (`/admin/v1/content/*`, `/admin/v1/languages/*`, actor, права в домене) — пути и формы `admin.ts`.
 
+### 1.5а Уточнения реализации (catalog, приняты координатором)
+- Автор сида — служебный UUID `00000000-0000-4000-a000-000000005eed` (поле `published_by` события — uuid); admin-bff показывает его как «Сид (начальное наполнение)».
+- `ContentRow` от домена несёт `updated_by` (id) — имя подставляет admin-bff. `CourseSnapshot` — без рубрик (как `bff.ts`).
+- `audience` обязателен для списков и карточек сценариев и медиа (без него 422); для `…/audio` — необязателен. Тело заявки принимает `ui_locale` (по умолчанию ru). Детский профиль — `lrn ≠ sub` или claim `age_band` ∈ {6-9, 10-13}.
+- `PairCard.learners` и `readiness.diagnostic_test` дополняет admin-bff (diagnostics `GET /admin/v1/diagnostics/pairs`); готовность теста диагностики при публикации пары тоже проверяет admin-bff (`PAIR_NOT_READY {missing: ["diagnostic_test"]}`).
+- `CONTENT_IN_USE` — для всех видов, по ссылкам-зависимостям и опубликованным парам курса. При публикации новой версии одобренные неопубликованные старые версии уходят в архив.
+- Упражнения к медиа: `line_index` допустим у любого типа (проверяется попадание в транскрипт), у shadowing обязателен; `order_lines` — варианты = реплики транскрипта, ответ — их порядок в транскрипте. `RECOVERY_CANNOT_FINISH` засчитывает только `success`. `original_title` — строка ≤ 200 или null.
+- Дополнительные коды валидации: `LOCALE_SCRIPT`, `REF_MISMATCH`, `RUBRIC_BANDS`, `RUBRIC_MISMATCH`, `END_HAS_TRANSITIONS`, `EMBED_INVALID`, `MEDIA_TOO_SHORT`, `ROLLBACK_TARGET_INVALID`; 429 `MEDIA_REQUEST_LIMIT`. `KIDS_CONTENT` — также ссылки и встраивание в детском контенте.
+- Перевод реплик транскрипта (`gloss`) — только при `allowed_uses ∋ translation`, иначе `gloss: null` (транскрипт при этом может быть разрешён).
+- `voices` карточки медиа назначаются говорящим по очереди en-GB / en-US. Повторная загрузка того же аудио (sha256) — 200 с существующим blob. Лимит тела 4,5 МБ — только на `POST /admin/v1/content/blobs` (собственный middleware catalog; общий лимит по маршруту — техдолг py-common).
+
 ### 1.6 События
 - `catalog.version.published.v1` {kind, key, version, previous_version, course_id?, published_by, published_at} — также при rollback и archive (`action: published|rolled_back|archived`).
 - `catalog.media.suspended.v1` {asset_id, version, reason: rights_expired|rights_revoked, suspended_at}.
@@ -43,7 +54,7 @@
 ### 2.1 Тест и задания
 - `tests` (test_id, version, status draft|published|archived, pair_id, audience adults|kids, config JSONB, items JSONB, created_by, published_at) — сид: `dx-en-adult` v1 (~90 заданий), `dx-en-kids` v1 (~36). Публикация новой версии — `content.publish` (admin), прохождение старых сессий — на своей версии.
 - Задание: `{item_id, area: vocabulary|grammar|reading|listening, band, tags[], skill_ids[], type: single_choice|gap_choice|order_words|read_choice|listen_choice, instruction: Localized, prompt_en, passage_en|null (чтение ≤ 600 знаков), audio_text_en|null (аудирование: текст для синтеза речи устройством, ≤ 300), options[], answer: index | string[] (порядок слов)}`; ключ ученику не отдаётся никогда.
-- config: `{areas: [vocabulary, grammar, reading, listening], items_per_area: 6 (kids 3), start_band: A1 (kids A0), min_items_assessed: 3 (kids 2), followup_items: 3, retest_days: 14, time_limit_min: 15}`.
+- config: `{areas: [vocabulary, grammar, reading, listening], items_per_area: 6 (kids 3), start_band: A1 (kids A0), min_items_assessed: 3 (kids 2), min_correct_per_band: 2 (kids 1), followup_items: 3, retest_days: 14, time_limit_min: 15}`.
 
 ### 2.2 Сессия и подбор (AT-32)
 - `sessions` (session_id, user_id, pair_id, test_id, test_version, seed, status in_progress|finished|abandoned, started_at, finished_at, listening_available), `answers` (session_id, seq, item_id, area, band, answer, correct, dont_know, time_ms, answered_at).
@@ -52,11 +63,11 @@
 - Сессия живёт 24 ч; новая сессия делает прежнюю `abandoned`. Подсказок нет; «не знаю» — неверно, но не угадывание.
 
 ### 2.3 Оценка (AT-32, AT-33)
-- По области: ответов < `min_items_assessed` → `not_assessed`; иначе полоса = наивысшая, где верных ≥ 2 и точность ≥ 0,6 (если таких нет — на ступень ниже стартовой, минимум A0); уверенность = clamp(0,2 + 0,1·n + 0,4·согласованность − 0,2·скачки, 0, 1), где согласованность — доля ответов, согласных с итоговой полосой. `needs_followup` при уверенности < 0,5.
+- По области: ответов < `min_items_assessed` → `not_assessed`; иначе полоса = наивысшая, где **внутри этой полосы** верных ≥ `min_correct_per_band` и точность ≥ 0,6 (если таких нет — на ступень ниже стартовой, минимум A0). Лестница: следующий шаг — от полосы показанного задания; при равном расстоянии до доступных полос — более низкая. «Скачки» — верные ответы выше самой низкой полосы с ошибкой. Медиана при чётном числе областей — нижняя из двух средних; уверенность = clamp(0,2 + 0,1·n + 0,4·согласованность − 0,2·скачки, 0, 1), где согласованность — доля ответов, согласных с итоговой полосой. `needs_followup` при уверенности < 0,5.
 - Говорение и письмо — `not_assessed` (`reason: not_in_test_yet`).
-- Общий предварительный уровень — медиана оценённых областей (округление вниз); при < 2 оценённых — null. Флаг `cefr_certificate: false` всегда.
-- Слабые стороны — области с полосой ниже медианы или `not_assessed` (отдельно).
-- Рекомендация старта — по снимку курса: первый core-урок курса (порядок модулей и уроков), у которого основной навык не `demonstrated`, а предпосылки `demonstrated` или уровня ниже оценённой полосы области навыка; детям — первый урок с audience kids.
+- Общий предварительный уровень — медиана оценённых областей (при чётном числе — нижняя из двух средних); при < 2 оценённых — null. Флаг `cefr_certificate: false` всегда.
+- Слабые стороны — сначала области с полосой ниже медианы, затем `not_assessed` области теста (говорение и письмо сюда не входят).
+- Рекомендация старта — по снимку курса: первый core-урок курса (порядок модулей и уроков), у которого основной навык не `demonstrated` **и не ниже оценённой полосы своей области** (для функций, говорения, письма и неоценённых областей — ниже предварительного уровня), а предпосылки `demonstrated` или уровня **не выше** оценённой полосы своей области (ученик с полосой A2 по словарю владеет словарём A2; для функций и неоценённых областей — не выше предварительного уровня); детям — только уроки с audience kids. Ученик A2 не получает урок A0 только потому, что тест его не показал. Если все core-уроки ниже уровня ученика — первый не освоенный core-урок самого высокого уровня курса; иначе null.
 - Уточнение (`POST …/followup {area}`): только при needs_followup, в течение 24 ч после завершения, + `followup_items` заданий области → новый результат-ревизия (`results.revision += 1`, прежний сохраняется).
 - `results` (result_id, session_id, user_id, pair_id, revision, test_id, test_version, profile JSONB, provisional_level, recommended_start_lesson_id, created_at) — неизменяемы.
 
@@ -71,22 +82,25 @@
 - `POST …/sessions/{id}/listening-unavailable`, `POST …/sessions/{id}/finish` → `DiagnosticResult`; `POST /internal/v1/diagnostics/results/{id}/followup {area}` → `DiagnosticSession` (продолжение).
 - `GET /internal/v1/diagnostics/results?pair_id=` → `{items: DiagnosticResult[]}` (история); `GET …/results/{id}`.
 - `GET /internal/v1/skills/map?pair_id=` → `SkillMap` (состояния + последние 5 свидетельств навыка; названия навыков дополняет BFF из снимка курса).
-- Admin: `GET /admin/v1/diagnostics/tests`, `…/tests/{id}/versions/{v}` (с ключами — content.read), `POST …/tests/{id}/versions/{v}/publish` (content.publish), `GET /admin/v1/diagnostics/stats?period=` (dashboard.read) → прохождения, распределение полос, доля not_assessed по областям.
+- Admin: `GET /admin/v1/diagnostics/tests`, `…/tests/{id}/versions/{v}` (с ключами — content.read), `POST …/tests/{id}/versions/{v}/publish` (content.publish), `GET /admin/v1/diagnostics/stats?period=` (dashboard.read) → прохождения, распределение полос, доля not_assessed по областям. `GET /admin/v1/diagnostics/pairs` (content.read) → `{items: [{pair_id, learners}]}` — learners = различные ученики хотя бы с одним результатом по паре (для `PairCard.learners` в admin-bff).
 - Сага удаления: участвует как остальные (`user.deletion.requested.v1` → удалить сессии, ответы, результаты, состояния → `user.domain.deleted.v1`).
+- Аудитория теста: `GET state` и `POST sessions` принимают `?audience=kids|teens|adults` (BFF передаёт сегмент `lrn` по возрасту, как для «Что нового»); детский профиль из `user.profile.created|updated.v1` (identity-consent) «липкий» — ребёнок получает детский тест при любом значении параметра; без параметра — сегмент последней сессии ученика.
+- Уточнения реализации: история `GET results?limit=` (последняя ревизия каждого результата), `GET results/{id}?revision=`; уточнение — отдельная сессия с новым `session_id`, не больше одного на область; ограничение повтора считается от последнего результата, где оценена хотя бы одна область (брошенная в начале диагностика повтор не блокирует); рекомендация старта — возможен null (нет подходящих уроков сегмента); в `SkillMap` поля `area`, `title`, `level` = null без снимка курса (дополняет BFF); `not_assessed_pct` в статистике — проценты 0–100.
+- Коды ошибок (переводит BFF): 404 `DIAGNOSTIC_SESSION_NOT_FOUND`, `DIAGNOSTIC_RESULT_NOT_FOUND`, `DIAGNOSTIC_TEST_NOT_FOUND`; 409 `DIAGNOSTIC_SESSION_EXPIRED`, `DIAGNOSTIC_SESSION_CLOSED {status}`, `DIAGNOSTIC_TOO_SOON {next_allowed_at}`, `ITEM_NOT_CURRENT`, `PAIR_NOT_AVAILABLE`, `FOLLOWUP_NOT_AVAILABLE {area, reason}`; 422 `DIAGNOSTIC_EMPTY` (завершение без ответов), `ANSWER_INVALID`, `TEST_INVALID {errors}`; 410 `USER_DELETED`.
 
 ### 2.6 События
 - `diagnostics.completed.v1` {user_id, pair_id, result_id, revision, test_id, test_version, provisional_level, areas: {area: {status, band, confidence}}, recommended_start_lesson_id, completed_at}.
 - `skills.state.changed.v1` {user_id, pair_id, changes: [{skill_id, from, to, source, evidence_id}], occurred_at}.
 
 ## 3. learning-plan — траектория (AT-36, AT-34)
-- Потребляет `diagnostics.completed.v1`, `skills.state.changed.v1`, `catalog.version.published.v1` (kind course|module|lesson|skill — пересчёт отложенно, при следующем чтении), собственное изменение цели.
+- Потребляет `diagnostics.completed.v1`, `skills.state.changed.v1`, `catalog.version.published.v1` (kind course|module|lesson|skill — пересчёт отложенно, при следующем чтении), `user.profile.created|updated.v1` (сегмент аудитории kids/teens/adults, «липкий» детский), собственное изменение цели (пересчёт при следующем чтении).
 - `trajectories` (user_id, pair_id, revision, basis JSONB {diagnostic_result_id, goal, topics, audience, course_snapshot_version}, next_lesson_id, items JSONB, computed_at) — история ревизий хранится; текущая — последняя.
 - Алгоритм (детерминированный, навык `curriculum_planner` без LLM): (1) обязательные = core-уроки курса по порядку, начиная с рекомендованного старта, без уроков, чей основной навык `demonstrated`; перед уроком вставляются уроки, закрывающие его недостающие предпосылки; (2) дополнительные = optional-уроки, совпадающие с целью или темами ученика (≤ 8); (3) аудитория: детям — только audience kids; (4) следующий — первый обязательный; `reason_codes`: `start_after_diagnostic`, `no_diagnostic`, `prerequisite_missing`, `weak_area`, `goal_match`, `topic_match`, `next_in_course`; объяснение — Localized из кодов. Без диагностики — траектория от начала курса с `no_diagnostic`.
-- `GET /internal/v1/plan/trajectory?pair_id=` (subject — ученик) → `Trajectory`; пересчёт при отсутствии актуальной ревизии; смена цели (`PUT plan`) → новая ревизия, прежние сохраняются; выполненные уроки (спринт 4) не теряются.
+- `GET /internal/v1/plan/trajectory?pair_id=&audience=` (subject — ученик; `audience` — kids|teens|adults, telegram-bff передаёт по возрасту ученика; неизвестный сегмент без проекции профиля — kids, самый строгий набор) → `Trajectory`; 409 `PAIR_NOT_AVAILABLE`, 410 `USER_DELETED`, 503 `CATALOG_UNAVAILABLE` (нет снимка курса и нет кеша); пересчёт при отсутствии актуальной ревизии; смена цели (`PUT plan`) → новая ревизия, прежние сохраняются; выполненные уроки (спринт 4) не теряются.
 - Событие `learning.trajectory.updated.v1` {user_id, pair_id, revision, next_lesson_id, reason_codes, computed_at}.
 
 ## 4. notifications
-- Шаблон `media_request.decided` (категория support; параметры: request_title, status, note; RU/UZ; редактируемый, плейсхолдеры `{request_title}`, `{decision}`); consumer `catalog.media_request.decided.v1` → запись ученику (детям не бывает — заявки только у аккаунтов). Маршрут startapp `route_media_requests`.
+- Шаблон `media_request.decided` (категория support; RU/UZ; редактируемый, плейсхолдеры `{request_title}`, `{decision}`; комментарий сотрудника в уведомление не попадает — ученик видит его в «Мои заявки»); consumer `catalog.media_request.decided.v1` → запись ученику (детям не бывает — заявки только у аккаунтов). Маршрут startapp `route_media_requests`.
 - Каталог маршрутов `release-notes.json` + `diagnostics`, `plan`, `skills`, `scenarios`, `media`, `media_requests`, `languages` (для «Что нового» и уведомлений).
 
 ## 5. admin-identity
@@ -99,4 +113,16 @@
 Маршруты `bff.ts` («Спринт 3»): диагностика, результат, история, карта навыков, траектория, сценарии, медиа (аудио — прокси с кешем), заявки, языки. Ученик идентифицируется как в спринте 1 (`lrn`); пара — `ru-en` по умолчанию (`X-Pair` не нужен).
 
 ## 8. infra
-Порты 8110/8111, схемы и роли `catalog`, `diagnostics` (+ `_owner`) в `infra/db/bootstrap.sql`, издатели JWT `catalog`, `diagnostics`, n8n `catalog-tick` (`CATALOG_URL`), Railway setup, CI-матрицы, схемы событий.
+Порты 8110/8111, схемы и роли `catalog`, `diagnostics` (+ `_owner`) в `infra/db/bootstrap.sql`, издатели JWT `catalog`, `diagnostics`, n8n `catalog-tick` (`CATALOG_URL`), Railway setup, CI-матрицы, схемы событий. audit принимает `admin.audit.recorded.v1` от `catalog` и `diagnostics` (`AUDIT_EVENT_PRODUCERS`).
+
+### Решения по независимому ревью (координатор)
+- **Основания результата диагностики** — по полосам: `evidence: [{band, answered, correct}]` (bff.ts `AreaResult`), без item_id и без отметок по отдельным заданиям; для `not_assessed` — `[]`. Отметки по заданиям остаются только в БД diagnostics (навыки, статистика).
+- **Результаты без оценённой области** не блокируют повтор, но не больше 3 таких результатов за `retest_days`; дальше 409 `DIAGNOSTIC_TOO_SOON {next_allowed_at}` (самый ранний из них + `retest_days`).
+- **Покрытие предпосылки** — одно правило в diagnostics и learning-plan: `demonstrated`/`retained` или уровень ≤ оценённой полосы своей области, для функций и неоценённых областей — ≤ предварительного уровня. Следующий урок плана после диагностики = рекомендованный старт.
+- **Реестр заявок учеников** (список и карточка) — право `media.rights` (не `content.read`): ссылка и комментарий ученика — персональные данные.
+- **catalog — защита в глубину по аудитории:** telegram-bff передаёт claims `lrn` и `age_band` во всех вызовах учеников (сценарии, медиа, аудио, заявки); детский профиль (`lrn ≠ sub` или `age_band` ∈ {6-9, 10-13}) — аудитория kids принудительно, независимо от `?audience=`; `GET` заявок детскому профилю — 403 `KIDS_NOT_ALLOWED`.
+- **Медиа:** `has_audio` = есть файл **и** `allowed_uses ∋ listen`; синтез речи по транскрипту в Mini App — только при `listen`.
+- **Языковые пары:** смена `course_id` у опубликованной пары — с той же проверкой готовности, что и публикация.
+- **CONTENT_IN_USE:** публикация, снятие и откат берут общую блокировку графа контента (транзакционная advisory-блокировка) — без гонок проверки ссылок.
+- **`CATALOG_URL`** обязателен в stage/prod для learning-plan и diagnostics (как у BFF).
+- Уведомление «диагностика готова» не делаем: результат показывается сразу по завершении (PLAN, поток D — исключено).

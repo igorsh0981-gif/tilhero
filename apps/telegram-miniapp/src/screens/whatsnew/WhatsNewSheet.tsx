@@ -1,4 +1,5 @@
-import type { ReleaseNoteRoute, WhatsNew } from "@tilhero/contracts/bff";
+import type { WhatsNew } from "@tilhero/contracts/bff";
+import type { AppRoute } from "../../tg/deeplink";
 import { useMemo, useRef, useState } from "react";
 import { cardsOf, seenNoteIds } from "../../domain/whatsNew";
 import { useI18n } from "../../i18n";
@@ -11,7 +12,7 @@ import { Sheet } from "../../ui/overlays";
  * what the learner has not seen yet. One item per card; the notes whose cards were on screen are reported as seen
  * when the sheet closes (by «Понятно», «Подробнее», the cross, Escape or the Telegram back button).
  */
-export function WhatsNewSheet({ data, onClose }: { data: WhatsNew; onClose: (seenIds: string[], route: ReleaseNoteRoute | null) => void }) {
+export function WhatsNewSheet({ data, onClose }: { data: WhatsNew; onClose: (seenIds: string[], route: AppRoute | null) => void }) {
   const { t } = useI18n();
   const cards = useMemo(() => cardsOf(data), [data]);
   const [idx, setIdx] = useState(0);
@@ -22,7 +23,7 @@ export function WhatsNewSheet({ data, onClose }: { data: WhatsNew; onClose: (see
   const last = idx >= cards.length - 1;
   const welcome = data.mode === "welcome";
 
-  const close = (route: ReleaseNoteRoute | null) => {
+  const close = (route: AppRoute | null) => {
     if (closed.current) return;
     closed.current = true;
     onClose(seenNoteIds(cards, maxIdx.current), route);

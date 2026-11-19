@@ -1,0 +1,600 @@
+[
+  {
+    "rubric_id": "r-lesson-core",
+    "title": {
+      "ru": "Урок: основная оценка",
+      "uz": "Dars: asosiy baholash"
+    },
+    "applies_to": [
+      "lesson"
+    ],
+    "criteria": [
+      {
+        "code": "task",
+        "title": {
+          "ru": "Задача урока",
+          "uz": "Dars vazifasi"
+        },
+        "weight": 0.4,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Задача не выполнена: ответа нет или он не по теме.",
+              "uz": "Vazifa bajarilmadi: javob yoʻq yoki mavzuga oid emas."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Задача выполнена частично: понятна только часть, нужна помощь.",
+              "uz": "Vazifa qisman bajarildi: faqat bir qismi tushunarli, yordam kerak."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Задача выполнена: главное сказано, мелкие детали упущены.",
+              "uz": "Vazifa bajarildi: asosiysi aytildi, mayda tafsilotlar tushib qoldi."
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Задача выполнена полностью и уместно для ситуации.",
+              "uz": "Vazifa vaziyatga mos ravishda toʻliq bajarildi."
+            }
+          }
+        ]
+      },
+      {
+        "code": "vocabulary",
+        "title": {
+          "ru": "Слова и фразы",
+          "uz": "Soʻz va iboralar"
+        },
+        "weight": 0.2,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Нужных слов урока почти нет.",
+              "uz": "Darsning kerakli soʻzlari deyarli yoʻq."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Есть несколько слов урока, но часто не к месту.",
+              "uz": "Darsdan bir nechta soʻz bor, lekin koʻpincha oʻrinsiz."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Слова урока использованы верно, иногда с заминкой.",
+              "uz": "Dars soʻzlari toʻgʻri ishlatildi, baʼzan toʻxtalib."
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Слова и фразы урока использованы свободно и точно.",
+              "uz": "Dars soʻz va iboralari erkin va aniq ishlatildi."
+            }
+          }
+        ]
+      },
+      {
+        "code": "grammar",
+        "title": {
+          "ru": "Грамматика",
+          "uz": "Grammatika"
+        },
+        "weight": 0.2,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Ошибки мешают понять смысл.",
+              "uz": "Xatolar maʼnoni tushunishga xalaqit beradi."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Много ошибок в теме урока, смысл понятен с трудом.",
+              "uz": "Dars mavzusida xatolar koʻp, maʼno qiyinchilik bilan tushuniladi."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Грамматика урока в основном верна, ошибки не мешают пониманию.",
+              "uz": "Dars grammatikasi asosan toʻgʻri, xatolar tushunishga xalaqit bermaydi."
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Грамматика урока использована верно и уверенно.",
+              "uz": "Dars grammatikasi toʻgʻri va ishonch bilan ishlatildi."
+            }
+          }
+        ]
+      },
+      {
+        "code": "independence",
+        "title": {
+          "ru": "Самостоятельность",
+          "uz": "Mustaqillik"
+        },
+        "weight": 0.2,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Без подсказок ответить пока не получилось.",
+              "uz": "Yordamsiz javob berish hozircha chiqmadi."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Понадобились частые подсказки или образец.",
+              "uz": "Tez-tez yordam yoki namuna kerak boʻldi."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Одна-две подсказки, остальное — самостоятельно.",
+              "uz": "Bir-ikki yordam, qolgani — mustaqil."
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Всё сделано самостоятельно, без подсказок.",
+              "uz": "Hammasi mustaqil, yordamsiz bajarildi."
+            }
+          }
+        ]
+      }
+    ],
+    "pass_rule": {
+      "min_weighted": 1.5,
+      "min_per_criterion": 1
+    }
+  },
+  {
+    "rubric_id": "r-roleplay",
+    "title": {
+      "ru": "Ролевой диалог",
+      "uz": "Rolli dialog"
+    },
+    "applies_to": [
+      "scenario"
+    ],
+    "criteria": [
+      {
+        "code": "task",
+        "title": {
+          "ru": "Цель разговора",
+          "uz": "Suhbat maqsadi"
+        },
+        "weight": 0.4,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Цель разговора не достигнута.",
+              "uz": "Suhbat maqsadiga erishilmadi."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Цель достигнута частично или с большой помощью собеседника.",
+              "uz": "Maqsadga qisman yoki suhbatdoshning katta yordami bilan erishildi."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Цель достигнута, одна-две детали упущены.",
+              "uz": "Maqsadga erishildi, bir-ikki tafsilot tushib qoldi."
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Цель достигнута полностью, все детали согласованы.",
+              "uz": "Maqsadga toʻliq erishildi, barcha tafsilotlar kelishildi."
+            }
+          }
+        ]
+      },
+      {
+        "code": "comprehension",
+        "title": {
+          "ru": "Понимание собеседника",
+          "uz": "Suhbatdoshni tushunish"
+        },
+        "weight": 0.25,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Реплики собеседника не поняты.",
+              "uz": "Suhbatdosh gaplari tushunilmadi."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Поняты отдельные слова, ответы часто не к месту.",
+              "uz": "Alohida soʻzlar tushunildi, javoblar koʻpincha oʻrinsiz."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Главное понятно, иногда приходится переспрашивать.",
+              "uz": "Asosiysi tushunarli, baʼzan qayta soʻrashga toʻgʻri keladi."
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Всё понятно, ответы точно по смыслу.",
+              "uz": "Hammasi tushunarli, javoblar maʼnoga aniq mos."
+            }
+          }
+        ]
+      },
+      {
+        "code": "fluency",
+        "title": {
+          "ru": "Беглость",
+          "uz": "Ravonlik"
+        },
+        "weight": 0.15,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Ответа нет или паузы очень долгие.",
+              "uz": "Javob yoʻq yoki pauzalar juda uzun."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Отдельные слова с длинными паузами.",
+              "uz": "Uzun pauzali alohida soʻzlar."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Короткие фразы с паузами, но разговор идёт.",
+              "uz": "Pauzali qisqa iboralar, lekin suhbat davom etyapti."
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Реплики связные, паузы естественные.",
+              "uz": "Gaplar bogʻliq, pauzalar tabiiy."
+            }
+          }
+        ]
+      },
+      {
+        "code": "independence",
+        "title": {
+          "ru": "Самостоятельность",
+          "uz": "Mustaqillik"
+        },
+        "weight": 0.2,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Без подсказок ответить пока не получилось.",
+              "uz": "Yordamsiz javob berish hozircha chiqmadi."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Понадобились частые подсказки или образец.",
+              "uz": "Tez-tez yordam yoki namuna kerak boʻldi."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Одна-две подсказки, остальное — самостоятельно.",
+              "uz": "Bir-ikki yordam, qolgani — mustaqil."
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Всё сделано самостоятельно, без подсказок.",
+              "uz": "Hammasi mustaqil, yordamsiz bajarildi."
+            }
+          }
+        ]
+      }
+    ],
+    "pass_rule": {
+      "min_weighted": 1.5,
+      "min_per_criterion": 1
+    }
+  },
+  {
+    "rubric_id": "r-media",
+    "title": {
+      "ru": "Задания к аудио и сценкам",
+      "uz": "Audio va sahnachalar boʻyicha topshiriqlar"
+    },
+    "applies_to": [
+      "media_exercise"
+    ],
+    "criteria": [
+      {
+        "code": "comprehension",
+        "title": {
+          "ru": "Понимание",
+          "uz": "Tushunish"
+        },
+        "weight": 0.5,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Содержание записи не понято.",
+              "uz": "Yozuv mazmuni tushunilmadi."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Понятны отдельные слова, но не смысл.",
+              "uz": "Alohida soʻzlar tushunildi, lekin maʼno emas."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Главное понятно, отдельные детали упущены.",
+              "uz": "Asosiysi tushunarli, ayrim tafsilotlar tushib qoldi."
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Понятны и смысл, и нужные детали.",
+              "uz": "Maʼno ham, kerakli tafsilotlar ham tushunarli."
+            }
+          }
+        ]
+      },
+      {
+        "code": "vocabulary",
+        "title": {
+          "ru": "Слова и фразы",
+          "uz": "Soʻz va iboralar"
+        },
+        "weight": 0.3,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Фразы из записи не узнаны.",
+              "uz": "Yozuvdagi iboralar tanilmadi."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Узнаны отдельные слова из записи.",
+              "uz": "Yozuvdan alohida soʻzlar tanildi."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Большинство фраз узнано и понято верно.",
+              "uz": "Iboralarning koʻpi tanildi va toʻgʻri tushunildi."
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Фразы из записи узнаны и использованы точно.",
+              "uz": "Yozuvdagi iboralar tanildi va aniq ishlatildi."
+            }
+          }
+        ]
+      },
+      {
+        "code": "pronunciation",
+        "title": {
+          "ru": "Произношение",
+          "uz": "Talaffuz"
+        },
+        "weight": 0.2,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Слова трудно узнать на слух.",
+              "uz": "Soʻzlarni eshitib tanish qiyin."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Понятна часть слов, многие звуки искажены.",
+              "uz": "Soʻzlarning bir qismi tushunarli, koʻp tovushlar buzilgan."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Понятно почти всё, есть отдельные неточности.",
+              "uz": "Deyarli hammasi tushunarli, ayrim noaniqliklar bor."
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Чётко и понятно, ударения на месте.",
+              "uz": "Aniq va tushunarli, urgʻular oʻz oʻrnida."
+            }
+          }
+        ]
+      }
+    ],
+    "pass_rule": {
+      "min_weighted": 1.5,
+      "min_per_criterion": 0
+    }
+  },
+  {
+    "rubric_id": "r-kids",
+    "title": {
+      "ru": "Мягкая оценка для детей",
+      "uz": "Bolalar uchun yumshoq baholash"
+    },
+    "applies_to": [
+      "lesson",
+      "scenario",
+      "media_exercise"
+    ],
+    "criteria": [
+      {
+        "code": "task",
+        "title": {
+          "ru": "Задание",
+          "uz": "Topshiriq"
+        },
+        "weight": 0.5,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Пока не получилось — попробуем ещё раз вместе.",
+              "uz": "Hozircha chiqmadi — keling, birga yana urinib koʻramiz."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Получилась часть задания — хорошее начало!",
+              "uz": "Topshiriqning bir qismi chiqdi — yaxshi boshlanish!"
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Почти всё получилось — осталось чуть-чуть!",
+              "uz": "Deyarli hammasi chiqdi — ozgina qoldi!"
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Всё получилось — здорово!",
+              "uz": "Hammasi chiqdi — zoʻr!"
+            }
+          }
+        ]
+      },
+      {
+        "code": "vocabulary",
+        "title": {
+          "ru": "Новые слова",
+          "uz": "Yangi soʻzlar"
+        },
+        "weight": 0.25,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Новые слова ещё в пути — послушаем их снова.",
+              "uz": "Yangi soʻzlar hali yoʻlda — ularni yana tinglaymiz."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Уже звучат одно-два новых слова.",
+              "uz": "Bir-ikkita yangi soʻz allaqachon eshitilyapti."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Много новых слов, и почти все на своём месте.",
+              "uz": "Yangi soʻzlar koʻp va deyarli hammasi oʻz oʻrnida."
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Новые слова звучат легко и к месту.",
+              "uz": "Yangi soʻzlar oson va oʻrinli eshitilyapti."
+            }
+          }
+        ]
+      },
+      {
+        "code": "independence",
+        "title": {
+          "ru": "Самостоятельно",
+          "uz": "Mustaqil"
+        },
+        "weight": 0.25,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Пока справляемся вместе с героем-помощником.",
+              "uz": "Hozircha yordamchi qahramon bilan birga uddalayapmiz."
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Получается с подсказками — так и учимся.",
+              "uz": "Yordam bilan chiqyapti — shunday oʻrganamiz."
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Почти без подсказок!",
+              "uz": "Deyarli yordamsiz!"
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Всё сам или сама, без подсказок — молодец!",
+              "uz": "Hammasi yordamsiz bajarildi — barakalla!"
+            }
+          }
+        ]
+      }
+    ],
+    "pass_rule": {
+      "min_weighted": 1.0,
+      "min_per_criterion": 0
+    }
+  }
+]

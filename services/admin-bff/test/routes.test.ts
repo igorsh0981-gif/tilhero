@@ -16,7 +16,11 @@ import { strictContractSchema } from "../src/responses.js";
 import {
   AUD,
   APPROVAL_ID,
+  BLOB_ID,
   CAMPAIGN_ID,
+  MP3_BYTES,
+  PAYLOAD_HASH,
+  REQUEST_ID,
   LEARNER_ID,
   NOTE_ID,
   RECORD_ID,
@@ -29,6 +33,8 @@ import {
   makeHarness,
   releaseNoteBody,
   stepUp,
+  languageRow,
+  pairCard,
   type Harness,
   type Service,
 } from "./helpers.js";
@@ -334,6 +340,142 @@ const CASES: Record<string, Case> = {
     status: 200,
     domain: ["notifications", "POST", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/stop`],
   },
+  // ---------- контент (catalog)
+  "GET /admin/v1/content/:kind": {
+    url: "/admin/v1/content/lesson?q=greet&status=draft&level=A1&limit=20",
+    status: 200,
+    domain: ["catalog", "GET", "/admin/v1/content/lesson"],
+  },
+  "GET /admin/v1/content/:kind/:key": { url: "/admin/v1/content/skill/en.func.greet", status: 200, domain: ["catalog", "GET", "/admin/v1/content/skill/en.func.greet"] },
+  "GET /admin/v1/content/:kind/:key/versions/:v": {
+    url: "/admin/v1/content/lesson/l-a1-01-greetings/versions/2",
+    status: 200,
+    domain: ["catalog", "GET", "/admin/v1/content/lesson/l-a1-01-greetings/versions/2"],
+  },
+  "POST /admin/v1/content/:kind": {
+    url: "/admin/v1/content/rubric",
+    payload: { payload: { rubric_id: "r-dialogue", title: { ru: "Диалог", uz: "Dialog" }, criteria: [] } },
+    headers: IK("content"),
+    status: 201,
+    domain: ["catalog", "POST", "/admin/v1/content/rubric"],
+  },
+  "POST /admin/v1/content/:kind/:key/versions": {
+    url: "/admin/v1/content/lesson/l-a1-01-greetings/versions",
+    payload: { from_version: 1 },
+    status: 201,
+    domain: ["catalog", "POST", "/admin/v1/content/lesson/l-a1-01-greetings/versions"],
+  },
+  "PUT /admin/v1/content/:kind/:key/versions/:v": {
+    url: "/admin/v1/content/lesson/l-a1-01-greetings/versions/2",
+    payload: { payload: { lesson_id: "l-a1-01-greetings" }, expected_hash: PAYLOAD_HASH },
+    status: 200,
+    domain: ["catalog", "PUT", "/admin/v1/content/lesson/l-a1-01-greetings/versions/2"],
+  },
+  "POST /admin/v1/content/:kind/:key/versions/:v/validate": {
+    url: "/admin/v1/content/media_asset/m-own-coffee-order/versions/1/validate",
+    status: 200,
+    domain: ["catalog", "POST", "/admin/v1/content/media_asset/m-own-coffee-order/versions/1/validate"],
+  },
+  // вид scenario в пути: маршрутизатор возвращается от статического «scenario/…/test-run» к общему /:kind
+  "POST /admin/v1/content/:kind/:key/versions/:v/submit": {
+    url: "/admin/v1/content/scenario/sc-travel-hotel-checkin/versions/2/submit",
+    status: 200,
+    domain: ["catalog", "POST", "/admin/v1/content/scenario/sc-travel-hotel-checkin/versions/2/submit"],
+  },
+  "POST /admin/v1/content/:kind/:key/versions/:v/review": {
+    url: "/admin/v1/content/lesson/l-a1-01-greetings/versions/2/review",
+    payload: { decision: "approve", note: "Проверено", locale_checks: { ru: "checked", uz: "checked" } },
+    status: 200,
+    domain: ["catalog", "POST", "/admin/v1/content/lesson/l-a1-01-greetings/versions/2/review"],
+  },
+  "POST /admin/v1/content/:kind/:key/versions/:v/publish": {
+    url: "/admin/v1/content/media_asset/m-own-coffee-order/versions/2/publish",
+    payload: { reason: "права подтверждены" },
+    headers: IK("cpub"),
+    status: 200,
+    domain: ["catalog", "POST", "/admin/v1/content/media_asset/m-own-coffee-order/versions/2/publish"],
+  },
+  "POST /admin/v1/content/:kind/:key/archive": {
+    url: "/admin/v1/content/scenario/sc-travel-hotel-checkin/archive",
+    payload: { reason: "устарел" },
+    status: 200,
+    domain: ["catalog", "POST", "/admin/v1/content/scenario/sc-travel-hotel-checkin/archive"],
+  },
+  "POST /admin/v1/content/:kind/:key/rollback": {
+    url: "/admin/v1/content/lesson/l-a1-01-greetings/rollback",
+    payload: { to_version: 1, reason: "ошибка в версии 2" },
+    status: 200,
+    domain: ["catalog", "POST", "/admin/v1/content/lesson/l-a1-01-greetings/rollback"],
+  },
+  "POST /admin/v1/content/scenario/:key/versions/:v/test-run": {
+    url: "/admin/v1/content/scenario/sc-travel-hotel-checkin/versions/2/test-run",
+    status: 200,
+    domain: ["catalog", "POST", "/admin/v1/content/scenario/sc-travel-hotel-checkin/versions/2/test-run"],
+  },
+  "POST /admin/v1/content/media_asset/:key/versions/:v/rights-approve": {
+    url: "/admin/v1/content/media_asset/m-own-coffee-order/versions/2/rights-approve",
+    payload: { note: "Своя запись TilHero" },
+    status: 200,
+    domain: ["catalog", "POST", "/admin/v1/content/media_asset/m-own-coffee-order/versions/2/rights-approve"],
+  },
+  "POST /admin/v1/content/blobs": {
+    url: "/admin/v1/content/blobs",
+    payload: { filename: "coffee.mp3", content_type: "audio/mpeg", data_base64: MP3_BYTES.toString("base64") },
+    status: 201,
+    domain: ["catalog", "POST", "/admin/v1/content/blobs"],
+  },
+  "GET /admin/v1/content/blobs/:blobId": { url: `/admin/v1/content/blobs/${BLOB_ID}`, status: 200, domain: ["catalog", "GET", `/admin/v1/content/blobs/${BLOB_ID}`] },
+  "GET /admin/v1/content/review-queue": { url: "/admin/v1/content/review-queue?kind=lesson&limit=10", status: 200, domain: ["catalog", "GET", "/admin/v1/content/review-queue"] },
+  "GET /admin/v1/content/summary": { url: "/admin/v1/content/summary", status: 200, domain: ["catalog", "GET", "/admin/v1/content/summary"] },
+  "GET /admin/v1/content/media-requests": {
+    url: "/admin/v1/content/media-requests?status=new&q=imagine",
+    status: 200,
+    domain: ["catalog", "GET", "/admin/v1/content/media-requests"],
+  },
+  "POST /admin/v1/content/media-requests/:id/take": {
+    url: `/admin/v1/content/media-requests/${REQUEST_ID}/take`,
+    status: 200,
+    domain: ["catalog", "POST", `/admin/v1/content/media-requests/${REQUEST_ID}/take`],
+  },
+  "POST /admin/v1/content/media-requests/:id/decide": {
+    url: `/admin/v1/content/media-requests/${REQUEST_ID}/decide`,
+    payload: { status: "authored_alternative", note: "Подобрали авторскую сценку", linked_asset_id: "m-own-coffee-order" },
+    headers: IK("decide"),
+    status: 200,
+    domain: ["catalog", "POST", `/admin/v1/content/media-requests/${REQUEST_ID}/decide`],
+  },
+  // ---------- языки и пары (catalog + diagnostics)
+  "GET /admin/v1/languages": { url: "/admin/v1/languages", status: 200, domain: ["catalog", "GET", "/admin/v1/languages"] },
+  "PUT /admin/v1/languages/:code": {
+    url: "/admin/v1/languages/kk",
+    payload: languageRow({ code: "kk", status: "planned", tts: null, name: { ru: "Казахский", uz: "Qozoq tili", en: "Kazakh" } }),
+    status: 200,
+    domain: ["catalog", "PUT", "/admin/v1/languages/kk"],
+  },
+  "GET /admin/v1/language-pairs": { url: "/admin/v1/language-pairs", status: 200, domain: ["catalog", "GET", "/admin/v1/language-pairs"] },
+  "PUT /admin/v1/language-pairs/:pairId": {
+    url: "/admin/v1/language-pairs/ru-kk",
+    payload: (() => {
+      const { readiness: _r, learners: _l, updated_by: _u, ...pair } = pairCard({ pair_id: "ru-kk", target: "kk", status: "development", course_id: null });
+      return { ...pair, reason: "начинаем курс" };
+    })(),
+    status: 200,
+    domain: ["catalog", "PUT", "/admin/v1/language-pairs/ru-kk"],
+  },
+  // ---------- диагностика (diagnostics)
+  "GET /admin/v1/diagnostics/tests": { url: "/admin/v1/diagnostics/tests", status: 200, domain: ["diagnostics", "GET", "/admin/v1/diagnostics/tests"] },
+  "GET /admin/v1/diagnostics/tests/:id/versions/:v": {
+    url: "/admin/v1/diagnostics/tests/dx-en-adult/versions/1",
+    status: 200,
+    domain: ["diagnostics", "GET", "/admin/v1/diagnostics/tests/dx-en-adult/versions/1"],
+  },
+  "POST /admin/v1/diagnostics/tests/:id/versions/:v/publish": {
+    url: "/admin/v1/diagnostics/tests/dx-en-kids/versions/2/publish",
+    payload: { reason: "новые задания на аудирование" },
+    status: 200,
+    domain: ["diagnostics", "POST", "/admin/v1/diagnostics/tests/dx-en-kids/versions/2/publish"],
+  },
+  "GET /admin/v1/diagnostics/stats": { url: "/admin/v1/diagnostics/stats?period=7d", status: 200, domain: ["diagnostics", "GET", "/admin/v1/diagnostics/stats"] },
 };
 
 let h: Harness;
@@ -398,14 +540,20 @@ describe("матрица маршрутов", () => {
   });
 
   it("4xx домена → клиенту с кодом и details; 5xx и сеть → 503 UPSTREAM_UNAVAILABLE {service} на каждом проксирующем маршруте", async () => {
-    const { s } = await loginAs(h, "super_admin");
-    await stepUp(h, s);
     const proxied = Object.entries(CASES).filter(
       ([k, c]) => c.domain && c.domain[0] !== "adminIdentity" && k !== "GET /admin/v1/dashboard" && !k.includes("/auth/"),
     );
-    expect(proxied.length).toBeGreaterThan(45);
-    const send = (key: string, c: Case) => {
+    expect(proxied.length).toBeGreaterThan(70);
+    // лимит команд — 60/мин на сотрудника: новый сотрудник на каждые 40 команд
+    let s = (await loginAs(h, "super_admin")).s;
+    await stepUp(h, s);
+    let commands = 0;
+    const send = async (key: string, c: Case) => {
       const method = key.split(" ")[0]! as "GET";
+      if (method !== "GET" && ++commands % 40 === 0) {
+        s = (await loginAs(h, "super_admin")).s;
+        await stepUp(h, s);
+      }
       return h.app.inject({ method, url: c.url, headers: { ...browser(s), ...c.headers }, ...(method === "GET" ? {} : { payload: (c.payload ?? {}) as object }) });
     };
     for (const [key, c] of proxied) {

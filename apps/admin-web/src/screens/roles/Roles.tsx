@@ -15,7 +15,7 @@ import { ConfirmCommand, Drawer, MenuButton, MenuItem } from "../../ui/overlays"
 import { useToast } from "../../ui/toasts";
 import { errText } from "../../ui/errors";
 
-export const ROLE_CODES: readonly RoleCode[] = ["super_admin", "operations", "communications", "support", "methodist", "analyst", "auditor", "read_only"];
+export const ROLE_CODES: readonly RoleCode[] = ["super_admin", "operations", "communications", "support", "methodist", "content_manager", "analyst", "auditor", "read_only"];
 /**
  * Privileged role (MFA required, granting it is four-eyes): `Role.privileged` of GET /roles — admin-identity decides it
  * by the role's permissions too, so a role that gains a step-up right becomes privileged without a new admin-web
@@ -31,7 +31,7 @@ export function privilegedOf(roles: readonly Pick<Role, "code" | "privileged">[]
 
 /** Matrix rows: section access first, then commands (admin.ts Permission catalogue). */
 export const PERM_GROUPS: ReadonlyArray<{ id: "sections" | "actions"; perms: readonly Permission[] }> = [
-  { id: "sections", perms: ["dashboard.read", "users.read", "support.read", "whatsnew.manage", "notif.templates.manage", "notif.campaigns.manage", "config.read", "audit.read"] },
+  { id: "sections", perms: ["dashboard.read", "users.read", "support.read", "whatsnew.manage", "notif.templates.manage", "notif.campaigns.manage", "config.read", "audit.read", "content.read"] },
   {
     id: "actions",
     perms: [
@@ -44,6 +44,12 @@ export const PERM_GROUPS: ReadonlyArray<{ id: "sections" | "actions"; perms: rea
       "config.publish",
       "staff.manage",
       "roles.manage",
+      // sprint 3: content life cycle, media rights and learners' requests, languages and pairs
+      "content.edit",
+      "content.review",
+      "content.publish",
+      "media.rights",
+      "lang.manage",
     ],
   },
 ]

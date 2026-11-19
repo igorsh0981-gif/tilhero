@@ -23,7 +23,7 @@ REDIS_PORT="${REDIS_PORT:-6379}"
 NATS_PORT="${NATS_PORT:-4222}"
 
 # Сервисы со своей схемой БД (owner schema per bounded context, ТЗ §Инфраструктура).
-SERVICES=(identity_consent learning_plan social support notifications audit experience_config admin_identity user_admin)
+SERVICES=(identity_consent learning_plan social support notifications audit experience_config admin_identity user_admin catalog diagnostics)
 
 as_pg() {
   if [ "$(id -u)" = "0" ]; then runuser -u postgres -- "$@"; else "$@"; fi

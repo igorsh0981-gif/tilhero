@@ -1,0 +1,192 @@
+[
+  {
+    "scenario_id": "sc-cafe-coffee",
+    "title": {
+      "ru": "Напиток в кафе",
+      "uz": "Kafeda ichimlik"
+    },
+    "task": {
+      "ru": "Закажите напиток и выберите размер",
+      "uz": "Ichimlik buyurtma qiling va hajmini tanlang"
+    },
+    "goals": [
+      "travel",
+      "daily"
+    ],
+    "topics": [
+      "food"
+    ],
+    "level": "A1",
+    "difficulty": 1,
+    "audience": [
+      "kids",
+      "teens",
+      "adults"
+    ],
+    "access": "free",
+    "characters": [
+      {
+        "id": "barista",
+        "name": "Mia",
+        "role": {
+          "ru": "Бариста",
+          "uz": "Barista"
+        },
+        "voice": "en-GB"
+      }
+    ],
+    "start_node": "n1",
+    "nodes": {
+      "n1": {
+        "speaker": "barista",
+        "line_en": "Hi there! What can I get you?",
+        "gloss": {
+          "ru": "Привет! Что вам предложить?",
+          "uz": "Salom! Sizga nima beray?"
+        },
+        "hint": {
+          "ru": "Назовите напиток и скажите please",
+          "uz": "Ichimlik nomini ayting va please deng"
+        },
+        "recovery_point": true,
+        "event": null,
+        "transitions": [
+          {
+            "intent": "order",
+            "description": {
+              "ru": "Закажите напиток",
+              "uz": "Ichimlik buyurtma qiling"
+            },
+            "examples_en": [
+              "A hot chocolate, please.",
+              "Can I have an orange juice, please?"
+            ],
+            "to": "n2"
+          },
+          {
+            "intent": "clarify",
+            "description": {
+              "ru": "Попросите меню",
+              "uz": "Menyuni soʻrang"
+            },
+            "examples_en": [
+              "Can I see the menu, please?"
+            ],
+            "to": "n3"
+          }
+        ],
+        "end": null
+      },
+      "n2": {
+        "speaker": "barista",
+        "line_en": "Sure! Small or large?",
+        "gloss": {
+          "ru": "Конечно! Маленький или большой?",
+          "uz": "Albatta! Kichikmi yoki kattami?"
+        },
+        "hint": null,
+        "recovery_point": true,
+        "event": null,
+        "transitions": [
+          {
+            "intent": "choose_size",
+            "description": {
+              "ru": "Выберите размер",
+              "uz": "Hajmni tanlang"
+            },
+            "examples_en": [
+              "Small, please.",
+              "Large, please."
+            ],
+            "to": "n4"
+          },
+          {
+            "intent": "decline",
+            "description": {
+              "ru": "Передумайте и вежливо откажитесь",
+              "uz": "Fikringizni oʻzgartiring va xushmuomalalik bilan voz keching"
+            },
+            "examples_en": [
+              "Sorry, no, thank you."
+            ],
+            "to": "n5"
+          }
+        ],
+        "end": null
+      },
+      "n3": {
+        "speaker": "barista",
+        "line_en": "Here you are. We have tea, juice and hot chocolate.",
+        "gloss": {
+          "ru": "Вот, пожалуйста. У нас есть чай, сок и горячий шоколад.",
+          "uz": "Mana, marhamat. Bizda choy, sharbat va issiq shokolad bor."
+        },
+        "hint": null,
+        "recovery_point": false,
+        "event": null,
+        "transitions": [
+          {
+            "intent": "order",
+            "description": {
+              "ru": "Закажите напиток из меню",
+              "uz": "Menyudan ichimlik buyurtma qiling"
+            },
+            "examples_en": [
+              "A tea, please."
+            ],
+            "to": "n2"
+          }
+        ],
+        "end": null
+      },
+      "n4": {
+        "speaker": "barista",
+        "line_en": "Here you go. Enjoy!",
+        "gloss": {
+          "ru": "Пожалуйста. Угощайтесь!",
+          "uz": "Marhamat. Yoqimli ishtaha!"
+        },
+        "hint": null,
+        "recovery_point": false,
+        "event": null,
+        "transitions": [],
+        "end": {
+          "outcome": "success",
+          "summary": {
+            "ru": "Вы заказали напиток",
+            "uz": "Siz ichimlik buyurtma qildingiz"
+          }
+        }
+      },
+      "n5": {
+        "speaker": "barista",
+        "line_en": "No problem. Have a nice day!",
+        "gloss": {
+          "ru": "Ничего страшного. Хорошего дня!",
+          "uz": "Hechqisi yoʻq. Kuningiz yaxshi oʻtsin!"
+        },
+        "hint": null,
+        "recovery_point": false,
+        "event": null,
+        "transitions": [],
+        "end": {
+          "outcome": "alt_success",
+          "summary": {
+            "ru": "Вы вежливо отказались",
+            "uz": "Siz xushmuomalalik bilan voz kechdingiz"
+          }
+        }
+      }
+    },
+    "completion": {
+      "criteria": {
+        "ru": "Заказать напиток и выбрать размер",
+        "uz": "Ichimlik buyurtma qilish va hajmini tanlash"
+      }
+    },
+    "skill_ids": [
+      "en.func.order-drink"
+    ],
+    "rubric_id": "r-lesson-core"
+  }
+]

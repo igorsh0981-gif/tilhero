@@ -11,18 +11,20 @@ const ALL: Permission[] = [
   "dashboard.read", "users.read", "users.sensitive.read", "support.read", "support.reply", "support.manage", "audit.read", "config.read",
   "config.edit", "config.publish", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage",
   "notif.campaigns.send", "staff.manage", "roles.manage",
+  "content.read", "content.edit", "content.review", "content.publish", "media.rights", "lang.manage",
 ];
 const MATRIX: Record<RoleCode, Permission[]> = {
   super_admin: ALL,
-  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read"],
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read"],
   communications: ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"],
   support: ["dashboard.read", "users.read", "support.read", "support.reply"],
-  methodist: ["dashboard.read", "users.read"],
-  analyst: ["dashboard.read", "users.read"],
-  auditor: ["dashboard.read", "audit.read"],
+  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish"],
+  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights"],
+  analyst: ["dashboard.read", "users.read", "content.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read"],
   read_only: ["dashboard.read"],
 };
-const SOON = ["content", "agents", "qa", "costs", "heroes", "game", "events", "langs"];
+const SOON = ["agents", "qa", "costs", "heroes", "game", "events"];
 const ids = (role: RoleCode, menu?: Array<{ id: string; enabled: boolean }>) => visibleNav(new Set(MATRIX[role]), menu).flatMap((g) => g.items.map((i) => i.id));
 const live = (role: RoleCode) => ids(role).filter((x) => !SOON.includes(x));
 
@@ -39,11 +41,12 @@ describe("menu: 15 sections of the experience-config seed, filtered by role (UX 
     expect(visibleNav(new Set(ALL)).map((g) => g.group)).toEqual(["product", "ai", "game", "comms", "manage"]);
   });
   it("live sections per role", () => {
-    expect(live("operations")).toEqual(["overview", "users", "support", "config", "audit"]);
+    expect(live("operations")).toEqual(["overview", "users", "content", "support", "config", "langs", "audit"]);
     expect(live("communications")).toEqual(["overview", "news"]);
     expect(live("support")).toEqual(["overview", "users", "support"]);
-    expect(live("methodist")).toEqual(["overview", "users"]);
-    expect(live("auditor")).toEqual(["overview", "audit"]);
+    expect(live("methodist")).toEqual(["overview", "users", "content", "langs"]);
+    expect(live("content_manager")).toEqual(["overview", "content", "langs"]);
+    expect(live("auditor")).toEqual(["overview", "content", "langs", "audit"]);
     expect(live("read_only")).toEqual(["overview"]);
   });
   it("«news» opens with any communications right; roles with staff.manage OR roles.manage", () => {
@@ -55,7 +58,13 @@ describe("menu: 15 sections of the experience-config seed, filtered by role (UX 
   });
   it("«soon» sections carry the sprint number of the plan", () => {
     const soon = Object.fromEntries(NAV_ITEMS.filter((i) => i.soon).map((i) => [i.id, i.soon]));
-    expect(soon).toEqual({ content: 3, langs: 3, agents: 4, qa: 4, costs: 4, heroes: 6, game: 6, events: 6 });
+    expect(soon).toEqual({ agents: 4, qa: 4, costs: 4, heroes: 6, game: 6, events: 6 });
+  });
+  it("sprint 3: «content» opens with content.read; «langs» with content.read or lang.manage", () => {
+    expect(pageAllowed("content", new Set<Permission>(["content.read"]))).toBe(true);
+    expect(pageAllowed("content", new Set<Permission>(["dashboard.read", "content.edit"]))).toBe(false);
+    expect(pageAllowed("langs", new Set<Permission>(["lang.manage"]))).toBe(true);
+    expect(pageAllowed("langs", new Set<Permission>(["dashboard.read"]))).toBe(false);
   });
   it("the start screen is the first live section", () => {
     expect(homePage(new Set(MATRIX.communications))).toBe("overview");

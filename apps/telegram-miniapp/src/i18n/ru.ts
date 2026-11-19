@@ -1,5 +1,8 @@
 /** Russian — the source dictionary. Keys are the MessageKey type; uz.ts must have exactly the same keys. */
+import { ruContent } from "./ru.content";
+
 export const ru = {
+  ...ruContent,
   // ---- common ----
   "c.continue": "Продолжить",
   "c.back": "Назад",

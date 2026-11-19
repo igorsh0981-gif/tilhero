@@ -1,0 +1,34 @@
+[
+  {
+    "module_id": "m1-meet",
+    "course_id": "en-core",
+    "title": {
+      "ru": "Знакомство",
+      "uz": "Tanishuv"
+    },
+    "goal": {
+      "ru": "Здороваться и рассказывать о себе",
+      "uz": "Salomlashish va oʻzi haqida gapirish"
+    },
+    "theme": "small_talk",
+    "lesson_ids": [
+      "l-01-greetings"
+    ]
+  },
+  {
+    "module_id": "m2-city",
+    "course_id": "en-core",
+    "title": {
+      "ru": "В городе",
+      "uz": "Shaharda"
+    },
+    "goal": {
+      "ru": "Справляться с простыми ситуациями в городе",
+      "uz": "Shahardagi oddiy vaziyatlarda gaplasha olish"
+    },
+    "theme": "food",
+    "lesson_ids": [
+      "l-07-coffee"
+    ]
+  }
+]

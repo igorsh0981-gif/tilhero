@@ -8,7 +8,7 @@
 - текст ответа оператора в уведомление не кладём — только номер обращения;
 - кнопка «Открыть» (startapp): напоминание и пропуск → route_home; приглашение принято / новый участник
   семьи / отклонено → route_family; неотвеченное приглашение → invite_<invite_id>; поддержка → ticket_<number>;
-  «Что нового» → route_news;
+  «Что нового» → route_news; решение по заявке на песню/фильм (спринт 3) → route_media_requests;
 - параметры проверяются строгой моделью при приёме (неизвестное поле/формат → failed params_invalid).
 
 Спринт 2 (INTERNAL_API §3 «Шаблоны»): код — источник текстов по умолчанию; сотрудник создаёт версию поверх.
@@ -349,6 +349,50 @@ def _release_note(lang: Lang, p: ReleaseNoteParams, ctx: Context) -> Rendered:
     )
 
 
+# ---------------------------------------------------------------- media_request.decided (catalog, спринт 3)
+
+MediaDecision = Literal["authored_alternative", "licensed", "rejected", "duplicate"]
+REQUEST_TITLE_MAX = 80  # название из заявки в тексте — коротко (в заявке до 200)
+
+
+class MediaRequestParams(Params):
+    """Решение по заявке ученика на песню/фильм (AT-30). Комментарий сотрудника в уведомление не кладётся (его нет в
+    событии; ученик читает его в Mini App на экране заявок) — как текст ответа поддержки."""
+
+    request_id: uuid.UUID
+    request_title: Annotated[str, Field(min_length=1, max_length=200)]
+    status: MediaDecision
+    linked_asset_id: Annotated[str, Field(max_length=200)] | None = None
+
+
+DECISION_NAMES: dict[str, dict[str, str]] = {
+    "authored_alternative": {"ru": "подобран авторский аналог", "uz": "oʻxshash mualliflik materiali tanlandi"},
+    "licensed": {"ru": "материал лицензирован и добавлен", "uz": "material litsenziyalanib qoʻshildi"},
+    "rejected": {"ru": "заявка отклонена", "uz": "soʻrov rad etildi"},
+    "duplicate": {"ru": "такая заявка уже есть", "uz": "bunday soʻrov allaqachon bor"},
+}
+REQUESTS_BUTTON = {"ru": "Открыть заявки", "uz": "Soʻrovlarni ochish"}
+
+
+def short_title(value: str) -> str:
+    """Название из заявки ученика: без управляющих символов, пробелы схлопнуты, ≤ 80 символов (с «…»)."""
+    text = clean_text(value)
+    return text if len(text) <= REQUEST_TITLE_MAX else text[: REQUEST_TITLE_MAX - 1].rstrip() + "…"
+
+
+def _media_request_values(lang: Lang, p: MediaRequestParams, ctx: Context) -> dict[str, str]:
+    return {"request_title": short_title(p.request_title), "decision": DECISION_NAMES[p.status][lang]}
+
+
+def _media_request_decided(lang: Lang, p: MediaRequestParams, ctx: Context) -> Rendered:
+    v = _media_request_values(lang, p, ctx)
+    if lang == "ru":
+        body = f"Решение по заявке «{v['request_title']}»: {v['decision']}. Подробности — в разделе заявок."
+        return Rendered("Решение по вашей заявке", body, REQUESTS_BUTTON[lang], "route_media_requests")
+    body = f"«{v['request_title']}» soʻrovi boʻyicha qaror: {v['decision']}. Batafsil — soʻrovlar boʻlimida."
+    return Rendered("Soʻrovingiz boʻyicha qaror", body, REQUESTS_BUTTON[lang], "route_media_requests")
+
+
 # ---------------------------------------------------------------- pin.reset_code (transactional, не в центре)
 
 
@@ -428,6 +472,14 @@ PLACEHOLDER_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "New family member's name; generic if unknown",
     ),
     "ticket_number": ("Номер обращения, например TCK-3081", "Support ticket number, e.g. TCK-3081"),
+    "request_title": (
+        "Название песни или фильма из заявки ученика (до 80 символов)",
+        "Song or movie title from the learner's request (up to 80 characters)",
+    ),
+    "decision": (
+        "Решение по заявке на языке ученика, например «подобран авторский аналог»",
+        "Decision in the learner's language, e.g. “authored alternative found”",
+    ),
 }
 KID_NAME = {"ru": "Ваш ребёнок", "uz": "Farzandingiz"}
 INVITER_NAME = {"ru": "Ваш знакомый", "uz": "Tanishingiz"}
@@ -737,6 +789,14 @@ TEMPLATES: dict[str, TemplateSpec] = {
             "support.resolved", "support", TicketParams, _support_resolved,
             description=("Обращение решено", "Ticket resolved"),
             placeholder_names=("ticket_number",), placeholders=_ticket_values, sample={"number": "TCK-3081"},
+        ),
+        TemplateSpec(
+            "media_request.decided", "support", MediaRequestParams, _media_request_decided,
+            description=("Решение по заявке на песню или фильм (без комментария сотрудника)",
+                         "Decision on a song/movie request (without the staff comment)"),
+            placeholder_names=("request_title", "decision"), placeholders=_media_request_values,
+            sample={"request_id": _SAMPLE_ID, "request_title": "Moonlight Café", "status": "authored_alternative",
+                    "linked_asset_id": "m-own-coffee-order"},
         ),
         TemplateSpec(
             "release_note.published", "product", ReleaseNoteParams, _release_note,

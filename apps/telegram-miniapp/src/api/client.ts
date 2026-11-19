@@ -182,25 +182,34 @@ export class ApiClient {
     this.initData = null;
   }
 
-  async request<T>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
+  request<T>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
+    return this.authed(opts, () => this.raw<T>(method, path, opts));
+  }
+
+  /** Binary GET (audio of the media library: GET /v1/media/{id}/audio) with the same token refresh as JSON calls. */
+  blob(path: string, opts: RequestOptions = {}): Promise<Blob> {
+    return this.authed(opts, async () => (await this.send("GET", path, opts, "audio/*")).blob());
+  }
+
+  private async authed<T>(opts: RequestOptions, call: () => Promise<T>): Promise<T> {
     const auth = opts.auth !== false;
     // Proactive refresh shortly before expiry. A transient failure here is harmless: the token is still valid.
     if (auth && this.access && !this.issuing && this.now() > this.accessExp - 20_000) await this.refreshOnce().catch(() => null);
     try {
-      return await this.raw<T>(method, path, opts);
+      return await call();
     } catch (e) {
       if (!(e instanceof ApiError) || !auth || e.status !== 401 || BUSINESS_401.has(e.code)) throw e;
       // A PIN verify / learner switch in flight is about to replace the tokens: wait for it instead of refreshing.
       const gen = this.generation;
       if (this.issuingP && !opts.issuing) await this.issuingP.catch(() => null);
-      if (this.generation !== gen) return this.raw<T>(method, path, opts);
+      if (this.generation !== gen) return call();
       // Transient refresh failures (network, 5xx, 429) reject here and reach the caller as they are.
       const lost = await this.refreshOnce(e.code === "SESSION_REVOKED");
       if (lost) {
         this.hooks.onSessionLost?.(lost);
         throw lost;
       }
-      return this.raw<T>(method, path, opts);
+      return call();
     }
   }
 
@@ -360,7 +369,7 @@ export class ApiClient {
 }
 
 /** 503 codes that mean «BFF is reachable, one domain is down» — no connectivity banner. */
-const REACHABLE_503: ReadonlySet<string> = new Set(["UPSTREAM_UNAVAILABLE", "RATE_LIMIT_UNAVAILABLE"]);
+const REACHABLE_503: ReadonlySet<string> = new Set(["UPSTREAM_UNAVAILABLE", "RATE_LIMIT_UNAVAILABLE", "CATALOG_UNAVAILABLE"]);
 
 /** Idempotency-Key for creating commands (one per draft, reused on retries). */
 export function newIdempotencyKey(): string {

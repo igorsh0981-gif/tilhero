@@ -49,7 +49,9 @@ describe("contract coverage", () => {
     // «accept | /decline» в одном комментарии: decline-маршруты — отдельно
     found.add("POST /v1/guardian-consents/:token/decline");
     found.add("POST /v1/invites/:invite_id/decline");
-    expect(found.size).toBeGreaterThanOrEqual(40);
+    expect(found.has("PUT /v1/plan")).toBe(false);
+    expect(found.has("PATCH /v1/plan")).toBe(true);
+    expect(found.size).toBeGreaterThanOrEqual(58);
     const missing = [...found].filter((e) => {
       const [method, url] = e.split(" ") as [string, string];
       return !h.app.hasRoute({ method: method as "GET", url });

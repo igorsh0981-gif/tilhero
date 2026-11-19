@@ -154,6 +154,7 @@ export function profileRoutes(app: App, ctx: BffContext): void {
       const auth = authOf(req);
       forbidInChildProfile(auth, "ADULT_REQUIRED");
       const me = await identity.put<IdentityMe>("/internal/v1/me/age", { subject: auth.accountId, body: { age_band: req.body.age_band } });
+      ctx.audience.forget(auth.accountId); // сегмент контента (спринт 3) — по новому возрасту
       return profileFor(ctx, auth, clientTimezone(req), me);
     },
   );

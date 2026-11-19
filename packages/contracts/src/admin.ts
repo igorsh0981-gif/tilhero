@@ -28,7 +28,8 @@
  *
  * Step-up (повторный TOTP ≤ 5 мин) требуют: публикация и снятие «Что нового»; активация и сброс шаблона
  * уведомления; расписание и остановка рассылки; активация и откат конфигурации; раскрытие Telegram ID; все команды
- * по сотрудникам, ролям и заявкам four-eyes.
+ * по сотрудникам, ролям и заявкам four-eyes. Спринт 3: публикация, снятие и откат версии контента; подтверждение прав
+ * медиа; решение по заявке ученика на песню/фильм; правка языков и языковых пар; публикация версии теста диагностики.
  */
 
 import type {
@@ -105,7 +106,10 @@ export type RoleCode =
   | "auditor"
   | "read_only";
 
-/** Роли, для которых MFA (TOTP) обязательна; назначение такой роли — four-eyes. */
+/** Роли, для которых MFA (TOTP) обязательна; назначение такой роли — four-eyes. Базовый список спринта 2:
+ * привилегированной также считается любая роль с правом, требующим step-up (спринт 3: methodist — content.publish,
+ * content_manager — media.rights). Источник истины — `Role.privileged` из GET /admin/v1/roles; константа — запасной
+ * вариант, пока роли не загружены. */
 export const PRIVILEGED_ROLES: readonly RoleCode[] = ["super_admin", "operations", "communications"];
 
 export interface Role {
@@ -651,7 +655,9 @@ export type ReleaseNoteStatus = "draft" | "published" | "archived";
 /** new — знакомство после первой регистрации; existing — новое для тех, кто уже занимался до публикации; all — всем. */
 export type ReleaseNoteAudience = "new" | "existing" | "all";
 export type ReleaseNoteRoute =
-  | "home" | "lessons" | "review" | "progress" | "profile" | "schedule" | "notifications" | "family" | "support" | "news";
+  | "home" | "lessons" | "review" | "progress" | "profile" | "schedule" | "notifications" | "family" | "support" | "news"
+  // спринт 3
+  | "diagnostics" | "plan" | "skills" | "scenarios" | "media" | "media_requests" | "languages";
 export type ReleaseNoteIcon =
   | "spark" | "hero" | "calendar" | "clock" | "bell" | "book" | "chat" | "mic" | "star" | "flame" | "users" | "gift"
   | "shield" | "globe" | "trophy" | "news";
@@ -1121,7 +1127,8 @@ export interface AdminMediaRequest {
   /** сколько ещё заявок с похожим названием (нормализованным) */
   similar_count: number;
 }
-/** GET /admin/v1/content/media-requests?status=&q=&cursor= (content.read) → Page<AdminMediaRequest>
+/** GET /admin/v1/content/media-requests?status=&q=&cursor= (media.rights — в заявке ссылка и свободный комментарий
+ *  ученика, минимизация доступа к персональным данным) → Page<AdminMediaRequest>
  *  POST /admin/v1/content/media-requests/{id}/take (media.rights) → in_review
  *  POST /admin/v1/content/media-requests/{id}/decide MediaRequestDecision (media.rights, step-up) → AdminMediaRequest;
  *       уведомление ученику (шаблон media_request.decided). Ссылка ученика НЕ открывается и НЕ скачивается сервером. */
@@ -1172,6 +1179,7 @@ export interface DiagnosticStats {
   finished: number;
   median_minutes: number | null;
   by_level: Record<Band | "none", number>;
+  /** проценты 0–100, один знак после запятой */
   not_assessed_pct: Record<"vocabulary" | "grammar" | "reading" | "listening", number>;
   followups: number;
 }

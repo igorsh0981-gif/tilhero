@@ -1,0 +1,999 @@
+{
+  "test_id": "dx-en-kids",
+  "version": 1,
+  "pair_id": "ru-en",
+  "audience": "kids",
+  "config": {
+    "areas": [
+      "vocabulary",
+      "grammar",
+      "reading",
+      "listening"
+    ],
+    "items_per_area": 3,
+    "start_band": "A0",
+    "min_items_assessed": 2,
+    "followup_items": 3,
+    "retest_days": 14,
+    "time_limit_min": 15,
+    "min_correct_per_band": 1
+  },
+  "items": [
+    {
+      "item_id": "kv-a0-01",
+      "area": "vocabulary",
+      "band": "A0",
+      "tags": [
+        "voc.numbers"
+      ],
+      "skill_ids": [
+        "en.voc.numbers"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Какое слово подходит? Выбери.",
+        "uz": "Qaysi soʻz mos keladi? Tanla."
+      },
+      "prompt_en": "A cat has ___ legs.",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "two",
+        "four",
+        "six",
+        "eight"
+      ],
+      "answer": 1
+    },
+    {
+      "item_id": "kv-a0-02",
+      "area": "vocabulary",
+      "band": "A0",
+      "tags": [
+        "voc.family"
+      ],
+      "skill_ids": [
+        "en.voc.family"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Выбери слово «мама».",
+        "uz": "«Ona» soʻzini tanla."
+      },
+      "prompt_en": "I love my ___!",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "dad",
+        "sister",
+        "brother",
+        "mum"
+      ],
+      "answer": 3
+    },
+    {
+      "item_id": "kv-a0-03",
+      "area": "vocabulary",
+      "band": "A0",
+      "tags": [
+        "func.greet"
+      ],
+      "skill_ids": [
+        "en.func.greet"
+      ],
+      "type": "single_choice",
+      "instruction": {
+        "ru": "Утро. Ты встречаешь учителя. Что ты скажешь?",
+        "uz": "Ertalab ustozingni koʻrding. Nima deysan?"
+      },
+      "prompt_en": "In the morning you say:",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "Good morning!",
+        "Good night!",
+        "Goodbye!",
+        "Thank you!"
+      ],
+      "answer": 0
+    },
+    {
+      "item_id": "kv-a1-01",
+      "area": "vocabulary",
+      "band": "A1",
+      "tags": [
+        "voc.clothes-colors"
+      ],
+      "skill_ids": [
+        "en.voc.clothes-colors"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Какое слово подходит? Выбери.",
+        "uz": "Qaysi soʻz mos keladi? Tanla."
+      },
+      "prompt_en": "Snow is ___.",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "black",
+        "green",
+        "white",
+        "red"
+      ],
+      "answer": 2
+    },
+    {
+      "item_id": "kv-a1-02",
+      "area": "vocabulary",
+      "band": "A1",
+      "tags": [
+        "voc.food-drink"
+      ],
+      "skill_ids": [
+        "en.voc.food-drink"
+      ],
+      "type": "single_choice",
+      "instruction": {
+        "ru": "Выбери правильный ответ.",
+        "uz": "Toʻgʻri javobni tanla."
+      },
+      "prompt_en": "Which one is a fruit?",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "a potato",
+        "an egg",
+        "a banana",
+        "a sandwich"
+      ],
+      "answer": 2
+    },
+    {
+      "item_id": "kv-a1-03",
+      "area": "vocabulary",
+      "band": "A1",
+      "tags": [
+        "voc.city-places"
+      ],
+      "skill_ids": [
+        "en.voc.city-places"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Какое слово подходит? Выбери.",
+        "uz": "Qaysi soʻz mos keladi? Tanla."
+      },
+      "prompt_en": "We can see lions and monkeys at the ___.",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "zoo",
+        "library",
+        "school",
+        "shop"
+      ],
+      "answer": 0
+    },
+    {
+      "item_id": "kv-a2-01",
+      "area": "vocabulary",
+      "band": "A2",
+      "tags": [
+        "voc.health"
+      ],
+      "skill_ids": [
+        "en.voc.health"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Какое слово подходит? Выбери.",
+        "uz": "Qaysi soʻz mos keladi? Tanla."
+      },
+      "prompt_en": "I need to go to the dentist. I've got ___.",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "a headache",
+        "a cold",
+        "a temperature",
+        "toothache"
+      ],
+      "answer": 3
+    },
+    {
+      "item_id": "kv-a2-02",
+      "area": "vocabulary",
+      "band": "A2",
+      "tags": [
+        "voc.work"
+      ],
+      "skill_ids": [
+        "en.voc.work"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Какое слово подходит? Выбери.",
+        "uz": "Qaysi soʻz mos keladi? Tanla."
+      },
+      "prompt_en": "A ___ looks after sick animals.",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "pilot",
+        "vet",
+        "cook",
+        "driver"
+      ],
+      "answer": 1
+    },
+    {
+      "item_id": "kv-a2-03",
+      "area": "vocabulary",
+      "band": "A2",
+      "tags": [
+        "voc.travel"
+      ],
+      "skill_ids": [
+        "en.voc.travel"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Какое слово подходит? Выбери.",
+        "uz": "Qaysi soʻz mos keladi? Tanla."
+      },
+      "prompt_en": "We're going on holiday tomorrow. Let's pack our ___!",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "homework",
+        "teachers",
+        "desks",
+        "suitcases"
+      ],
+      "answer": 3
+    },
+    {
+      "item_id": "kg-a0-01",
+      "area": "grammar",
+      "band": "A0",
+      "tags": [
+        "gram.to-be"
+      ],
+      "skill_ids": [
+        "en.gram.to-be"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Выбери слово, которое подходит.",
+        "uz": "Mos soʻzni tanla."
+      },
+      "prompt_en": "I ___ seven years old.",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "is",
+        "am",
+        "are",
+        "be"
+      ],
+      "answer": 1
+    },
+    {
+      "item_id": "kg-a0-02",
+      "area": "grammar",
+      "band": "A0",
+      "tags": [
+        "gram.pronouns-possessives"
+      ],
+      "skill_ids": [
+        "en.gram.pronouns-possessives"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Выбери слово, которое подходит.",
+        "uz": "Mos soʻzni tanla."
+      },
+      "prompt_en": "This is my sister. ___ name is Mila.",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "His",
+        "She",
+        "Her",
+        "Its"
+      ],
+      "answer": 2
+    },
+    {
+      "item_id": "kg-a0-03",
+      "area": "grammar",
+      "band": "A0",
+      "tags": [
+        "gram.to-be"
+      ],
+      "skill_ids": [
+        "en.gram.to-be"
+      ],
+      "type": "order_words",
+      "instruction": {
+        "ru": "Составь предложение из слов.",
+        "uz": "Soʻzlardan gap tuz."
+      },
+      "prompt_en": "Look at my pet!",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "is",
+        "It",
+        "cat.",
+        "a"
+      ],
+      "answer": [
+        "It",
+        "is",
+        "a",
+        "cat."
+      ]
+    },
+    {
+      "item_id": "kg-a1-01",
+      "area": "grammar",
+      "band": "A1",
+      "tags": [
+        "gram.present-simple"
+      ],
+      "skill_ids": [
+        "en.gram.present-simple"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Выбери слово, которое подходит.",
+        "uz": "Mos soʻzni tanla."
+      },
+      "prompt_en": "My brother ___ football every day.",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "plays",
+        "play",
+        "playing",
+        "is play"
+      ],
+      "answer": 0
+    },
+    {
+      "item_id": "kg-a1-02",
+      "area": "grammar",
+      "band": "A1",
+      "tags": [
+        "gram.there-is"
+      ],
+      "skill_ids": [
+        "en.gram.there-is"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Выбери слово, которое подходит.",
+        "uz": "Mos soʻzni tanla."
+      },
+      "prompt_en": "There ___ three birds in the tree.",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "are",
+        "is",
+        "am",
+        "has"
+      ],
+      "answer": 0
+    },
+    {
+      "item_id": "kg-a1-03",
+      "area": "grammar",
+      "band": "A1",
+      "tags": [
+        "gram.can-requests",
+        "func.order-drink"
+      ],
+      "skill_ids": [
+        "en.gram.can-requests",
+        "en.func.order-drink"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Выбери слово, которое подходит.",
+        "uz": "Mos soʻzni tanla."
+      },
+      "prompt_en": "___ I have some juice, please?",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "Do",
+        "Am",
+        "Can",
+        "Is"
+      ],
+      "answer": 2
+    },
+    {
+      "item_id": "kg-a2-01",
+      "area": "grammar",
+      "band": "A2",
+      "tags": [
+        "gram.present-continuous"
+      ],
+      "skill_ids": [
+        "en.gram.present-continuous"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Выбери слово, которое подходит.",
+        "uz": "Mos soʻzni tanla."
+      },
+      "prompt_en": "Look! The cat ___ with a ball.",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "plays",
+        "is playing",
+        "playing",
+        "play"
+      ],
+      "answer": 1
+    },
+    {
+      "item_id": "kg-a2-02",
+      "area": "grammar",
+      "band": "A2",
+      "tags": [
+        "gram.past-simple"
+      ],
+      "skill_ids": [
+        "en.gram.past-simple"
+      ],
+      "type": "gap_choice",
+      "instruction": {
+        "ru": "Выбери слово, которое подходит.",
+        "uz": "Mos soʻzni tanla."
+      },
+      "prompt_en": "Yesterday we ___ to the zoo.",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "go",
+        "goes",
+        "going",
+        "went"
+      ],
+      "answer": 3
+    },
+    {
+      "item_id": "kg-a2-03",
+      "area": "grammar",
+      "band": "A2",
+      "tags": [
+        "gram.future-going-to"
+      ],
+      "skill_ids": [
+        "en.gram.future-going-to"
+      ],
+      "type": "order_words",
+      "instruction": {
+        "ru": "Составь предложение из слов.",
+        "uz": "Soʻzlardan gap tuz."
+      },
+      "prompt_en": "Talk about your plans for Sunday.",
+      "passage_en": null,
+      "audio_text_en": null,
+      "options": [
+        "are",
+        "going",
+        "We",
+        "visit",
+        "to",
+        "park.",
+        "the"
+      ],
+      "answer": [
+        "We",
+        "are",
+        "going",
+        "to",
+        "visit",
+        "the",
+        "park."
+      ]
+    },
+    {
+      "item_id": "kr-a0-01",
+      "area": "reading",
+      "band": "A0",
+      "tags": [
+        "voc.numbers",
+        "func.introduce"
+      ],
+      "skill_ids": [
+        "en.voc.numbers",
+        "en.func.introduce"
+      ],
+      "type": "read_choice",
+      "instruction": {
+        "ru": "Прочитай и выбери ответ.",
+        "uz": "Oʻqi va javobni tanla."
+      },
+      "prompt_en": "How old is Sam?",
+      "passage_en": "Hi! I'm Sam. I'm six. I have a dog.",
+      "audio_text_en": null,
+      "options": [
+        "7",
+        "6",
+        "16",
+        "60"
+      ],
+      "answer": 1
+    },
+    {
+      "item_id": "kr-a0-02",
+      "area": "reading",
+      "band": "A0",
+      "tags": [
+        "voc.family",
+        "voc.numbers"
+      ],
+      "skill_ids": [
+        "en.voc.family",
+        "en.voc.numbers"
+      ],
+      "type": "read_choice",
+      "instruction": {
+        "ru": "Прочитай и выбери ответ.",
+        "uz": "Oʻqi va javobni tanla."
+      },
+      "prompt_en": "How many sisters are there?",
+      "passage_en": "I have one brother and two sisters.",
+      "audio_text_en": null,
+      "options": [
+        "1",
+        "3",
+        "4",
+        "2"
+      ],
+      "answer": 3
+    },
+    {
+      "item_id": "kr-a0-03",
+      "area": "reading",
+      "band": "A0",
+      "tags": [
+        "gram.pronouns-possessives",
+        "voc.family"
+      ],
+      "skill_ids": [
+        "en.gram.pronouns-possessives",
+        "en.voc.family"
+      ],
+      "type": "read_choice",
+      "instruction": {
+        "ru": "Прочитай и выбери ответ.",
+        "uz": "Oʻqi va javobni tanla."
+      },
+      "prompt_en": "Who is Mimi?",
+      "passage_en": "This is Ali. He is my brother. His cat is Mimi.",
+      "audio_text_en": null,
+      "options": [
+        "Ali's cat",
+        "Ali's sister",
+        "Ali's mum",
+        "Ali's friend"
+      ],
+      "answer": 0
+    },
+    {
+      "item_id": "kr-a1-01",
+      "area": "reading",
+      "band": "A1",
+      "tags": [
+        "read.signs-menus",
+        "voc.food-drink"
+      ],
+      "skill_ids": [
+        "en.read.signs-menus",
+        "en.voc.food-drink"
+      ],
+      "type": "read_choice",
+      "instruction": {
+        "ru": "Прочитай и выбери ответ.",
+        "uz": "Oʻqi va javobni tanla."
+      },
+      "prompt_en": "What can you drink at the cafe today?",
+      "passage_en": "SCHOOL CAFE\nToday: pizza, soup, apples, milk",
+      "audio_text_en": null,
+      "options": [
+        "juice",
+        "tea",
+        "milk",
+        "water"
+      ],
+      "answer": 2
+    },
+    {
+      "item_id": "kr-a1-02",
+      "area": "reading",
+      "band": "A1",
+      "tags": [
+        "func.free-time"
+      ],
+      "skill_ids": [
+        "en.func.free-time"
+      ],
+      "type": "read_choice",
+      "instruction": {
+        "ru": "Прочитай и выбери ответ.",
+        "uz": "Oʻqi va javobni tanla."
+      },
+      "prompt_en": "What does Leo do on Sundays?",
+      "passage_en": "My name is Leo. On Sundays I go to the park with my dad. We play football there.",
+      "audio_text_en": null,
+      "options": [
+        "He goes to school.",
+        "He swims in the pool.",
+        "He plays football in the park.",
+        "He visits his grandma."
+      ],
+      "answer": 2
+    },
+    {
+      "item_id": "kr-a1-03",
+      "area": "reading",
+      "band": "A1",
+      "tags": [
+        "read.signs-menus"
+      ],
+      "skill_ids": [
+        "en.read.signs-menus"
+      ],
+      "type": "read_choice",
+      "instruction": {
+        "ru": "Прочитай и выбери ответ.",
+        "uz": "Oʻqi va javobni tanla."
+      },
+      "prompt_en": "What can't you do at the zoo?",
+      "passage_en": "CITY ZOO\nOpen 9:00–17:00\nPlease do not feed the animals!",
+      "audio_text_en": null,
+      "options": [
+        "give food to the animals",
+        "visit at 10 o'clock",
+        "see the lions",
+        "walk around the zoo"
+      ],
+      "answer": 0
+    },
+    {
+      "item_id": "kr-a2-01",
+      "area": "reading",
+      "band": "A2",
+      "tags": [
+        "read.short-messages",
+        "gram.past-simple"
+      ],
+      "skill_ids": [
+        "en.read.short-messages",
+        "en.gram.past-simple"
+      ],
+      "type": "read_choice",
+      "instruction": {
+        "ru": "Прочитай и выбери ответ.",
+        "uz": "Oʻqi va javobni tanla."
+      },
+      "prompt_en": "Who made the cake?",
+      "passage_en": "Hi Grandma! Yesterday was my birthday. Mum made a chocolate cake, and my friends came to our house. We played games. It was great! Love, Mia",
+      "audio_text_en": null,
+      "options": [
+        "Mia's grandma",
+        "Mia's friends",
+        "Mia",
+        "Mia's mum"
+      ],
+      "answer": 3
+    },
+    {
+      "item_id": "kr-a2-02",
+      "area": "reading",
+      "band": "A2",
+      "tags": [
+        "read.short-messages",
+        "gram.future-going-to"
+      ],
+      "skill_ids": [
+        "en.read.short-messages",
+        "en.gram.future-going-to"
+      ],
+      "type": "read_choice",
+      "instruction": {
+        "ru": "Прочитай и выбери ответ.",
+        "uz": "Oʻqi va javobni tanla."
+      },
+      "prompt_en": "What do the children need to take?",
+      "passage_en": "Dear parents, on Friday our class is going to visit the science museum. Please give your child a packed lunch and a drink. We are going to come back at 3 o'clock. Ms Lee",
+      "audio_text_en": null,
+      "options": [
+        "money for tickets",
+        "lunch and a drink",
+        "their schoolbooks",
+        "a camera"
+      ],
+      "answer": 1
+    },
+    {
+      "item_id": "kr-a2-03",
+      "area": "reading",
+      "band": "A2",
+      "tags": [
+        "read.short-messages",
+        "gram.present-continuous"
+      ],
+      "skill_ids": [
+        "en.read.short-messages",
+        "en.gram.present-continuous"
+      ],
+      "type": "read_choice",
+      "instruction": {
+        "ru": "Прочитай и выбери ответ.",
+        "uz": "Oʻqi va javobni tanla."
+      },
+      "prompt_en": "What is Nina's brother doing?",
+      "passage_en": "Hi Tim! We're at Grandpa's farm. The sun is shining and my little brother is feeding the chickens. Dad is fixing the fence. See you soon! Nina",
+      "audio_text_en": null,
+      "options": [
+        "fixing the fence",
+        "writing a message",
+        "playing football",
+        "feeding the chickens"
+      ],
+      "answer": 3
+    },
+    {
+      "item_id": "kl-a0-01",
+      "area": "listening",
+      "band": "A0",
+      "tags": [
+        "voc.numbers"
+      ],
+      "skill_ids": [
+        "en.voc.numbers"
+      ],
+      "type": "listen_choice",
+      "instruction": {
+        "ru": "Послушай и выбери ответ.",
+        "uz": "Tingla va javobni tanla."
+      },
+      "prompt_en": "How many cats are there?",
+      "passage_en": null,
+      "audio_text_en": "I have three cats and one dog.",
+      "options": [
+        "1",
+        "3",
+        "2",
+        "4"
+      ],
+      "answer": 1
+    },
+    {
+      "item_id": "kl-a0-02",
+      "area": "listening",
+      "band": "A0",
+      "tags": [
+        "func.introduce",
+        "voc.numbers"
+      ],
+      "skill_ids": [
+        "en.func.introduce",
+        "en.voc.numbers"
+      ],
+      "type": "listen_choice",
+      "instruction": {
+        "ru": "Послушай и выбери ответ.",
+        "uz": "Tingla va javobni tanla."
+      },
+      "prompt_en": "How old is Rustam?",
+      "passage_en": null,
+      "audio_text_en": "Hello! I'm Rustam. I'm nine.",
+      "options": [
+        "5",
+        "19",
+        "9",
+        "7"
+      ],
+      "answer": 2
+    },
+    {
+      "item_id": "kl-a0-03",
+      "area": "listening",
+      "band": "A0",
+      "tags": [
+        "voc.family",
+        "gram.to-be"
+      ],
+      "skill_ids": [
+        "en.voc.family",
+        "en.gram.to-be"
+      ],
+      "type": "listen_choice",
+      "instruction": {
+        "ru": "Послушай и выбери ответ.",
+        "uz": "Tingla va javobni tanla."
+      },
+      "prompt_en": "Who is a cook?",
+      "passage_en": null,
+      "audio_text_en": "This is my dad. He is a cook.",
+      "options": [
+        "dad",
+        "mum",
+        "grandma",
+        "brother"
+      ],
+      "answer": 0
+    },
+    {
+      "item_id": "kl-a1-01",
+      "area": "listening",
+      "band": "A1",
+      "tags": [
+        "voc.clothes-colors"
+      ],
+      "skill_ids": [
+        "en.voc.clothes-colors"
+      ],
+      "type": "listen_choice",
+      "instruction": {
+        "ru": "Послушай и выбери ответ.",
+        "uz": "Tingla va javobni tanla."
+      },
+      "prompt_en": "What colour is the bag?",
+      "passage_en": null,
+      "audio_text_en": "My bag is red, and my pencil case is green.",
+      "options": [
+        "red",
+        "green",
+        "blue",
+        "yellow"
+      ],
+      "answer": 0
+    },
+    {
+      "item_id": "kl-a1-02",
+      "area": "listening",
+      "band": "A1",
+      "tags": [
+        "func.order-drink"
+      ],
+      "skill_ids": [
+        "en.func.order-drink"
+      ],
+      "type": "listen_choice",
+      "instruction": {
+        "ru": "Послушай и выбери ответ.",
+        "uz": "Tingla va javobni tanla."
+      },
+      "prompt_en": "Which drink do they ask for?",
+      "passage_en": null,
+      "audio_text_en": "Can I have an orange juice, please? — Yes, here you are.",
+      "options": [
+        "apple juice",
+        "milk",
+        "orange juice",
+        "water"
+      ],
+      "answer": 2
+    },
+    {
+      "item_id": "kl-a1-03",
+      "area": "listening",
+      "band": "A1",
+      "tags": [
+        "listen.numbers-times"
+      ],
+      "skill_ids": [
+        "en.listen.numbers-times"
+      ],
+      "type": "listen_choice",
+      "instruction": {
+        "ru": "Послушай и выбери ответ.",
+        "uz": "Tingla va javobni tanla."
+      },
+      "prompt_en": "When does school finish?",
+      "passage_en": null,
+      "audio_text_en": "School starts at eight o'clock and finishes at two o'clock.",
+      "options": [
+        "at 8:00",
+        "at 2:00",
+        "at 12:00",
+        "at 3:00"
+      ],
+      "answer": 1
+    },
+    {
+      "item_id": "kl-a2-01",
+      "area": "listening",
+      "band": "A2",
+      "tags": [
+        "listen.short-dialogues",
+        "gram.past-simple"
+      ],
+      "skill_ids": [
+        "en.listen.short-dialogues",
+        "en.gram.past-simple"
+      ],
+      "type": "listen_choice",
+      "instruction": {
+        "ru": "Послушай и выбери ответ.",
+        "uz": "Tingla va javobni tanla."
+      },
+      "prompt_en": "Where was Sam yesterday?",
+      "passage_en": null,
+      "audio_text_en": "Where were you yesterday, Sam? — I was at the beach with my family. We swam in the sea!",
+      "options": [
+        "at the zoo",
+        "at school",
+        "at the pool",
+        "at the beach"
+      ],
+      "answer": 3
+    },
+    {
+      "item_id": "kl-a2-02",
+      "area": "listening",
+      "band": "A2",
+      "tags": [
+        "listen.short-dialogues",
+        "gram.present-continuous"
+      ],
+      "skill_ids": [
+        "en.listen.short-dialogues",
+        "en.gram.present-continuous"
+      ],
+      "type": "listen_choice",
+      "instruction": {
+        "ru": "Послушай и выбери ответ.",
+        "uz": "Tingla va javobni tanla."
+      },
+      "prompt_en": "What is Lily doing?",
+      "passage_en": null,
+      "audio_text_en": "What are you doing, Lily? — I'm drawing a horse for my grandpa.",
+      "options": [
+        "riding a horse",
+        "drawing a horse",
+        "reading a book",
+        "feeding a horse"
+      ],
+      "answer": 1
+    },
+    {
+      "item_id": "kl-a2-03",
+      "area": "listening",
+      "band": "A2",
+      "tags": [
+        "listen.short-dialogues"
+      ],
+      "skill_ids": [
+        "en.listen.short-dialogues"
+      ],
+      "type": "listen_choice",
+      "instruction": {
+        "ru": "Послушай и выбери ответ.",
+        "uz": "Tingla va javobni tanla."
+      },
+      "prompt_en": "What will they do after lunch?",
+      "passage_en": null,
+      "audio_text_en": "Mum, can we go to the park after lunch? — Not today, it's going to rain. Let's play a board game at home.",
+      "options": [
+        "go to the park",
+        "go to a cafe",
+        "play in the rain",
+        "play a game at home"
+      ],
+      "answer": 3
+    }
+  ]
+}

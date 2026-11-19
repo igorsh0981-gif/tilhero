@@ -1,0 +1,137 @@
+/* ==========================================================================
+   Sprint 3 screens in the notebook language: placement test (items, word order, listening), result (band scale,
+   confidence, «почему так»), skill map, «Мой план», practice (scenarios, media), song / film requests.
+   Same discipline as packages/ui-tokens: tokens only, no colour literals; states are never shown by colour alone
+   (icons, words, aria). Appended to the `layout` layer of ui-tokens (request to move into ui-tokens — README).
+   ========================================================================== */
+@layer layout {
+  .dx-wrap { display: contents; }
+  .dx-hero { height: 120px; width: auto; margin: 0 auto; }
+
+  /* ---------- progress of the test ---------- */
+  .dx-top { display: flex; flex-direction: column; gap: 6px; }
+  .dx-top .hrow { min-height: var(--tap); }
+  .dx-prog { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+  .dx-prog > div { height: 100%; background: var(--pen); border-radius: 5px; transition: width var(--dur) var(--ease); }
+  .dx-q { font-size: var(--fs-h2); font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+  .dx-q .gap {
+    display: inline-block; min-width: 3.2em; border-bottom: 2.5px solid var(--pen); margin: 0 3px; text-align: center;
+    color: var(--pen); font-weight: 700;
+  }
+  .dx-instr { font-size: var(--fs-md); color: var(--ink2); }
+  .dx-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 10px; }
+  .passage { font-size: 16px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .notice { display: flex; gap: 10px; align-items: flex-start; }
+  .notice svg { flex-shrink: 0; margin-top: 1px; }
+
+  /* ---------- word order: answer line + bank ---------- */
+  .ow-line {
+    min-height: 64px; border: 2px dashed var(--line); border-radius: var(--r-card); padding: 8px; display: flex; flex-wrap: wrap;
+    gap: 8px; align-content: flex-start; background: var(--card);
+  }
+  .ow-line.over { border-color: var(--pen); background: var(--pen-soft); }
+  .ow-line .ph { color: var(--ink2); font-size: var(--fs-md); padding: 10px 6px; }
+  .ow-bank { display: flex; flex-wrap: wrap; gap: 8px; min-height: var(--tap); }
+  .ow-word {
+    min-height: var(--tap); min-width: var(--tap); padding: 0 14px; border-radius: 12px; border: 1.5px solid var(--ink);
+    background: var(--card); color: var(--ink); font: 600 16px var(--font-body); cursor: grab; touch-action: manipulation;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .ow-line .ow-word { background: var(--pen); border-color: var(--pen); color: var(--pen-ink); }
+  .ow-word:active { cursor: grabbing; }
+
+  /* ---------- listening ---------- */
+  .listen { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px 0; }
+  .listen-btn {
+    width: 84px; height: 84px; border-radius: 42px; border: 0; background: var(--pen); color: var(--pen-ink); display: grid;
+    place-items: center; cursor: pointer; box-shadow: var(--lift-shadow);
+  }
+  .listen-btn:disabled { opacity: .42; cursor: not-allowed; }
+  .listen-btn.playing { outline: 4px solid var(--pen-soft); }
+
+  /* ---------- children: bigger targets, friendlier rhythm ---------- */
+  .app[data-learner="child"] .dx .opt { min-height: 64px; font-size: 17px; }
+  .app[data-learner="child"] .dx .btn, .app[data-learner="child"] .dx .btn2 { min-height: 56px; font-size: 16.5px; }
+  .app[data-learner="child"] .dx .ow-word { min-height: 52px; font-size: 18px; }
+  .app[data-learner="child"] .dx .listen-btn { width: 96px; height: 96px; border-radius: 48px; }
+
+  /* ---------- result: areas, band scale, confidence ---------- */
+  .area { display: flex; flex-direction: column; gap: 8px; }
+  .area-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .bands { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+  .bands span {
+    height: 22px; border-radius: 6px; background: var(--line); color: var(--ink2); font-size: 10.5px; font-weight: 700;
+    display: grid; place-items: center;
+  }
+  .bands span.on { background: var(--pen); color: var(--pen-ink); }
+  .bands span.cur { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .conf { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--ink2); }
+  .conf i { width: 9px; height: 9px; border-radius: 5px; border: 1.5px solid var(--ink2); display: inline-block; }
+  .conf i.on { background: var(--ink); border-color: var(--ink); }
+  details.why { border-top: 1px dashed var(--line); padding-top: 6px; }
+  .area > details.why:last-child { margin-bottom: -8px; }
+  details.legend { padding-top: 4px; padding-bottom: 4px; }
+  details.legend[open] { padding-bottom: 12px; }
+  details.why > summary, details.legend > summary {
+    cursor: pointer; min-height: var(--tap); display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px;
+    color: var(--pen); list-style: none;
+  }
+  details.why > summary::-webkit-details-marker, details.legend > summary::-webkit-details-marker { display: none; }
+  details.why > summary::before, details.legend > summary::before { content: "▸"; display: inline-block; transition: transform var(--dur-fast); }
+  details.why[open] > summary::before, details.legend[open] > summary::before { transform: rotate(90deg); }
+  .ev { display: flex; align-items: center; gap: 8px; font-size: var(--fs-md); padding: 4px 0; }
+  .ev b { font-weight: 600; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .evb { display: flex; align-items: center; gap: 10px; }
+  .evb .prog { height: 6px; display: block; }
+  .evb .prog > span { display: block; height: 100%; background: var(--ok); border-radius: 4px; }
+  .mk { width: 22px; height: 22px; border-radius: 11px; display: grid; place-items: center; flex-shrink: 0; font-size: 12px; font-weight: 800; }
+  .mk.ok { background: var(--ok-soft); color: var(--ok); }
+  .mk.no { background: var(--err-soft); color: var(--err); }
+  .cert { display: flex; gap: 10px; align-items: flex-start; }
+  .cert svg { flex-shrink: 0; color: var(--warn); }
+
+  /* ---------- skill states: shape + word, not colour only ---------- */
+  .st {
+    display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 2px 9px 2px 5px; border-radius: 12px;
+    font-size: var(--fs-xs); font-weight: 700; white-space: nowrap; border: 1.5px solid transparent;
+  }
+  .st .g { width: 16px; height: 16px; display: grid; place-items: center; font-size: 13px; line-height: 1; }
+  .st.not_started { background: var(--line); color: var(--ink2); }
+  .st.learning { background: var(--warn-soft); color: var(--warn); }
+  .st.demonstrated { background: var(--pen-soft); color: var(--pen); }
+  .st.retained { background: var(--ok-soft); color: var(--ok); }
+  .counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .count { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: var(--r-card); background: var(--card); border: 1px solid var(--line); }
+  .count b { font-size: 20px; font-variant-numeric: tabular-nums; }
+  .skill { display: flex; flex-direction: column; gap: 6px; }
+  .skill + .skill { border-top: 1px solid var(--line); }
+  .skill > [data-testid="skill-history"] { padding-bottom: 12px; }
+  .blk { display: block; }
+
+  /* ---------- lesson cards of the plan ---------- */
+  .stagebar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; }
+  .stagebar > span { background: var(--pen); opacity: .35; }
+  .stagebar > span:nth-child(2n) { opacity: .6; }
+  .stagebar > span:nth-child(3) { opacity: 1; }
+  .stages { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: var(--fs-sm); color: var(--ink2); }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  /* ---------- filters ---------- */
+  .filters { display: flex; flex-direction: column; gap: 8px; }
+  .chips.x { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+  .chips.x::-webkit-scrollbar { display: none; }
+  .chips.x .chip { flex-shrink: 0; }
+
+  /* ---------- scenarios & media ---------- */
+  .line-en { font-size: 17px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+  .gloss { font-size: var(--fs-md); color: var(--ink2); }
+  .tr {
+    display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line);
+    background: transparent; color: var(--ink); font: inherit; padding: 10px 0; min-height: var(--tap); cursor: pointer;
+  }
+  .tr:last-child { border-bottom: 0; }
+  .tr .sp { font-size: 11.5px; font-weight: 700; color: var(--pen); text-transform: uppercase; letter-spacing: .03em; }
+  .tts { display: inline-flex; align-items: center; gap: 4px; }
+  textarea.inp { min-height: 96px; line-height: 1.4; }
+  .req { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+}

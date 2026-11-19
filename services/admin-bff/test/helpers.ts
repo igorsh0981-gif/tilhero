@@ -28,6 +28,8 @@ export const URLS = {
   audit: "http://audit.test",
   experience: "http://experience.test",
   notifications: "http://notifications.test",
+  catalog: "http://catalog.test",
+  diagnostics: "http://diagnostics.test",
 } as const;
 export type Service = keyof typeof URLS;
 export const AUD: Record<Service, string> = {
@@ -38,6 +40,8 @@ export const AUD: Record<Service, string> = {
   audit: "audit",
   experience: "experience-config",
   notifications: "notifications",
+  catalog: "catalog",
+  diagnostics: "diagnostics",
 };
 
 export function testConfig(env: Record<string, string> = {}): Config {
@@ -57,6 +61,8 @@ export function testConfig(env: Record<string, string> = {}): Config {
     AUDIT_URL: URLS.audit,
     EXPERIENCE_URL: URLS.experience,
     NOTIFICATIONS_URL: URLS.notifications,
+    CATALOG_URL: URLS.catalog,
+    DIAGNOSTICS_URL: URLS.diagnostics,
     UPSTREAM_RETRIES: "0",
     UPSTREAM_TIMEOUT_MS: "2000",
     DASHBOARD_TIMEOUT_MS: "500",
@@ -489,6 +495,181 @@ export const WHATS_NEW_SUMMARY = {
 };
 export const CAMPAIGN_SUMMARY = { scheduled: 1, sending: 0, sent_in_period: 2, delivered_in_period: 1500 };
 
+
+// ---------------------------------------------------------------- контент и диагностика (спринт 3)
+
+export const AUTHOR_ID = "2b6f1c3d-4e5a-4b7c-8d9e-0f1a2b3c4d5e";
+export const REVIEWER_ID = "3c7a2d4e-5f6b-4c8d-9e0f-1a2b3c4d5e6f";
+export const SEED_ACTOR_ID = "00000000-0000-4000-a000-000000005eed";
+export const REQUEST_ID = "4d8b3e5f-6a7c-4d9e-8f0a-2b3c4d5e6f70";
+export const BLOB_ID = "5e9c4f6a-7b8d-4e0f-9a1b-3c4d5e6f7a81";
+export const PAYLOAD_HASH = "a".repeat(64);
+/** Минимальный mp3 (ID3) — для предпросмотра. */
+export const MP3_BYTES = Buffer.concat([Buffer.from("ID3"), Buffer.alloc(61, 1)]);
+
+export function contentRowDomain(p: Record<string, unknown> = {}) {
+  return {
+    kind: "lesson",
+    key: "l-a1-01-greetings",
+    title: { ru: "Приветствие", uz: "Salomlashish" },
+    published_version: 1,
+    latest_version: 2,
+    latest_status: "draft",
+    level: "A1",
+    updated_at: "2026-11-18T10:00:00Z",
+    // id для имени — клиенту не уходит
+    updated_by: AUTHOR_ID,
+    updated_by_name: "от домена не берётся",
+    rights_warning: null,
+    ...p,
+  };
+}
+
+export function versionMeta(p: Record<string, unknown> = {}) {
+  return {
+    version: 2,
+    status: "draft",
+    author_id: AUTHOR_ID,
+    author_name: null,
+    created_at: "2026-11-18T09:00:00Z",
+    submitted_at: null,
+    reviewer_id: null,
+    reviewer_name: null,
+    reviewed_at: null,
+    review_note: null,
+    locale_checks: { ru: "draft", uz: "draft" },
+    rights_approved_by: null,
+    rights_approved_by_name: null,
+    rights_approved_at: null,
+    published_by: null,
+    published_by_name: null,
+    published_at: null,
+    archived_at: null,
+    suspended_at: null,
+    suspend_reason: null,
+    ...p,
+  };
+}
+
+export function scenarioTestRun(p: Record<string, unknown> = {}) {
+  return {
+    ok: false,
+    checked_at: "2026-11-18T10:00:00Z",
+    issues: [{ code: "DEAD_END", node_id: "n4", detail: "Из узла нет переходов" }],
+    stats: { nodes: 7, ends: { success: 1, alt_success: 0, fail: 1 }, max_depth: 5, paths_to_success: 2 },
+    ...p,
+  };
+}
+
+export function contentVersion(p: Record<string, unknown> = {}) {
+  return {
+    ...versionMeta(),
+    kind: "lesson",
+    key: "l-a1-01-greetings",
+    payload: { lesson_id: "l-a1-01-greetings", title: { ru: "Приветствие", uz: "Salomlashish" }, stages: [] },
+    payload_hash: PAYLOAD_HASH,
+    test_run: null,
+    // служебное поле домена — не уходит клиенту
+    editors: [AUTHOR_ID],
+    ...p,
+  };
+}
+
+const KIND_COUNTS = { published: 1, drafts: 2, in_review: 1 };
+export const CONTENT_SUMMARY = {
+  by_kind: Object.fromEntries(["course", "skill", "module", "lesson", "rubric", "scenario", "media_asset", "media_exercise"].map((k) => [k, KIND_COUNTS])),
+  in_review: 8,
+  rights_expiring: [{ asset_id: "m-own-coffee-order", title: { ru: "Кофе", uz: "Qahva" }, valid_to: "2026-11-30" }],
+  suspended_media: 1,
+  new_media_requests: 3,
+};
+
+export function mediaRequest(p: Record<string, unknown> = {}) {
+  return {
+    request_id: REQUEST_ID,
+    user_id: LEARNER_ID,
+    kind: "song",
+    title: "Imagine",
+    link: "https://example.com/song",
+    comment: "Хочу разобрать\nприпев",
+    ui_locale: "uz",
+    status: "new",
+    decision_note: null,
+    linked_asset_id: null,
+    decided_by: null,
+    decided_by_name: null,
+    decided_at: null,
+    created_at: "2026-11-17T10:00:00Z",
+    similar_count: 2,
+    ...p,
+  };
+}
+
+export function audioBlob(p: Record<string, unknown> = {}) {
+  return { blob_id: BLOB_ID, content_type: "audio/mpeg", size: MP3_BYTES.length, sha256: "b".repeat(64), created_at: "2026-11-18T10:00:00Z", ...p };
+}
+
+export function languageRow(p: Record<string, unknown> = {}) {
+  return {
+    code: "en",
+    name: { ru: "Английский", uz: "Ingliz tili", en: "English" },
+    script: "Latn",
+    variants: ["en-GB", "en-US"],
+    asr: null,
+    tts: { provider: "device", voices: ["en-GB"] },
+    limitations: null,
+    status: "active",
+    ...p,
+  };
+}
+
+export function pairCard(p: Record<string, unknown> = {}) {
+  return {
+    pair_id: "ru-en",
+    source: "ru",
+    target: "en",
+    explanation_locales: ["ru"],
+    ui_locales: ["ru", "uz"],
+    title: { ru: "Английский (объяснения на русском)", uz: "Ingliz tili (rus tilida)" },
+    status: "published",
+    release_at: null,
+    course_id: "en-core",
+    readiness: {
+      skills: 40,
+      lessons_published: 24,
+      scenarios_published: 24,
+      rubrics_published: 4,
+      media_published: 8,
+      diagnostic_test: null,
+      locales_checked_pct: 100,
+    },
+    learners: 0,
+    updated_by: AUTHOR_ID,
+    ...p,
+  };
+}
+
+export function diagnosticTestRow(p: Record<string, unknown> = {}) {
+  return {
+    test_id: "dx-en-adult",
+    pair_id: "ru-en",
+    audience: "adults",
+    published_version: 1,
+    versions: [{ version: 1, status: "published", items: 90, published_at: "2026-11-18T00:00:00Z" }],
+    ...p,
+  };
+}
+
+export const DIAGNOSTIC_STATS = {
+  period: "today",
+  started: 10,
+  finished: 7,
+  median_minutes: 12.5,
+  by_level: { A0: 1, A1: 3, A2: 2, B1: 1, B2: 0, none: 0 },
+  not_assessed_pct: { vocabulary: 0, grammar: 0, reading: 14.3, listening: 28.6 },
+  followups: 1,
+};
+
 export class FakeDomains {
   readonly calls: Call[] = [];
   readonly staff = new Map<string, FakeStaff>();
@@ -621,7 +802,82 @@ export class FakeDomains {
         return this.experience(c, key);
       case "notifications":
         return this.notifications(c, key);
+      case "catalog":
+        return this.catalog(c, key);
+      case "diagnostics":
+        return this.diagnostics(c, key);
     }
+    return domainError(404, "NOT_FOUND");
+  }
+
+  private catalog(c: Call, key: string): Response {
+    const B = "/admin/v1/content";
+    if (key === `GET ${B}/summary`) return json(200, CONTENT_SUMMARY);
+    if (key === `GET ${B}/review-queue`) return json(200, { items: [contentRowDomain({ latest_status: "in_review" })], next_cursor: null });
+    if (key === `POST ${B}/blobs`) return json(201, audioBlob({ content_type: c.body.content_type }));
+    if (c.method === "GET" && c.path.startsWith(`${B}/blobs/`)) {
+      return new Response(new Uint8Array(MP3_BYTES), { status: 200, headers: { "content-type": "audio/mpeg", etag: '"bbb"' } });
+    }
+    if (key === `GET ${B}/media-requests`) return json(200, { items: [mediaRequest()], next_cursor: null });
+    const mr = /^\/admin\/v1\/content\/media-requests\/([^/]+)\/(take|decide)$/.exec(c.path);
+    if (c.method === "POST" && mr) {
+      if (mr[2] === "take") return json(200, mediaRequest({ request_id: mr[1], status: "in_review" }));
+      return json(200, mediaRequest({ request_id: mr[1], status: c.body.status, decision_note: c.body.note, linked_asset_id: c.body.linked_asset_id ?? null, decided_by: c.actor?.id, decided_at: "2026-11-18T11:00:00Z" }));
+    }
+    if (key === "GET /admin/v1/languages") return json(200, { items: [languageRow(), languageRow({ code: "kk", status: "planned", tts: null, name: { ru: "Казахский", uz: "Qozoq tili", en: "Kazakh" } })] });
+    if (c.method === "PUT" && c.path.startsWith("/admin/v1/languages/")) return json(200, { ...c.body, updated_by: c.actor?.id });
+    if (key === "GET /admin/v1/language-pairs") {
+      return json(200, { items: [pairCard(), pairCard({ pair_id: "ru-uz", target: "uz", status: "planned", course_id: null, title: { ru: "Узбекский", uz: "Oʻzbek tili" } })] });
+    }
+    if (c.method === "PUT" && c.path.startsWith("/admin/v1/language-pairs/")) {
+      const { reason: _r, ...pair } = c.body;
+      return json(200, pairCard(pair));
+    }
+    const m = /^\/admin\/v1\/content\/([a-z_]+)(?:\/([^/]+)(?:\/(versions|archive|rollback)(?:\/(\d+)(?:\/([a-z-]+))?)?)?)?$/.exec(c.path);
+    if (m) {
+      const [, kind, k, sub, v, verb] = m;
+      const ver = (p: Record<string, unknown> = {}) => contentVersion({ kind, key: k ?? "new-key", ...p });
+      if (!k && c.method === "GET") return json(200, { items: [contentRowDomain({ kind })], next_cursor: null });
+      if (!k && c.method === "POST") return json(201, ver({ version: 1, payload: c.body.payload, author_id: c.actor?.id }));
+      if (k && !sub && c.method === "GET") {
+        return json(200, { row: contentRowDomain({ kind, key: k }), versions: [versionMeta(), versionMeta({ version: 1, status: "published", published_by: REVIEWER_ID, published_at: "2026-11-01T00:00:00Z", reviewer_id: REVIEWER_ID })] });
+      }
+      if (sub === "versions" && !v && c.method === "POST") return json(201, ver({ version: 3, author_id: c.actor?.id }));
+      if (sub === "versions" && v && !verb && c.method === "GET") return json(200, ver({ version: Number(v) }));
+      if (sub === "versions" && v && !verb && c.method === "PUT") return json(200, ver({ version: Number(v), payload: c.body.payload }));
+      if (verb === "validate") return json(200, { ok: false, errors: [{ path: "payload.title.uz", code: "LOCALE_MISSING", message: "Пустой перевод" }] });
+      if (verb === "submit") return json(200, ver({ version: Number(v), status: "in_review", submitted_at: "2026-11-18T10:00:00Z" }));
+      if (verb === "review") {
+        return json(200, ver({ version: Number(v), status: c.body.decision === "approve" ? "approved" : "draft", reviewer_id: c.actor?.id, reviewed_at: "2026-11-18T10:05:00Z", review_note: c.body.note, locale_checks: c.body.locale_checks }));
+      }
+      if (verb === "publish") return json(200, ver({ version: Number(v), status: "published", published_by: c.actor?.id, published_at: "2026-11-18T10:10:00Z" }));
+      if (verb === "test-run") return json(200, scenarioTestRun());
+      if (verb === "rights-approve") return json(200, ver({ version: Number(v), rights_approved_by: c.actor?.id, rights_approved_at: "2026-11-18T10:00:00Z" }));
+      if (sub === "archive") return json(200, { row: contentRowDomain({ kind, key: k, published_version: null, latest_status: "archived", updated_by: c.actor?.id }) });
+      if (sub === "rollback") return json(200, ver({ version: c.body.to_version, status: "published", published_by: c.actor?.id }));
+    }
+    return domainError(404, "NOT_FOUND");
+  }
+
+  private diagnostics(c: Call, key: string): Response {
+    const B = "/admin/v1/diagnostics";
+    if (key === `GET ${B}/tests`) {
+      return json(200, { items: [diagnosticTestRow(), diagnosticTestRow({ test_id: "dx-en-kids", audience: "kids", versions: [{ version: 1, status: "published", items: 36, published_at: null }] })] });
+    }
+    if (key === `GET ${B}/stats`) return json(200, { ...DIAGNOSTIC_STATS, period: c.query.period ?? "today" });
+    if (key === `GET ${B}/pairs`) return json(200, { items: [{ pair_id: "ru-en", learners: 12 }] });
+    const m = /^\/admin\/v1\/diagnostics\/tests\/([^/]+)\/versions\/(\d+)(\/publish)?$/.exec(c.path);
+    if (m && c.method === "GET" && !m[3]) {
+      return json(200, {
+        test_id: m[1],
+        version: Number(m[2]),
+        status: "published",
+        config: { areas: ["vocabulary", "grammar", "reading", "listening"], items_per_area: 6 },
+        items: [{ item_id: "v-a1-01", area: "vocabulary", band: "A1", answer: 1 }],
+        coverage: { vocabulary: { A0: 4, A1: 6, A2: 6, B1: 4, B2: 2 } },
+      });
+    }
+    if (m && c.method === "POST" && m[3]) return json(200, diagnosticTestRow({ test_id: m[1], published_version: Number(m[2]) }));
     return domainError(404, "NOT_FOUND");
   }
 

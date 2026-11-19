@@ -32,3 +32,6 @@ railway-vars/
 test-results/
 playwright-report/
 apps/telegram-miniapp/e2e/shots/
+
+# дамп Redis локального стенда
+*.rdb

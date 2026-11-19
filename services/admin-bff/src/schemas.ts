@@ -5,7 +5,7 @@
  */
 import { ALL_PERMISSIONS, ROLE_CODES } from "./rbac.js";
 
-type Schema = Record<string, unknown>;
+export type Schema = Record<string, unknown>;
 
 export const str = (minLength: number, maxLength: number, extra: Schema = {}): Schema => ({
   type: "string",
@@ -90,7 +90,11 @@ export const ESCALATION_TYPE = enumOf(["billing_review", "assessment_review", "c
 
 // ---------------------------------------------------------------- «Что нового» (admin.ts ReleaseNoteContent)
 
-export const NOTE_ROUTES = ["home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news"] as const;
+export const NOTE_ROUTES = [
+  "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
+  // спринт 3
+  "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
+] as const;
 export const NOTE_ICONS = [
   "spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield", "globe", "trophy", "news",
 ] as const;
@@ -160,3 +164,102 @@ export const CAMPAIGN_SCHEDULE = obj(
   { expected_version: EXPECTED_VERSION, send_at: nullable(DATETIME), reason: REASON },
   ["expected_version", "send_at", "reason"],
 );
+
+// ---------------------------------------------------------------- контент и диагностика (спринт 3, admin.ts)
+
+export const CONTENT_KINDS = ["course", "skill", "module", "lesson", "rubric", "scenario", "media_asset", "media_exercise"] as const;
+export const VERSION_STATUSES = ["draft", "in_review", "approved", "published", "suspended", "archived"] as const;
+export const BANDS = ["A0", "A1", "A2", "B1", "B2"] as const;
+export const LOCALE_CHECKS = ["missing", "draft", "checked"] as const;
+export const MEDIA_REQUEST_STATUSES = ["new", "in_review", "authored_alternative", "licensed", "rejected", "duplicate"] as const;
+export const AUDIO_TYPES = ["audio/mpeg", "audio/ogg", "audio/mp4"] as const;
+/** Аудио ≤ 3 МБ (catalog MAX_AUDIO_BYTES): в base64 — ≤ 4 194 304 символа; домен проверяет размер и сигнатуру. */
+export const AUDIO_MAX_BYTES = 3 * 1024 * 1024;
+/** Лимит тела POST /admin/v1/content/blobs — «4,5 МБ», как UPLOAD_MAX_BYTES catalog (остальные маршруты — 64 КБ). */
+export const UPLOAD_BODY_LIMIT = 4_500_000;
+/** Тело версии контента (сценарий до 30 узлов с RU/UZ) — до лимита тела домена (tilhero_common, 256 КБ). */
+export const CONTENT_BODY_LIMIT = 256 * 1024;
+
+export const CONTENT_KIND = enumOf(CONTENT_KINDS);
+/** Идентификатор сущности контента (content.ts): [a-z0-9][a-z0-9._-]{1,63}. */
+export const CONTENT_KEY = str(2, 64, { pattern: "^[a-z0-9][a-z0-9._-]{1,63}$" });
+export const VERSION_STATUS = enumOf(VERSION_STATUSES);
+export const BAND = enumOf(BANDS);
+export const LOCALE_CHECK = enumOf(LOCALE_CHECKS);
+/** Тело версии — JSON-объект; схему вида проверяет catalog (422 CONTENT_INVALID {errors: [{path, code, message}]}). */
+export const CONTENT_PAYLOAD: Schema = { type: "object" };
+export const CONTENT_CREATE = obj({ payload: CONTENT_PAYLOAD }, ["payload"]);
+export const CONTENT_NEW_VERSION = obj({ from_version: integer(1, 2_147_483_647) }, ["from_version"]);
+export const CONTENT_UPDATE = obj(
+  { payload: CONTENT_PAYLOAD, expected_hash: str(64, 64, { pattern: "^[0-9a-f]{64}$" }) },
+  ["payload", "expected_hash"],
+);
+/** ContentReviewInput: note 3..1000; при approve обе отметки должны быть checked — проверяет домен. */
+export const CONTENT_REVIEW = obj(
+  {
+    decision: enumOf(["approve", "return"]),
+    note: str(3, 1000),
+    locale_checks: obj({ ru: LOCALE_CHECK, uz: LOCALE_CHECK }, ["ru", "uz"]),
+  },
+  ["decision", "note", "locale_checks"],
+);
+export const CONTENT_ROLLBACK = obj({ to_version: integer(1, 2_147_483_647), reason: REASON }, ["to_version", "reason"]);
+/** Подтверждение прав медиа: note 3..1000 (catalog RightsApproveIn). */
+export const RIGHTS_APPROVE = obj({ note: str(3, 1000) }, ["note"]);
+/** AudioUpload: base64 без пробелов; размер (> 3 МБ), тип и сигнатуру проверяет домен — 422 AUDIO_INVALID {reason}. */
+export const AUDIO_UPLOAD = obj(
+  {
+    filename: str(1, 200),
+    content_type: enumOf(AUDIO_TYPES),
+    data_base64: str(4, 4_400_000, { pattern: "^[A-Za-z0-9+/]*={0,2}$" }),
+  },
+  ["filename", "content_type", "data_base64"],
+);
+export const MEDIA_REQUEST_STATUS = enumOf(MEDIA_REQUEST_STATUSES);
+/** MediaRequestDecision: linked_asset_id — для authored_alternative | licensed (обязательность проверяет домен). */
+export const MEDIA_REQUEST_DECISION = obj(
+  {
+    status: enumOf(["authored_alternative", "licensed", "rejected", "duplicate"]),
+    note: str(3, 500),
+    linked_asset_id: CONTENT_KEY,
+  },
+  ["status", "note"],
+);
+
+const LANG_CODE_PATTERN = "^[a-z]{2,3}(-[A-Z]{2})?$";
+export const LANG_CODE = str(2, 6, { pattern: LANG_CODE_PATTERN });
+export const PAIR_ID = str(5, 7, { pattern: "^[a-z]{2,3}-[a-z]{2,3}$" });
+const SHORT_TEXT = (max: number) => str(1, max);
+/** Language (content.ts) — тело PUT /admin/v1/languages/{code}. */
+export const LANGUAGE_BODY = obj(
+  {
+    code: LANG_CODE,
+    name: obj({ ru: SHORT_TEXT(80), uz: SHORT_TEXT(80), en: SHORT_TEXT(80) }, ["ru", "uz", "en"]),
+    script: enumOf(["Latn", "Cyrl"]),
+    variants: arrayOf(LANG_CODE, 0, 20, { uniqueItems: true }),
+    asr: nullable(obj({ provider: SHORT_TEXT(60), model: SHORT_TEXT(120) }, ["provider", "model"])),
+    tts: nullable(obj({ provider: SHORT_TEXT(60), voices: arrayOf(SHORT_TEXT(60), 0, 50) }, ["provider", "voices"])),
+    limitations: nullable(str(0, 1000)),
+    status: enumOf(["active", "planned"]),
+  },
+  ["code", "name", "script", "variants", "asr", "tts", "limitations", "status"],
+);
+export const PAIR_STATUSES = ["planned", "development", "review", "pilot", "published", "archived"] as const;
+/** LanguagePair & {reason} — тело PUT /admin/v1/language-pairs/{pair_id}. Тексты RU/UZ пустыми проверяет домен. */
+export const PAIR_BODY = obj(
+  {
+    pair_id: PAIR_ID,
+    source: LANG_CODE,
+    target: LANG_CODE,
+    explanation_locales: arrayOf(LANG_CODE, 1, 5, { uniqueItems: true }),
+    ui_locales: arrayOf(UI_LANG, 1, 2, { uniqueItems: true }),
+    title: obj({ ru: str(0, 1000), uz: str(0, 1000) }, ["ru", "uz"]),
+    status: enumOf(PAIR_STATUSES),
+    release_at: nullable(str(10, 40, { pattern: "^\\d{4}-\\d{2}-\\d{2}" })),
+    course_id: nullable(CONTENT_KEY),
+    reason: REASON,
+  },
+  ["pair_id", "source", "target", "explanation_locales", "ui_locales", "title", "status", "release_at", "course_id", "reason"],
+);
+/** Идентификатор теста диагностики (dx-en-adult). */
+export const TEST_ID = CONTENT_KEY;

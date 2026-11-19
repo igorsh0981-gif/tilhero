@@ -1,0 +1,134 @@
+[
+  {
+    "rubric_id": "r-lesson-core",
+    "title": {
+      "ru": "Урок: базовая рубрика",
+      "uz": "Dars: asosiy baholash mezoni"
+    },
+    "applies_to": [
+      "lesson",
+      "scenario",
+      "media_exercise"
+    ],
+    "criteria": [
+      {
+        "code": "task",
+        "title": {
+          "ru": "Выполнение задачи",
+          "uz": "Vazifani bajarish"
+        },
+        "weight": 0.4,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Задача не выполнена",
+              "uz": "Vazifa bajarilmadi"
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Выполнена частично, с большой помощью",
+              "uz": "Qisman, koʻp yordam bilan bajarildi"
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Выполнена с небольшой помощью",
+              "uz": "Ozgina yordam bilan bajarildi"
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Выполнена самостоятельно",
+              "uz": "Mustaqil bajarildi"
+            }
+          }
+        ]
+      },
+      {
+        "code": "vocabulary",
+        "title": {
+          "ru": "Словарь",
+          "uz": "Lugʻat"
+        },
+        "weight": 0.3,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Нужных слов нет",
+              "uz": "Kerakli soʻzlar yoʻq"
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Отдельные слова",
+              "uz": "Alohida soʻzlar"
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Большинство нужных слов",
+              "uz": "Kerakli soʻzlarning koʻpi"
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Все нужные слова к месту",
+              "uz": "Barcha kerakli soʻzlar oʻrnida"
+            }
+          }
+        ]
+      },
+      {
+        "code": "grammar",
+        "title": {
+          "ru": "Грамматика",
+          "uz": "Grammatika"
+        },
+        "weight": 0.3,
+        "bands": [
+          {
+            "score": 0,
+            "descriptor": {
+              "ru": "Фразы непонятны",
+              "uz": "Iboralar tushunarsiz"
+            }
+          },
+          {
+            "score": 1,
+            "descriptor": {
+              "ru": "Много ошибок, смысл ясен с трудом",
+              "uz": "Xatolar koʻp, maʼno qiyin tushuniladi"
+            }
+          },
+          {
+            "score": 2,
+            "descriptor": {
+              "ru": "Есть ошибки, смысл ясен",
+              "uz": "Xatolar bor, maʼno tushunarli"
+            }
+          },
+          {
+            "score": 3,
+            "descriptor": {
+              "ru": "Почти без ошибок",
+              "uz": "Deyarli xatosiz"
+            }
+          }
+        ]
+      }
+    ],
+    "pass_rule": {
+      "min_weighted": 1.5,
+      "min_per_criterion": 1
+    }
+  }
+]

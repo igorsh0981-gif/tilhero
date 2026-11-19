@@ -17,6 +17,9 @@
   проекция владельца семьи; role child — без сообщения (ребёнка добавляет сам родитель);
 - support.ticket.replied.v1 / status.changed→RESOLVED → support.reply / support.resolved (как aievent);
 - experience.release_note.published.v1 → broadcasts (запись центра — при чтении центра, broadcasts.py);
+- catalog.media_request.decided.v1 (спринт 3, только от catalog) → media_request.decided → ученику, категория
+  support (media_request.decided:<request>:<status>; повтор того же решения — без дубля, изменённое решение — новое
+  сообщение); заявки бывают только у аккаунтов 14+, но общая политика (в т.ч. правила детей) не обходится;
 - user.deletion.requested.v1 (только от identity-consent) → удаление → user.domain.deleted.v1 {domain: notifications};
 - user.status.changed / consent.revoked / user.notification_settings.changed / user.profile.updated — сброс кэша
   адресации.
@@ -58,6 +61,9 @@ TICKET_REPLIED = "support.ticket.replied.v1"
 TICKET_STATUS_CHANGED = "support.ticket.status.changed.v1"
 RELEASE_NOTE = "experience.release_note.published.v1"
 DELETION_REQUESTED = "user.deletion.requested.v1"
+MEDIA_REQUEST_DECIDED = "catalog.media_request.decided.v1"
+# Решения по заявкам публикует только catalog (защита в глубину: чужой издатель — лог и подтверждение без записи)
+CATALOG_PRODUCERS = frozenset({"catalog"})
 # Сагу удаления ведёт только identity-consent: запрос от другого издателя не исполняется (защита в глубину, P-7)
 DELETION_PRODUCERS = frozenset({"identity-consent"})
 CACHE_EVENTS = [
@@ -136,6 +142,15 @@ class ReleaseNotePublished(_Payload):
 class DeletionRequested(_Payload):
     user_id: uuid.UUID
     request_id: uuid.UUID
+
+
+class MediaRequestDecided(_Payload):
+    request_id: uuid.UUID
+    user_id: uuid.UUID
+    status: Literal["authored_alternative", "licensed", "rejected", "duplicate"]
+    title: Annotated[str, Field(min_length=1, max_length=200)]
+    linked_asset_id: Annotated[str, Field(max_length=200)] | None = None
+    decided_at: datetime
 
 
 Accept = Callable[..., Awaitable[str]]
@@ -382,6 +397,30 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
             now=datetime.now(UTC),
         )
 
+    # ---------------------------------------------------------------- catalog (спринт 3)
+
+    async def on_catalog(session: AsyncSession, env: Envelope) -> None:
+        """Решение по заявке на песню/фильм (AT-30) → запись ученику через общую политику доставки. В журнал — без
+        названия заявки (это текст ученика)."""
+        if env.producer not in CATALOG_PRODUCERS:
+            log.warning("media request decision from unexpected producer ignored",
+                        extra={"event_type": env.event_type, "producer": env.producer[:64]})
+            return
+        d = MediaRequestDecided.model_validate(env.payload)
+        await accept(
+            session,
+            env,
+            user_id=d.user_id,
+            template="media_request.decided",
+            params={
+                "request_id": str(d.request_id),
+                "request_title": d.title,
+                "status": d.status,
+                "linked_asset_id": d.linked_asset_id,
+            },
+            dedup_key=f"media_request.decided:{d.request_id}:{d.status}",
+        )
+
     # ---------------------------------------------------------------- identity-consent
 
     async def on_user_deleted(session: AsyncSession, env: Envelope) -> None:
@@ -414,6 +453,7 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
         "notifications.social": ([INVITE_ACCEPTED, INVITE_DECLINED, INVITE_REMINDER, MEMBER_ADDED], on_social),
         "notifications.support": ([TICKET_REPLIED, TICKET_STATUS_CHANGED], on_support),
         "notifications.product": ([RELEASE_NOTE], on_release_note),
+        "notifications.catalog": ([MEDIA_REQUEST_DECIDED], on_catalog),
         "notifications.user_deleted": ([DELETION_REQUESTED], on_user_deleted),
         "notifications.delivery_cache": (CACHE_EVENTS, on_user_changed),
     }

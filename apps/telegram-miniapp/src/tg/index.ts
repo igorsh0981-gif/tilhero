@@ -9,4 +9,5 @@ export * from "./popup";
 export * from "./store";
 export * from "./storage";
 export * from "./homeScreen";
+export * from "./speech";
 export type * from "./types";

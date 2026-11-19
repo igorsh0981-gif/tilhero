@@ -47,7 +47,7 @@ export interface SessionPolicy {
   principalCacheSeconds: number;
 }
 
-/** Адреса доменов (INTERNAL_API спринта 2): все обязательны в stage/prod. */
+/** Адреса доменов (INTERNAL_API спринтов 2–3): все обязательны в stage/prod. */
 export interface DomainUrls {
   adminIdentity: string;
   userAdmin: string;
@@ -56,6 +56,10 @@ export interface DomainUrls {
   audit: string;
   experience: string;
   notifications: string;
+  /** спринт 3: контент, медиа, заявки, языки и пары */
+  catalog: string;
+  /** спринт 3: тесты диагностики и статистика */
+  diagnostics: string;
 }
 
 export interface Config {
@@ -103,6 +107,8 @@ export const DEV_DEFAULTS = {
   NOTIFICATIONS_URL: "http://127.0.0.1:8104",
   AUDIT_URL: "http://127.0.0.1:8105",
   EXPERIENCE_URL: "http://127.0.0.1:8106",
+  CATALOG_URL: "http://127.0.0.1:8110",
+  DIAGNOSTICS_URL: "http://127.0.0.1:8111",
 } as const;
 
 /** Переменные адресов доменов (порядок — как в DomainUrls). */
@@ -114,6 +120,8 @@ export const DOMAIN_URL_VARS = {
   audit: "AUDIT_URL",
   experience: "EXPERIENCE_URL",
   notifications: "NOTIFICATIONS_URL",
+  catalog: "CATALOG_URL",
+  diagnostics: "DIAGNOSTICS_URL",
 } as const satisfies Record<keyof DomainUrls, keyof typeof DEV_DEFAULTS>;
 
 export class ConfigError extends Error {

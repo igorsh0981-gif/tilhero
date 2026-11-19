@@ -212,6 +212,8 @@ describe("overview", () => {
       support: { available: true, data: { open: 0, in_progress: 0, waiting_customer: 0, breached: 0, avg_first_response_minutes: null, avg_resolution_minutes: null } },
       whats_new: { available: true, data: { published: 1, drafts: 0, latest: { release_note_id: "x", slug: "2026.10", title: "Октябрь", views_total: 812, published_at: "2026-10-18T10:00:00Z" } } },
       campaigns: { available: true, data: { scheduled: 0, sending: 0, sent_in_period: 0, delivered_in_period: 0 } },
+      content: { available: false, data: null, service: "catalog" },
+      diagnostics: { available: false, data: null, service: "diagnostics" },
     };
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);
     ui(<Overview />, ["dashboard.read"]);
@@ -229,6 +231,8 @@ describe("overview", () => {
       support: { available: false, data: null, service: "support" },
       whats_new: { available: false, data: null, service: "experience-config" },
       campaigns: { available: true, data: { scheduled: 1, sending: 0, sent_in_period: 2, delivered_in_period: 5 } },
+      content: { available: false, data: null, service: "catalog" },
+      diagnostics: { available: false, data: null, service: "diagnostics" },
     };
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);
     ui(<Overview />, ["dashboard.read"]);

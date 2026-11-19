@@ -85,6 +85,7 @@ export function maskUsername(u: string): string {
   return u.length < 5 ? "•••" : `${u.slice(0, 2)}•••${u.slice(-2)}`;
 }
 import { ALL_PERMISSIONS, ROLE_CODES } from "./rbac.js";
+import { NOTE_ROUTES as NOTE_ROUTES_IN } from "./schemas.js";
 
 // ---------------------------------------------------------------- общие
 
@@ -105,9 +106,11 @@ const TICKET_CATEGORIES: readonly TicketCategory[] = [
 const PRIORITIES: readonly TicketPriority[] = ["low", "normal", "high", "urgent"];
 const SLA_STATES: readonly SlaState[] = ["breached", "soon", "ok"];
 const ESCALATION_TYPES: readonly EscalationType[] = ["billing_review", "assessment_review", "content_review", "tech_issue", "security_privacy"];
-const NOTE_ROUTES: readonly ReleaseNoteRoute[] = [
-  "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
-];
+/** Маршруты «Что нового» и кнопок рассылок — тот же список, что проверяет вход (schemas.ts), сверка с admin.ts. */
+const NOTE_ROUTES = NOTE_ROUTES_IN satisfies readonly ReleaseNoteRoute[];
+type MissingNoteRoutes = Exclude<ReleaseNoteRoute, (typeof NOTE_ROUTES)[number]>;
+const _noteRoutesListed: [MissingNoteRoutes] extends [never] ? true : MissingNoteRoutes = true;
+void _noteRoutesListed;
 const NOTE_ICONS: readonly ReleaseNoteIcon[] = [
   "spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield", "globe", "trophy", "news",
 ];

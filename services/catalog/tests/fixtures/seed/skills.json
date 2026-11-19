@@ -1,0 +1,61 @@
+[
+  {
+    "skill_id": "en.func.greet",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Приветствие и знакомство",
+      "uz": "Salomlashish va tanishuv"
+    },
+    "description": {
+      "ru": "Поздороваться, представиться и спросить имя",
+      "uz": "Salomlashish, oʻzini tanishtirish va ismini soʻrash"
+    },
+    "level": "A0",
+    "prerequisites": [],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "func.greet"
+    ]
+  },
+  {
+    "skill_id": "en.gram.to-be",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "Глагол to be",
+      "uz": "to be feʼli"
+    },
+    "description": {
+      "ru": "am, is, are в утверждениях и вопросах",
+      "uz": "am, is, are darak va soʻroq gaplarda"
+    },
+    "level": "A0",
+    "prerequisites": [],
+    "rubric_id": null,
+    "diagnostic_tags": [
+      "gram.to-be"
+    ]
+  },
+  {
+    "skill_id": "en.func.order-drink",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Заказ напитка",
+      "uz": "Ichimlik buyurtma qilish"
+    },
+    "description": {
+      "ru": "Заказать напиток в кафе и выбрать размер",
+      "uz": "Kafeda ichimlik buyurtma qilish va hajmini tanlash"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.func.greet"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "func.order-drink"
+    ]
+  }
+]

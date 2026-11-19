@@ -29,6 +29,8 @@ PARAMS: dict[str, dict] = {
     "support.reply": {"number": "TCK-3081"},
     "support.resolved": {"number": "TCK-3081"},
     "release_note.published": {"release_note_id": INVITE, "slug": "2026.11"},
+    "media_request.decided": {"request_id": INVITE, "request_title": "Moonlight Café", "status": "rejected",
+                              "linked_asset_id": None},
     "pin.reset_code": {"code": "482913", "ttl_minutes": 10},
     "pin.reset_scheduled": {"effective_at": "2026-11-19T05:30:00.000Z"},
 }
@@ -49,6 +51,7 @@ STARTAPP = {
     "support.reply": "ticket_TCK-3081",
     "support.resolved": "ticket_TCK-3081",
     "release_note.published": "route_news",
+    "media_request.decided": "route_media_requests",
 }
 
 

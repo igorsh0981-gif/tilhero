@@ -19,7 +19,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tilhero_common.errors import ApiError, conflict, unprocessable
 from tilhero_common.messaging import emit
 from tilhero_learning_plan.domain import schedule as sch
-from tilhero_learning_plan.models import Activity, DeletedUser, Plan, SlotMark
+from tilhero_learning_plan.models import (
+    Activity,
+    DeletedUser,
+    LearnerAudience,
+    LearnerDiagnostic,
+    Plan,
+    SkillStateProjection,
+    SlotMark,
+    Trajectory,
+)
 from tilhero_learning_plan.schemas import ActivityIn, LearningPlanOut, PlanPatchIn
 
 PLAN_UPDATED = "learning.plan.updated.v1"
@@ -364,7 +373,8 @@ async def record_activity(session: AsyncSession, user_id: uuid.UUID, body: Activ
 
 async def delete_user_data(session: AsyncSession, user_id: uuid.UUID, request_id: uuid.UUID,
                            causation_id: str | None, producer: str) -> None:
-    """Физическое удаление плана, занятий и отметок (TG-FR-006) + ACK саге. Повтор снова подтверждает удаление.
+    """Физическое удаление плана, занятий, отметок, траекторий и проекций (TG-FR-006) + ACK саге. Повтор снова
+    подтверждает удаление.
 
     План удаляется первым: DELETE ждёт tick, который держит план FOR KEY SHARE, — после этого удаление отметок
     видит и отметку, которую tick успел записать (READ COMMITTED), сирот не остаётся."""
@@ -372,6 +382,11 @@ async def delete_user_data(session: AsyncSession, user_id: uuid.UUID, request_id
     await session.execute(delete(Plan).where(Plan.user_id == user_id))
     await session.execute(delete(Activity).where(Activity.user_id == user_id))
     await session.execute(delete(SlotMark).where(SlotMark.user_id == user_id))
+    # спринт 3: ревизии траектории и проекции входов (диагностика, карта навыков, сегмент аудитории)
+    await session.execute(delete(Trajectory).where(Trajectory.user_id == user_id))
+    await session.execute(delete(LearnerDiagnostic).where(LearnerDiagnostic.user_id == user_id))
+    await session.execute(delete(SkillStateProjection).where(SkillStateProjection.user_id == user_id))
+    await session.execute(delete(LearnerAudience).where(LearnerAudience.user_id == user_id))
     await session.execute(
         insert(DeletedUser).values(user_id=user_id, request_id=request_id).on_conflict_do_nothing(
             index_elements=["user_id"])

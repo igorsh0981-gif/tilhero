@@ -17,6 +17,8 @@ const PROD = {
   NOTIFICATIONS_URL: "http://notifications.railway.internal:8104",
   AUDIT_URL: "http://audit.railway.internal:8105",
   EXPERIENCE_URL: "http://experience-config.railway.internal:8106",
+  CATALOG_URL: "http://catalog.railway.internal:8110",
+  DIAGNOSTICS_URL: "http://diagnostics.railway.internal:8111",
 };
 
 function problems(env: Record<string, string>): string[] {
@@ -49,12 +51,17 @@ describe("config", () => {
       audit: "http://127.0.0.1:8105",
       experience: "http://127.0.0.1:8106",
       notifications: "http://127.0.0.1:8104",
+      catalog: "http://127.0.0.1:8110",
+      diagnostics: "http://127.0.0.1:8111",
     });
   });
 
   it("имена переменных адресов — как у telegram-bff (IDENTITY_URL, SUPPORT_URL, NOTIFICATIONS_URL, EXPERIENCE_URL)", () => {
     expect(Object.values(DOMAIN_URL_VARS).sort()).toEqual(
-      ["ADMIN_IDENTITY_URL", "AUDIT_URL", "EXPERIENCE_URL", "IDENTITY_URL", "NOTIFICATIONS_URL", "SUPPORT_URL", "USER_ADMIN_URL"].sort(),
+      [
+        "ADMIN_IDENTITY_URL", "AUDIT_URL", "EXPERIENCE_URL", "IDENTITY_URL", "NOTIFICATIONS_URL", "SUPPORT_URL", "USER_ADMIN_URL",
+        "CATALOG_URL", "DIAGNOSTICS_URL",
+      ].sort(),
     );
     for (const v of Object.values(DOMAIN_URL_VARS)) expect(DEV_DEFAULTS[v]).toMatch(/^http:\/\/127\.0\.0\.1:81\d\d$/);
   });
@@ -65,6 +72,16 @@ describe("config", () => {
       expect(p.some((x) => x.startsWith(name)), name).toBe(true);
     }
     expect(p.some((x) => x.includes("SESSION_SECRET"))).toBe(false);
+  });
+
+  it("спринт 3: CATALOG_URL и DIAGNOSTICS_URL обязательны в stage/prod (порты 8110/8111 в dev)", () => {
+    for (const env of ["stage", "prod"]) {
+      const { CATALOG_URL: _c, DIAGNOSTICS_URL: _d, ...rest } = PROD;
+      const p = problems({ ...rest, ENV: env });
+      expect(p, env).toEqual([expect.stringMatching(/^CATALOG_URL не задана/), expect.stringMatching(/^DIAGNOSTICS_URL не задана/)]);
+    }
+    expect(loadConfig(PROD).urls).toMatchObject({ catalog: PROD.CATALOG_URL, diagnostics: PROD.DIAGNOSTICS_URL });
+    expect(problems({ ...PROD, DIAGNOSTICS_URL: "diagnostics:8111" })).toEqual([expect.stringMatching(/^DIAGNOSTICS_URL=/)]);
   });
 
   it("prod: полный набор — ок, без dev-деривации и без имперсонации; NODE_ENV=production тоже защищённое", () => {

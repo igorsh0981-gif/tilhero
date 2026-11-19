@@ -415,7 +415,9 @@ export interface Family {
 // ---------- «Что нового» и новости (experience-config) ----------
 
 export type ReleaseNoteRoute =
-  | "home" | "lessons" | "review" | "progress" | "profile" | "schedule" | "notifications" | "family" | "support" | "news";
+  | "home" | "lessons" | "review" | "progress" | "profile" | "schedule" | "notifications" | "family" | "support" | "news"
+  // спринт 3 (release-notes.json)
+  | "diagnostics" | "plan" | "skills" | "scenarios" | "media" | "media_requests" | "languages";
 export type ReleaseNoteIcon =
   | "spark" | "hero" | "calendar" | "clock" | "bell" | "book" | "chat" | "mic" | "star" | "flame" | "users" | "gift"
   | "shield" | "globe" | "trophy" | "news";
@@ -616,8 +618,9 @@ export interface AreaResult {
   band: Band | null;
   confidence: number | null; // 0..1
   reason: "too_few_items" | "no_speech_voice" | "not_in_test_yet" | null;
-  /** основания: задания и исход (без ключей ответов) */
-  evidence: Array<{ item_id: string; band: Band; correct: boolean }>;
+  /** основания по полосам (по возрастанию): сколько заданий полосы показано и сколько верно. Без заданий и без
+   *  отметок верно/неверно по отдельным заданиям — иначе результат стал бы «оракулом» ключей банка. Для not_assessed — []. */
+  evidence: Array<{ band: Band; answered: number; correct: number }>;
   needs_followup: boolean;
 }
 
@@ -676,7 +679,7 @@ export interface LessonCard {
   stages: Array<{ type: LessonStageType; minutes: number }>;
 }
 
-/** GET /v1/plan/trajectory → Trajectory. Смена цели (PUT /v1/plan) пересчитывает траекторию. */
+/** GET /v1/plan/trajectory → Trajectory. Смена цели (PATCH /v1/plan) пересчитывает траекторию. */
 export interface Trajectory {
   pair_id: string;
   course_id: string;
@@ -729,8 +732,8 @@ export interface MediaCard {
  *  GET /v1/media/{id}/audio → аудио (прокси с кешем); 404 MEDIA_NOT_AVAILABLE — снят с публикации или права истекли. */
 export interface MediaDetail extends MediaCard {
   attribution: string | null;
-  /** null — транскрипт не разрешён лицензией */
-  transcript: Array<{ t_start_ms: number; t_end_ms: number; speaker: string; text_en: string; gloss: Localized }> | null;
+  /** null — транскрипт не разрешён лицензией; gloss = null — перевод реплик не разрешён (allowed_uses ∌ translation) */
+  transcript: Array<{ t_start_ms: number; t_end_ms: number; speaker: string; text_en: string; gloss: Localized | null }> | null;
   phrases: Array<{ en: string; gloss: Localized }>;
   /** для синтеза речи устройством, если нет аудиофайла */
   voices: Record<string, "en-GB" | "en-US">;
@@ -740,7 +743,7 @@ export interface MediaDetail extends MediaCard {
 
 // ---------- Заявки на песни и фильмы (APP-MEDIA-04) ----------
 /** POST /v1/media/requests (Idempotency-Key) → MediaRequest (201). Детский профиль → 403 KIDS_NOT_ALLOWED;
- *  > 5 в сутки → 429. GET /v1/media/requests → {items: MediaRequest[]}. Это заявка контент-менеджеру:
+ *  > 5 в сутки → 429 MEDIA_REQUEST_LIMIT (Retry-After). GET /v1/media/requests → {items: MediaRequest[]}. Это заявка контент-менеджеру:
  *  ничего не скачивается и не расшифровывается автоматически. */
 export interface MediaRequestCreate {
   kind: "song" | "movie" | "series" | "other";

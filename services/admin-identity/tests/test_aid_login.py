@@ -39,7 +39,7 @@ async def test_bootstrap_first_login_then_mfa_login(env: Env) -> None:
     assert done.json()["next"] == "done" and done.json()["challenge"] is None
     assert p["staff"]["role"] == "super_admin" and p["mfa_enabled"] is True and p["must_change_password"] is False
     assert p["session_version"] == 2 and p["status"] == "ACTIVE"  # смена пароля → рост версии
-    assert p["permissions"] == list(PERMISSIONS)  # super_admin — все 17 прав в порядке admin.ts
+    assert p["permissions"] == list(PERMISSIONS)  # super_admin — все 23 права в порядке admin.ts
     # повторный вход: пароль → TOTP → done (следующий шаг TOTP — повтор текущего запрещён)
     r = await env.login(ROOT_EMAIL, NEW_PASSWORD)
     assert r.json()["next"] == "mfa"

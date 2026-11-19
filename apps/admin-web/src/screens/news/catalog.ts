@@ -24,7 +24,11 @@ export const LANGS: readonly UiLang[] = ["ru", "uz"];
 
 /* ---------------------------------------------------------------- «Что нового» catalogue */
 
-export const NOTE_ROUTES: readonly ReleaseNoteRoute[] = ["home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news"];
+export const NOTE_ROUTES: readonly ReleaseNoteRoute[] = [
+  "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
+  // sprint 3: diagnostics, plan, skill map, scenarios, media library, song/film requests, «Мои языки»
+  "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
+];
 export const NOTE_ICONS: readonly ReleaseNoteIcon[] = ["spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield", "globe", "trophy", "news"];
 export const AUDIENCES: readonly ReleaseNoteAudience[] = ["new", "existing", "all"];
 export const AGE_SEGMENTS: readonly AgeSegment[] = ["kids", "teens", "adults"];

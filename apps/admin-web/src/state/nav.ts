@@ -33,14 +33,15 @@ export interface NavItem {
   /** visible when the staff member has ANY of these permissions (Me.permissions) */
   perms: readonly Permission[];
   /** section of a later sprint: honest «soon» screen with the sprint number */
-  soon?: 3 | 4 | 6;
+  soon?: 4 | 6;
 }
 
 /** Default order and grouping (prototype NAV). */
 export const NAV_ITEMS: readonly NavItem[] = [
   { id: "overview", group: "product", icon: "dashboard", perms: ["dashboard.read"] },
   { id: "users", group: "product", icon: "users", perms: ["users.read"] },
-  { id: "content", group: "product", icon: "book", perms: ["dashboard.read"], soon: 3 },
+  // sprint 3: course, lessons, scenarios, rubrics, media and rights, learners' requests, review, diagnostics
+  { id: "content", group: "product", icon: "book", perms: ["content.read"] },
   { id: "agents", group: "ai", icon: "cpu", perms: ["dashboard.read"], soon: 4 },
   { id: "qa", group: "ai", icon: "clipboardCheck", perms: ["dashboard.read"], soon: 4 },
   { id: "costs", group: "ai", icon: "gauge", perms: ["dashboard.read"], soon: 4 },
@@ -51,7 +52,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: "news", group: "comms", icon: "sparkles", perms: ["whatsnew.manage", "notif.templates.manage", "notif.campaigns.manage"] },
   { id: "support", group: "comms", icon: "support", perms: ["support.read"] },
   { id: "config", group: "manage", icon: "sliders", perms: ["config.read"] },
-  { id: "langs", group: "manage", icon: "globe", perms: ["dashboard.read"], soon: 3 },
+  // sprint 3: languages and language pairs (changes — lang.manage with step-up)
+  { id: "langs", group: "manage", icon: "globe", perms: ["content.read", "lang.manage"] },
   { id: "roles", group: "manage", icon: "shield", perms: ["staff.manage", "roles.manage"] },
   { id: "audit", group: "manage", icon: "audit", perms: ["audit.read"] },
 ];

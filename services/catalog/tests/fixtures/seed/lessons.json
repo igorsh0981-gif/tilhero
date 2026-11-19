@@ -1,0 +1,370 @@
+[
+  {
+    "lesson_id": "l-01-greetings",
+    "course_id": "en-core",
+    "module_id": "m1-meet",
+    "title": {
+      "ru": "Привет! Как тебя зовут?",
+      "uz": "Salom! Isming nima?"
+    },
+    "goal": {
+      "ru": "Поздороваться, представиться и спросить имя",
+      "uz": "Salomlashish, oʻzini tanishtirish va ismini soʻrash"
+    },
+    "level": "A0",
+    "kind": "core",
+    "audience": [
+      "kids",
+      "teens",
+      "adults"
+    ],
+    "goals": [
+      "daily",
+      "travel"
+    ],
+    "topics": [
+      "small_talk"
+    ],
+    "primary_skill_id": "en.func.greet",
+    "secondary_skill_ids": [
+      "en.gram.to-be"
+    ],
+    "prerequisite_skill_ids": [],
+    "duration_min": 20,
+    "stages": [
+      {
+        "type": "retrieval",
+        "minutes": 3,
+        "instructions": {
+          "ru": "Вспомните, как здороваются на вашем языке",
+          "uz": "Oʻz tilingizda qanday salomlashishni eslang"
+        }
+      },
+      {
+        "type": "explanation",
+        "minutes": 5,
+        "instructions": {
+          "ru": "Hello, Hi, Good morning и фраза My name is…",
+          "uz": "Hello, Hi, Good morning va My name is… iborasi"
+        }
+      },
+      {
+        "type": "roleplay",
+        "minutes": 6,
+        "instructions": {
+          "ru": "Познакомьтесь с новым соседом",
+          "uz": "Yangi qoʻshningiz bilan tanishing"
+        }
+      },
+      {
+        "type": "assessment",
+        "minutes": 4,
+        "instructions": {
+          "ru": "Выполните три коротких задания",
+          "uz": "Uchta qisqa topshiriqni bajaring"
+        }
+      },
+      {
+        "type": "summary",
+        "minutes": 2,
+        "instructions": {
+          "ru": "Повторите главные фразы урока",
+          "uz": "Darsning asosiy iboralarini takrorlang"
+        }
+      }
+    ],
+    "key_words": [
+      {
+        "en": "hello",
+        "gloss": {
+          "ru": "привет, здравствуйте",
+          "uz": "salom"
+        },
+        "example_en": "Hello, I'm Sam."
+      },
+      {
+        "en": "good morning",
+        "gloss": {
+          "ru": "доброе утро",
+          "uz": "xayrli tong"
+        },
+        "example_en": "Good morning, Ms Lee!"
+      },
+      {
+        "en": "name",
+        "gloss": {
+          "ru": "имя",
+          "uz": "ism"
+        },
+        "example_en": "My name is Anna."
+      },
+      {
+        "en": "nice to meet you",
+        "gloss": {
+          "ru": "приятно познакомиться",
+          "uz": "tanishganimdan xursandman"
+        },
+        "example_en": "Nice to meet you, Tom."
+      }
+    ],
+    "examples": [
+      {
+        "en": "Hi! I'm Leo. What's your name?",
+        "gloss": {
+          "ru": "Привет! Я Лео. Как тебя зовут?",
+          "uz": "Salom! Men Leoman. Isming nima?"
+        }
+      },
+      {
+        "en": "My name is Dina. Nice to meet you!",
+        "gloss": {
+          "ru": "Меня зовут Дина. Приятно познакомиться!",
+          "uz": "Mening ismim Dina. Tanishganimdan xursandman!"
+        }
+      }
+    ],
+    "scenario_id": null,
+    "rubric_id": "r-lesson-core",
+    "control_items": [
+      {
+        "item_id": "ci-01",
+        "type": "single_choice",
+        "skill_id": "en.func.greet",
+        "instruction": {
+          "ru": "Выберите приветствие для утра",
+          "uz": "Ertalabki salomlashishni tanlang"
+        },
+        "prompt_en": "It is 8 a.m. You say:",
+        "options": [
+          "Good morning!",
+          "Good night!",
+          "Goodbye!"
+        ],
+        "answer": 0
+      },
+      {
+        "item_id": "ci-02",
+        "type": "gap_fill",
+        "skill_id": "en.gram.to-be",
+        "instruction": {
+          "ru": "Вставьте пропущенное слово",
+          "uz": "Tushib qolgan soʻzni qoʻying"
+        },
+        "prompt_en": "My name ___ Anna.",
+        "options": [],
+        "answer": [
+          "is"
+        ]
+      },
+      {
+        "item_id": "ci-03",
+        "type": "order_words",
+        "skill_id": "en.func.greet",
+        "instruction": {
+          "ru": "Соберите фразу из слов",
+          "uz": "Soʻzlardan ibora tuzing"
+        },
+        "prompt_en": "Put the words in order.",
+        "options": [
+          "meet",
+          "Nice",
+          "you",
+          "to"
+        ],
+        "answer": [
+          "Nice",
+          "to",
+          "meet",
+          "you"
+        ]
+      }
+    ],
+    "hints": [
+      {
+        "ru": "Hi — проще, чем Hello",
+        "uz": "Hi — Hello dan soddaroq"
+      }
+    ]
+  },
+  {
+    "lesson_id": "l-07-coffee",
+    "course_id": "en-core",
+    "module_id": "m2-city",
+    "title": {
+      "ru": "В кафе",
+      "uz": "Kafeda"
+    },
+    "goal": {
+      "ru": "Заказать напиток в кафе",
+      "uz": "Kafeda ichimlik buyurtma qilish"
+    },
+    "level": "A1",
+    "kind": "core",
+    "audience": [
+      "kids",
+      "teens",
+      "adults"
+    ],
+    "goals": [
+      "travel",
+      "daily"
+    ],
+    "topics": [
+      "food"
+    ],
+    "primary_skill_id": "en.func.order-drink",
+    "secondary_skill_ids": [],
+    "prerequisite_skill_ids": [
+      "en.func.greet"
+    ],
+    "duration_min": 20,
+    "stages": [
+      {
+        "type": "retrieval",
+        "minutes": 3,
+        "instructions": {
+          "ru": "Вспомните названия напитков",
+          "uz": "Ichimliklar nomlarini eslang"
+        }
+      },
+      {
+        "type": "explanation",
+        "minutes": 5,
+        "instructions": {
+          "ru": "Фразы Can I have…, please? и Small or large?",
+          "uz": "Can I have…, please? va Small or large? iboralari"
+        }
+      },
+      {
+        "type": "roleplay",
+        "minutes": 6,
+        "instructions": {
+          "ru": "Закажите напиток у бариста",
+          "uz": "Baristadan ichimlik buyurtma qiling"
+        }
+      },
+      {
+        "type": "assessment",
+        "minutes": 4,
+        "instructions": {
+          "ru": "Выполните три коротких задания",
+          "uz": "Uchta qisqa topshiriqni bajaring"
+        }
+      },
+      {
+        "type": "summary",
+        "minutes": 2,
+        "instructions": {
+          "ru": "Повторите, как заказать напиток",
+          "uz": "Ichimlik qanday buyurtma qilinishini takrorlang"
+        }
+      }
+    ],
+    "key_words": [
+      {
+        "en": "tea",
+        "gloss": {
+          "ru": "чай",
+          "uz": "choy"
+        },
+        "example_en": "A tea, please."
+      },
+      {
+        "en": "juice",
+        "gloss": {
+          "ru": "сок",
+          "uz": "sharbat"
+        },
+        "example_en": "Can I have an orange juice?"
+      },
+      {
+        "en": "small",
+        "gloss": {
+          "ru": "маленький",
+          "uz": "kichik"
+        },
+        "example_en": "Small, please."
+      },
+      {
+        "en": "please",
+        "gloss": {
+          "ru": "пожалуйста",
+          "uz": "iltimos"
+        },
+        "example_en": "A hot chocolate, please."
+      }
+    ],
+    "examples": [
+      {
+        "en": "Can I have a hot chocolate, please?",
+        "gloss": {
+          "ru": "Можно горячий шоколад, пожалуйста?",
+          "uz": "Issiq shokolad bersangiz, iltimos?"
+        }
+      },
+      {
+        "en": "Small, please. Thank you!",
+        "gloss": {
+          "ru": "Маленький, пожалуйста. Спасибо!",
+          "uz": "Kichik, iltimos. Rahmat!"
+        }
+      }
+    ],
+    "scenario_id": "sc-cafe-coffee",
+    "rubric_id": "r-lesson-core",
+    "control_items": [
+      {
+        "item_id": "ci-01",
+        "type": "single_choice",
+        "skill_id": "en.func.order-drink",
+        "instruction": {
+          "ru": "Как вежливо заказать?",
+          "uz": "Qanday qilib xushmuomalalik bilan buyurtma qilinadi?"
+        },
+        "prompt_en": "You want tea. You say:",
+        "options": [
+          "A tea, please.",
+          "Tea now!",
+          "Give tea."
+        ],
+        "answer": 0
+      },
+      {
+        "item_id": "ci-02",
+        "type": "gap_fill",
+        "skill_id": "en.func.order-drink",
+        "instruction": {
+          "ru": "Вставьте пропущенное слово",
+          "uz": "Tushib qolgan soʻzni qoʻying"
+        },
+        "prompt_en": "Can I ___ a juice, please?",
+        "options": [],
+        "answer": [
+          "have"
+        ]
+      },
+      {
+        "item_id": "ci-03",
+        "type": "translate_choice",
+        "skill_id": "en.func.order-drink",
+        "instruction": {
+          "ru": "Выберите перевод: «Маленький или большой?»",
+          "uz": "Tarjimani tanlang: «Kichikmi yoki kattami?»"
+        },
+        "prompt_en": "Маленький или большой?",
+        "options": [
+          "Small or large?",
+          "Hot or cold?",
+          "Tea or juice?"
+        ],
+        "answer": 0
+      }
+    ],
+    "hints": [
+      {
+        "ru": "Добавьте please — так вежливее",
+        "uz": "please qoʻshing — shunday xushmuomalaroq"
+      }
+    ]
+  }
+]

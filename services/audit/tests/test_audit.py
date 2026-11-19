@@ -40,7 +40,7 @@ SERVICE_DIR = str(Path(__file__).resolve().parents[1])
 AUDITOR = Actor(id="staff-7", role="auditor", permissions=frozenset({"audit.read"}))
 SUPPORT = Actor(id="staff-8", role="support", permissions=frozenset({"support.reply"}))
 SPRINT1_WRITERS = ("identity-consent", "learning-plan", "social", "experience-config", "support", "notifications")
-BUS_WRITERS = (*SPRINT1_WRITERS, "admin-identity")
+BUS_WRITERS = (*SPRINT1_WRITERS, "admin-identity", "catalog", "diagnostics")
 HTTP_WRITERS = ("identity-consent",)
 
 
@@ -123,6 +123,13 @@ WRITER_RECORDS: dict[str, dict[str, Any]] = {
                              object_type="staff", before=None,
                              after={"email": "s***@tilhero.test", "role": "support", "must_change_password": True},
                              reason=None, ip="10.0.0.1", session_id=None),
+    # спринт 3: команды контента и публикация диагностики — без текстов, только статусы и версии
+    "catalog": record(actor_id=str(uuid.uuid4()), actor_role="methodist", action="content.published",
+                      object_type="lesson", object_id="en.a1.greetings", before={"version": 1},
+                      after={"version": 2, "status": "published"}, reason="Новая версия урока"),
+    "diagnostics": record(actor_type="system", actor_id="seed", actor_role=None, action="diagnostics.test_published",
+                          object_type="diagnostic_test", object_id="dx-en-adult", before=None,
+                          after={"version": 1, "status": "published"}, reason="Сид спринта 3"),
 }
 
 
@@ -163,7 +170,7 @@ async def test_bus_writers_append_hash_chain_exactly_once(env) -> None:
     await env.bus.publish(again)
     assert len(await env.records()) == len(BUS_WRITERS)
     verify = await env.c.get("/admin/v1/audit/verify", headers=env.read_headers())
-    assert verify.json() == {"valid": True, "checked": 7, "first_seq": chain[0]["seq"],
+    assert verify.json() == {"valid": True, "checked": len(BUS_WRITERS), "first_seq": chain[0]["seq"],
                              "last_seq": chain[-1]["seq"], "broken_at_seq": None}
 
 

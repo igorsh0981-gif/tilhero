@@ -28,12 +28,14 @@ export const ALL_PERMS: Permission[] = [...PERMISSIONS];
 /** Default matrix (PLAN.md «Роли и права»; super_admin — all; users.sensitive.read, staff.manage, roles.manage — only super_admin). */
 export const MATRIX: Record<RoleCode, Permission[]> = {
   super_admin: [...ALL_PERMS],
-  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read"],
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read"],
   communications: ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"],
   support: ["dashboard.read", "users.read", "support.read", "support.reply"],
-  methodist: ["dashboard.read", "users.read"],
-  analyst: ["dashboard.read", "users.read"],
-  auditor: ["dashboard.read", "audit.read"],
+  // sprint 3 (PLAN «Права и роли»)
+  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish"],
+  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights"],
+  analyst: ["dashboard.read", "users.read", "content.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read"],
   read_only: ["dashboard.read"],
 };
 
@@ -43,11 +45,13 @@ export const ROLE_NAMES: Record<RoleCode, { ru: string; en: string }> = {
   communications: { ru: "Коммуникации", en: "Communications" },
   support: { ru: "Поддержка", en: "Support" },
   methodist: { ru: "Методист", en: "Methodist" },
+  content_manager: { ru: "Контент-менеджер", en: "Content manager" },
   analyst: { ru: "Аналитик", en: "Analyst" },
   auditor: { ru: "Аудитор", en: "Auditor" },
   read_only: { ru: "Только чтение", en: "Read only" },
 };
-export const PRIVILEGED: RoleCode[] = ["super_admin", "operations", "communications"];
+/** privileged by their permissions (admin-identity Role.privileged): step-up rights make methodist and content_manager privileged too */
+export const PRIVILEGED: RoleCode[] = ["super_admin", "operations", "communications", "methodist", "content_manager"];
 
 export const iso = (msFromNow: number) => new Date(Date.now() + msFromNow).toISOString();
 export const MIN = 60_000;
@@ -69,6 +73,8 @@ export const ID = {
   comms: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a07",
   methodist: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a08",
   former: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a09",
+  methodist2: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a10",
+  content: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a11",
 };
 
 function staff(id: string, email: string, display_name: string, role: RoleCode, extra: Partial<Staff> = {}): Staff {
@@ -97,7 +103,9 @@ export function accounts(): Account[] {
     { staff: staff(ID.comms, "comms@tilhero.local", "Дилноза", "communications", { last_login_at: iso(-5 * HOUR) }), password: PASSWORD },
     { staff: staff(ID.support, "support@tilhero.local", "Алина", "support", { last_login_at: iso(-21 * MIN) }), password: PASSWORD },
     { staff: staff(ID.ops, "ops@tilhero.local", "Тимур", "operations", { last_login_at: iso(-3 * HOUR) }), password: PASSWORD },
-    { staff: staff(ID.methodist, "methodist@tilhero.local", "Гульнора", "methodist", { mfa_enabled: false }), password: PASSWORD },
+    { staff: staff(ID.methodist, "methodist@tilhero.local", "Гульнора", "methodist"), password: PASSWORD },
+    { staff: staff(ID.methodist2, "methodist2@tilhero.local", "Камила", "methodist"), password: PASSWORD },
+    { staff: staff(ID.content, "content@tilhero.local", "Ольга", "content_manager"), password: PASSWORD },
     { staff: staff(ID.auditor, "auditor@tilhero.local", "Сардор", "auditor", { mfa_enabled: false }), password: PASSWORD },
     { staff: staff(ID.newbie, "newbie@tilhero.local", "Новый сотрудник", "operations", { mfa_enabled: false, must_change_password: true, last_login_at: null }), password: "Temp-Pass-0001" },
     // disabled privileged account: re-enabling it is a four-eyes request (review P2-2)

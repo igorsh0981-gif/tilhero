@@ -35,6 +35,15 @@ import { Profile as ProfileScreen } from "./screens/profile/Profile";
 import { ScheduleScreen } from "./screens/profile/ScheduleScreen";
 import { ThemeScreen } from "./screens/profile/ThemeScreen";
 import { Soon } from "./screens/soon/Soon";
+import { Diagnostics } from "./screens/diagnostics/Diagnostics";
+import { DiagResultScreen } from "./screens/diagnostics/Result";
+import { PlanScreen } from "./screens/plan/PlanScreen";
+import { MediaRequests } from "./screens/practice/MediaRequests";
+import { MediaScreen } from "./screens/practice/MediaScreen";
+import { Practice } from "./screens/practice/Practice";
+import { ScenarioScreen } from "./screens/practice/ScenarioScreen";
+import { MyLanguages } from "./screens/profile/MyLanguages";
+import { SkillMap } from "./screens/skills/SkillMap";
 import { Support, TicketScreen } from "./screens/support/Support";
 import { WhatsNewSheet } from "./screens/whatsnew/WhatsNewSheet";
 
@@ -413,12 +422,16 @@ function TabScreen({ tab }: { tab: Tab }) {
       return <Home />;
     case "profile":
       return <ProfileScreen />;
+    case "progress":
+      return <SkillMap />;
     default:
       return <Soon what={tab} />;
   }
 }
 
 function PushedScreen({ p }: { p: Pushed }) {
+  const { nav } = useApp();
+  const { t } = useI18n();
   switch (p.name) {
     case "inbox":
       return <Inbox />;
@@ -448,5 +461,28 @@ function PushedScreen({ p }: { p: Pushed }) {
       return <Support number={p.number} />;
     case "ticket":
       return <TicketScreen id={p.id} />;
+    case "diagnostics":
+      return <Diagnostics />;
+    case "diagResult":
+      return <DiagResultScreen result={p.result} />;
+    case "skills":
+      return (
+        <>
+          <Bar title={t("sk.title")} onBack={nav.back} />
+          <SkillMap />
+        </>
+      );
+    case "plan":
+      return <PlanScreen />;
+    case "practice":
+      return <Practice tab={p.tab} />;
+    case "scenario":
+      return <ScenarioScreen id={p.id} />;
+    case "mediaItem":
+      return <MediaScreen id={p.id} />;
+    case "mediaRequests":
+      return <MediaRequests />;
+    case "languages":
+      return <MyLanguages />;
   }
 }

@@ -21,6 +21,7 @@ export function Profile() {
   const plan = usePlan();
   const { t, lang } = useI18n();
   const profile = useLoad(() => bff.profile(), [session.learner.learner_id]);
+  const dx = useLoad(() => bff.diagnosticsState(true), [session.learner.learner_id]);
   useEffect(() => {
     if (profile.data) syncProfile(profile.data);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -73,6 +74,14 @@ export function Profile() {
               <Pill tone="ok">{t("profile.active")}</Pill>
             </div>
             <NavRow title={t("profile.goal")} note={direction} onClick={() => nav.push({ name: "goal" })} testId="row-goal" />
+            <NavRow
+              title={t("profile.diagnostics")}
+              value={dx.data ? (dx.data.status === "completed" ? (dx.data.last_result?.provisional_level ? t("profile.dxDone", { band: dx.data.last_result.provisional_level }) : t("profile.dxDoneNone")) : t("profile.dxNone")) : ""}
+              icon="target"
+              onClick={() => nav.push({ name: "diagnostics" })}
+              testId="row-diagnostics"
+            />
+            <NavRow title={t("profile.languages")} icon="globe" onClick={() => nav.push({ name: "languages" })} testId="row-languages" />
           </div>
         </div>
 

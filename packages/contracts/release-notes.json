@@ -30,7 +30,14 @@
     "notifications",
     "family",
     "support",
-    "news"
+    "news",
+    "diagnostics",
+    "plan",
+    "skills",
+    "scenarios",
+    "media",
+    "media_requests",
+    "languages"
   ],
   "icons": [
     "spark",

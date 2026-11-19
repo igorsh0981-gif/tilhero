@@ -58,6 +58,8 @@ AGE_SEGMENTS: Final[tuple[str, ...]] = ("kids", "teens", "adults")
 UI_LANGS: Final[tuple[str, ...]] = ("ru", "uz")
 ROUTES: Final[tuple[str, ...]] = (
     "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
+    # спринт 3
+    "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
 )
 ICONS: Final[tuple[str, ...]] = (
     "spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield",
@@ -74,7 +76,7 @@ Audience = Literal["new", "existing", "all"]
 AgeSegment = Literal["kids", "teens", "adults"]
 UiLang = Literal["ru", "uz"]
 Route = Literal["home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support",
-                "news"]
+                "news", "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages"]
 IconName = Literal["spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users",
                    "gift", "shield", "globe", "trophy", "news"]
 

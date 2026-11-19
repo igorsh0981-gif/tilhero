@@ -224,7 +224,8 @@ async def test_late_slot_before_midnight(env, user) -> None:
 
 def test_scheduler_token_length_guard_in_secure_env() -> None:
     """P-8: в stage/prod SCHEDULER_TOKEN пустой (вход выключен) или не короче 32 символов; dev/test — любой."""
-    prod = {"internal_jwt_secret": "p" * 40, "internal_jwt_private_key": "A" * 43}
+    prod = {"internal_jwt_secret": "p" * 40, "internal_jwt_private_key": "A" * 43,
+            "catalog_url": "http://catalog.railway.internal:8110"}
     for env_name in ("stage", "prod"):
         for short in ("abc", "x" * 31, " " + "y" * 31 + " "):
             with pytest.raises(ValidationError, match="SCHEDULER_TOKEN"):

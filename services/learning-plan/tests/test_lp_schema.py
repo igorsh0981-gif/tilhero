@@ -7,8 +7,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import asyncpg
 import httpx
+import pytest
 from conftest import SCHEDULER_TOKEN, SERVICE_DIR, make_settings
+from lp_course import FakeCatalog
+from sqlalchemy.engine import make_url
 
 from tilhero_common.app import Runtime
 from tilhero_common.messaging import InMemoryBus, make_envelope, messaging_metadata
@@ -20,11 +24,13 @@ from tilhero_learning_plan.models import Base
 async def test_models_match_migrations_and_runtime_role() -> None:
     async with migrated_under_roles(SERVICE_DIR, make_settings, "lp_roles") as (settings, roles):
         assert await schema_drift(roles.runtime_url, roles.schema, [Base.metadata, messaging_metadata]) == []
-        for table in ("plans", "activities", "slot_marks", "tick_state", "deleted_users", "outbox"):
+        for table in ("plans", "activities", "slot_marks", "tick_state", "deleted_users", "outbox", "trajectories",
+                      "course_snapshots", "learner_diagnostics", "skill_states", "learner_audience"):
             assert await ddl_allowed_for(roles.runtime_url, roles.schema, table) == [], table
         bus = InMemoryBus()
         runtime = Runtime(settings, bus=bus)
-        app = build_app(settings, runtime)
+        catalog = FakeCatalog()
+        app = build_app(settings, runtime, catalog_transport=httpx.MockTransport(catalog.handler))
         user = uuid.uuid4()
         now = datetime(2026, 11, 16, 3, 0, tzinfo=UTC)
         app.state.clock = lambda: now
@@ -44,6 +50,17 @@ async def test_models_match_migrations_and_runtime_role() -> None:
                 now = datetime.now(UTC) + timedelta(minutes=5)  # окно после отметки миграции (last_tick_at)
                 tick = await c.post("/internal/v1/plan:tick", headers=sched)
                 assert tick.status_code == 200 and tick.json()["plans_checked"] == 1, tick.text
+                # спринт 3: траектория под ролью сервиса; ревизии неизменяемы и для неё (триггер)
+                traj = await c.get("/internal/v1/plan/trajectory", headers=h, params={"audience": "adults"})
+                assert traj.status_code == 200 and traj.json()["revision"] == 1, traj.text
+                conn = await asyncpg.connect(make_url(roles.runtime_url).set(drivername="postgresql")
+                                             .render_as_string(hide_password=False))
+                try:
+                    await conn.execute(f'SET search_path TO "{roles.schema}"')
+                    with pytest.raises(asyncpg.PostgresError, match="immutable"):
+                        await conn.execute("UPDATE trajectories SET next_lesson_id = NULL")
+                finally:
+                    await conn.close()
                 await bus.publish(make_envelope(
                     "user.deletion.requested.v1",
                     {"user_id": str(user), "request_id": str(uuid.uuid4()), "requested_at": "2026-11-18T10:00:00Z"},

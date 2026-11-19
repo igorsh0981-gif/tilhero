@@ -32,5 +32,17 @@
 
 ## 3. Секреты и ключи
 - Ротация ключа внутреннего JWT сервиса: новый запуск `setup.py` в пустой каталог и замена `INTERNAL_JWT_PRIVATE_KEY` у сервиса и `INTERNAL_JWT_PUBLIC_KEYS` у всех (сначала открытые ключи, потом закрытый).
-- `SCHEDULER_TOKEN` — одинаковый у n8n, learning-plan, notifications, social (не короче 32 символов).
+- `SCHEDULER_TOKEN` — одинаковый у n8n, learning-plan, notifications, social, catalog (не короче 32 символов).
 - `TELEGRAM_APP_LINK` — одинаковый у social, telegram-bff, telegram-bot-gateway.
+
+## 4. Выкладка спринта 3 поверх спринта 2 (контент и диагностика)
+Новые сервисы `catalog` (8110) и `diagnostics` (8111) — без публичных доменов. Разовый генератор `.dev/sprint3_extend.py` (вне git) берёт действующие секреты и открытые ключи и пишет в `.dev/railway-prod-s3/`: `catalog.env`, `diagnostics.env`, `db-passwords.sql`, `public-keys.json`, `updates.json` (что выставить существующим сервисам).
+1. **База:** `bootstrap.sql` (идемпотентен — добавит схемы и роли `catalog`, `diagnostics` и `_owner`), затем `db-passwords.sql` из `railway-prod-s3` — разовым `db-bootstrap`, как в спринте 2.
+2. **Открытые ключи:** `INTERNAL_JWT_PUBLIC_KEYS` (с ключами catalog и diagnostics) — у всех сервисов из `updates.json` **до** запуска новых издателей.
+3. **catalog → diagnostics:** создать сервисы (Dockerfile `services/<svc>/Dockerfile`, Pre-Deploy `alembic upgrade head` — миграции загружают сид курса, сценариев, медиа и тестов диагностики как опубликованную v1). Проверка: `/health/ready`, в логе нет ошибок сида.
+4. **Адреса:** `CATALOG_URL` — learning-plan, diagnostics, telegram-bff, admin-bff, n8n; `DIAGNOSTICS_URL` — telegram-bff, admin-bff (оба BFF без них в prod не стартуют). `SCHEDULER_TOKEN` у catalog — тот же, что у n8n. Затем выкладка learning-plan, notifications, experience-config, audit, admin-identity (миграция 0003: права контента, роль content_manager — **сессии методистов отзываются, при входе нужен TOTP**), BFF, Mini App, admin-web.
+5. **n8n:** импорт `infra/n8n/workflows/catalog-tick.json` (каждый час в :05 — истечение прав медиа), включить.
+6. **Проверка:** Mini App — «Мои языки», диагностика целиком, результат, план, карта навыков, практика (сценарии, медиа), заявка на песню; админка — раздел «Контент» (урок, сценарий, медиа, проверка), «Языки и курсы», обзор с блоками «Контент» и «Диагностика».
+- Сага удаления: identity-consent ждёт подтверждения и от catalog, diagnostics — запросы на удаление, пришедшие до их запуска, догоняются из NATS (хранение 7 дней).
+- Детские профили старше 7 дней не попадут в проекцию профилей diagnostics и learning-plan; детский сегмент для них держится на параметре `audience` и claims от telegram-bff (BFF всегда вычисляет kids для детского профиля).
+

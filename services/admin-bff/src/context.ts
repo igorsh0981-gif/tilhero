@@ -115,6 +115,14 @@ export class PrincipalCache {
 }
 
 /**
+ * Служебные авторы с UUID, которых нет среди сотрудников (lookup их не найдёт): автор и проверяющий сида контента
+ * catalog (импорт миграцией данных, docs/sprint3/PLAN.md «Решения»).
+ */
+export const SYSTEM_ACTOR_NAMES: Readonly<Record<string, string>> = {
+  "00000000-0000-4000-a000-000000005eed": "Сид (начальное наполнение)",
+};
+
+/**
  * Имена сотрудников для полей `*_name` (операторы тикетов, авторы заметок, версий шаблонов и рассылок) —
  * admin-identity `GET /admin/v1/staff/lookup?ids=` (с actor; в INTERNAL_API §1 — /internal/v1/…, admin-identity
  * реализовал по пути staff API), in-memory кэш 60 с, до 100 id за вызов.
@@ -133,6 +141,11 @@ export class StaffNames {
     const out = new Map<string, string>();
     const missing: string[] = [];
     for (const id of new Set(ids.filter((x): x is string => typeof x === "string" && UUID_RE.test(x)).map((x) => x.toLowerCase()))) {
+      const system = SYSTEM_ACTOR_NAMES[id];
+      if (system) {
+        out.set(id, system);
+        continue;
+      }
       const hit = this.cache.get(id);
       if (hit && now - hit.at < this.ttlMs) out.set(id, hit.name);
       else missing.push(id);

@@ -1,7 +1,9 @@
 import type { MessageKey } from "./ru";
+import { enContent } from "./en.content";
 
 /** EN dictionary — the same keys as ru.ts (test). Plurals: "one|other" with {n}. */
 export const en: Record<MessageKey, string> = {
+  ...enContent,
   /* account */
   "account.changePwd": "Change password",
   "account.idle": "Sign-out after {n} min of inactivity",
@@ -835,7 +837,7 @@ export const en: Record<MessageKey, string> = {
   "role.desc.analyst": "overview and learners, read only",
   "role.desc.auditor": "overview and the audit log",
   "role.desc.communications": "“What’s new”, notification templates, campaigns",
-  "role.desc.methodist": "learners without reveal; content — sprint 3",
+  "role.desc.methodist": "course, lessons, scenarios, rubrics: editing, review, publication; learners without reveal",
   "role.desc.operations": "configuration, support, learners, audit",
   "role.desc.read_only": "overview only",
   "role.desc.super_admin": "all permissions, MFA required",
