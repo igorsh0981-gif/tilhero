@@ -1,7 +1,8 @@
 /**
- * Speech synthesis of the device (Web Speech API, speechSynthesis) for the listening items of the placement test and
- * the media without an audio file (INTERNAL_API: «аудирование — синтез речи устройства, голос en-*»). No en-* voice on
- * the device → the caller reports listening as unavailable (diagnostics) or offers the transcript (media).
+ * Speech synthesis of the device (Web Speech API, speechSynthesis). Since release 4.1 it is only the fallback of the
+ * server speech (tts.ts: MP3 from POST /v1/speech): inside Telegram on Android there is no synthesis at all, on iOS it
+ * goes to a channel the volume buttons do not control. Used only when the server speech is unavailable (503 / no
+ * network / the file does not start). No en-* voice → the caller says «недоступно».
  * Voices load asynchronously in Chrome / Android WebView: wait for `voiceschanged` (bounded).
  */
 export type EnVariant = "en-GB" | "en-US";
@@ -59,8 +60,23 @@ export async function hasEnglishVoice(timeoutMs?: number): Promise<boolean> {
   return pickEnglishVoice(await loadVoices(timeoutMs)) !== null;
 }
 
-/** Speak one phrase; resolves when it ends (or fails). A previous phrase is cancelled. */
-export function speak(text: string, opts: { voice?: SpeechSynthesisVoice | null; variant?: EnVariant; rate?: number } = {}): Promise<void> {
+/** No `start` from the engine within this time — the phrase is given up (some WebViews accept speak() and stay silent). */
+export const SPEAK_START_TIMEOUT_MS = 5000;
+
+export interface SpeakOptions {
+  voice?: SpeechSynthesisVoice | null;
+  variant?: EnVariant;
+  rate?: number;
+  /** the phrase actually started sounding (`start`, or a normal `end` without one) */
+  onStart?: () => void;
+  startTimeoutMs?: number;
+}
+
+/**
+ * Speak one phrase; resolves when it ends, fails or is cancelled — with `true` if it actually sounded. A previous
+ * phrase is cancelled.
+ */
+export function speak(text: string, opts: SpeakOptions = {}): Promise<boolean> {
   const s = synth();
   if (!s || typeof SpeechSynthesisUtterance === "undefined") return Promise.reject(new Error("no speech synthesis"));
   return new Promise((resolve) => {
@@ -70,18 +86,31 @@ export function speak(text: string, opts: { voice?: SpeechSynthesisVoice | null;
     if (v) u.voice = v;
     u.lang = v?.lang ?? opts.variant ?? "en-GB";
     u.rate = opts.rate ?? 0.95;
-    u.onend = () => resolve();
-    u.onerror = () => resolve();
+    let started = false;
+    let done = false;
+    const start = () => {
+      if (started || done) return;
+      started = true;
+      clearTimeout(timer);
+      opts.onStart?.();
+    };
+    const finish = (ok: boolean) => {
+      if (done) return;
+      if (ok) start();
+      done = true;
+      clearTimeout(timer);
+      resolve(started);
+    };
+    const timer = setTimeout(() => {
+      if (started || done) return;
+      finish(false);
+      s.cancel();
+    }, opts.startTimeoutMs ?? SPEAK_START_TIMEOUT_MS);
+    u.onstart = () => start();
+    u.onend = () => finish(true);
+    u.onerror = () => finish(false);
     s.speak(u);
   });
-}
-
-/** Speak lines one after another (media without an audio file); `signal` stops between and inside lines. */
-export async function speakLines(lines: ReadonlyArray<{ text: string; variant: EnVariant }>, voices: readonly SpeechSynthesisVoice[], signal: { stopped: boolean }): Promise<void> {
-  for (const l of lines) {
-    if (signal.stopped) return;
-    await speak(l.text, { voice: pickEnglishVoice(voices, l.variant), variant: l.variant });
-  }
 }
 
 export function stopSpeaking(): void {

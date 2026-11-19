@@ -1,5 +1,6 @@
 import type { LessonStep } from "@tilhero/contracts/bff";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { errorText } from "../../api/errors";
 import { splitGap } from "../../domain/diagnostics";
 import {
   itemAnswer,
@@ -13,7 +14,18 @@ import {
 } from "../../domain/lessons";
 import { useI18n, type MessageKey } from "../../i18n";
 import { useApp } from "../../state/app";
-import { haptic, loadVoices, pickEnglishVoice, speakLines, stopSpeaking, type EnVariant } from "../../tg";
+import { useDelayedFlag } from "../../state/hooks";
+import {
+  haptic,
+  playSpeech,
+  playUrl,
+  preloadAudio,
+  prefetchSpeech,
+  SpeechUnavailableError,
+  stopSpeech,
+  type EnVariant,
+  type PreloadedFile,
+} from "../../tg";
 import { Icon } from "../../ui/Icon";
 import { Btn, Chip, cx, HERO, Hero, Opt, Pill } from "../../ui/kit";
 import { OrderWords } from "../diagnostics/ItemView";
@@ -302,64 +314,105 @@ export function ListenView({ api, step, top, error }: StepProps<ListenStep>) {
   );
 }
 
+/**
+ * Listening of a media step: the file of the BFF, or without a file the lines one after another as server speech in each
+ * speaker's voice (the device voice as a fallback). Everything plays on the shared audio element of tg/tts.ts and is
+ * fetched when the step shows: iOS plays only from a tap, so a ready sound starts right in the tap handler and a pending
+ * one after the element is unlocked in the tap.
+ */
 function ListenPlayer({ step }: { step: ListenStep }) {
   const { bff } = useApp();
-  const { t } = useI18n();
+  const { t, fmt } = useI18n();
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [waiting, setWaiting] = useState(false);
+  const slow = useDelayedFlag(waiting);
   const [failed, setFailed] = useState<string | null>(null);
-  const audio = useRef<HTMLAudioElement | null>(null);
-  const url = useRef<string | null>(null);
+  const audioFile = useRef<PreloadedFile | null>(null);
   const signal = useRef({ stopped: false });
   const tts = !step.has_audio && !!step.transcript?.length;
-  useEffect(
-    () => () => {
-      signal.current.stopped = true;
-      audio.current?.pause();
-      stopSpeaking();
-      if (url.current) URL.revokeObjectURL(url.current);
-    },
-    [],
+  const lines = useMemo(
+    () => (tts && step.transcript ? step.transcript.map((x) => ({ text: x.text_en, variant: (step.voices[x.speaker] ?? "en-GB") as EnVariant })) : []),
+    [tts, step],
   );
+  useEffect(() => {
+    if (step.has_audio) audioFile.current = preloadAudio(() => bff.mediaAudio(step.asset_id), step.asset_id);
+    if (lines[0]) void prefetchSpeech(lines[0].text, lines[0].variant);
+    return () => {
+      signal.current.stopped = true;
+      stopSpeech();
+      audioFile.current?.dispose();
+      audioFile.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   if (!step.has_audio && !tts) return null;
   const stop = () => {
     signal.current.stopped = true;
-    audio.current?.pause();
-    stopSpeaking();
+    stopSpeech();
+    setLoading(false);
+    setWaiting(false);
     setPlaying(false);
   };
-  const play = async () => {
-    setFailed(null);
+  const playFile = () => {
+    const f = (audioFile.current ??= preloadAudio(() => bff.mediaAudio(step.asset_id), step.asset_id));
+    const sig = { stopped: false };
+    signal.current = sig;
     setLoading(true);
-    try {
-      if (step.has_audio) {
-        if (!url.current) url.current = URL.createObjectURL(await bff.mediaAudio(step.asset_id));
-        const a = audio.current ?? new Audio(url.current);
-        audio.current = a;
-        a.onended = () => setPlaying(false);
-        a.currentTime = 0;
-        await a.play();
+    playUrl(f.src(), {
+      onStart: () => {
+        if (sig.stopped) return;
+        setLoading(false);
         setPlaying(true);
-      } else if (step.transcript) {
-        const voices = await loadVoices(1500);
-        if (!pickEnglishVoice(voices)) {
-          setFailed(t("pl.rp.noVoice"));
-          return;
-        }
-        signal.current = { stopped: false };
-        setPlaying(true);
-        const lines = step.transcript.map((x) => ({ text: x.text_en, variant: (step.voices[x.speaker] ?? "en-GB") as EnVariant }));
-        void speakLines(lines, voices, signal.current).finally(() => setPlaying(false));
+      },
+    })
+      .catch(() => {
+        if (!sig.stopped) setFailed(t("pl.ls.error"));
+      })
+      .finally(() => {
+        if (signal.current !== sig) return;
+        setLoading(false);
+        setPlaying(false);
+      });
+  };
+  const playLines = () => {
+    const sig = { stopped: false };
+    signal.current = sig;
+    setPlaying(true);
+    const run = async () => {
+      for (let i = 0; i < lines.length && !sig.stopped; i++) {
+        const line = lines[i]!;
+        const next = lines[i + 1];
+        setWaiting(true);
+        await playSpeech(line.text, line.variant, {
+          onStart: () => {
+            if (sig.stopped) return;
+            setWaiting(false);
+            if (next) void prefetchSpeech(next.text, next.variant);
+          },
+        });
       }
-    } catch {
-      setFailed(t("pl.ls.error"));
-    } finally {
-      setLoading(false);
-    }
+    };
+    run()
+      .catch((e: unknown) => {
+        if (sig.stopped) return;
+        setFailed(e instanceof SpeechUnavailableError ? t("pl.rp.noVoice") : e instanceof Error && e.name === "ApiError" ? errorText(e, t, fmt.mmss) : t("pl.ls.error"));
+      })
+      .finally(() => {
+        if (signal.current !== sig) return;
+        setWaiting(false);
+        setPlaying(false);
+      });
+  };
+  /** Synchronous in the tap handler (iOS). */
+  const play = () => {
+    setFailed(null);
+    if (step.has_audio) playFile();
+    else playLines();
   };
   return (
     <div className="card stack tight" data-testid="pl-player">
-      <Btn variant={playing ? "secondary" : "primary"} busy={loading} onClick={() => (playing ? stop() : void play())} data-testid="pl-play">
+      <Btn variant={playing ? "secondary" : "primary"} busy={loading} onClick={() => (playing ? stop() : play())} data-testid="pl-play">
         <Icon name={playing ? "stop" : "play"} size={18} />
         {playing ? t("pl.ls.stop") : t("pl.ls.play")}
       </Btn>
@@ -368,7 +421,8 @@ function ListenPlayer({ step }: { step: ListenStep }) {
           <Pill tone="warn">{t("pl.ls.tts")}</Pill>
         </p>
       ) : null}
-      {failed ? <p className="sub small" role="status">{failed}</p> : null}
+      {slow && playing ? <p className="sub small" role="status" data-testid="pl-loading">{t("sp.loading")}</p> : null}
+      {failed ? <p className="sub small" role="status" data-testid="pl-play-failed">{failed}</p> : null}
     </div>
   );
 }

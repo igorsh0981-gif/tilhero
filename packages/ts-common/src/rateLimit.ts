@@ -50,6 +50,7 @@ export const RATE_LIMIT_POLICIES: readonly PolicySpec[] = [
   P("tg.pin", "telegram-bff", "user", 5, 60, "closed", "RATE_LIMIT_PIN_PER_MIN", "Проверка и сброс PIN / биометрии — на пользователя (сброс — отдельный счётчик reset:<user_id>)"),
   P("tg.public_ip", "telegram-bff", "ip", 120, 60, "open", "RATE_LIMIT_PUBLIC_IP_PER_MIN", "Публичные эндпоинты Mini App (refresh, config, policy) — с одного IP"),
   P("tg.support_create", "telegram-bff", "user", 10, 3600, "open", null, "Создание обращения в поддержку — на пользователя в час (новая)"),
+  P("tg.speech", "telegram-bff", "user", 120, 600, "open", null, "Озвучка фраз контента (POST /v1/speech) — на пользователя за 10 минут (новая, релиз 4.1)"),
   P("adm.login_ip", "admin-bff", "ip", 10, 60, "closed", "RATE_LIMIT_LOGIN_IP_PER_MIN", "Вход сотрудника (POST /admin/v1/auth/login) — с одного IP"),
   P("adm.login_email", "admin-bff", "email", 5, 60, "closed", "RATE_LIMIT_LOGIN_EMAIL_PER_MIN", "Вход сотрудника — на один e-mail (в ключе только хеш с суточной солью)"),
   P("adm.auth_step_ip", "admin-bff", "ip", 30, 60, "closed", "RATE_LIMIT_AUTH_STEP_IP_PER_MIN", "Шаги входа по challenge (MFA, enroll, пароль) — с одного IP"),

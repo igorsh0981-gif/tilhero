@@ -50,6 +50,7 @@ const URLS = {
   diagnostics: "http://diagnostics.test",
   lessons: "http://lessons.test",
   assessment: "http://assessment.test",
+  tts: "http://tts.test",
 } as const;
 
 export type Service = keyof typeof URLS;
@@ -65,7 +66,15 @@ const DOMAIN_AUD: Record<Service, string> = {
   diagnostics: "diagnostics",
   lessons: "lessons",
   assessment: "assessment",
+  tts: "tts",
 };
+
+/** MP3-заглушка tts: два беззвучных кадра MPEG-1 Layer III (32 кбит/с, 48 кГц, моно). */
+export const FAKE_MP3: Buffer = (() => {
+  const frame = Buffer.alloc(96);
+  frame.set([0xff, 0xfb, 0x14, 0xc0]);
+  return Buffer.concat([frame, frame]);
+})();
 
 export function testConfig(env: Record<string, string> = {}): Config {
   const prefix = `bfftest:${randomUUID().slice(0, 8)}:`;
@@ -89,6 +98,7 @@ export function testConfig(env: Record<string, string> = {}): Config {
     DIAGNOSTICS_URL: URLS.diagnostics,
     LESSONS_URL: URLS.lessons,
     ASSESSMENT_URL: URLS.assessment,
+    TTS_URL: URLS.tts,
     UPSTREAM_RETRIES: "0",
     UPSTREAM_TIMEOUT_MS: "2000",
     LOG_LEVEL: "info",
@@ -390,7 +400,24 @@ export class FakeDomains {
         return this.lessons.lessons(r);
       case "assessment":
         return this.lessons.assessment(r);
+      case "tts":
+        return this.ttsRoute(r);
     }
+  }
+
+  // ---------------------------------------------------------------- tts (release 4.1)
+
+  /** Байты ответа tts на POST /internal/v1/speech. */
+  speechAudio: Buffer = FAKE_MP3;
+
+  private ttsRoute(r: Req): Response {
+    if (r.method === "POST" && r.path === "/internal/v1/speech") {
+      return new Response(new Uint8Array(this.speechAudio), {
+        status: 200,
+        headers: { "content-type": "audio/mpeg", "cache-control": "private, max-age=86400", "x-tts-cache": "miss" },
+      });
+    }
+    return domainError(404, "NOT_FOUND");
   }
 
   // ---------------------------------------------------------------- identity-consent

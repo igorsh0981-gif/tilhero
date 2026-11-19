@@ -10,7 +10,7 @@ import type { ExperienceCache } from "./experience.js";
 import type { RateLimiter } from "./rateLimit.js";
 import type { SessionStore } from "./sessions.js";
 import type { AccessTokens } from "./tokens.js";
-import { upstreamUnavailable, type Domains } from "./upstream.js";
+import { upstreamUnavailable, type Domains, type RawClient } from "./upstream.js";
 
 export interface BffContext {
   config: Config;
@@ -25,6 +25,8 @@ export interface BffContext {
   pairs: PairsCache;
   snapshots: SnapshotCache;
   audio: AudioCache;
+  /** Release 4.1: tts (озвучка фраз, байты MP3); null — TTS_URL не задан, POST /v1/speech → 503 SPEECH_UNAVAILABLE. */
+  tts: RawClient | null;
   log: FastifyBaseLogger;
   /** Вызов хранилища сессий/лимитов: сбой Redis → 503 (fail-closed), без деталей наружу. */
   store<T>(fn: () => Promise<T>): Promise<T>;

@@ -75,7 +75,16 @@ export interface Scenario {
   /** "METHOD /path" → [status, code]: the mock handles the call (the domain saved it), then answers this error — the BFF
    *  did not wait for the domain (503 UPSTREAM_UNAVAILABLE, 504 of the edge) — once */
   lateResponseOnce?: Record<string, [number, string]>;
+  /** release 4.1, POST /v1/speech: ok (default) — a small MP3; down — 503 SPEECH_UNAVAILABLE; delayMs — answer later */
+  speech?: { mode?: "ok" | "down"; delayMs?: number };
 }
+
+/** ~0.1 s of silent MP3 (4 frames of MPEG-1 Layer III, 32 kbit/s, 48 kHz, mono) — the body of the mock speech. */
+export const SPEECH_MP3 = (() => {
+  const frame = Buffer.alloc(96);
+  frame.set([0xff, 0xfb, 0x14, 0xc0]);
+  return Buffer.concat([frame, frame, frame, frame]);
+})();
 
 export interface Recorded {
   method: string;
@@ -606,6 +615,15 @@ export class MockBff {
       if (m[2] === "messages") t.messages.push({ message_id: `m${t.messages.length + 1}`, sender_type: "user", author_name: null, text: String(b.text), created_at: new Date().toISOString() });
       if (m[2] === "close") t.status = "CLOSED";
       return this.ok(route, t);
+    }
+
+    // ---- release 4.1: server speech ----
+    if (key === "POST /v1/speech") {
+      const sp = this.sc.speech ?? {};
+      if (sp.delayMs) await new Promise((r) => setTimeout(r, sp.delayMs));
+      if (sp.mode === "down") return this.err(route, 503, "SPEECH_UNAVAILABLE", { service: "tts" });
+      if (typeof b.text !== "string" || !/[A-Za-z]/.test(b.text) || (b.variant !== "en-GB" && b.variant !== "en-US")) return this.err(route, 422, "TEXT_INVALID", { field: "text" });
+      return route.fulfill({ status: 200, contentType: "audio/mpeg", body: SPEECH_MP3, headers: { "cache-control": "private, max-age=86400" } });
     }
 
     // ---- sprint 4 ----

@@ -1,25 +1,29 @@
 import type { DiagnosticItem } from "@tilhero/contracts/bff";
 import { useEffect, useId, useRef, useState, type DragEvent } from "react";
+import { errorText } from "../../api/errors";
 import { MAX_LISTENS, orderAnswer, orderPick, orderStart, orderUnpick, splitGap, type OrderState } from "../../domain/diagnostics";
 import { useI18n } from "../../i18n";
-import { haptic, speak, stopSpeaking } from "../../tg";
+import { useDelayedFlag } from "../../state/hooks";
+import { haptic, playSpeech, prefetchSpeech, SpeechUnavailableError, stopSpeech, type EnVariant, type SpeechSpeed } from "../../tg";
 import { Icon } from "../../ui/Icon";
-import { Btn, cx, Opt } from "../../ui/kit";
+import { Btn, cx, ErrorLine, Opt } from "../../ui/kit";
 
 export type Answer = number | string[] | null;
 
 /**
  * One item of the placement test. The learner never sees whether the answer was right (no colours, no ticks after
  * answering); «Не знаю» is always available. Types: single_choice, gap_choice, read_choice (passage + question),
- * listen_choice (the phrase is spoken by the device, ≤ 2 plays, its text stays hidden), order_words (tap or drag).
+ * listen_choice (the phrase comes as MP3 from the server — the device voice only as a fallback —, ≤ 2 plays, its text
+ * stays hidden), order_words (tap or drag).
  */
 export function ItemView(props: {
   item: DiagnosticItem;
   kid: boolean;
   busy: boolean;
-  voice: SpeechSynthesisVoice | null;
-  /** listening is not possible on this device (no en-* voice): only «Не знаю» */
+  /** listening is not possible (neither the server speech nor an English device voice): only «Не знаю» */
   listenBlocked: boolean;
+  /** a play found that neither the server nor the device can speak — the runner reports listening-unavailable */
+  onListenUnavailable: () => void;
   /** the chosen answer (controlled: the actions live in the pinned footer of the runner) */
   draft: Answer;
   onDraft: (a: Answer) => void;
@@ -38,7 +42,7 @@ export function ItemView(props: {
         </div>
       ) : null}
       {item.type === "listen_choice" ? (
-        <Listen text={item.audio_text_en ?? ""} voice={props.voice} kid={kid} blocked={props.listenBlocked} />
+        <Listen text={item.audio_text_en ?? ""} kid={kid} blocked={props.listenBlocked} onUnavailable={props.onListenUnavailable} />
       ) : null}
       <Prompt item={item} id={qId} />
       {item.type === "order_words" ? (
@@ -89,25 +93,53 @@ function Prompt({ item, id }: { item: DiagnosticItem; id: string }) {
   );
 }
 
-/* ---------- listening: device speech synthesis, at most two plays ---------- */
-function Listen({ text, voice, kid, blocked }: { text: string; voice: SpeechSynthesisVoice | null; kid: boolean; blocked: boolean }) {
-  const { t } = useI18n();
+/* ---------- listening: server speech (MP3), the device voice as a fallback, at most two plays ---------- */
+/** The voice of the placement test (the device fallback preferred en-GB as well). */
+const LISTEN_VARIANT: EnVariant = "en-GB";
+
+function Listen({ text, kid, blocked, onUnavailable }: { text: string; kid: boolean; blocked: boolean; onUnavailable: () => void }) {
+  const { t, fmt } = useI18n();
   const [plays, setPlays] = useState(0);
-  const [playing, setPlaying] = useState(false);
-  useEffect(() => () => stopSpeaking(), []);
+  const [phase, setPhase] = useState<"idle" | "waiting" | "playing">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const loading = useDelayedFlag(phase === "waiting");
+  const alive = useRef(true);
+  // children 6–13 hear the phrase slower
+  const speed: SpeechSpeed = kid ? "slow" : "normal";
+  useEffect(() => {
+    alive.current = true;
+    // the item is on screen: fetch its MP3 now, so the first tap plays at once (a blocked item is never played)
+    if (text && !blocked) void prefetchSpeech(text, LISTEN_VARIANT, speed);
+    return () => {
+      alive.current = false;
+      stopSpeech();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text, speed]);
   const left = MAX_LISTENS - plays;
-  const play = async () => {
-    if (playing || left <= 0 || blocked) return;
-    setPlays((p) => p + 1);
-    setPlaying(true);
+  /** Synchronous in the tap handler: iOS lets the shared audio element play only from a user gesture. */
+  const play = () => {
+    if (phase !== "idle" || left <= 0 || blocked) return;
     haptic.impact("light");
-    try {
-      await speak(text, { voice, rate: kid ? 0.85 : 0.95 });
-    } catch {
-      /* no synthesis — the learner can still answer «Не знаю» */
-    } finally {
-      setPlaying(false);
-    }
+    setError(null);
+    setPhase("waiting");
+    playSpeech(text, LISTEN_VARIANT, {
+      speed,
+      // a listening is spent only when the sound actually started (not on a tap that played nothing)
+      onStart: () => {
+        if (!alive.current) return;
+        setPlays((p) => p + 1);
+        setPhase("playing");
+      },
+    })
+      .catch((e: unknown) => {
+        if (!alive.current) return;
+        if (e instanceof SpeechUnavailableError) onUnavailable();
+        else setError(errorText(e, t, fmt.mmss));
+      })
+      .finally(() => {
+        if (alive.current) setPhase("idle");
+      });
   };
   if (blocked) {
     return (
@@ -117,21 +149,30 @@ function Listen({ text, voice, kid, blocked }: { text: string; voice: SpeechSynt
       </div>
     );
   }
+  const status = loading
+    ? t("sp.loading")
+    : phase === "playing"
+      ? t("dx.listen.playing")
+      : left > 0
+        ? `${plays === 0 ? t("dx.listen.play") : t("dx.listen.again")} · ${t("dx.listen.left", { n: left })}`
+        : t("dx.listen.none");
   return (
     <div className="listen" data-testid="dx-listen">
       <button
         type="button"
-        className={cx("listen-btn", playing && "playing")}
-        onClick={() => void play()}
-        disabled={playing || left <= 0}
+        className={cx("listen-btn", phase === "playing" && "playing")}
+        onClick={play}
+        disabled={phase !== "idle" || left <= 0}
+        aria-busy={phase === "waiting"}
         aria-label={plays === 0 ? t("dx.listen.play") : t("dx.listen.again")}
         data-testid="dx-listen-play"
       >
-        <Icon name={playing ? "volume" : "play"} size={34} />
+        <Icon name={phase === "playing" ? "volume" : "play"} size={34} />
       </button>
       <p className="sub small" aria-live="polite" data-testid="dx-listen-left">
-        {playing ? t("dx.listen.playing") : left > 0 ? `${plays === 0 ? t("dx.listen.play") : t("dx.listen.again")} · ${t("dx.listen.left", { n: left })}` : t("dx.listen.none")}
+        {status}
       </p>
+      <ErrorLine text={error} />
       <p className="sub small center">{t("dx.listen.hint")}</p>
     </div>
   );

@@ -1278,3 +1278,18 @@ export const LocaleQuerySchema = Type.Object({ locale: Type.Optional(UiLang) }, 
 // ---------- Параметры путей ----------
 export const LessonParamsSchema = Type.Object({ lesson_id: ContentId }, strict);
 export const StepParamsSchema = Type.Object({ id: Uuid, step_id: StepId }, strict);
+
+// ---------- Озвучка (release 4.1) ----------
+/** Тело POST /v1/speech. Длина и состав текста (1–400 знаков после нормализации пробелов, без управляющих символов,
+ *  хотя бы одна латинская буква) проверяются в маршруте (routes/speech.ts); здесь — только верхняя граница сырого
+ *  текста. Любая ошибка схемы → 422 TEXT_INVALID. */
+export const SpeechRequestSchema = Type.Object(
+  {
+    text: Type.String({ maxLength: 2000 }),
+    variant: Enum(["en-GB", "en-US"]),
+    speed: Type.Optional(Enum(["normal", "slow"])),
+  },
+  strict,
+);
+assertSame<Same<Static<typeof SpeechRequestSchema>, C.SpeechRequest>>();
+export const SpeechBytesSchema = Type.Unsafe<Buffer>({ type: "string", format: "binary", description: "audio/mpeg (MP3, моно)" });

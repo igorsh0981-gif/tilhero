@@ -2,18 +2,19 @@ import { expect, test, type Page } from "@playwright/test";
 import type { ContentScenario } from "./fixtures/content";
 import * as F from "./fixtures/data";
 import type { Scenario } from "./fixtures/mock-bff";
-import { EN_VOICES, installSpeech, played, spoken, type FakeVoice } from "./fixtures/speech";
+import { EN_VOICES, installSpeech, played, sources, spoken, type FakeVoice } from "./fixtures/speech";
 import { CYRILLIC, open, settle } from "./helpers";
 
 /**
- * Sprint 3 on the mock BFF: placement test (choice, word order by taps and drag, listening by the device voice and
- * without it), result (not_assessed, «не сертификат CEFR», follow-up, retake date), skill map, «Мой план» and goal change,
+ * Sprint 3 on the mock BFF: placement test (choice, word order by taps and drag, listening — release 4.1: MP3 of the
+ * server speech, the device voice only as a fallback, «недоступно» only when neither works; a listening is spent when
+ * the sound starts), result (not_assessed, «не сертификат CEFR», follow-up, retake date), skill map, «Мой план» and goal change,
  * practice (scenario and media filters, audio and speech synthesis), song / film requests (403 for a child),
  * «Мои языки», deep links, RU / UZ, the dark notebook and phone widths 375–412.
  */
 const ALL_SEEN = [F.WELCOME.id, F.UPDATE_1.id, F.UPDATE_2.id];
 
-async function start(page: Page, content: ContentScenario = {}, sc: Scenario = {}, voices: FakeVoice[] = EN_VOICES) {
+async function start(page: Page, content: ContentScenario = {}, sc: Scenario = {}, voices: FakeVoice[] | null = EN_VOICES) {
   await installSpeech(page, voices);
   return open(page, { onboarded: true, seen: ALL_SEEN, content, ...sc });
 }
@@ -69,20 +70,23 @@ test.describe("диагностика", () => {
     await expect(page.getByTestId("dx-passage")).toContainText("Aziz usually takes the bus");
     await answerChoice(page, "read_choice", 0);
 
-    // 5. listening: the phrase is spoken by an en-* voice, at most twice; its text never shown
+    // 5. listening: the phrase comes as MP3 of the server speech (fetched when the item is shown), at most twice; its
+    // text never shown; the device voice is not used
     const item = page.getByTestId("dx-item-listen_choice");
     await expect(item).toBeVisible();
     await expect(item).not.toContainText("green tea, please");
+    await expect.poll(() => bff.calls("POST", "/v1/speech").length).toBe(1);
+    expect(bff.last("POST", "/v1/speech")?.body).toEqual({ text: "Could I have a cup of green tea, please?", variant: "en-GB", speed: "normal" });
     const play = page.getByTestId("dx-listen-play");
     await play.click();
     await expect(page.getByTestId("dx-listen-left")).toContainText("Осталось прослушиваний: 1");
     await play.click();
     await expect(page.getByTestId("dx-listen-left")).toHaveText("Прослушивания закончились — выберите ответ.");
     await expect(play).toBeDisabled();
-    expect((await spoken(page)).map((s) => [s.text, s.voice])).toEqual([
-      ["Could I have a cup of green tea, please?", "Fake English (UK)"],
-      ["Could I have a cup of green tea, please?", "Fake English (UK)"],
-    ]);
+    expect(await played(page)).toBe(2);
+    expect((await sources(page)).filter((src) => src.startsWith("blob:"))).toHaveLength(2);
+    expect(await spoken(page)).toEqual([]);
+    expect(bff.calls("POST", "/v1/speech")).toHaveLength(1); // the second play — from the cache
     await expect(page.getByText(/верно|неверно/)).toHaveCount(0);
     await answerChoice(page, "listen_choice", 1);
 
@@ -109,8 +113,8 @@ test.describe("диагностика", () => {
     await expect(page.getByTestId("dx-history")).toContainText("текущий");
   });
 
-  test("нет голоса en-* → listening-unavailable, ученику объяснили, аудирование not_assessed (no_speech_voice)", async ({ page }) => {
-    const bff = await start(page, {}, {}, [{ lang: "ru-RU", name: "Fake Russian" }]);
+  /** Four items to the listening one, by «Не знаю» / a choice. */
+  async function toListening(page: Page) {
     await page.getByTestId("home-diag-start").click();
     await page.getByTestId("dx-start").click();
     for (const type of ["single_choice", "gap_choice"]) {
@@ -120,11 +124,59 @@ test.describe("диагностика", () => {
     await expect(page.getByTestId("dx-item-order_words")).toBeVisible();
     await page.getByTestId("dx-dont-know").click();
     await answerChoice(page, "read_choice", 0);
-    // the listening item is not shown — reported once, the result follows
+    await expect(page.getByTestId("dx-item-listen_choice")).toBeVisible();
+  }
+
+  test("Android: синтеза речи на устройстве нет — аудирование звучит с сервера, listening-unavailable не вызывается", async ({ page }) => {
+    const bff = await start(page, {}, {}, null);
+    await toListening(page);
+    await expect(page.getByTestId("dx-listen-blocked")).toHaveCount(0);
+    await page.getByTestId("dx-listen-play").click();
+    await expect(page.getByTestId("dx-listen-left")).toContainText("Осталось прослушиваний: 1");
+    expect(await played(page)).toBe(1);
+    await answerChoice(page, "listen_choice", 1);
+    await expect(page.getByTestId("dx-result")).toBeVisible();
+    expect(bff.calls("POST", /\/listening-unavailable$/)).toHaveLength(0);
+    await expect(page.getByTestId("reason-listening")).not.toHaveText(/Звук не заработал/);
+  });
+
+  test("медленная озвучка: «Загружаю звук…», прослушивание списывается только после старта звука", async ({ page }) => {
+    const bff = await start(page, {}, { speech: { delayMs: 1500 } }, null);
+    await toListening(page);
+    await page.getByTestId("dx-listen-play").click();
+    await expect(page.getByTestId("dx-listen-left")).toHaveText("Загружаю звук…");
+    expect(await played(page)).toBe(0);
+    expect((await sources(page))[0]).toMatch(/^data:audio\/mpeg;base64,/); // the element unlocked in the tap (iOS)
+    await expect(page.getByTestId("dx-listen-left")).toContainText("Осталось прослушиваний: 1", { timeout: 5000 });
+    expect(await played(page)).toBe(1);
+    expect(bff.calls("POST", "/v1/speech")).toHaveLength(1); // the prefetch and the tap share one request
+  });
+
+  test("озвучка недоступна (503), английский голос есть → синтез устройства, аудирование не отключается", async ({ page }) => {
+    const bff = await start(page, {}, { speech: { mode: "down" } });
+    await toListening(page);
+    await page.getByTestId("dx-listen-play").click();
+    await expect(page.getByTestId("dx-listen-left")).toContainText("Осталось прослушиваний: 1");
+    expect((await spoken(page)).map((x) => [x.text, x.voice])).toEqual([["Could I have a cup of green tea, please?", "Fake English (UK)"]]);
+    await expect(page.getByTestId("dx-listen-blocked")).toHaveCount(0);
+    await expect(page.getByTestId("offline")).toHaveCount(0); // 503 SPEECH_UNAVAILABLE is not «Нет связи»
+    expect(bff.calls("POST", /\/listening-unavailable$/)).toHaveLength(0);
+  });
+
+  test("озвучка недоступна и голоса en-* нет → «недоступно», listening-unavailable один раз, прослушивание не списано, аудирование not_assessed", async ({ page }) => {
+    const bff = await start(page, {}, { speech: { mode: "down" } }, [{ lang: "ru-RU", name: "Fake Russian" }]);
+    await toListening(page);
+    // nothing is decided in advance: the item is playable until a play fails both ways
+    expect(bff.calls("POST", /\/listening-unavailable$/)).toHaveLength(0);
+    await page.getByTestId("dx-listen-play").click();
+    await expect(page.getByTestId("dx-listen-blocked")).toHaveText("Звук сейчас недоступен — аудирование оценим позже. Остальные задания продолжаются.");
+    await expect.poll(() => bff.content.listeningUnavailableCalls).toBe(1);
+    await expect(page.getByTestId("dx-opt-0")).toBeDisabled();
+    expect(await played(page)).toBe(0);
+    await page.getByTestId("dx-dont-know").click();
     await expect(page.getByTestId("dx-result")).toBeVisible();
     expect(bff.calls("POST", /\/listening-unavailable$/)).toHaveLength(1);
-    expect(bff.content.listeningUnavailableCalls).toBe(1);
-    await expect(page.getByTestId("reason-listening")).toHaveText("На устройстве не нашлось английского голоса — аудирование оценим позже.");
+    await expect(page.getByTestId("reason-listening")).toHaveText("Звук не заработал — аудирование оценим позже.");
   });
 
   test("уточнение сомнительной области: +3 задания, новая ревизия «уточнено», кнопки уточнения больше нет", async ({ page }) => {
@@ -272,8 +324,11 @@ test.describe("практика", () => {
     await expect(page.getByTestId("md-list").locator("button")).toHaveCount(1);
     await page.getByTestId("md-m-own-coffee").click();
 
+    // the file is fetched when the screen shows (before the tap) and plays on the shared audio element in the tap
+    await expect.poll(() => bff.calls("GET", "/v1/media/m-own-coffee/audio").length).toBe(1);
     await page.getByTestId("md-play").click();
     await expect.poll(() => played(page)).toBe(1);
+    expect((await sources(page)).at(-1)).toMatch(/^blob:/);
     expect(bff.calls("GET", "/v1/media/m-own-coffee/audio")).toHaveLength(1);
     expect(bff.last("GET", "/v1/media/m-own-coffee/audio")?.headers.authorization).toMatch(/^Bearer /);
     await expect(page.getByTestId("md-tts")).toHaveCount(0);
@@ -284,9 +339,16 @@ test.describe("практика", () => {
     await page.getByTestId("flt-md-level").getByRole("button", { name: "Все" }).click();
     await page.getByTestId("md-m-own-train").click();
     await expect(page.getByTestId("md-tts")).toContainText("синтез речи");
+    const filePlays = await played(page);
     await page.getByTestId("md-play").click();
-    await expect.poll(async () => (await spoken(page)).length).toBe(2);
-    expect((await spoken(page)).map((s) => s.voice)).toEqual(["Fake English (UK)", "Fake English (US)"]);
+    // without a file: the lines one after another as MP3 of the server speech, each in its speaker's voice
+    await expect.poll(async () => (await played(page)) - filePlays).toBe(2);
+    expect(bff.calls("POST", "/v1/speech").map((c) => c.body)).toEqual([
+      { text: "Where are you travelling to?", variant: "en-GB", speed: "normal" },
+      { text: "Samarkand, one way, please.", variant: "en-US", speed: "normal" },
+    ]);
+    expect(await spoken(page)).toEqual([]);
+    await expect(page.getByTestId("md-play")).toHaveText("Прослушать");
     await page.getByTestId("bar-back").click();
 
     // лицензия без `listen`: ни файла, ни синтеза речи по транскрипту — кнопки прослушивания нет

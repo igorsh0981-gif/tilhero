@@ -103,6 +103,11 @@ export interface Config {
   audioCacheBytes: number;
   /** Сегмент возраста ученика (kids/teens/adults) для контента: кеш в памяти, секунды. */
   audienceCacheSeconds: number;
+  /** tts (release 4.1): серверная озвучка фраз (POST /v1/speech). Необязателен даже в stage/prod: без адреса маршрут
+   *  отвечает 503 SPEECH_UNAVAILABLE (Mini App откатывается на синтез устройства) — BFF выкладывается раньше tts. */
+  ttsUrl: string | undefined;
+  /** Таймаут вызова tts, мс (15 000), без повторов: синтез длинной фразы — секунды, кеш у tts. */
+  ttsTimeoutMs: number;
 
   rateLimits: RateLimits;
   rateLimiting: RateLimiting;
@@ -290,6 +295,19 @@ export function loadConfig(env: Env = process.env): Config {
     problems.push("REFRESH_TTL_SECONDS должен быть больше ACCESS_TTL_SECONDS");
   }
 
+  // ---- tts: необязательный адрес (нет — озвучка недоступна, остальное работает)
+  let ttsUrl = raw("TTS_URL");
+  if (ttsUrl !== undefined) {
+    try {
+      const u = new URL(ttsUrl);
+      if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("protocol");
+      ttsUrl = ttsUrl.replace(/\/+$/, "");
+    } catch {
+      problems.push(`TTS_URL=${JSON.stringify(ttsUrl)}: ожидается http(s) URL`);
+      ttsUrl = undefined;
+    }
+  }
+
   const rlEnabledRaw = raw("RATE_LIMITS_ENABLED")?.toLowerCase();
   if (rlEnabledRaw !== undefined && !["true", "false", "1", "0"].includes(rlEnabledRaw)) {
     problems.push(`RATE_LIMITS_ENABLED=${JSON.stringify(rlEnabledRaw)}: допустимо true|false`);
@@ -340,6 +358,8 @@ export function loadConfig(env: Env = process.env): Config {
     pairsCacheSeconds: int("PAIRS_CACHE_SECONDS", 60, 0, 3600),
     audioCacheBytes: int("AUDIO_CACHE_MB", 32, 0, 512) * 1024 * 1024,
     audienceCacheSeconds: int("AUDIENCE_CACHE_SECONDS", 30, 0, 600),
+    ttsUrl,
+    ttsTimeoutMs: int("TTS_TIMEOUT_MS", 15_000, 1000, 60_000),
     rateLimits: {
       userPerMinute: int("RATE_LIMIT_USER_PER_MIN", 120, 1, 100_000),
       sessionPerIpPerMinute: int("RATE_LIMIT_SESSION_IP_PER_MIN", 10, 1, 100_000),

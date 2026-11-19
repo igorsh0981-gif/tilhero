@@ -64,3 +64,18 @@ def test_extend_refuses_already_deployed_service(tmp_path: Path) -> None:
     with pytest.raises(Exception):  # noqa: B017 — неизвестный сервис
         extend.main(["--env-from", str(env), "--public-keys", str(keys), "--out", str(tmp_path / "p"),
                      "--only", "nope"])
+
+
+def test_extend_verify_only_service_touches_only_callers(tmp_path: Path) -> None:
+    """Релиз 4.1: tts (VERIFY_ONLY) — свой закрытый ключ, открытые ключи остальных не меняются; обновить нужно только
+    вызывающих (TTS_URL у telegram-bff)."""
+    env, keys, _, pub = _prod(tmp_path)
+    keys.write_text(json.dumps({**pub, **{n: "k" for n in NEW}}))  # спринт 4 уже в prod
+    out = tmp_path / "s41"
+    assert extend.main(["--env-from", str(env), "--public-keys", str(keys), "--out", str(out), "--only", "tts"]) == 0
+    tts = extend.env_of(out / "tts.env")
+    assert tts["INTERNAL_JWT_PRIVATE_KEY"] and "NATS_URL" not in tts and "DATABASE_URL" not in tts
+    assert json.loads((out / "public-keys.json").read_text()) == json.loads(keys.read_text())
+    upd = json.loads((out / "updates.json").read_text())
+    assert upd == {"telegram-bff": {"TTS_URL": "http://${{tts.RAILWAY_PRIVATE_DOMAIN}}:8115"}}
+    assert (out / "db-passwords.sql").read_text() == ""

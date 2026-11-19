@@ -73,3 +73,17 @@ export function useLoad<T>(loader: () => Promise<T>, deps: readonly unknown[]) {
   }, deps);
   return { data, error, errorObj, loading, reload: load, setData };
 }
+
+/** true once `active` has stayed true for `ms` — a «Загружаю звук…» line only for waits the learner notices. */
+export function useDelayedFlag(active: boolean, ms = 300): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    if (!active) {
+      setOn(false);
+      return;
+    }
+    const timer = setTimeout(() => setOn(true), ms);
+    return () => clearTimeout(timer);
+  }, [active, ms]);
+  return active && on;
+}

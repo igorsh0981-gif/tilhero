@@ -1,8 +1,9 @@
 /**
- * Sprint 3 screens on a fake BFF (fetch): the placement test (choice, «Не знаю», word order by taps, listening with the
- * device voice and without it), the result (CEFR disclaimer, not_assessed reasons, follow-up only within 24 h, retake
- * date), Home's learning card, the skill map (CATALOG_UNAVAILABLE), song / film requests (children — no calls),
- * the binary audio call of the client.
+ * Sprint 3 screens on a fake BFF (fetch): the placement test (choice, «Не знаю», word order by taps, listening by the
+ * server speech — release 4.1: MP3 from POST /v1/speech, the device voice only as a fallback, «недоступно» only when
+ * neither works), the result (CEFR disclaimer, not_assessed reasons, follow-up only within 24 h, retake date), Home's
+ * learning card, the skill map (CATALOG_UNAVAILABLE), song / film requests (children — no calls), the binary audio calls
+ * of the client.
  */
 import type { DiagnosticResult, LearningPlan, SessionResponse } from "@tilhero/contracts/bff";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -14,6 +15,7 @@ import { ApiClient } from "../src/api/client";
 import { FALLBACK_CONFIG } from "../src/config/experience";
 import { I18nProvider } from "../src/i18n";
 import { Diagnostics } from "../src/screens/diagnostics/Diagnostics";
+import { ItemView } from "../src/screens/diagnostics/ItemView";
 import { ResultView } from "../src/screens/diagnostics/Result";
 import { Home } from "../src/screens/home/Home";
 import { tooSoonKey } from "../src/screens/diagnostics/Diagnostics";
@@ -21,6 +23,7 @@ import { MediaRequests } from "../src/screens/practice/MediaRequests";
 import { MediaScreen } from "../src/screens/practice/MediaScreen";
 import { SkillMap } from "../src/screens/skills/SkillMap";
 import { AppProvider, type AppCtx } from "../src/state/app";
+import { setSpeechSource, speechPlayer } from "../src/tg/tts";
 import { useNav, type Nav, type Pushed } from "../src/state/nav";
 import { ToastHost } from "../src/ui/overlays";
 
@@ -54,7 +57,10 @@ function result(over: Partial<DiagnosticResult> = {}): DiagnosticResult {
   };
 }
 
-function fakeServer(o: { diag?: "none" | "completed"; skillsDown?: boolean; nextAllowedAt?: string | null } = {}) {
+/** POST /v1/speech of the fake BFF: ok — a small MP3; down — 503 SPEECH_UNAVAILABLE; limit — 429 tg.speech */
+type SpeechMode = "ok" | "down" | "limit";
+
+function fakeServer(o: { diag?: "none" | "completed"; skillsDown?: boolean; nextAllowedAt?: string | null; speech?: SpeechMode } = {}) {
   const calls: Array<{ key: string; body: any; headers: Record<string, string> }> = []; // eslint-disable-line @typescript-eslint/no-explicit-any
   let answered = 0;
   let listening = true;
@@ -71,6 +77,10 @@ function fakeServer(o: { diag?: "none" | "completed"; skillsDown?: boolean; next
     const items = ITEMS.filter((i) => listening || i.area !== "listening");
     const session = { session_id: "d1a90000-aaaa-4bbb-8ccc-000000000001", pair_id: "ru-en", test_version: "dx-en-adult@1", status: "in_progress", answered, total_estimate: 3, started_at: new Date().toISOString(), expires_at: new Date(Date.now() + 86400000).toISOString(), followup_area: null };
     switch (key) {
+      case "POST /v1/speech":
+        if (o.speech === "down") return err(503, "SPEECH_UNAVAILABLE", { service: "tts" });
+        if (o.speech === "limit") return err(429, "RATE_LIMITED", { policy: "tg.speech", retry_after: 4 });
+        return new Response(new Uint8Array([0xff, 0xfb, 0x14, 0xc0]), { status: 200, headers: { "Content-Type": "audio/mpeg" } });
       case "GET /v1/diagnostics/state":
         return ok({ pair_id: "ru-en", status: res ? "completed" : "none", session: null, last_result: res, next_allowed_at: o.nextAllowedAt ?? null, audience: "adults" });
       case "POST /v1/diagnostics/sessions":
@@ -161,6 +171,7 @@ function Shell({ server, kid, children, stack }: { server: ReturnType<typeof fak
 }
 function mount(ui: ReactNode, o: Parameters<typeof fakeServer>[0] & { kid?: boolean; lang?: "ru" | "uz"; stack?: Pushed[] } = {}) {
   const server = fakeServer(o);
+  setSpeechSource(server.bff.speech); // App.tsx does it for the app's client
   render(
     <I18nProvider initial={o.lang ?? "ru"}>
       <Shell server={server} kid={o.kid} stack={o.stack}>{ui}</Shell>
@@ -191,18 +202,36 @@ function installVoices(voices: Array<{ lang: string; name: string }>) {
   return spoken;
 }
 
+/** The shared audio element (jsdom plays nothing): play() starts at once, «ends» 5 ms later unless the src changed;
+ *  `played` — every src played (the silent unlock clip is a data: URI). */
+let played: string[] = [];
+let blobs = 0;
 beforeEach(() => {
   navRef = null;
+  played = [];
+  URL.createObjectURL = () => `blob:test/${++blobs}`;
+  URL.revokeObjectURL = () => undefined;
+  vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(function play(this: HTMLMediaElement) {
+    const src = this.src;
+    played.push(src);
+    setTimeout(() => {
+      if (this.src === src) this.dispatchEvent(new Event("ended"));
+    }, 5);
+    return Promise.resolve();
+  });
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
 });
 afterEach(() => {
   delete (window as unknown as Record<string, unknown>).speechSynthesis;
+  speechPlayer.stopSpeech();
+  setSpeechSource(null);
   vi.useRealTimers();
 });
+const phrasePlays = () => played.filter((p) => p.startsWith("blob:"));
 
 describe("placement test", () => {
-  it("intro → choice → word order by taps → listening (≤ 2 plays, text hidden) → result; no correctness shown", async () => {
-    const spoken = installVoices([{ lang: "en-GB", name: "UK" }]);
-    const server = mount(<Diagnostics />);
+  it("intro → choice → word order by taps → listening by the server speech without any device synthesis (≤ 2 plays, text hidden) → result; no correctness shown", async () => {
+    const server = mount(<Diagnostics />); // no speechSynthesis — like Telegram on Android
     expect(await screen.findByTestId("dx-intro")).toHaveTextContent("не экзамен и не сертификат");
     await userEvent.click(screen.getByTestId("dx-start"));
     expect(server.callsTo("POST /v1/diagnostics/sessions")[0]!.headers["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/);
@@ -225,13 +254,19 @@ describe("placement test", () => {
 
     await screen.findByTestId("dx-item-listen_choice");
     expect(screen.getByTestId("dx-item-listen_choice")).not.toHaveTextContent("A cup of tea");
+    // the MP3 is fetched as soon as the item is shown (prefetch) — once for both plays
+    await waitFor(() => expect(server.callsTo("POST /v1/speech")).toHaveLength(1));
+    expect(server.callsTo("POST /v1/speech")[0]!.body).toEqual({ text: "A cup of tea, please.", variant: "en-GB", speed: "normal" });
     const play = screen.getByTestId("dx-listen-play");
     await userEvent.click(play);
+    await waitFor(() => expect(screen.getByTestId("dx-listen-left")).toHaveTextContent("Осталось прослушиваний: 1"));
     await waitFor(() => expect(play).not.toBeDisabled());
     await userEvent.click(play);
     await waitFor(() => expect(screen.getByTestId("dx-listen-left")).toHaveTextContent("Прослушивания закончились"));
     expect(play).toBeDisabled();
-    expect(spoken).toEqual(["A cup of tea, please.", "A cup of tea, please."]);
+    expect(phrasePlays()).toHaveLength(2);
+    expect(server.callsTo("POST /v1/speech")).toHaveLength(1);
+    expect(server.callsTo("POST /v1/diagnostics/sessions/d1a90000-aaaa-4bbb-8ccc-000000000001/listening-unavailable")).toHaveLength(0);
     expect(screen.queryByText(/верно|неверно/)).toBeNull(); // no correctness during the test
     await userEvent.click(screen.getByTestId("dx-dont-know"));
     expect(server.callsTo("POST /v1/diagnostics/sessions/d1a90000-aaaa-4bbb-8ccc-000000000001/answers")[2]!.body).toMatchObject({ item_id: "l1", answer: null, dont_know: true });
@@ -242,17 +277,93 @@ describe("placement test", () => {
     expect(screen.getByTestId("why-grammar")).not.toHaveAttribute("open");
   });
 
-  it("no English voice on the device → listening-unavailable once, the learner is told, the test goes on", async () => {
+  it("the server speech is down and the device has no English voice → «недоступно» after the tap, listening-unavailable once, nothing spent; «Не знаю» goes on", async () => {
     installVoices([{ lang: "ru-RU", name: "RU" }]);
-    const server = mount(<Diagnostics />);
+    const server = mount(<Diagnostics />, { speech: "down" });
     await userEvent.click(await screen.findByTestId("dx-start"));
     await userEvent.click(await screen.findByTestId("dx-dont-know"));
     await screen.findByTestId("dx-item-order_words");
     await userEvent.click(screen.getByTestId("dx-dont-know"));
-    // the listening item is skipped: reported, then the server says done → result
+    // nothing is decided in advance by the device voices: the item is shown and playable
+    await screen.findByTestId("dx-item-listen_choice");
+    expect(screen.getByTestId("dx-listen-left")).toHaveTextContent("Осталось прослушиваний: 2");
+    expect(server.callsTo("POST /v1/diagnostics/sessions/d1a90000-aaaa-4bbb-8ccc-000000000001/listening-unavailable")).toHaveLength(0);
+    await userEvent.click(screen.getByTestId("dx-listen-play"));
+    expect(await screen.findByTestId("dx-listen-blocked")).toHaveTextContent("Звук сейчас недоступен — аудирование оценим позже.");
+    await waitFor(() => expect(server.callsTo("POST /v1/diagnostics/sessions/d1a90000-aaaa-4bbb-8ccc-000000000001/listening-unavailable")).toHaveLength(1));
+    expect(screen.queryByTestId("dx-listen-unavailable")).toBeNull(); // one notice, on the item
+    expect(screen.getByTestId("dx-opt-0")).toBeDisabled();
+    expect(phrasePlays()).toHaveLength(0);
+    await userEvent.click(screen.getByTestId("dx-dont-know"));
     expect(await screen.findByTestId("dx-result", {}, { timeout: 4000 })).toBeInTheDocument();
     expect(server.callsTo("POST /v1/diagnostics/sessions/d1a90000-aaaa-4bbb-8ccc-000000000001/listening-unavailable")).toHaveLength(1);
-    expect(within(screen.getByTestId("area-listening")).getByTestId("reason-listening")).toHaveTextContent("не нашлось английского голоса");
+    expect(within(screen.getByTestId("area-listening")).getByTestId("reason-listening")).toHaveTextContent("Звук не заработал — аудирование оценим позже.");
+  });
+
+  it("the server speech is down, the device has an English voice → the device speaks; listening is not reported unavailable", async () => {
+    const spoken = installVoices([{ lang: "en-GB", name: "UK" }]);
+    const server = mount(<Diagnostics />, { speech: "down" });
+    await userEvent.click(await screen.findByTestId("dx-start"));
+    await userEvent.click(await screen.findByTestId("dx-dont-know"));
+    await screen.findByTestId("dx-item-order_words");
+    await userEvent.click(screen.getByTestId("dx-dont-know"));
+    await screen.findByTestId("dx-item-listen_choice");
+    await userEvent.click(screen.getByTestId("dx-listen-play"));
+    await waitFor(() => expect(screen.getByTestId("dx-listen-left")).toHaveTextContent("Осталось прослушиваний: 1"));
+    expect(spoken).toEqual(["A cup of tea, please."]);
+    expect(screen.queryByTestId("dx-listen-blocked")).toBeNull();
+    expect(server.callsTo("POST /v1/diagnostics/sessions/d1a90000-aaaa-4bbb-8ccc-000000000001/listening-unavailable")).toHaveLength(0);
+  });
+});
+
+describe("listening item (ItemView)", () => {
+  const LISTEN = ITEMS.find((i) => i.type === "listen_choice")! as unknown as Parameters<typeof ItemView>[0]["item"];
+  function mountItem(o: { kid?: boolean; speech?: SpeechMode }) {
+    const server = fakeServer({ speech: o.speech });
+    setSpeechSource(server.bff.speech);
+    const onUnavailable = vi.fn();
+    render(
+      <I18nProvider initial="ru">
+        <ItemView item={LISTEN} kid={!!o.kid} busy={false} listenBlocked={false} onListenUnavailable={onUnavailable} draft={null} onDraft={() => undefined} />
+        <ToastHost />
+      </I18nProvider>,
+    );
+    return { server, onUnavailable };
+  }
+
+  it("children hear the phrase slower: speed slow", async () => {
+    const { server } = mountItem({ kid: true });
+    await waitFor(() => expect(server.callsTo("POST /v1/speech")).toHaveLength(1));
+    expect(server.callsTo("POST /v1/speech")[0]!.body).toEqual({ text: "A cup of tea, please.", variant: "en-GB", speed: "slow" });
+  });
+
+  it("429 of the speech: the reason is shown, the listening is not spent, nothing reported", async () => {
+    const { onUnavailable } = mountItem({ speech: "limit" });
+    await userEvent.click(screen.getByTestId("dx-listen-play"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Слишком много запросов — повторите через 4 с.");
+    expect(screen.getByTestId("dx-listen-left")).toHaveTextContent("Прослушать · Осталось прослушиваний: 2");
+    expect(screen.getByTestId("dx-listen-play")).not.toBeDisabled();
+    expect(onUnavailable).not.toHaveBeenCalled();
+    expect(phrasePlays()).toHaveLength(0);
+  });
+
+  it("a slow server: «Загружаю звук…» after 300 ms, the listening is spent only when the sound starts", async () => {
+    const { server } = mountItem({});
+    let release!: () => void;
+    const slow = new Promise<void>((r) => (release = r));
+    const speech = server.bff.speech;
+    setSpeechSource(null);
+    setSpeechSource(async (req, o) => {
+      await slow;
+      return speech(req, o);
+    });
+    await userEvent.click(screen.getByTestId("dx-listen-play"));
+    expect(played[0]).toMatch(/^data:audio\/mpeg;base64,/); // the silent unlock in the tap
+    await waitFor(() => expect(screen.getByTestId("dx-listen-left")).toHaveTextContent("Загружаю звук…"), { timeout: 2000 });
+    expect(phrasePlays()).toHaveLength(0);
+    release();
+    await waitFor(() => expect(screen.getByTestId("dx-listen-left")).toHaveTextContent("Осталось прослушиваний: 1"));
+    expect(phrasePlays()).toHaveLength(1);
   });
 });
 
@@ -379,13 +490,24 @@ describe("media — listening only with the licence", () => {
     expect(screen.getByTestId("md-transcript")).toHaveTextContent("Hello there.");
     expect(spoken).toEqual([]);
   });
-  it("с `listen` и без файла — синтез речи с пометкой; перевод не разрешён (gloss null) — реплики не раскрываются", async () => {
+  it("с `listen` и без файла — серверная озвучка реплик голосом говорящего, с пометкой; перевод не разрешён (gloss null) — реплики не раскрываются", async () => {
     const spoken = installVoices([{ lang: "en-GB", name: "UK" }]);
-    mount(<MediaScreen id="m-tts" />);
+    const server = mount(<MediaScreen id="m-tts" />);
     expect(await screen.findByTestId("md-tts")).toHaveTextContent("синтез речи");
     await userEvent.click(screen.getByTestId("md-play"));
-    await waitFor(() => expect(spoken).toEqual(["Hello there."]));
+    await waitFor(() => expect(phrasePlays()).toHaveLength(1));
+    expect(server.callsTo("POST /v1/speech").map((c) => c.body)).toEqual([{ text: "Hello there.", variant: "en-GB", speed: "normal" }]);
+    expect(spoken).toEqual([]);
+    await waitFor(() => expect(screen.getByTestId("md-play")).toHaveTextContent("Прослушать"));
     expect(screen.queryByTestId("md-line-0")).toBeNull();
+  });
+
+  it("без файла, озвучка недоступна и английского голоса нет — «прочитайте транскрипт»", async () => {
+    installVoices([{ lang: "ru-RU", name: "RU" }]);
+    mount(<MediaScreen id="m-tts" />, { speech: "down" });
+    await userEvent.click(await screen.findByTestId("md-play"));
+    expect(await screen.findByTestId("md-no-voice")).toHaveTextContent("Озвучка сейчас недоступна — прочитайте транскрипт.");
+    expect(screen.getByTestId("md-play")).toHaveTextContent("Прослушать");
   });
 });
 

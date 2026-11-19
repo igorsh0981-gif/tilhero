@@ -1,7 +1,8 @@
 /**
  * Лимиты Mini App (спринт 9, INTERNAL_API §2.3) — единый лимитер ts-common (GCRA на Redis, общий для реплик,
  * переопределения из админки без деплоя, метрики для ops-monitor, fail open / closed по политике).
- * Значения по умолчанию — env RATE_LIMIT_* (config.rateLimits); `tg.support_create` — из каталога.
+ * Значения по умолчанию — env RATE_LIMIT_* (config.rateLimits); `tg.support_create` и `tg.speech` (release 4.1,
+ * POST /v1/speech: 120 за 10 минут на аккаунт) — из каталога.
  */
 import type { Redis } from "ioredis";
 import { RateLimiter, policyDefaults, type Logger } from "@tilhero/ts-common";

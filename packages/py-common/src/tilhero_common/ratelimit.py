@@ -126,6 +126,8 @@ POLICIES: dict[str, Policy] = {p.policy: p for p in (
        "Публичные эндпоинты Mini App (refresh, config, policy) — с одного IP"),
     _p("tg.support_create", "telegram-bff", "user", 10, 3600, "open", None,
        "Создание обращения в поддержку — на пользователя в час (новая)"),
+    _p("tg.speech", "telegram-bff", "user", 120, 600, "open", None,
+       "Озвучка фраз контента (POST /v1/speech) — на пользователя за 10 минут (новая, релиз 4.1)"),
     _p("adm.login_ip", "admin-bff", "ip", 10, 60, "closed", "RATE_LIMIT_LOGIN_IP_PER_MIN",
        "Вход сотрудника (POST /admin/v1/auth/login) — с одного IP"),
     _p("adm.login_email", "admin-bff", "email", 5, 60, "closed", "RATE_LIMIT_LOGIN_EMAIL_PER_MIN",

@@ -21,6 +21,7 @@ SERVICES = [
     "lessons",
     "assessment",
     "ai-gateway",
+    "tts",  # релиз 4.1: только проверяет токены telegram-bff (закрытый ключ нужен ServiceSettings в stage/prod)
     "identity-consent",
     "learning-plan",
     "social",

@@ -93,6 +93,7 @@ PY_SERVICES=(
   "ai-gateway|services/ai-gateway|tilhero_ai_gateway.main:app|8114|ai_gateway"
   "assessment|services/assessment|tilhero_assessment.main:app|8113|assessment"
   "lessons|services/lessons|tilhero_lessons.main:app|8112|lessons"
+  "tts|services/tts|tilhero_tts.main:app|8115|"
 )
 
 log() { printf '\033[1;34m[e2e]\033[0m %s\n' "$*"; }
@@ -145,6 +146,8 @@ svc_env() {
       env="$env CATALOG_URL=http://127.0.0.1:8110" ;;
     ai-gateway)  # стенд — детерминированный fake-провайдер; ключ провайдера не нужен
       env="$env AI_PROVIDER=${E2E_AI_PROVIDER:-fake} AI_ALLOW_FAKE_TEST_PUBLISH=true" ;;
+    tts)  # стенд — fake-синтез (детерминированный MP3 без моделей Piper); prod — Piper с голосами в образе
+      env="$env TTS_ENGINE=fake" ;;
     assessment)  # SCHEDULER_TOKEN — вход n8n assessment-tick (стирание текста апелляций по сроку, R3-04)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 AI_GATEWAY_URL=http://127.0.0.1:8114" ;;
     lessons)
@@ -264,7 +267,7 @@ up() {
     IDENTITY_URL=http://127.0.0.1:8101 LEARNING_PLAN_URL=http://127.0.0.1:8102 SUPPORT_URL=http://127.0.0.1:8103 \
     NOTIFICATIONS_URL=http://127.0.0.1:8104 EXPERIENCE_URL=http://127.0.0.1:8106 SOCIAL_URL=http://127.0.0.1:8109 \
     CATALOG_URL=http://127.0.0.1:8110 DIAGNOSTICS_URL=http://127.0.0.1:8111 \
-    LESSONS_URL=http://127.0.0.1:8112 ASSESSMENT_URL=http://127.0.0.1:8113 \
+    LESSONS_URL=http://127.0.0.1:8112 ASSESSMENT_URL=http://127.0.0.1:8113 TTS_URL=http://127.0.0.1:8115 \
     RATE_LIMIT_SESSION_IP_PER_MIN="${E2E_RATE_LIMIT_SESSION_IP_PER_MIN:-500}" \
     RATE_LIMIT_USER_PER_MIN="${E2E_RATE_LIMIT_USER_PER_MIN:-600}" \
     RATE_LIMIT_PUBLIC_IP_PER_MIN="${E2E_RATE_LIMIT_PUBLIC_IP_PER_MIN:-600}" \
@@ -348,7 +351,7 @@ stop_one() {
 
 stop() {
   local f
-  for f in miniapp admin-bff telegram-bff lessons assessment ai-gateway diagnostics catalog user-admin admin-identity notifications telegram-bot-gateway social support \
+  for f in miniapp admin-bff telegram-bff tts lessons assessment ai-gateway diagnostics catalog user-admin admin-identity notifications telegram-bot-gateway social support \
            learning-plan identity-consent experience-config audit mock-telegram; do
     stop_one "$f"
   done

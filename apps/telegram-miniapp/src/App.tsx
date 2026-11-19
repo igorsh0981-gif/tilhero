@@ -11,7 +11,7 @@ import { env } from "./env";
 import { resolveLang, useI18n } from "./i18n";
 import { AppProvider, useApp, type AppCtx } from "./state/app";
 import { useNav, type Pushed, type Tab } from "./state/nav";
-import { bindTelegramEnvironment, needsOnboarding, parseStartParam, syncNativeChrome, tgReady, type BootMode, type DeepLink } from "./tg";
+import { bindTelegramEnvironment, needsOnboarding, parseStartParam, setSpeechSource, syncNativeChrome, tgReady, type BootMode, type DeepLink } from "./tg";
 import { cx } from "./ui/kit";
 import { PopupHost, ToastHost } from "./ui/overlays";
 import { Bar, Tabs } from "./ui/shell";
@@ -103,7 +103,12 @@ export function App({ boot, client: injected }: { boot: BootMode; client?: Parti
   // one client for the life of the app (tests may inject fetch / storage)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const client = useMemo(() => new ApiClient({ baseUrl: env.bffUrl, lang: () => langRef.current, timezone: () => deviceTz, ...injected }), []);
-  const bff = useMemo(() => createBff(client), [client]);
+  const bff = useMemo(() => {
+    const b = createBff(client);
+    // release 4.1: the server speech player (tg/tts.ts) fetches MP3 through this client
+    setSpeechSource(b.speech);
+    return b;
+  }, [client]);
   // the session flag (set at login from the plan, and by «Открыть главную» after the done step) — not the plan itself:
   // completing the plan must still show the done step of onboarding
   const onboarded = !!session?.onboarding_completed;

@@ -1,10 +1,10 @@
 import type { MediaDetail } from "@tilhero/contracts/bff";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { errorText } from "../../api/errors";
 import { useI18n, type MessageKey } from "../../i18n";
 import { useApp } from "../../state/app";
-import { useLoad } from "../../state/hooks";
-import { loadVoices, pickEnglishVoice, speakLines, stopSpeaking, type EnVariant } from "../../tg";
+import { useDelayedFlag, useLoad } from "../../state/hooks";
+import { playSpeech, playUrl, preloadAudio, prefetchSpeech, SpeechUnavailableError, stopSpeech, type EnVariant, type PreloadedFile } from "../../tg";
 import { Icon } from "../../ui/Icon";
 import { Btn, ErrorLine, Pill, Skeleton } from "../../ui/kit";
 import { Bar } from "../../ui/shell";
@@ -13,7 +13,9 @@ import { MEDIA_ICON } from "./Practice";
 
 /**
  * A media item (APP-MEDIA-01, AT-29): source and attribution (plain text, never a link), listening — the audio file from
- * the BFF or, without a file, device speech synthesis line by line (marked «синтез речи»), the transcript with the
+ * the BFF (fetched when the screen shows, played on the shared audio element of tg/tts.ts — iOS plays only from a tap) or,
+ * without a file, speech synthesis line by line (marked «синтез речи»: server MP3 per line, the device voice
+ * as a fallback), the transcript with the
  * translation on tap (only when the licence allows it), phrases; «Упражнения» (AT-48) — a media session (comprehension,
  * gaps, order of lines, phrase meaning) with a check and a summary; no published exercises — no button.
  */
@@ -130,61 +132,106 @@ function Player({ d }: { d: MediaDetail }) {
   const { t, fmt } = useI18n();
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [waiting, setWaiting] = useState(false);
+  const loading = useDelayedFlag(waiting);
   const [error, setError] = useState<string | null>(null);
   const [noVoice, setNoVoice] = useState(false);
-  const audio = useRef<HTMLAudioElement | null>(null);
-  const url = useRef<string | null>(null);
+  const audioFile = useRef<PreloadedFile | null>(null);
   const signal = useRef({ stopped: false });
   // licence first: without `listen` there is neither the file nor speech synthesis of the transcript (review of sprint 3)
   const canListen = d.allowed_uses.includes("listen");
   const file = canListen && d.has_audio;
   const tts = canListen && !d.has_audio && !!d.transcript?.length;
+  /** the lines to speak, each in its speaker's voice */
+  const lines = useMemo(
+    () => (tts && d.transcript ? d.transcript.map((x) => ({ text: x.text_en, variant: (d.voices[x.speaker] ?? "en-GB") as EnVariant })) : []),
+    [tts, d],
+  );
 
   const stop = () => {
     signal.current.stopped = true;
-    audio.current?.pause();
-    stopSpeaking();
+    stopSpeech();
+    setWaiting(false);
+    setBusy(false);
     setPlaying(false);
   };
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // ready before the tap — it then plays right in the tap handler: the file, or the first line without a file
+    if (file) audioFile.current = preloadAudio(() => bff.mediaAudio(d.asset_id), d.asset_id);
+    if (lines[0]) void prefetchSpeech(lines[0].text, lines[0].variant);
+    return () => {
       signal.current.stopped = true;
-      audio.current?.pause();
-      stopSpeaking();
-      if (url.current) URL.revokeObjectURL(url.current);
-    },
-    [],
-  );
+      stopSpeech();
+      audioFile.current?.dispose();
+      audioFile.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const play = async () => {
+  /** The file on the shared element: loaded — it plays right in the tap; still loading (or the preload failed — loaded
+   *  again) — the element is unlocked in the tap and plays the file once it arrives. */
+  const playFile = () => {
+    const f = (audioFile.current ??= preloadAudio(() => bff.mediaAudio(d.asset_id), d.asset_id));
+    const sig = { stopped: false };
+    signal.current = sig;
+    setBusy(true);
+    playUrl(f.src(), {
+      onStart: () => {
+        if (sig.stopped) return;
+        setBusy(false);
+        setPlaying(true);
+      },
+    })
+      .catch((e: unknown) => {
+        if (!sig.stopped) setError(e instanceof Error && e.name === "ApiError" ? errorText(e, t, fmt.mmss) : t("md.audioError"));
+      })
+      .finally(() => {
+        if (signal.current !== sig) return;
+        setBusy(false);
+        setPlaying(false);
+      });
+  };
+
+  /** The lines one after another through the shared audio element. The first playSpeech() runs synchronously in the tap
+   *  handler (iOS unlocks the element only in a gesture); the next line is fetched while the current one sounds. */
+  const playLines = () => {
+    const sig = { stopped: false };
+    signal.current = sig;
+    setNoVoice(false);
+    setPlaying(true);
+    const run = async () => {
+      for (let i = 0; i < lines.length && !sig.stopped; i++) {
+        const line = lines[i]!;
+        const next = lines[i + 1];
+        setWaiting(true);
+        await playSpeech(line.text, line.variant, {
+          onStart: () => {
+            if (sig.stopped) return;
+            setWaiting(false);
+            if (next) void prefetchSpeech(next.text, next.variant);
+          },
+        });
+      }
+    };
+    run()
+      .catch((e: unknown) => {
+        if (sig.stopped) return;
+        if (e instanceof SpeechUnavailableError) setNoVoice(true);
+        else setError(errorText(e, t, fmt.mmss));
+      })
+      .finally(() => {
+        if (signal.current !== sig) return;
+        setWaiting(false);
+        setPlaying(false);
+      });
+  };
+
+  /** Synchronous in the tap handler (iOS). */
+  const play = () => {
     if (!file && !tts) return;
     setError(null);
-    setBusy(true);
-    try {
-      if (file) {
-        if (!url.current) url.current = URL.createObjectURL(await bff.mediaAudio(d.asset_id));
-        const a = audio.current ?? new Audio(url.current);
-        audio.current = a;
-        a.onended = () => setPlaying(false);
-        a.currentTime = 0;
-        await a.play();
-        setPlaying(true);
-      } else if (tts && d.transcript) {
-        const voices = await loadVoices(1500);
-        if (!pickEnglishVoice(voices)) {
-          setNoVoice(true);
-          return;
-        }
-        signal.current = { stopped: false };
-        setPlaying(true);
-        const lines = d.transcript.map((x) => ({ text: x.text_en, variant: (d.voices[x.speaker] ?? "en-GB") as EnVariant }));
-        void speakLines(lines, voices, signal.current).finally(() => setPlaying(false));
-      }
-    } catch (e) {
-      setError(e instanceof Error && e.name === "ApiError" ? errorText(e, t, fmt.mmss) : t("md.audioError"));
-    } finally {
-      setBusy(false);
-    }
+    if (file) playFile();
+    else playLines();
   };
 
   if (!canListen) return <p className="sub" data-testid="md-no-listen">{t("md.noListen")}</p>;
@@ -192,7 +239,7 @@ function Player({ d }: { d: MediaDetail }) {
   return (
     <div className="card stack tight" data-testid="md-player">
       <div className="hrow between">
-        <Btn variant={playing ? "secondary" : "primary"} busy={busy} onClick={() => (playing ? stop() : void play())} data-testid="md-play">
+        <Btn variant={playing ? "secondary" : "primary"} busy={busy} onClick={() => (playing ? stop() : play())} data-testid="md-play">
           <Icon name={playing ? "stop" : "play"} size={18} />
           {playing ? t("md.stop") : t("md.listen")}
         </Btn>
@@ -203,7 +250,8 @@ function Player({ d }: { d: MediaDetail }) {
           {t("md.ttsNote")}
         </p>
       ) : null}
-      {noVoice ? <p className="sub small" role="status">{t("md.noVoice")}</p> : null}
+      {loading && playing ? <p className="sub small" role="status" data-testid="md-loading">{t("sp.loading")}</p> : null}
+      {noVoice ? <p className="sub small" role="status" data-testid="md-no-voice">{t("md.noVoice")}</p> : null}
       <ErrorLine text={error} />
     </div>
   );

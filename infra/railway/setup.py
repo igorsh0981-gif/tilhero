@@ -64,7 +64,7 @@ SERVICES: tuple[Service, ...] = (
     Service("social", 8109, "services/social/Dockerfile", "social", calls=("identity-consent",)),
     Service("telegram-bff", 8001, "services/telegram-bff/Dockerfile", public=True,
             calls=("identity-consent", "learning-plan", "support", "notifications", "experience-config", "social",
-                   "catalog", "diagnostics", "lessons", "assessment")),
+                   "catalog", "diagnostics", "lessons", "assessment", "tts")),
     Service("telegram-miniapp", 8080, "apps/telegram-miniapp/Dockerfile", public=True, health="/healthz"),
     # спринт 3 — учебный контур: контент и диагностика
     Service("catalog", 8110, "services/catalog/Dockerfile", "catalog"),
@@ -74,6 +74,8 @@ SERVICES: tuple[Service, ...] = (
             calls=("catalog", "ai-gateway", "assessment", "learning-plan", "diagnostics")),
     Service("assessment", 8113, "services/assessment/Dockerfile", "assessment", calls=("catalog", "ai-gateway")),
     Service("ai-gateway", 8114, "services/ai-gateway/Dockerfile", "ai_gateway"),
+    # релиз 4.1 — серверная озвучка (Piper → MP3): синтез устройства в Telegram на Android отсутствует, на iOS тихий
+    Service("tts", 8115, "services/tts/Dockerfile"),
     # спринт 2 — админка: admin-bff без публичного домена, admin-web проксирует /admin/v1/* на него (один origin)
     Service("admin-identity", 8120, "services/admin-identity/Dockerfile", "admin_identity"),
     Service("user-admin", 8121, "services/user-admin/Dockerfile", "user_admin",
@@ -88,6 +90,9 @@ SERVICES: tuple[Service, ...] = (
 JWT_ISSUERS = ("identity-consent", "learning-plan", "support", "notifications", "audit", "experience-config",
                "telegram-bot-gateway", "social", "telegram-bff", "admin-bff", "admin-identity", "user-admin",
                "catalog", "diagnostics", "lessons", "assessment", "ai-gateway")
+# только проверяют внутренний JWT (сами никого не вызывают): закрытый ключ нужен ServiceSettings в stage/prod, но их
+# открытый ключ никому не раздаётся
+VERIFY_ONLY = ("tts",)
 SCHEDULED = ("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment")
 # имя переменной адреса в коде вызывающего (BFF и Python-сервисы называют identity по-разному)
 URL_VAR = {
@@ -150,15 +155,15 @@ class Secrets:
     @classmethod
     def new(cls) -> Secrets:
         roles = [r for s in SERVICES if s.schema for r in (s.schema, f"{s.schema}_owner")]
-        return cls(seeds={n: os.urandom(32) for n in JWT_ISSUERS},
+        return cls(seeds={n: os.urandom(32) for n in (*JWT_ISSUERS, *VERIFY_ONLY)},
                    passwords={r: secrets.token_hex(24) for r in roles},
                    scheduler=token(), session_jwt=token(48), invite_key=token(), webhook=secrets.token_hex(32),
                    n8n_key=token(), internal_hmac=token(48), user_ref=token(),
                    mfa_key=base64.b64encode(secrets.token_bytes(32)).decode(), admin_password=admin_password())
 
     def public_keys(self) -> str:
-        return json.dumps({n: b64e(public_raw(private_from_seed(s))) for n, s in self.seeds.items()},
-                          separators=(",", ":"))
+        return json.dumps({n: b64e(public_raw(private_from_seed(s))) for n, s in self.seeds.items()
+                           if n in JWT_ISSUERS}, separators=(",", ":"))
 
 
 def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_username: str = "",
@@ -186,9 +191,9 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
         lines += [f"DATABASE_URL={pg_url(svc.schema, sec.passwords[svc.schema])}",
                   f"MIGRATION_DATABASE_URL={pg_url(svc.schema + '_owner', sec.passwords[svc.schema + '_owner'])}"]
     lines += [REDIS]
-    if svc.name not in ("telegram-bff", "admin-bff"):
+    if svc.name not in ("telegram-bff", "admin-bff", "tts"):  # tts без шины: только Redis-кеш озвучки
         lines += [NATS]
-    if svc.name in JWT_ISSUERS:
+    if svc.name in JWT_ISSUERS or svc.name in VERIFY_ONLY:
         lines += [f"INTERNAL_JWT_PRIVATE_KEY={b64e(sec.seeds[svc.name])}",
                   f"INTERNAL_JWT_PUBLIC_KEYS={sec.public_keys()}"]
     if svc.name not in ("telegram-bff", "admin-bff"):  # Python: ServiceSettings в stage/prod; BFF его не использует

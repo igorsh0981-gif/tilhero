@@ -123,6 +123,7 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 | GET | `/v1/evaluations/{id}` | assessment (**sub = ученик `lrn`**, claims `lrn`, `age_band`) | `EvaluationView` актуальной записи цепочки (то же правило ключей); 404 `EVALUATION_NOT_FOUND` |
 | POST | `/v1/evaluations/{id}/appeal` | assessment | `{reason ≤ 500}`, `Idempotency-Key` обязателен → 201 `Appeal`; 409 `APPEAL_EXISTS` / `APPEAL_WINDOW_CLOSED` / `APPEAL_NOT_ALLOWED`; причина не логируется |
 | GET | `/v1/appeals` | assessment (`?limit=50`) | `{items: Appeal[]}` (элемент не по контракту отбрасывается); `reason: null` — текст стёрт по сроку хранения (90 дней после решения) |
+| POST | `/v1/speech` | tts `/internal/v1/speech` (**аккаунт**, и в детском профиле) | release 4.1, `SpeechRequest` → `audio/mpeg` (MP3 из tts как есть, ≤ 3 МБ), `Cache-Control: private, max-age=86400`. Текст нормализуется как в tts (пробелы, табуляция и переводы строки схлопываются, края обрезаются) и уходит в tts уже нормализованным, `speed` по умолчанию `normal`. 422 `TEXT_INVALID {field}` — после нормализации пусто или > 400 знаков (символов Unicode), управляющие символы, нет латиницы, чужой `variant` / `speed`, лишние поля, а также 422 самого tts; 429 `RATE_LIMITED` (`tg.speech`, 120 за 10 минут на аккаунт); 503 `SPEECH_UNAVAILABLE {service: tts}` — `TTS_URL` не задан, tts недоступен / таймаут `TTS_TIMEOUT_MS` (без повторов) / 5xx / любой другой ответ, в том числе не `audio/mpeg` (Mini App откатывается на синтез речи устройства) |
 
 Сегмент ученика `audience` (kids / teens / adults) — по возрасту активного ученика, как для «Что нового»: детский профиль
 (`lrn ≠ sub`) — всегда kids без запроса к identity; возраст аккаунта не выбран — kids (самый строгий набор). Кеш
@@ -151,9 +152,11 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 | `LESSONS_TIMEOUT_MS` / `LESSONS_FINISH_TIMEOUT_MS` | `25000` / `45000` | таймаут вызовов lessons и assessment / завершения урока: lessons ждёт оценку assessment до 32 с плюс вспомогательные вызовы, поэтому `LESSONS_FINISH_TIMEOUT_MS` — с запасом, **больше 32 000**. Шаг ролевой ситуации и «проще» ждут ИИ до 20 с (`AI_TIMEOUT_SECONDS` lessons), поэтому `LESSONS_TIMEOUT_MS` должен быть **больше 20 000**: иначе BFF отвечает 503, хотя lessons ответ уже сохранил (ревью R2-02). Ответ на шаг (POST) BFF не повторяет — повтор того же ответа делает Mini App («Отправить ещё раз»), домен идемпотентен по шагу |
 | `COURSE_SNAPSHOT_REVALIDATE_SECONDS` / `PAIRS_CACHE_SECONDS` | `60` / `60` | перепроверка снимка курса по ETag / кеш языковых пар |
 | `AUDIO_CACHE_MB` / `AUDIENCE_CACHE_SECONDS` | `32` / `30` | кеш байтов аудио медиатеки (LRU, 0 — выключен) / кеш сегмента ученика |
+| `TTS_URL` | — | release 4.1: адрес tts (Railway: `http://tts.railway.internal:8115`, локально `http://127.0.0.1:8115`). **Необязателен и в stage/prod**: без него `POST /v1/speech` отвечает 503 `SPEECH_UNAVAILABLE`, при старте — одно предупреждение `TTS_URL is not set` (BFF можно выложить раньше tts). Если задан — только http(s) |
+| `TTS_TIMEOUT_MS` | `15000` | таймаут вызова tts (1000–60000), без повторов: длинная фраза синтезируется секунды, кеш MP3 — у tts |
 | `UPSTREAM_TIMEOUT_MS` / `UPSTREAM_RETRIES` | `3000` / `1` | таймаут и повторы (GET и команды с `Idempotency-Key`) |
 | `EXPERIENCE_CACHE_SECONDS` | `60` | кэш конфига интерфейса |
-| `RATE_LIMIT_USER_PER_MIN` / `RATE_LIMIT_SESSION_IP_PER_MIN` / `RATE_LIMIT_PIN_PER_MIN` / `RATE_LIMIT_PUBLIC_IP_PER_MIN` | `120` / `10` / `5` / `120` | политики `tg.user`, `tg.session_ip`, `tg.pin` (код родителя, в т. ч. при выходе из детского профиля; сброс — отдельный счётчик), `tg.public_ip`; `tg.support_create` — из каталога |
+| `RATE_LIMIT_USER_PER_MIN` / `RATE_LIMIT_SESSION_IP_PER_MIN` / `RATE_LIMIT_PIN_PER_MIN` / `RATE_LIMIT_PUBLIC_IP_PER_MIN` | `120` / `10` / `5` / `120` | политики `tg.user`, `tg.session_ip`, `tg.pin` (код родителя, в т. ч. при выходе из детского профиля; сброс — отдельный счётчик), `tg.public_ip`; `tg.support_create` и `tg.speech` (120 за 600 с на аккаунт, `POST /v1/speech`) — из каталога |
 | `RATE_LIMITS_ENABLED`, `RATE_LIMIT_OVERRIDE_REFRESH_SECONDS` | `true`, `30` | единый лимитер ts-common |
 | `TRUST_PROXY_HOPS` | `1` | доверенные прокси (Railway edge) |
 | `LOG_LEVEL`, `SERVICE_VERSION` | `info`, версия package.json | |
@@ -173,6 +176,8 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
   `correction`, `your_answer`, `correct_answer`, `text_en`) в логи не попадают (redact-пути и вычистка ключей); ключей
   ответов в ответах Mini App нет: задание собирается явно без `answer`, правильность на проверке без подсказок не
   отдаётся никогда, верный ответ в итогах — только у заданий с ошибкой.
+- Release 4.1: текст озвучиваемых фраз (`POST /v1/speech`) в логи не попадает — `req.body.text` в redact-путях, ключ `text`
+  вычищается из любого объекта лога; предупреждения о tts пишут только статус, код и правило проверки.
 - Сбой Redis → `503` (fail-closed).
 
 ## Отклонения от контракта и обходы
@@ -204,6 +209,12 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 - **`POST /v1/sessions/{id}/review`**: `Idempotency-Key` в `bff.ts` не указан — BFF требует его (создающая команда, как
   старт сессий); **`POST /v1/sessions/{id}/simpler?locale=`** — необязательный параметр сверх контракта.
 - Открытый ответ (`open_answer`) Mini App отправляет полем `text` (≤ 300; README lessons), в `bff.ts` это не написано.
+- **Release 4.1, `POST /v1/speech`:**
+  - ошибки tts клиенту **не** передаются как есть (в отличие от остальных доменов): 422 → `422 TEXT_INVALID`, всё прочее
+    (4xx, 5xx, таймаут, сеть) → `503 SPEECH_UNAVAILABLE {service: tts}` — Mini App различает только «текст не годится» и
+    «озвучки нет, откатиться на устройство»;
+  - табуляция и переводы строки (`\t \n \r`) допустимы и схлопываются в пробел, как в tts; прочие управляющие символы
+    (Cc) → 422. Длина считается в символах Unicode (как `len()` в tts), не в единицах UTF-16.
 
 ## Локальная разработка
 
@@ -222,6 +233,7 @@ npx tsx scripts/dev-init-data.ts --user-id 900001 --name Игорь --start-para
 - **Деплой (Railway):** `RAILWAY_DOCKERFILE_PATH=services/telegram-bff/Dockerfile` (контекст — корень репозитория), healthcheck `/health/ready`.
 - **`/health/ready` = 503 `redis: down`:** проверить Redis и `REDIS_URL`; пока Redis недоступен, авторизованные запросы → 503.
 - **Массовые `503 UPSTREAM_UNAVAILABLE {service}`:** строки лога `domain unavailable` (`upstream`, `upstream_status`, `upstream_code`). `INTERNAL_TOKEN_*` / `CALLER_NOT_ALLOWED` — у домена нет открытого ключа `telegram-bff` или домен не разрешает `telegram-bff`.
+- **`503 SPEECH_UNAVAILABLE` на `/v1/speech`:** при старте `TTS_URL is not set` — переменная не задана; иначе строки `domain unavailable` / `speech unavailable` / `speech audio rejected` с `upstream: tts` (статус, код, причина). Mini App в это время озвучивает синтезом устройства, где он есть (в Telegram на Android его нет — там аудирование отмечается недоступным).
 - **Вход падает 503 `learning-plan`:** сессия не создаётся (онбординг ученика неизвестен), initData можно предъявить снова после восстановления.
 - **Частые `401 TOKEN_EXPIRED {reason: learner_switched}`:** Mini App продолжает слать старый access-токен после `POST /v1/session/learner` — ошибка клиента (токены надо заменить из ответа).
 - **Отозвать сессии аккаунта:** `redis-cli smembers bff:usid:<user_id>` → `del bff:sid:<sid>` для каждого. Компрометация `SESSION_JWT_SECRET` — заменить секрет и удалить `bff:sid:*`, `bff:rt:*`, `bff:usid:*`.
