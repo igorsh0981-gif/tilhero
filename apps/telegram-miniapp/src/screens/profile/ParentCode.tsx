@@ -48,10 +48,9 @@ export function ParentCode({ cancel = false }: { cancel?: boolean }) {
               {sec.pin_enabled && pendingAt ? <PinResetPending at={pendingAt} onCancel={() => setMode({ k: "cancel" })} /> : null}
               <div className={sec.pin_enabled ? "card ok" : "card warn"}>
                 <div className="hrow between">
-                  <b className="h3">{t("pc.title")}</b>
+                  <p className="sub ink" data-testid="pc-status">{sec.pin_enabled ? t("pc.on") : t("pc.off")}</p>
                   <Pill tone={sec.pin_enabled ? "ok" : "warn"}>{sec.pin_enabled ? t("profile.pinOn") : t("profile.pinOff")}</Pill>
                 </div>
-                <p className="sub ink mt8" data-testid="pc-status">{sec.pin_enabled ? t("pc.on") : t("pc.off")}</p>
               </div>
               <p className="sub">{t("pc.text")}</p>
               {sec.pin_enabled ? (
