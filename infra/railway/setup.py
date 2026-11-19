@@ -53,7 +53,7 @@ class Service:
 SERVICES: tuple[Service, ...] = (
     Service("identity-consent", 8101, "services/identity-consent/Dockerfile", "identity_consent",
             calls=("notifications", "audit")),
-    Service("learning-plan", 8102, "services/learning-plan/Dockerfile", "learning_plan"),
+    Service("learning-plan", 8102, "services/learning-plan/Dockerfile", "learning_plan", calls=("catalog",)),
     Service("support", 8103, "services/support/Dockerfile", "support"),
     Service("notifications", 8104, "services/notifications/Dockerfile", "notifications",
             calls=("identity-consent", "telegram-bot-gateway")),
@@ -63,22 +63,27 @@ SERVICES: tuple[Service, ...] = (
             calls=("identity-consent",)),
     Service("social", 8109, "services/social/Dockerfile", "social", calls=("identity-consent",)),
     Service("telegram-bff", 8001, "services/telegram-bff/Dockerfile", public=True,
-            calls=("identity-consent", "learning-plan", "support", "notifications", "experience-config", "social")),
+            calls=("identity-consent", "learning-plan", "support", "notifications", "experience-config", "social",
+                   "catalog", "diagnostics")),
     Service("telegram-miniapp", 8080, "apps/telegram-miniapp/Dockerfile", public=True, health="/healthz"),
+    # спринт 3 — учебный контур: контент и диагностика
+    Service("catalog", 8110, "services/catalog/Dockerfile", "catalog"),
+    Service("diagnostics", 8111, "services/diagnostics/Dockerfile", "diagnostics", calls=("catalog",)),
     # спринт 2 — админка: admin-bff без публичного домена, admin-web проксирует /admin/v1/* на него (один origin)
     Service("admin-identity", 8120, "services/admin-identity/Dockerfile", "admin_identity"),
     Service("user-admin", 8121, "services/user-admin/Dockerfile", "user_admin",
             calls=("identity-consent", "learning-plan")),
     Service("admin-bff", 8002, "services/admin-bff/Dockerfile", health="/health/ready",
             calls=("admin-identity", "user-admin", "identity-consent", "support", "audit", "experience-config",
-                   "notifications")),
+                   "notifications", "catalog", "diagnostics")),
     Service("admin-web", 8080, "apps/admin-web/Dockerfile", public=True, health="/healthz"),
     Service("n8n", 5678, "infra/n8n/Dockerfile", health="/healthz",
-            calls=("learning-plan", "notifications", "social", "user-admin")),
+            calls=("learning-plan", "notifications", "social", "user-admin", "catalog")),
 )
 JWT_ISSUERS = ("identity-consent", "learning-plan", "support", "notifications", "audit", "experience-config",
-               "telegram-bot-gateway", "social", "telegram-bff", "admin-bff", "admin-identity", "user-admin")
-SCHEDULED = ("learning-plan", "notifications", "social", "user-admin")
+               "telegram-bot-gateway", "social", "telegram-bff", "admin-bff", "admin-identity", "user-admin",
+               "catalog", "diagnostics")
+SCHEDULED = ("learning-plan", "notifications", "social", "user-admin", "catalog")
 # имя переменной адреса в коде вызывающего (BFF и Python-сервисы называют identity по-разному)
 URL_VAR = {
     ("telegram-bff", "identity-consent"): "IDENTITY_URL",

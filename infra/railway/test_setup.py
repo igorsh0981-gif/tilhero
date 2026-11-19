@@ -65,7 +65,7 @@ def test_scheduler_and_service_specific_secrets():
     assert gw["MINIAPP_URL"].startswith("https://") and "localhost" not in gw["MINIAPP_URL"]
     n8n = env_of(files, "n8n")
     assert {k for k in n8n if k.endswith("_URL")} == {"LEARNING_PLAN_URL", "NOTIFICATIONS_URL", "SOCIAL_URL",
-                                                       "USER_ADMIN_URL"}
+                                                       "USER_ADMIN_URL", "CATALOG_URL"}
     assert n8n["RAILWAY_RUN_UID"] == "0" and len(n8n["N8N_ENCRYPTION_KEY"]) >= 32
 
 
@@ -122,7 +122,7 @@ def test_admin_services_sprint2():
     assert "INTERNAL_JWT_SECRET" not in bff and bff["INTERNAL_JWT_PRIVATE_KEY"]
     assert {k for k in bff if k.endswith("_URL") and k != "REDIS_URL"} == {
         "ADMIN_IDENTITY_URL", "USER_ADMIN_URL", "IDENTITY_URL", "SUPPORT_URL", "AUDIT_URL", "EXPERIENCE_URL",
-        "NOTIFICATIONS_URL"}
+        "NOTIFICATIONS_URL", "CATALOG_URL", "DIAGNOSTICS_URL"}
     assert not rs.by_name("admin-bff").public and rs.by_name("admin-web").public
     web = env_of(files, "admin-web")
     assert web["ADMIN_BFF_URL"] == "http://${{admin-bff.RAILWAY_PRIVATE_DOMAIN}}:8002"
@@ -141,3 +141,19 @@ def test_admin_services_sprint2():
     assert "ADMIN_BOOTSTRAP_EMAIL" not in env_of(plain, "admin-identity")
     with pytest.raises(ValueError):
         rs.build(sec, env="prod", bot_username="TilHeroBot", app_name="app", admin_email="not-an-email")
+
+
+def test_content_services_sprint3():
+    """Спринт 3: catalog и diagnostics — приватные, со своими схемами; адреса у вызывающих."""
+    sec = rs.Secrets.new()
+    files = rs.build(sec, env="prod", bot_username="TilHeroBot", app_name="app")
+    for name, port, schema in (("catalog", 8110, "catalog"), ("diagnostics", 8111, "diagnostics")):
+        svc = rs.by_name(name)
+        assert not svc.public and svc.port == port and svc.schema == schema
+        env = env_of(files, name)
+        assert env["DATABASE_URL"].startswith(f"postgresql://{schema}:") and env["INTERNAL_JWT_PRIVATE_KEY"]
+    assert env_of(files, "catalog")["SCHEDULER_TOKEN"] == sec.scheduler
+    assert env_of(files, "diagnostics")["CATALOG_URL"].endswith(":8110")
+    assert env_of(files, "learning-plan")["CATALOG_URL"].endswith(":8110")
+    bff = env_of(files, "telegram-bff")
+    assert bff["CATALOG_URL"].endswith(":8110") and bff["DIAGNOSTICS_URL"].endswith(":8111")

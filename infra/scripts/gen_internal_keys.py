@@ -16,6 +16,8 @@ SERVICES = [
     "admin-bff",
     "admin-identity",
     "user-admin",
+    "catalog",
+    "diagnostics",
     "identity-consent",
     "learning-plan",
     "social",

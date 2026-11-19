@@ -12,7 +12,9 @@ members = [
     "tilhero-admin-identity",
     "tilhero-audit",
     "tilhero-botgw",
+    "tilhero-catalog",
     "tilhero-common",
+    "tilhero-diagnostics",
     "tilhero-experience",
     "tilhero-identity",
     "tilhero-learning-plan",
@@ -1687,6 +1689,17 @@ dependencies = [
 requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
 
 [[package]]
+name = "tilhero-catalog"
+version = "0.1.0"
+source = { editable = "services/catalog" }
+dependencies = [
+    { name = "tilhero-common" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
+
+[[package]]
 name = "tilhero-common"
 version = "0.1.0"
 source = { editable = "packages/py-common" }
@@ -1720,6 +1733,17 @@ requires-dist = [
     { name = "tzdata", specifier = ">=2026.5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
+
+[[package]]
+name = "tilhero-diagnostics"
+version = "0.1.0"
+source = { editable = "services/diagnostics" }
+dependencies = [
+    { name = "tilhero-common" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
 
 [[package]]
 name = "tilhero-experience"

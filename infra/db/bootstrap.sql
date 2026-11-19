@@ -1,6 +1,6 @@
 -- TilHero: подготовка PostgreSQL (stage/prod на Railway, локальный e2e-стенд) — две роли и схема на сервис.
 -- Спринт 1: identity_consent, learning_plan, social, support, notifications, audit, experience_config;
--- спринт 2: admin_identity, user_admin. Новые сервисы учебного контура добавляются в массив ниже.
+-- спринт 2: admin_identity, user_admin; спринт 3: catalog, diagnostics. Новые сервисы учебного контура добавляются в массив ниже.
 -- Запуск (идемпотентно, под суперпользователем/владельцем БД):
 --   psql "$DATABASE_PUBLIC_URL" -v ON_ERROR_STOP=1 -f infra/db/bootstrap.sql
 --
@@ -22,7 +22,7 @@ DECLARE
   owner text;
 BEGIN
   FOREACH svc IN ARRAY ARRAY['identity_consent','learning_plan','social','support','notifications','audit',
-                                  'experience_config','admin_identity','user_admin']
+                                  'experience_config','admin_identity','user_admin','catalog','diagnostics']
   LOOP
     owner := svc || '_owner';
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = svc) THEN

@@ -31,6 +31,11 @@
  * по сотрудникам, ролям и заявкам four-eyes.
  */
 
+import type {
+  ContentKind, Language, LanguagePair, LocaleCheck, MediaRequestStatus, ScenarioTestRun, VersionStatus,
+  Localized as ContentLocalized, Band,
+} from "./content.js";
+
 export interface ErrorBody {
   code: string;
   message: string;
@@ -73,12 +78,20 @@ export type Permission =
   | "notif.campaigns.manage" // рассылки: черновик, сегмент, оценка охвата, тест
   | "notif.campaigns.send" // рассылки: расписание и экстренная остановка (step-up)
   | "staff.manage"
-  | "roles.manage";
+  | "roles.manage"
+  // спринт 3 — контент, медиа, языки
+  | "content.read"
+  | "content.edit" // черновики всех сущностей контента, тестовый прогон сценария, загрузка аудио
+  | "content.review" // проверка методиста и локализаций (не своих черновиков)
+  | "content.publish" // публикация, архив, откат контента и версий теста диагностики (step-up)
+  | "media.rights" // права и лицензии медиа, решения по заявкам учеников (step-up)
+  | "lang.manage"; // языки и языковые пары (step-up)
 
 export const PERMISSIONS: readonly Permission[] = [
   "dashboard.read", "users.read", "users.sensitive.read", "support.read", "support.reply", "support.manage",
   "audit.read", "config.read", "config.edit", "config.publish", "whatsnew.manage", "whatsnew.publish",
   "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send", "staff.manage", "roles.manage",
+  "content.read", "content.edit", "content.review", "content.publish", "media.rights", "lang.manage",
 ];
 
 export type RoleCode =
@@ -86,7 +99,8 @@ export type RoleCode =
   | "operations" // конфигурация, поддержка, ученики (без раскрытия), аудит
   | "communications" // «Что нового», шаблоны уведомлений, рассылки
   | "support"
-  | "methodist" // контент и сценарии — спринт 3; пока только чтение
+  | "methodist" // курс, уроки, сценарии, рубрики: правка, проверка, публикация
+  | "content_manager" // медиа, права и лицензии, заявки учеников
   | "analyst"
   | "auditor"
   | "read_only";
@@ -417,6 +431,9 @@ export interface Dashboard {
   support: DashboardBlock<SupportStats>;
   whats_new: DashboardBlock<DashboardWhatsNew>;
   campaigns: DashboardBlock<DashboardCampaigns>;
+  /** спринт 3 */
+  content: DashboardBlock<ContentSummary>;
+  diagnostics: DashboardBlock<DiagnosticStats>;
 }
 
 // =====================================================================================================================
@@ -959,3 +976,207 @@ export type NotificationsErrorCode =
 // =====================================================================================================================
 /** POST /admin/v1/dev/impersonate {role: RoleCode | null} — только ENV=dev (иначе 404): права сужаются до роли
  * для предпросмотра меню; расширить права сверх своих нельзя (403 IMPERSONATION_NOT_ALLOWED {role}). */
+
+// =====================================================================================================================
+// Контент и диагностика (спринт 3) — catalog и diagnostics через admin-bff. Форматы тел — ./content.ts.
+// Права: content.read — чтение; content.edit — черновики; content.review — проверка (не своих: 409 SELF_REVIEW);
+// content.publish — публикация/архив/откат (step-up); media.rights — права медиа и заявки (step-up);
+// lang.manage — языки и пары (step-up).
+// =====================================================================================================================
+
+export interface ContentValidationError {
+  path: string; // "payload.title.uz", "payload.nodes.n4.transitions[0].to"
+  code: string; // LOCALE_MISSING, UNKNOWN_REF, PREREQ_CYCLE, NO_CONTROL_ITEMS, RIGHTS_REQUIRED, …
+  message: string;
+}
+
+/** Строка списка сущностей вида. */
+export interface ContentRow {
+  kind: ContentKind;
+  key: string;
+  title: ContentLocalized;
+  published_version: number | null;
+  latest_version: number;
+  latest_status: VersionStatus;
+  level: Band | null;
+  updated_at: string;
+  updated_by_name: string | null;
+  /** media_asset: истекает ли лицензия в ≤ 14 дней / уже приостановлен */
+  rights_warning: "expiring" | "expired" | null;
+}
+
+export interface ContentVersionMeta {
+  version: number;
+  status: VersionStatus;
+  author_id: string;
+  author_name: string | null;
+  created_at: string;
+  submitted_at: string | null;
+  reviewer_id: string | null;
+  reviewer_name: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  locale_checks: { ru: LocaleCheck; uz: LocaleCheck };
+  rights_approved_by: string | null;
+  rights_approved_by_name: string | null;
+  rights_approved_at: string | null;
+  published_by: string | null;
+  published_by_name: string | null;
+  published_at: string | null;
+  archived_at: string | null;
+  suspended_at: string | null;
+  suspend_reason: "rights_expired" | "rights_revoked" | null;
+}
+
+export interface ContentVersion<P = Record<string, unknown>> extends ContentVersionMeta {
+  kind: ContentKind;
+  key: string;
+  payload: P;
+  payload_hash: string;
+  /** scenario: последний тестовый прогон этой версии (null — не было или устарел) */
+  test_run: ScenarioTestRun | null;
+}
+
+/**
+ *  GET  /admin/v1/content/{kind}?q=&status=&level=&cursor=&limit= (content.read) → Page<ContentRow>
+ *  GET  /admin/v1/content/{kind}/{key} (content.read) → {row: ContentRow, versions: ContentVersionMeta[]}
+ *  GET  /admin/v1/content/{kind}/{key}/versions/{v} (content.read) → ContentVersion
+ *  POST /admin/v1/content/{kind} {payload} (content.edit, Idempotency-Key) → 201 ContentVersion (v1, draft);
+ *       409 CONTENT_KEY_EXISTS; 422 CONTENT_INVALID {errors: ContentValidationError[]} (только схема)
+ *  POST /admin/v1/content/{kind}/{key}/versions {from_version} (content.edit) → 201 черновик-копия;
+ *       409 DRAFT_EXISTS {version} — у ключа уже есть черновик или версия на проверке
+ *  PUT  /admin/v1/content/{kind}/{key}/versions/{v} {payload, expected_hash} (content.edit) → ContentVersion;
+ *       409 VERSION_NOT_DRAFT | VERSION_CONFLICT {payload_hash}; ключ в payload менять нельзя (422)
+ *  POST …/versions/{v}/validate (content.read) → {ok: boolean, errors: ContentValidationError[]} — сухая проверка
+ *       в режиме публикации
+ *  POST …/versions/{v}/submit (content.edit) → ContentVersion (in_review); 422 CONTENT_INVALID
+ *  POST …/versions/{v}/review ContentReviewInput (content.review) → ContentVersion (approved | draft);
+ *       409 SELF_REVIEW — автор не проверяет свою версию
+ *  POST …/versions/{v}/publish {reason} (content.publish, step-up, Idempotency-Key) → ContentVersion (published);
+ *       422 CONTENT_INVALID (целостность курса, локализации, права, тестовый прогон); 409 VERSION_NOT_APPROVED
+ *  POST /admin/v1/content/{kind}/{key}/archive {reason} (content.publish, step-up) → {row}; 409 CONTENT_IN_USE {refs}
+ *  POST /admin/v1/content/{kind}/{key}/rollback {to_version, reason} (content.publish, step-up) → ContentVersion
+ *  POST /admin/v1/content/scenario/{key}/versions/{v}/test-run (content.edit) → ScenarioTestRun
+ *  POST /admin/v1/content/media_asset/{key}/versions/{v}/rights-approve {note} (media.rights, step-up) → ContentVersion
+ *  POST /admin/v1/content/blobs AudioUpload (content.edit; тело ≤ 4,5 МБ) → AudioBlob;
+ *       422 AUDIO_INVALID (тип, размер > 3 МБ, сигнатура файла)
+ *  GET  /admin/v1/content/blobs/{blob_id} (content.read) → аудио для предпросмотра
+ *  GET  /admin/v1/content/review-queue?kind=&cursor= (content.review) → Page<ContentRow> — на проверке, не мои
+ *  GET  /admin/v1/content/summary (dashboard.read | content.read) → ContentSummary
+ *  Аудит: content.version_created | updated | submitted | reviewed | returned | published | archived | rolled_back |
+ *  rights_approved | test_run, media.suspended (system).
+ */
+export interface ContentReviewInput {
+  decision: "approve" | "return";
+  note: string; // 3..1000
+  /** при approve обе должны быть checked */
+  locale_checks: { ru: LocaleCheck; uz: LocaleCheck };
+}
+export interface ContentPublishInput {
+  reason: string;
+}
+export interface ContentRollbackInput {
+  to_version: number;
+  reason: string;
+}
+export interface AudioUpload {
+  filename: string;
+  content_type: "audio/mpeg" | "audio/ogg" | "audio/mp4";
+  data_base64: string;
+}
+export interface AudioBlob {
+  blob_id: string;
+  content_type: string;
+  size: number;
+  sha256: string;
+  created_at: string;
+}
+
+export interface ContentSummary {
+  by_kind: Record<ContentKind, { published: number; drafts: number; in_review: number }>;
+  in_review: number;
+  /** медиа с лицензией, истекающей в ≤ 14 дней */
+  rights_expiring: Array<{ asset_id: string; title: ContentLocalized; valid_to: string }>;
+  suspended_media: number;
+  new_media_requests: number;
+}
+
+// ---------- Заявки учеников на песни и фильмы (ADM-MEDIA-04) ----------
+export interface AdminMediaRequest {
+  request_id: string;
+  /** null — ученик удалён (заявка анонимизирована) */
+  user_id: string | null;
+  kind: "song" | "movie" | "series" | "other";
+  title: string;
+  link: string | null;
+  comment: string | null;
+  ui_locale: "ru" | "uz";
+  status: MediaRequestStatus;
+  decision_note: string | null;
+  linked_asset_id: string | null;
+  decided_by: string | null;
+  decided_by_name: string | null;
+  decided_at: string | null;
+  created_at: string;
+  /** сколько ещё заявок с похожим названием (нормализованным) */
+  similar_count: number;
+}
+/** GET /admin/v1/content/media-requests?status=&q=&cursor= (content.read) → Page<AdminMediaRequest>
+ *  POST /admin/v1/content/media-requests/{id}/take (media.rights) → in_review
+ *  POST /admin/v1/content/media-requests/{id}/decide MediaRequestDecision (media.rights, step-up) → AdminMediaRequest;
+ *       уведомление ученику (шаблон media_request.decided). Ссылка ученика НЕ открывается и НЕ скачивается сервером. */
+export interface MediaRequestDecision {
+  status: "authored_alternative" | "licensed" | "rejected" | "duplicate";
+  note: string; // 3..500, видна ученику
+  linked_asset_id?: string; // опубликованный media_asset (для authored_alternative | licensed)
+}
+
+// ---------- Языки и пары (ADM-LANG-01/02) ----------
+export interface PairCard extends LanguagePair {
+  readiness: {
+    skills: number;
+    lessons_published: number;
+    scenarios_published: number;
+    rubrics_published: number;
+    media_published: number;
+    diagnostic_test: string | null; // "dx-en-adult@1"
+    locales_checked_pct: number; // доля опубликованных сущностей курса с ru и uz = checked
+  };
+  learners: number; // учеников с активной парой (из diagnostics)
+}
+/** GET /admin/v1/languages (content.read) → {items: Language[]}; PUT /admin/v1/languages/{code} Language
+ *  (lang.manage, step-up) → Language. GET /admin/v1/language-pairs (content.read) → {items: PairCard[]};
+ *  PUT /admin/v1/language-pairs/{pair_id} LanguagePair & {reason} (lang.manage, step-up) → PairCard —
+ *  перевод в published только при опубликованном курсе и тесте диагностики (422 PAIR_NOT_READY {missing}). */
+
+// ---------- Диагностика (тесты, статистика) ----------
+export interface DiagnosticTestRow {
+  test_id: string; // dx-en-adult
+  pair_id: string;
+  audience: "adults" | "kids";
+  published_version: number | null;
+  versions: Array<{ version: number; status: "draft" | "published" | "archived"; items: number; published_at: string | null }>;
+}
+export interface DiagnosticTestVersion {
+  test_id: string;
+  version: number;
+  status: "draft" | "published" | "archived";
+  config: Record<string, unknown>;
+  /** с ключами ответов — только для content.read */
+  items: Array<Record<string, unknown>>;
+  coverage: Record<string, Record<Band, number>>; // area → band → число заданий
+}
+export interface DiagnosticStats {
+  period: Period;
+  started: number;
+  finished: number;
+  median_minutes: number | null;
+  by_level: Record<Band | "none", number>;
+  not_assessed_pct: Record<"vocabulary" | "grammar" | "reading" | "listening", number>;
+  followups: number;
+}
+/** GET /admin/v1/diagnostics/tests (content.read) → {items: DiagnosticTestRow[]};
+ *  GET /admin/v1/diagnostics/tests/{id}/versions/{v} (content.read) → DiagnosticTestVersion;
+ *  POST /admin/v1/diagnostics/tests/{id}/versions/{v}/publish {reason} (content.publish, step-up) → DiagnosticTestRow;
+ *  GET /admin/v1/diagnostics/stats?period= (dashboard.read) → DiagnosticStats */
+export type { Language, LanguagePair };
