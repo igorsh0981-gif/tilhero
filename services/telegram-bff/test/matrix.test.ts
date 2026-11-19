@@ -88,6 +88,25 @@ const SAMPLES: Record<string, Sample> = {
   "post /v1/support/tickets/{ticket_id}/messages": { params: { ticket_id: ID }, payload: { text: "Ещё" } },
   "post /v1/support/tickets/{ticket_id}/close": { params: { ticket_id: ID } },
   "get /v1/support/categories": {},
+  // спринт 3
+  "get /v1/languages": {},
+  "get /v1/diagnostics/state": {},
+  "post /v1/diagnostics/sessions": { payload: {}, idem: true },
+  "get /v1/diagnostics/sessions/{id}/next": {},
+  "post /v1/diagnostics/sessions/{id}/answers": { payload: { item_id: "v-a1-01", answer: 0, dont_know: false, time_ms: 10 } },
+  "post /v1/diagnostics/sessions/{id}/listening-unavailable": {},
+  "post /v1/diagnostics/sessions/{id}/finish": {},
+  "post /v1/diagnostics/results/{id}/followup": { payload: { area: "grammar" } },
+  "get /v1/diagnostics/results": {},
+  "get /v1/skills/map": {},
+  "get /v1/plan/trajectory": {},
+  "get /v1/scenarios": {},
+  "get /v1/scenarios/{id}": { params: { id: "sc-travel-hotel" } },
+  "get /v1/media": {},
+  "get /v1/media/{id}": { params: { id: "m-own-coffee" } },
+  "get /v1/media/{id}/audio": { params: { id: "m-own-coffee" } },
+  "get /v1/media/requests": {},
+  "post /v1/media/requests": { payload: { kind: "song", title: "Yesterday" }, idem: true },
 };
 
 interface Op {

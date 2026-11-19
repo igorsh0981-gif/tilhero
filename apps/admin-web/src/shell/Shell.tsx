@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RoleCode } from "@tilhero/contracts/admin";
 import { Auth, Support, type SupportStats } from "../api/endpoints";
 import { useI18n, fmtCountdown } from "../i18n";
@@ -9,7 +9,7 @@ import { GROUP_OF, homePage, navItem, pageAllowed, visibleNav, type PageId } fro
 import { useHashRoute } from "../state/route";
 import { useSession } from "../state/session";
 import { Icon } from "../ui/Icon";
-import { Btn, cx, IconBtn } from "../ui/kit";
+import { Btn, cx, IconBtn, Spinner } from "../ui/kit";
 import { MenuButton, MenuItem, Modal } from "../ui/overlays";
 import { useToast } from "../ui/toasts";
 import { errMeta, errText } from "../ui/errors";
@@ -29,12 +29,17 @@ import { AuditPage } from "../screens/audit/Audit";
 import { Soon } from "../screens/soon/Soon";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
 
+// sprint 3 sections are separate chunks (review T2-5: one 545 kB bundle) — loaded on first visit, same origin (CSP)
+const ContentPage = lazy(() => import("../screens/content/ContentPage").then((m) => ({ default: m.ContentPage })));
+const LangsPage = lazy(() => import("../screens/langs/Langs").then((m) => ({ default: m.LangsPage })));
+
 export const APP_VERSION = "admin-web 0.2.0";
 
 /** Sections whose route id is a tab or an object: «#/news/templates/streak.reminder», «#/support/TCK-1042». */
 function crumbOf(page: PageId | "", id: string | null): string | null {
   if (!id) return null;
   if (page === "news") return id.split("/").slice(1).join("/") || null;
+  if (page === "content") return id.split("/").slice(1).join("/") || null;
   return id;
 }
 
@@ -342,6 +347,14 @@ export function Shell() {
                 <Roles />
               ) : page === "audit" ? (
                 <AuditPage />
+              ) : page === "content" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <ContentPage routeId={route.id} />
+                </Suspense>
+              ) : page === "langs" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <LangsPage />
+                </Suspense>
               ) : null}
             </ErrorBoundary>
           </main>

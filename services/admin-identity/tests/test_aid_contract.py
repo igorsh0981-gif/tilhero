@@ -1,6 +1,7 @@
-"""Контрактный тест матрицы TilHero: сид миграции 0001 и каталог = packages/contracts/src/admin.ts
-(`PERMISSIONS`, `RoleCode`, `PRIVILEGED_ROLES`) и таблица docs/sprint2/PLAN.md §«Роли и права»;
-формы ответов Staff API = интерфейсы admin.ts (Staff, Role, Approval). admin.ts и PLAN.md разбираются регулярками."""
+"""Контрактный тест матрицы TilHero: сид миграций 0001 + 0003 и каталог = packages/contracts/src/admin.ts
+(`PERMISSIONS`, `RoleCode`, `PRIVILEGED_ROLES`), таблица docs/sprint2/PLAN.md §«Роли и права» и дополнение
+docs/sprint3/PLAN.md §«Права и роли» (права контента, роль content_manager); формы ответов Staff API = интерфейсы
+admin.ts (Staff, Role, Approval). admin.ts и оба PLAN.md разбираются регулярками."""
 
 from __future__ import annotations
 
@@ -22,8 +23,13 @@ from tilhero_admin_identity.domain.catalog import (
 ROOT = Path(SERVICE_DIR).parents[1]
 ADMIN_TS = ROOT / "packages" / "contracts" / "src" / "admin.ts"
 PLAN_MD = ROOT / "docs" / "sprint2" / "PLAN.md"
+PLAN3_MD = ROOT / "docs" / "sprint3" / "PLAN.md"
 MIGRATION = Path(SERVICE_DIR) / "migrations" / "versions" / "0001_initial.py"
+MIGRATION3 = Path(SERVICE_DIR) / "migrations" / "versions" / "0003_content_permissions.py"
 EXCLUSIVE = {"users.sensitive.read", "staff.manage", "roles.manage"}  # PLAN: только super_admin
+SPRINT3_PERMISSIONS = ["content.read", "content.edit", "content.review", "content.publish", "media.rights",
+                       "lang.manage"]
+STEP_UP_SPRINT3 = {"content.publish", "media.rights", "lang.manage"}  # PLAN спринта 3: step-up
 
 
 # ---------------------------------------------------------------- разбор admin.ts и PLAN.md
@@ -53,8 +59,11 @@ def _ts_fields(src: str, name: str) -> set[str]:
     return fields | (_ts_fields(src, m.group(1)) if m.group(1) else set())
 
 
-def _plan_matrix() -> tuple[dict[str, list[str]], dict[str, bool]]:
-    """{роль: права}, {роль: MFA обязательна} из таблицы PLAN.md §«Роли и права»."""
+_PERM_RE = r"\b[a-z]+(?:\.[a-z]+)+\b"
+
+
+def _plan2_matrix() -> tuple[dict[str, list[str]], dict[str, bool]]:
+    """{роль: права}, {роль: MFA обязательна} из таблицы docs/sprint2/PLAN.md §«Роли и права»."""
     text = PLAN_MD.read_text(encoding="utf-8")
     section = text.split("## Роли и права", 1)[1].split("\n## ", 1)[0]
     matrix: dict[str, list[str]] = {}
@@ -64,17 +73,79 @@ def _plan_matrix() -> tuple[dict[str, list[str]], dict[str, bool]]:
         if len(cells) != 3 or cells[0] not in ROLE_CODES:
             continue
         role, perms, factor = cells
-        matrix[role] = list(PERMISSIONS) if perms == "все" else re.findall(r"\b[a-z]+(?:\.[a-z]+)+\b", perms)
+        matrix[role] = ["*"] if perms == "все" else re.findall(_PERM_RE, perms)
         mfa[role] = factor == "обязательна"
     return matrix, mfa
 
 
-def _migration() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("aid_migration_0001", MIGRATION)
+def _plan3_section() -> str:
+    text = PLAN3_MD.read_text(encoding="utf-8")
+    return text.split("## Права и роли", 1)[1].split("\n## ", 1)[0]
+
+
+def _plan3_additions() -> tuple[list[str], dict[str, list[str]], set[str]]:
+    """(новые права, {роль: добавленные права}, права со step-up) из docs/sprint3/PLAN.md §«Права и роли»."""
+    section = _plan3_section()
+    new_perms = re.findall(r"`([a-z]+\.[a-z.]+)`", section.split("Новые права:", 1)[1].split(". Новая роль", 1)[0])
+    step_up = {p for p in new_perms if re.search(rf"`{re.escape(p)}` \([^)]*step-up", section)}
+    adds: dict[str, list[str]] = {}
+    m = re.search(r"Новая роль `([a-z_]+)` \([^)]*\):(.*?)\.(?=\s|$)", section)
+    assert m, "PLAN спринта 3: новая роль"
+    adds[m.group(1)] = re.findall(_PERM_RE, m.group(2))
+    for roles, perms in re.findall(r"((?:`[a-z_]+`(?:, )?)+): \+(.*?)\.(?=\s|$)", section):
+        for role in re.findall(r"`([a-z_]+)`", roles):
+            adds.setdefault(role, []).extend(re.findall(_PERM_RE, perms))
+    assert "super_admin — все" in section
+    return new_perms, adds, step_up
+
+
+def _plan_matrix() -> tuple[dict[str, list[str]], dict[str, bool]]:
+    """Действующая матрица по умолчанию: спринт 2 + спринт 3. {роль: права}, {роль: MFA обязательна}.
+    MFA обязательна для PRIVILEGED_ROLES (таблица спринта 2) и для ролей с правами со step-up (правило спринта 2,
+    PLAN спринта 3: «роли с content.publish / media.rights / lang.manage — привилегированные»)."""
+    matrix2, mfa2 = _plan2_matrix()
+    _, adds, _ = _plan3_additions()
+    matrix: dict[str, list[str]] = {}
+    for role in ROLE_CODES:
+        base = matrix2.get(role, [])
+        perms = list(PERMISSIONS) if base == ["*"] else [*base, *adds.get(role, [])]
+        matrix[role] = list(dict.fromkeys(perms))
+    mfa = {role: mfa2.get(role, False) or privileged_by(role, perms) for role, perms in matrix.items()}
+    return matrix, mfa
+
+
+def _load(path: Path, name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _migration() -> ModuleType:
+    return _load(MIGRATION, "aid_migration_0001")
+
+
+def _migration3() -> ModuleType:
+    return _load(MIGRATION3, "aid_migration_0003")
+
+
+def _seeded_matrix() -> dict[str, list[str]]:
+    """Матрица после цепочки миграций: сид 0001 + новые роли и права 0003."""
+    m1, m3 = _migration(), _migration3()
+    seeded = {code: list(perms) for code, _, _, perms in m1.ROLES}
+    for code, _, _ in m3.NEW_ROLES:
+        seeded.setdefault(code, [])
+    for code, perms in m3.GRANTS.items():
+        seeded[code] = list(dict.fromkeys([*seeded[code], *perms]))
+    return seeded
+
+
+def _seeded_roles() -> list[str]:
+    """Порядок ролей каталога: 0001 + новые роли 0003 на своих местах в RoleCode."""
+    m1, m3 = _migration(), _migration3()
+    codes = [code for code, *_ in m1.ROLES] + [code for code, *_ in m3.NEW_ROLES]
+    return sorted(codes, key=list(ROLE_CODES).index)
 
 
 def _sorted(perms: list[str]) -> list[str]:
@@ -83,16 +154,36 @@ def _sorted(perms: list[str]) -> list[str]:
 
 # ---------------------------------------------------------------- каталог и сид
 
+def _expected_privileged() -> set[str]:
+    """Привилегированные роли матрицы по умолчанию: admin.ts PRIVILEGED_ROLES + роли с правами со step-up."""
+    matrix, _ = _plan_matrix()
+    return {code for code, perms in matrix.items() if privileged_by(code, perms)}
+
+
 def test_catalog_mirrors_admin_ts() -> None:
     src = _ts_source()
     assert list(PERMISSIONS) == _ts_union(src, "Permission") == _ts_const_list(src, "PERMISSIONS")
-    assert len(PERMISSIONS) == 17
+    assert len(PERMISSIONS) == 23
+    assert list(PERMISSIONS)[-6:] == SPRINT3_PERMISSIONS
     assert list(ROLE_CODES) == _ts_union(src, "RoleCode")
+    assert "content_manager" in ROLE_CODES and len(ROLE_CODES) == 9
     assert set(PRIVILEGED_ROLES) == set(_ts_const_list(src, "PRIVILEGED_ROLES"))
     for gone in ("billing.refund", "ai.content.read", "ops.kill_switch", "sources.manage", "users.access.manage",
                  "ops.queues.manage", "export.csv", "skills.edit", "news.manage", "events.review"):
         assert gone not in PERMISSIONS, gone
     assert not {"billing", "agent_manager"} & set(ROLE_CODES)
+
+
+def test_plan3_parsed() -> None:
+    """Разбор дополнения PLAN спринта 3 — не пустой и совпадает с ожидаемым (страховка регулярок)."""
+    new_perms, adds, step_up = _plan3_additions()
+    assert new_perms == SPRINT3_PERMISSIONS
+    assert step_up == STEP_UP_SPRINT3
+    assert {r: sorted(p) for r, p in adds.items()} == {
+        "content_manager": sorted(["content.read", "content.edit", "media.rights", "dashboard.read"]),
+        "methodist": sorted(["content.read", "content.edit", "content.review", "content.publish"]),
+        "operations": ["content.read"], "analyst": ["content.read"], "auditor": ["content.read"],
+    }
 
 
 def test_approval_kinds_equal_admin_ts() -> None:
@@ -105,51 +196,69 @@ def test_approval_kinds_equal_admin_ts() -> None:
     assert list(get_args(ApprovalKind)) == kinds
     check = next(c for c in Approval.__table__.constraints if c.name == "ck_approval_kind")
     assert set(re.findall(r"'([^']+)'", str(check.sqltext))) == set(kinds)  # type: ignore[attr-defined]
-    m2 = importlib.util.spec_from_file_location("aid_migration_0002",
-                                                MIGRATION.parent / "0002_reactivate_privileged.py")
-    assert m2 is not None and m2.loader is not None
-    mod = importlib.util.module_from_spec(m2)
-    m2.loader.exec_module(mod)
+    mod = _load(MIGRATION.parent / "0002_reactivate_privileged.py", "aid_migration_0002")
     assert set(re.findall(r"'([^']+)'", mod._KINDS_NEW)) == set(kinds)
 
 
 def test_migration_seed_equals_contract() -> None:
-    src, m = _ts_source(), _migration()
-    seeded = {p for _, _, _, perms in m.ROLES for p in perms}
-    assert seeded == set(_ts_const_list(src, "PERMISSIONS"))  # множество прав сида = PERMISSIONS
-    assert m.ALL_PERMISSIONS == _ts_const_list(src, "PERMISSIONS")
-    assert [code for code, *_ in m.ROLES] == _ts_union(src, "RoleCode")
-    assert set(m.PRIVILEGED_ROLES) == set(_ts_const_list(src, "PRIVILEGED_ROLES"))
-    assert set(m.PRIVILEGED_PERMISSIONS) == PRIVILEGED_PERMISSIONS
-    for code, ru, en, perms in m.ROLES:
+    src, m1, m3 = _ts_source(), _migration(), _migration3()
+    seeded = _seeded_matrix()
+    assert {p for perms in seeded.values() for p in perms} == set(_ts_const_list(src, "PERMISSIONS"))
+    # 0001 зафиксирован как каталог спринта 2, 0003 добавляет ровно права спринта 3
+    assert m1.ALL_PERMISSIONS + m3.NEW_PERMISSIONS == _ts_const_list(src, "PERMISSIONS")
+    assert m3.NEW_PERMISSIONS == SPRINT3_PERMISSIONS
+    assert sorted(m3.GRANTS["super_admin"]) == sorted(SPRINT3_PERMISSIONS)
+    assert _seeded_roles() == _ts_union(src, "RoleCode")
+    assert set(m1.PRIVILEGED_ROLES) == set(m3.PRIVILEGED_ROLES) == set(_ts_const_list(src, "PRIVILEGED_ROLES"))
+    assert set(m1.PRIVILEGED_PERMISSIONS) == set(m3.PRIVILEGED_PERMISSIONS_V2)
+    assert set(m3.PRIVILEGED_PERMISSIONS) == PRIVILEGED_PERMISSIONS
+    for code, ru, en, perms in m1.ROLES:
         assert len(perms) == len(set(perms)) and ru.strip() and en.strip(), code
-    assert {code for code, *_, perms in m.ROLES if m._privileged(code, perms)} == set(PRIVILEGED_ROLES)
+    assert m3.NEW_ROLES == [("content_manager", "Контент-менеджер", "Content manager")]
+    for code, perms in m3.GRANTS.items():
+        assert len(perms) == len(set(perms)), code
+    privileged = {code for code, perms in seeded.items() if code in m3.PRIVILEGED_ROLES
+                  or set(perms) & set(m3.PRIVILEGED_PERMISSIONS)}
+    assert privileged == _expected_privileged() == set(PRIVILEGED_ROLES) | {"methodist", "content_manager"}
 
 
 def test_migration_seed_equals_plan_matrix() -> None:
     matrix, mfa = _plan_matrix()
     assert list(matrix) == list(ROLE_CODES)  # в PLAN описаны все роли
-    seeded = {code: perms for code, _, _, perms in _migration().ROLES}
+    seeded = _seeded_matrix()
     assert {c: sorted(p) for c, p in seeded.items()} == {c: sorted(p) for c, p in matrix.items()}
-    assert {c for c, required in mfa.items() if required} == set(PRIVILEGED_ROLES)
+    assert {c for c, required in mfa.items() if required} == _expected_privileged()
     for perm in EXCLUSIVE:
         assert [c for c, p in seeded.items() if perm in p] == ["super_admin"], perm
+    # PLAN спринта 3: content.review — только methodist (и super_admin); media.rights — content_manager
+    assert sorted(c for c, p in seeded.items() if "content.review" in p) == ["methodist", "super_admin"]
+    assert sorted(c for c, p in seeded.items() if "content.publish" in p) == ["methodist", "super_admin"]
+    assert sorted(c for c, p in seeded.items() if "media.rights" in p) == ["content_manager", "super_admin"]
+    assert [c for c, p in seeded.items() if "lang.manage" in p] == ["super_admin"]
+    assert sorted(c for c, p in seeded.items() if "content.read" in p) == sorted(
+        ["super_admin", "operations", "methodist", "content_manager", "analyst", "auditor"])
 
 
 def test_privileged_permissions_are_step_up_rights() -> None:
-    """Права, чьи команды требуют step-up (PLAN §«Роли и права»), делают роль привилегированной: без MFA
+    """Права, чьи команды требуют step-up (PLAN спринтов 2 и 3), делают роль привилегированной: без MFA
     повторный TOTP невозможен. Чтение и черновики — нет."""
     assert PRIVILEGED_PERMISSIONS == {"users.sensitive.read", "staff.manage", "roles.manage", "config.publish",
-                                      "whatsnew.publish", "notif.templates.manage", "notif.campaigns.send"}
+                                      "whatsnew.publish", "notif.templates.manage", "notif.campaigns.send",
+                                      *STEP_UP_SPRINT3}
+    _, _, step_up = _plan3_additions()
+    assert step_up <= PRIVILEGED_PERMISSIONS
     for perm in PRIVILEGED_PERMISSIONS:
         assert privileged_by("read_only", ["dashboard.read", perm]) is True, perm
     for perm in set(PERMISSIONS) - PRIVILEGED_PERMISSIONS:
         assert privileged_by("analyst", [perm]) is False, perm
+    for perm in ("content.read", "content.edit", "content.review"):  # чтение, черновики, проверка — без step-up
+        assert perm not in PRIVILEGED_PERMISSIONS
     for code in PRIVILEGED_ROLES:
         assert privileged_by(code, []) is True
     matrix, _ = _plan_matrix()
-    for code, perms in matrix.items():  # матрица по умолчанию: привилегированы ровно PRIVILEGED_ROLES
-        assert privileged_by(code, perms) is (code in PRIVILEGED_ROLES), code
+    for code, perms in matrix.items():  # матрица по умолчанию: + methodist и content_manager (права со step-up)
+        expected = code in PRIVILEGED_ROLES or code in {"methodist", "content_manager"}
+        assert privileged_by(code, perms) is expected, code
 
 
 # ---------------------------------------------------------------- БД после миграции и API
@@ -165,23 +274,26 @@ async def test_seeded_db_and_roles_api_equal_contract(env: Env, root: Person) ->
     assert {c: sorted(p) for c, p in db.items()} == {c: sorted(p) for c, p in matrix.items()}
     roles = await env.sql("SELECT code, name_ru, name_en, privileged FROM roles")
     assert {r[0] for r in roles} == set(_ts_union(src, "RoleCode"))
-    assert {r[0] for r in roles if r[3]} == set(_ts_const_list(src, "PRIVILEGED_ROLES"))
-    assert len({r[1] for r in roles}) == len({r[2] for r in roles}) == len(roles) == 8
+    assert {r[0] for r in roles if r[3]} == _expected_privileged()
+    assert set(_ts_const_list(src, "PRIVILEGED_ROLES")) <= {r[0] for r in roles if r[3]}
+    assert len({r[1] for r in roles}) == len({r[2] for r in roles}) == len(roles) == 9
     api = (await env.c.get("/admin/v1/roles", headers=env.h(root.actor))).json()
     assert api["permissions"] == _ts_const_list(src, "PERMISSIONS")
     assert [r["code"] for r in api["items"]] == _ts_union(src, "RoleCode")
     for r in api["items"]:
         assert set(r) == _ts_fields(src, "Role"), r["code"]
         assert r["permissions"] == _sorted(matrix[r["code"]]), r["code"]
-        assert r["privileged"] is (r["code"] in PRIVILEGED_ROLES)
+        assert r["privileged"] is (r["code"] in _expected_privileged()), r["code"]
     names = {r["code"]: r["name"] for r in api["items"]}
     assert names["communications"] == {"ru": "Коммуникации", "en": "Communications"}
+    assert names["content_manager"] == {"ru": "Контент-менеджер", "en": "Content manager"}
     assert names["super_admin"] == {"ru": "Суперадминистратор", "en": "Super Admin"}
 
 
 async def test_mfa_required_exactly_for_privileged_roles(env: Env, root: Person) -> None:
-    """Вход сотрудника каждой роли (root — единственный super_admin, four-eyes waived): привилегированным —
-    обязательное подключение TOTP, остальным — вход без MFA; права principal = матрица PLAN."""
+    """Вход сотрудника каждой роли (root — единственный super_admin, four-eyes waived): привилегированным (в т. ч.
+    methodist и content_manager — права со step-up спринта 3) — обязательное подключение TOTP, остальным — вход без
+    MFA; права principal = матрица PLAN."""
     matrix, mfa = _plan_matrix()
     for code in (*ROLE_CODES[1:], ROLE_CODES[0]):  # второй super_admin — последним: дальше уже нужен второй голос
         person = await env.onboard(root.actor, new_email(code.replace("_", "")), code)

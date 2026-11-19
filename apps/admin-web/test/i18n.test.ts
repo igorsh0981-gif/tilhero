@@ -17,6 +17,10 @@ import { CAMPAIGN_STATUSES } from "../src/screens/news/Campaigns";
 import { LEARNER_STATUSES } from "../src/screens/learners/Learners";
 import { OBJECT_TYPES } from "../src/screens/audit/Audit";
 import { SECTION_TYPES } from "../src/screens/config/Config";
+import { AUDIENCES as CT_AUDIENCES, CONTROL_TYPES, EXERCISE_TYPES, KINDS, LICENSES, MEDIA_ORIGINS, MEDIA_TYPES, MEDIA_USES, RUBRIC_CODES, RUBRIC_TARGETS, SKILL_AREAS, STAGE_ORDER, STATUSES, TOPICS } from "../src/screens/content/model";
+import { CONTENT_TABS } from "../src/screens/content/ContentPage";
+import { DECISIONS, REQUEST_STATUSES } from "../src/screens/content/RequestsTab";
+import { MISSING_KEYS, PAIR_STATUSES } from "../src/screens/langs/Langs";
 
 const placeholders = (s: string) => [...new Set([...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort();
 const CYR = /[Ѐ-ӿ]/;
@@ -114,6 +118,44 @@ describe("i18n dictionaries", () => {
       ...["daily", "weekdays", "three_per_week", "custom"].map((g) => `preset.${g}`),
       ...[1, 2, 3, 4, 5, 6, 7].map((d) => `dow.${d}`),
       ...["required", "tooLong", "format", "control", "unknownPh", "invalidPh", "pressure", "server", "empty"].map((x) => `fx.${x}`),
+      // sprint 3: content, media, requests, review, diagnostics, languages
+      ...["content", "diagnostics"].flatMap((b) => [`dash.b.${b}`, `dash.empty.${b}`, `dash.svc.${b}`]),
+      ...KINDS.flatMap((k) => [`kind.${k}`, `kinds.${k}`, `ct.pick.${k}`]),
+      ...STATUSES.flatMap((s) => [`vst.${s}`]),
+      ...["in_review", "approved", "published", "archived", "suspended"].map((s) => `ct.ro.${s}`),
+      ...["missing", "draft", "checked"].map((s) => `lc.${s}`),
+      ...["save", "validate", "submit", "draft", "publish", "archive", "rollback"].map((s) => `ct.act.${s}`),
+      ...CONTENT_TABS.map((x) => `ct.tab.${x.v}`),
+      ...["expiring", "expired"].map((x) => `ct.rw.${x}`),
+      ...TOPICS.map((x) => `topic.${x}`),
+      ...STAGE_ORDER.map((x) => `stage.${x}`),
+      ...CONTROL_TYPES.map((x) => `cit.${x}`),
+      ...["success", "alt_success", "fail"].map((x) => `out.${x}`),
+      ...RUBRIC_CODES.map((x) => `rc.${x}`),
+      ...RUBRIC_TARGETS.map((x) => `ru.to.${x}`),
+      ...MEDIA_TYPES.map((x) => `mt.${x}`),
+      ...MEDIA_ORIGINS.map((x) => `morg.${x}`),
+      ...LICENSES.map((x) => `lic.${x}`),
+      ...MEDIA_USES.map((x) => `mu.${x}`),
+      ...EXERCISE_TYPES.map((x) => `xt.${x}`),
+      ...SKILL_AREAS.map((x) => `area.${x}`),
+      ...CT_AUDIENCES.map((x) => `ageseg.${x}`),
+      ...["type", "size", "empty", "signature"].map((x) => `ma.audioErr.${x}`),
+      ...REQUEST_STATUSES.map((x) => `rqs.${x}`),
+      ...["song", "movie", "series", "other"].map((x) => `rqk.${x}`),
+      ...DECISIONS.map((x) => `rqh.${x}`),
+      ...["draft", "published", "archived"].map((x) => `dxs.${x}`),
+      ...PAIR_STATUSES.map((x) => `ps.${x}`),
+      ...MISSING_KEYS.map((x) => `lg.m.${x}`),
+      ...["active", "planned"].map((x) => `lgs.${x}`),
+      ...["core", "optional"].map((x) => `le.kind.${x}`),
+      ...[
+        "LOCALE_MISSING", "LOCALE_SCRIPT", "LOCALE_NOT_CHECKED", "UNKNOWN_REF", "REF_MISMATCH", "PREREQ_CYCLE", "NO_CONTROL_ITEMS", "STAGES_INVALID",
+        "RUBRIC_WEIGHTS", "RUBRIC_BANDS", "RUBRIC_MISMATCH", "SCENARIO_TEST_FAILED", "START_MISSING", "UNKNOWN_NODE", "UNREACHABLE_NODE", "DEAD_END",
+        "NO_SUCCESS_END", "TRAP", "UNKNOWN_SPEAKER", "NO_RECOVERY_POINT", "RECOVERY_CANNOT_FINISH", "TOO_MANY_NODES", "END_HAS_TRANSITIONS",
+        "RIGHTS_REQUIRED", "EXTERNAL_SOURCE_DISABLED", "TRANSCRIPT_INVALID", "MEDIA_TOO_LONG", "MEDIA_TOO_SHORT", "EMBED_INVALID", "AUDIENCE_EMPTY",
+        "KIDS_CONTENT", "COUNT_OUT_OF_RANGE", "DUPLICATE_ID", "VALUE_REQUIRED", "ANSWER_INVALID", "LEVEL_RANGE", "SCHEMA_INVALID", "KEY_CHANGED",
+      ].map((c) => `ci.${c}`),
     ];
     expect(want.filter((k) => !has(k))).toEqual([]);
     void OBJECT_TYPES;
@@ -130,6 +172,11 @@ describe("i18n dictionaries", () => {
       "TEMPLATE_NOT_FOUND", "TEMPLATE_INVALID", "TEMPLATE_VERSION_NOT_FOUND", "TEST_RECIPIENT_NOT_ALLOWED",
       "CAMPAIGN_NOT_FOUND", "CAMPAIGN_INVALID", "CAMPAIGN_NOT_DRAFT", "CAMPAIGN_VERSION_CONFLICT", "CAMPAIGN_EMPTY_AUDIENCE", "CAMPAIGN_ALREADY_SENDING",
       "SESSION_NOT_REVOKED", // logout while the session store is down (review T2-10)
+      // sprint 3 (catalog, diagnostics via admin-bff)
+      "CONTENT_INVALID", "CONTENT_KEY_EXISTS", "CONTENT_NOT_FOUND", "VERSION_CONFLICT", "VERSION_NOT_DRAFT", "VERSION_NOT_IN_REVIEW", "VERSION_NOT_APPROVED",
+      "VERSION_IMMUTABLE", "DRAFT_EXISTS", "SELF_REVIEW", "CONTENT_IN_USE", "CONTENT_NOT_PUBLISHED", "ROLLBACK_TARGET_INVALID", "AUDIO_INVALID",
+      "PAYLOAD_TOO_LARGE", "MEDIA_REQUEST_DECIDED", "LINKED_ASSET_REQUIRED", "LINKED_ASSET_NOT_PUBLISHED", "LINKED_ASSET_NOT_ALLOWED", "PAIR_NOT_READY",
+      "PAIR_INVALID", "UNKNOWN_LANGUAGE",
     ];
     expect(codes.filter((c) => !has(`err.${c}`))).toEqual([]);
   });

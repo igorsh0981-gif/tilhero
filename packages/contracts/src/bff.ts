@@ -24,6 +24,11 @@
  * 4xx доменов передаются клиенту с их кодом и details.
  */
 
+import type {
+  AudienceSegment, Band, ControlItemType, GoalCode, LanguagePair, LessonStageType, Localized, MediaRequestStatus,
+  MediaType, MediaUse, SkillArea, TopicCode,
+} from "./content.js";
+
 export interface ErrorBody {
   code: string;
   message: string;
@@ -410,7 +415,9 @@ export interface Family {
 // ---------- «Что нового» и новости (experience-config) ----------
 
 export type ReleaseNoteRoute =
-  | "home" | "lessons" | "review" | "progress" | "profile" | "schedule" | "notifications" | "family" | "support" | "news";
+  | "home" | "lessons" | "review" | "progress" | "profile" | "schedule" | "notifications" | "family" | "support" | "news"
+  // спринт 3 (release-notes.json)
+  | "diagnostics" | "plan" | "skills" | "scenarios" | "media" | "media_requests" | "languages";
 export type ReleaseNoteIcon =
   | "spark" | "hero" | "calendar" | "clock" | "bell" | "book" | "chat" | "mic" | "star" | "flame" | "users" | "gift"
   | "shield" | "globe" | "trophy" | "news";
@@ -529,4 +536,248 @@ export interface DeletionResponse {
   status: "REQUESTED";
   domains: string[];
   learners: number; // сколько профилей удаляется (аккаунт + дети)
+}
+
+// =====================================================================================================================
+// Спринт 3 — диагностика, карта навыков, план уроков, сценарии, медиатека, заявки, языки
+// Форматы контента — ./content.ts. Пара по умолчанию — "ru-en" (единственная опубликованная, APP-LANG-02).
+// Общие коды: 409 PAIR_NOT_AVAILABLE {pair_id} — пара не опубликована; 403 KIDS_NOT_ALLOWED — действие недоступно
+// детскому профилю.
+// =====================================================================================================================
+
+// ---------- Языки (APP-LANG-01/02) ----------
+/** GET /v1/languages → MyLanguages. Неопубликованные пары видны как «скоро», начать их нельзя. */
+export interface MyLanguages {
+  active_pair_id: string; // "ru-en"
+  pairs: Array<Pick<LanguagePair, "pair_id" | "source" | "target" | "title" | "status"> & { available: boolean }>;
+}
+
+// ---------- Диагностика (APP-DIAG-01…04) ----------
+export type DiagnosticArea = "vocabulary" | "grammar" | "reading" | "listening" | "speaking" | "writing";
+export type DiagnosticItemType = "single_choice" | "gap_choice" | "order_words" | "read_choice" | "listen_choice";
+
+/** GET /v1/diagnostics/state → DiagnosticState */
+export interface DiagnosticState {
+  pair_id: string;
+  status: "none" | "in_progress" | "completed";
+  session: DiagnosticSession | null; // незавершённая (in_progress, ≤ 24 ч)
+  last_result: DiagnosticResult | null;
+  /** когда можно пройти снова (null — можно сейчас) */
+  next_allowed_at: string | null;
+  audience: "adults" | "kids";
+}
+
+/** POST /v1/diagnostics/sessions {pair_id?} (Idempotency-Key) → DiagnosticSession (201).
+ *  409 DIAGNOSTIC_TOO_SOON {next_allowed_at}. Новая сессия прерывает незавершённую. */
+export interface DiagnosticSession {
+  session_id: string;
+  pair_id: string;
+  test_version: string; // "dx-en-adult@1"
+  status: "in_progress" | "finished" | "abandoned";
+  answered: number;
+  /** ориентир для прогресс-бара: всего заданий в тесте (без уточнений) */
+  total_estimate: number;
+  started_at: string;
+  expires_at: string;
+  followup_area: DiagnosticArea | null;
+}
+
+/** GET /v1/diagnostics/sessions/{id}/next → DiagnosticItem | {done: true}. Ключа ответа в задании нет. */
+export interface DiagnosticItem {
+  item_id: string;
+  area: Exclude<DiagnosticArea, "speaking" | "writing">;
+  type: DiagnosticItemType;
+  instruction: Localized;
+  prompt_en: string;
+  passage_en: string | null;
+  /** аудирование: текст для синтеза речи устройством (en-GB/en-US); скрывать до ответа */
+  audio_text_en: string | null;
+  options: string[];
+  position: number; // 1-based
+}
+
+/** POST /v1/diagnostics/sessions/{id}/answers → AnswerResult. answer: индекс варианта | слова по порядку | null.
+ *  dont_know=true — «Не знаю» (answer=null). 409 ITEM_NOT_CURRENT. Правильность ученику не показывается. */
+export interface AnswerRequest {
+  item_id: string;
+  answer: number | string[] | null;
+  dont_know: boolean;
+  time_ms: number;
+}
+export interface AnswerResult {
+  accepted: boolean;
+  next: DiagnosticItem | null;
+  done: boolean;
+}
+/** POST /v1/diagnostics/sessions/{id}/listening-unavailable → 204 (нет голоса en-* на устройстве).
+ *  POST /v1/diagnostics/sessions/{id}/finish → DiagnosticResult. */
+
+export interface AreaResult {
+  area: DiagnosticArea;
+  status: "assessed" | "not_assessed";
+  band: Band | null;
+  confidence: number | null; // 0..1
+  reason: "too_few_items" | "no_speech_voice" | "not_in_test_yet" | null;
+  /** основания по полосам (по возрастанию): сколько заданий полосы показано и сколько верно. Без заданий и без
+   *  отметок верно/неверно по отдельным заданиям — иначе результат стал бы «оракулом» ключей банка. Для not_assessed — []. */
+  evidence: Array<{ band: Band; answered: number; correct: number }>;
+  needs_followup: boolean;
+}
+
+export interface DiagnosticResult {
+  result_id: string;
+  revision: number;
+  pair_id: string;
+  test_version: string;
+  provisional_level: Band | null;
+  areas: AreaResult[];
+  weak_areas: DiagnosticArea[];
+  recommended_start: { lesson_id: string; title: Localized; level: Band } | null;
+  /** всегда false: это не сертификат CEFR */
+  cefr_certificate: false;
+  created_at: string;
+}
+/** POST /v1/diagnostics/results/{id}/followup {area} → DiagnosticSession (уточнение +3 задания; ≤ 24 ч после
+ *  завершения; только needs_followup). GET /v1/diagnostics/results → {items: DiagnosticResult[]} (история). */
+
+// ---------- Карта навыков (APP-PLAN-01) ----------
+export type SkillState = "not_started" | "learning" | "demonstrated" | "retained";
+
+/** GET /v1/skills/map → SkillMap */
+export interface SkillMap {
+  pair_id: string;
+  course_id: string;
+  counts: Record<SkillState, number>;
+  skills: Array<{
+    skill_id: string;
+    area: SkillArea;
+    title: Localized;
+    level: Band;
+    state: SkillState;
+    confidence: number | null;
+    prerequisites: string[];
+    updated_at: string | null;
+    history: Array<{ source: "diagnostic" | "lesson" | "retention"; outcome: "positive" | "negative"; at: string }>;
+  }>;
+}
+
+// ---------- План уроков (APP-PLAN-02/03) ----------
+export type ReasonCode =
+  | "start_after_diagnostic" | "no_diagnostic" | "prerequisite_missing" | "weak_area" | "goal_match" | "topic_match"
+  | "next_in_course";
+
+export interface LessonCard {
+  lesson_id: string;
+  module_id: string;
+  title: Localized;
+  goal: Localized;
+  level: Band;
+  kind: "core" | "optional";
+  duration_min: number;
+  primary_skill_id: string;
+  scenario_id: string | null;
+  stages: Array<{ type: LessonStageType; minutes: number }>;
+}
+
+/** GET /v1/plan/trajectory → Trajectory. Смена цели (PATCH /v1/plan) пересчитывает траекторию. */
+export interface Trajectory {
+  pair_id: string;
+  course_id: string;
+  revision: number;
+  basis: { diagnostic_result_id: string | null; goal: GoalCode | null; computed_at: string };
+  next: (LessonCard & { reason_codes: ReasonCode[]; explanation: Localized }) | null;
+  mandatory: Array<LessonCard & { reason_codes: ReasonCode[] }>;
+  optional: Array<LessonCard & { reason_codes: ReasonCode[] }>;
+  /** пройденные уроки — со спринта 4 */
+  completed: LessonCard[];
+  /** уроки появятся в следующем обновлении — кнопка «Начать урок» показывает «скоро» */
+  lessons_available: boolean;
+}
+
+// ---------- Сценарии (APP-PLAN-04) ----------
+export interface ScenarioCard {
+  scenario_id: string;
+  title: Localized;
+  task: Localized;
+  level: Band;
+  difficulty: number;
+  goals: GoalCode[];
+  topics: TopicCode[];
+  characters: Array<{ name: string; role: Localized }>;
+  access: "free";
+}
+/** GET /v1/scenarios?goal=&level=&topic=&cursor= → Page<ScenarioCard> (детям — только audience kids);
+ *  GET /v1/scenarios/{id} → ScenarioDetail */
+export interface ScenarioDetail extends ScenarioCard {
+  completion: Localized;
+  /** первая реплика и варианты ответа ученика — превью; полный граф — в уроке (спринт 4) */
+  opening: { speaker: string; line_en: string; gloss: Localized; replies: Array<{ description: Localized; example_en: string }> };
+  outcomes: Array<{ outcome: "success" | "alt_success" | "fail"; summary: Localized }>;
+}
+
+// ---------- Медиатека (APP-MEDIA-01) ----------
+export interface MediaCard {
+  asset_id: string;
+  type: MediaType;
+  title: Localized;
+  level: Band;
+  topics: TopicCode[];
+  duration_s: number;
+  /** источник для ученика: «TilHero», «Общественное достояние», правообладатель */
+  source_label: string;
+  allowed_uses: MediaUse[];
+  has_audio: boolean;
+}
+/** GET /v1/media?type=&level=&topic=&cursor= → Page<MediaCard>; GET /v1/media/{id} → MediaDetail;
+ *  GET /v1/media/{id}/audio → аудио (прокси с кешем); 404 MEDIA_NOT_AVAILABLE — снят с публикации или права истекли. */
+export interface MediaDetail extends MediaCard {
+  attribution: string | null;
+  /** null — транскрипт не разрешён лицензией; gloss = null — перевод реплик не разрешён (allowed_uses ∌ translation) */
+  transcript: Array<{ t_start_ms: number; t_end_ms: number; speaker: string; text_en: string; gloss: Localized | null }> | null;
+  phrases: Array<{ en: string; gloss: Localized }>;
+  /** для синтеза речи устройством, если нет аудиофайла */
+  voices: Record<string, "en-GB" | "en-US">;
+  /** упражнения к медиа выполняются в уроке (спринт 4) */
+  exercises_available: boolean;
+}
+
+// ---------- Заявки на песни и фильмы (APP-MEDIA-04) ----------
+/** POST /v1/media/requests (Idempotency-Key) → MediaRequest (201). Детский профиль → 403 KIDS_NOT_ALLOWED;
+ *  > 5 в сутки → 429 MEDIA_REQUEST_LIMIT (Retry-After). GET /v1/media/requests → {items: MediaRequest[]}. Это заявка контент-менеджеру:
+ *  ничего не скачивается и не расшифровывается автоматически. */
+export interface MediaRequestCreate {
+  kind: "song" | "movie" | "series" | "other";
+  title: string; // 2..200
+  link?: string; // https://…, ≤ 500
+  comment?: string; // ≤ 500
+}
+export interface MediaRequest extends Required<Omit<MediaRequestCreate, "link" | "comment">> {
+  request_id: string;
+  link: string | null;
+  comment: string | null;
+  status: MediaRequestStatus;
+  decision_note: string | null;
+  linked_asset_id: string | null;
+  created_at: string;
+  decided_at: string | null;
+}
+
+// ---------- Снимок курса (для сервисов; ученику — через карточки выше) ----------
+export interface CourseSnapshot {
+  course_id: string;
+  pair_id: string;
+  snapshot_version: string;
+  title: Localized;
+  level_start: Band;
+  level_end: Band;
+  modules: Array<{ module_id: string; title: Localized; goal: Localized; theme: TopicCode; lesson_ids: string[] }>;
+  skills: Array<{ skill_id: string; area: SkillArea; title: Localized; level: Band; prerequisites: string[]; diagnostic_tags: string[] }>;
+  lessons: Array<LessonCard & {
+    audience: AudienceSegment[];
+    goals: GoalCode[];
+    topics: TopicCode[];
+    secondary_skill_ids: string[];
+    prerequisite_skill_ids: string[];
+    control_item_types: ControlItemType[];
+  }>;
 }

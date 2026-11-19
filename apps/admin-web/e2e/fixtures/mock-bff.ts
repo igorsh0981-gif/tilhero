@@ -26,6 +26,8 @@ import type {
 } from "@tilhero/contracts/admin";
 import type { Ticket as ClientTicket } from "@tilhero/contracts/bff";
 import * as F from "./data";
+import { ContentStore } from "./content-bff";
+import * as CD from "./content-data";
 
 export interface Scenario {
   /** start with a live cookie session of this account (skips the sign-in screen) */
@@ -42,7 +44,7 @@ export interface Scenario {
   /** replace the permissions of a role */
   matrix?: Partial<Record<RoleCode, Permission[]>>;
   /** dashboard blocks whose source is down (available=false) */
-  dashOff?: Array<"learners" | "support" | "whats_new" | "campaigns">;
+  dashOff?: Array<"learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics">;
   /** the audit log cannot be written: reveal → 503 AUDIT_UNAVAILABLE */
   auditDown?: boolean;
   /** no ADMIN_TEST_CHAT_IDS in notifications */
@@ -143,6 +145,7 @@ export class MockBff {
   notes: StaffReleaseNote[] = F.releaseNotes();
   templates = F.templates();
   campaigns: Campaign[] = F.campaigns();
+  content = new ContentStore();
   session: Session | null = null;
   versions: Record<ConfigApp, ConfigVersion[]>;
   activations: Record<ConfigApp, ConfigActivation[]>;
@@ -320,7 +323,7 @@ export class MockBff {
 
   private dashboard(period: Dashboard["period"]): Dashboard {
     const off = new Set(this.sc.dashOff ?? []);
-    const blk = <T,>(k: "learners" | "support" | "whats_new" | "campaigns", svc: string, data: T) => (off.has(k) ? { available: false, data: null, service: svc } : { available: true, data });
+    const blk = <T,>(k: "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics", svc: string, data: T) => (off.has(k) ? { available: false, data: null, service: svc } : { available: true, data });
     const ls = this.learners;
     const accounts = ls.filter((x) => x.kind === "account").length;
     const kids = ls.filter((x) => x.kind === "child").length;
@@ -360,6 +363,11 @@ export class MockBff {
         sent_in_period: period === "today" ? 0 : sent,
         delivered_in_period: period === "today" ? 0 : sent - 34,
       }),
+      content: blk("content", "catalog", this.content.summary()),
+      diagnostics: blk("diagnostics", "diagnostics", (() => {
+        const { dxStats } = CD;
+        return dxStats(period);
+      })()),
     };
   }
 
@@ -1071,8 +1079,20 @@ export class MockBff {
         return json(200, c);
       }
 
-      default:
+      default: {
+        const done = await this.content.handle(method, path, body, q, idemKey, {
+          me,
+          perms,
+          stepUpOk,
+          nameOf: (id) => this.nameOf(id),
+          record: (a, t, id, after, reason) => this.record(a, t, id, after, reason ?? null),
+          json: (st, data, extra) => json(st, data, extra),
+          err: (st, code, details) => err(st, code, details),
+          binary: (st, buf, ct) => route.fulfill({ status: st, contentType: ct, body: buf, headers: { "Cache-Control": "private, max-age=3600" } }),
+        });
+        if (done) return;
         return err(404, "NOT_FOUND", { path });
+      }
     }
   }
 

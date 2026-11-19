@@ -7,6 +7,7 @@
   "exports": {
     "./bff": "./src/bff.ts",
     "./admin": "./src/admin.ts",
-    "./events/*": "./events/*"
+    "./events/*": "./events/*",
+    "./content": "./src/content.ts"
   }
 }

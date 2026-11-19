@@ -15,6 +15,8 @@ const PROD_OK = {
   NOTIFICATIONS_URL: "http://notifications.railway.internal:8104",
   EXPERIENCE_URL: "http://experience-config.railway.internal:8106/",
   SOCIAL_URL: "http://social.railway.internal:8109",
+  CATALOG_URL: "http://catalog.railway.internal:8110/",
+  DIAGNOSTICS_URL: "http://diagnostics.railway.internal:8111",
 };
 
 function problems(env: Record<string, string>): string[] {
@@ -59,6 +61,9 @@ describe("loadConfig", () => {
     expect(c.miniappOrigins).toEqual(["https://miniapp.tilhero.app", "https://staging-miniapp.tilhero.app"]);
     expect(c.experienceUrl).toBe("http://experience-config.railway.internal:8106");
     expect(c.socialUrl).toBe("http://social.railway.internal:8109");
+    expect(c.catalogUrl).toBe("http://catalog.railway.internal:8110");
+    expect(c.diagnosticsUrl).toBe("http://diagnostics.railway.internal:8111");
+    expect(c.audioCacheBytes).toBe(32 * 1024 * 1024);
     expect(c.telegramAppLink).toBe("https://t.me/tilhero_bot/app");
   });
 
@@ -67,6 +72,7 @@ describe("loadConfig", () => {
     for (const name of [
       "BOT_TOKEN", "SESSION_JWT_SECRET", "INTERNAL_JWT_PRIVATE_KEY", "REDIS_URL", "MINIAPP_ORIGIN", "TELEGRAM_APP_LINK",
       "IDENTITY_URL", "LEARNING_PLAN_URL", "SUPPORT_URL", "NOTIFICATIONS_URL", "EXPERIENCE_URL", "SOCIAL_URL",
+      "CATALOG_URL", "DIAGNOSTICS_URL",
     ]) {
       expect(p.some((x) => x.startsWith(name))).toBe(true);
     }

@@ -37,6 +37,8 @@ export const DOMAIN = {
   audit: "audit",
   experience: "experience-config",
   notifications: "notifications",
+  catalog: "catalog",
+  diagnostics: "diagnostics",
 } as const satisfies Record<keyof DomainUrls, string>;
 export type DomainKey = keyof typeof DOMAIN;
 
@@ -67,6 +69,18 @@ export interface CallOptions {
   /** Перевод осознанного 5xx домена (ErrorBody с кодом) в ошибку маршрута; undefined — обычный 503 UPSTREAM_UNAVAILABLE.
    *  Переведённый ответ не повторяется и не считается сбоем для circuit breaker (домен ответил). */
   mapServerError?: (err: UpstreamError) => AppError | undefined;
+}
+
+/** Двоичный ответ домена (аудио для предпросмотра): байты, тип и ETag как есть — проверяет вызывающий маршрут. */
+export interface BinaryBody {
+  bytes: Buffer;
+  contentType: string;
+  etag: string | null;
+}
+
+export interface BinaryOptions extends Omit<CallOptions, "body" | "idempotencyKey" | "mapServerError"> {
+  /** Больше — ответ испорчен (503), тело дальше не читается. */
+  maxBytes: number;
 }
 
 export interface DomainResponse<T> {
@@ -104,6 +118,15 @@ export class DomainClient {
   }
 
   async call<T = unknown>(method: string, path: string, ro: CallOptions = {}): Promise<DomainResponse<T>> {
+    return this.request<T>(method, path, ro, null);
+  }
+
+  /** GET двоичного тела (аудио): те же токен, повторы, circuit breaker и ошибки, что у call(); тело ≤ maxBytes. */
+  async binary(path: string, ro: BinaryOptions): Promise<DomainResponse<BinaryBody>> {
+    return this.request<BinaryBody>("GET", path, ro, ro.maxBytes);
+  }
+
+  private async request<T>(method: string, path: string, ro: CallOptions, binaryMax: number | null): Promise<DomainResponse<T>> {
     method = method.toUpperCase();
     const breaker = this.breaker;
     if (!breaker.allow()) throw this.fail(503, "CIRCUIT_OPEN");
@@ -117,7 +140,7 @@ export class DomainClient {
     for (let attempt = 1; attempt <= attempts; attempt++) {
       const headers: Record<string, string> = {
         ...outgoingHeaders(),
-        accept: "application/json",
+        accept: binaryMax === null ? "application/json" : "*/*",
         [INTERNAL_HEADER]: await issueInternalToken(this.o.key, {
           issuer: SERVICE_NAME,
           audience: this.target,
@@ -166,6 +189,22 @@ export class DomainClient {
         throw err;
       }
       const replayed = resp.headers.get("idempotent-replayed")?.toLowerCase() === "true";
+      if (binaryMax !== null) {
+        const declared = Number(resp.headers.get("content-length") ?? "0");
+        if (declared > binaryMax) {
+          await resp.body?.cancel().catch(() => undefined);
+          throw this.fail(resp.status, "UPSTREAM_BAD_RESPONSE");
+        }
+        let bytes: Buffer;
+        try {
+          bytes = Buffer.from(await resp.arrayBuffer());
+        } catch {
+          throw this.fail(resp.status, "UPSTREAM_BAD_RESPONSE");
+        }
+        if (bytes.length > binaryMax) throw this.fail(resp.status, "UPSTREAM_BAD_RESPONSE");
+        const body: BinaryBody = { bytes, contentType: resp.headers.get("content-type") ?? "", etag: resp.headers.get("etag") };
+        return { status: resp.status, body: body as T };
+      }
       if (resp.status === 204) return { status: 204, body: undefined as T, ...(replayed ? { replayed } : {}) };
       try {
         const text = await resp.text();

@@ -7,7 +7,7 @@ import { useAction, useLoad } from "../../state/hooks";
 import { newIdempotencyKey } from "../../api/client";
 import { haptic } from "../../tg";
 import { Icon } from "../../ui/Icon";
-import { Btn, cx, ErrorLine, HERO, Hero, Margin, NoBreakHyphens, Pill, Skeleton } from "../../ui/kit";
+import { Btn, cx, ErrorLine, HERO, Hero, Margin, NoBreakHyphens, Skeleton } from "../../ui/kit";
 import { showToast } from "../../ui/overlays";
 import { scheduleSummary } from "../schedule/parts";
 
@@ -96,7 +96,7 @@ function Section({ type, today }: { type: HomeSectionType; today: ReturnType<typ
     case "today_plan":
       return <TodaySection today={today} />;
     case "lesson_of_day":
-      return <LessonSoon />;
+      return <LearningSection />;
     case "whats_new":
     case "news":
       return <NewsCard />;
@@ -229,19 +229,102 @@ function HeroCard() {
   );
 }
 
-function LessonSoon() {
-  const { t } = useI18n();
-  return (
-    <Margin note={t("home.lessonNote")} tilt>
-      <div className="card stack tight">
-        <div className="hrow between">
-          <div className="cap">{t("home.lessonCap")}</div>
-          <Pill tone="mute">{t("c.soon")}</Pill>
+/**
+ * Sprint 3: the learning entry of Home. No placement test yet → «Узнаем ваш уровень · 10–15 минут»; an unfinished one →
+ * «Продолжить»; done → «Следующий урок» from the trajectory with «почему» (explanation), «Начать урок» (the honest
+ * «скоро» of the lessons tab), links to «Мой план» and «Карта навыков»; then «Практика».
+ */
+function LearningSection() {
+  const { bff, nav, session } = useApp();
+  const plan = usePlan();
+  const { t, l } = useI18n();
+  const kid = session.learner.kind === "child";
+  const dx = useLoad(() => bff.diagnosticsState(true), [session.learner.learner_id]);
+  const done = dx.data?.status === "completed";
+  const tr = useLoad(() => (done ? bff.trajectory(true) : Promise.resolve(null)), [done, plan.version, session.learner.learner_id]);
+  const st = dx.data;
+  const next = tr.data?.next ?? null;
+
+  let card;
+  if (dx.loading && !st) {
+    card = <div className="pad"><Skeleton lines={2} /></div>;
+  } else if (!st) {
+    card = dx.error ? (
+      <div className="pad">
+        <div className="card warn stack tight">
+          <p className="sub ink">{dx.error}</p>
+          <Btn variant="secondary" onClick={() => void dx.reload()}>{t("c.retry")}</Btn>
         </div>
-        <p className="h3"><NoBreakHyphens text={t("home.lessonTitle")} /></p>
-        <p className="sub">{t("home.lessonText")}</p>
       </div>
-    </Margin>
+    ) : null;
+  } else if (!done) {
+    const resume = st.status === "in_progress" && st.session;
+    card = (
+      <Margin note={t("home.dx.note")} tone="b" tilt>
+        <section className="card lift stack tight" aria-labelledby="home-dx-cap" data-testid="home-diag-card">
+          <div className="cap" id="home-dx-cap">
+            {resume ? t("home.dx.resumeCap", { n: st.session!.answered, m: Math.max(st.session!.total_estimate, st.session!.answered) }) : kid ? t("home.dx.capKid") : t("home.dx.cap")}
+          </div>
+          <h2 className="h2"><NoBreakHyphens text={kid ? t("home.dx.titleKid") : t("home.dx.title")} /></h2>
+          <p className="sub">{kid ? t("home.dx.textKid") : t("home.dx.text")}</p>
+          <Btn onClick={() => nav.push({ name: "diagnostics" })} data-testid="home-diag-start">
+            <Icon name="target" size={18} />
+            {resume ? t("home.dx.resume") : t("home.dx.start")}
+          </Btn>
+        </section>
+      </Margin>
+    );
+  } else {
+    card = (
+      <Margin note={t("home.next.note")} tilt>
+        <section className="card lift stack tight" aria-labelledby="home-next-cap" data-testid="home-next-lesson">
+          {tr.loading && !tr.data ? (
+            <Skeleton lines={2} />
+          ) : next ? (
+            <>
+              <div className="cap" id="home-next-cap">{t("home.next.cap", { level: next.level, n: next.duration_min })}</div>
+              <h2 className="h2"><NoBreakHyphens text={l(next.title)} /></h2>
+              <p className="sub" data-testid="home-next-why">{l(next.explanation)}</p>
+              <Btn onClick={() => nav.goTab("lessons")} data-testid="home-start-lesson">
+                <Icon name="lessons" size={18} />
+                {t("home.next.start")}
+              </Btn>
+            </>
+          ) : (
+            <>
+              <div className="cap" id="home-next-cap">{t("plan.title")}</div>
+              <p className="sub ink">{tr.error ? t("home.planError") : t("plan.empty")}</p>
+              {tr.error ? <Btn variant="secondary" onClick={() => void tr.reload()}>{t("c.retry")}</Btn> : null}
+            </>
+          )}
+          <div className="hrow between">
+            <Btn variant="link" onClick={() => nav.push({ name: "plan" })} data-testid="home-plan-link">
+              <Icon name="route" size={18} />
+              {t("home.myPlan")}
+            </Btn>
+            <Btn variant="link" onClick={() => nav.goTab("progress")} data-testid="home-skills-link">
+              <Icon name="map" size={18} />
+              {t("home.skills")}
+            </Btn>
+          </div>
+        </section>
+      </Margin>
+    );
+  }
+  return (
+    <>
+      {card}
+      <Margin>
+        <button type="button" className="row boxed" onClick={() => nav.push({ name: "practice" })} data-testid="home-practice">
+          <span className="nic"><Icon name="chat" size={20} /></span>
+          <span className="t">
+            <b>{t("home.practice.title")}</b>
+            <span>{t("home.practice.text")}</span>
+          </span>
+          <Icon name="chevron" size={20} stroke={2} />
+        </button>
+      </Margin>
+    </>
   );
 }
 

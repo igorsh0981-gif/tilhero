@@ -37,13 +37,23 @@ const P: Record<string, string> = {
   send: "M4 12 20 4l-6 16-3-7z",
   logout: "M10 4H5v16h5M14 8l4 4-4 4M18 12H9",
   wave: "M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2",
+  // sprint 3
+  play: "M8 5.5v13l11-6.5z",
+  stop: "M7 7h10v10H7z",
+  volume: "M4 9v6h4l5 4V5L8 9zM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11",
+  music: "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
+  film: "M4 4h16v16H4zM4 9h16M4 15h16M9 4v16M15 4v16",
+  map: "M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15",
+  flag: "M5 21V4h11l-2 4 2 4H5",
+  target: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 12h.01",
+  route: "M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM6 15V9a3 3 0 0 1 3-3h7M18 9v6a3 3 0 0 1-3 3H8",
 };
 
 export type IconName = keyof typeof P | ReleaseNoteIcon;
 
 export function Icon({ name, size = 22, stroke = 1.9, className }: { name: IconName; size?: number; stroke?: number; className?: string }) {
   const d = P[name] ?? P.spark!;
-  const filled = name === "flame" || name === "star";
+  const filled = name === "flame" || name === "star" || name === "play";
   return (
     <svg
       width={size}

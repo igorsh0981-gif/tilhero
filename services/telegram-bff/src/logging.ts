@@ -51,6 +51,10 @@ export const SENSITIVE_KEYS = new Set([
   "link",
   "start_param",
   "startapp",
+  // спринт 3: заявки на песни и фильмы (свободный текст ученика), ответы диагностики
+  "comment",
+  "decision_note",
+  "answer",
 ]);
 
 const CENSOR = "[redacted]";

@@ -1,0 +1,86 @@
+[
+  {
+    "module_id": "m1-meet",
+    "course_id": "en-core",
+    "title": {
+      "ru": "Знакомство",
+      "uz": "Tanishuv"
+    },
+    "goal": {
+      "ru": "Поздороваться и рассказать о себе, семье, работе и свободном времени, обменяться номерами",
+      "uz": "Salomlashish, oʻzingiz, oilangiz, ishingiz va boʻsh vaqtingiz haqida gapirish, raqam almashish"
+    },
+    "theme": "small_talk",
+    "lesson_ids": [
+      "l-01-greetings",
+      "l-02-where-from",
+      "l-03-phone-number",
+      "l-04-family",
+      "l-05-jobs",
+      "l-06-free-time"
+    ]
+  },
+  {
+    "module_id": "m2-city",
+    "course_id": "en-core",
+    "title": {
+      "ru": "В городе",
+      "uz": "Shaharda"
+    },
+    "goal": {
+      "ru": "Заказать еду и напитки, купить одежду и фрукты, найти дорогу и объяснить в аптеке, что болит",
+      "uz": "Taom va ichimlik buyurtma qilish, kiyim va meva xarid qilish, yoʻl topish va dorixonada nima ogʻriyotganini tushuntirish"
+    },
+    "theme": "food",
+    "lesson_ids": [
+      "l-07-coffee",
+      "l-08-restaurant",
+      "l-09-clothes",
+      "l-10-market",
+      "l-11-directions",
+      "l-12-pharmacy"
+    ]
+  },
+  {
+    "module_id": "m3-travel",
+    "course_id": "en-core",
+    "title": {
+      "ru": "Путешествие",
+      "uz": "Sayohat"
+    },
+    "goal": {
+      "ru": "Пройти регистрацию и паспортный контроль, заселиться и решить проблему в гостинице, доехать на такси и забронировать экскурсию",
+      "uz": "Roʻyxatdan va pasport nazoratidan oʻtish, mehmonxonaga joylashish va muammoni hal qilish, taksida yetib borish va ekskursiya bron qilish"
+    },
+    "theme": "travel",
+    "lesson_ids": [
+      "l-13-flight-check-in",
+      "l-14-passport",
+      "l-15-hotel",
+      "l-16-hotel-problem",
+      "l-17-taxi",
+      "l-18-tour-booking"
+    ]
+  },
+  {
+    "module_id": "m4-work",
+    "course_id": "en-core",
+    "title": {
+      "ru": "Работа",
+      "uz": "Ish"
+    },
+    "goal": {
+      "ru": "Представиться команде, поговорить с коллегами, назначить встречу, позвонить, пройти собеседование и уточнить задачу",
+      "uz": "Jamoaga oʻzingizni tanishtirish, hamkasblar bilan suhbatlashish, uchrashuv belgilash, qoʻngʻiroq qilish, ish suhbatidan oʻtish va vazifani aniqlashtirish"
+    },
+    "theme": "work",
+    "lesson_ids": [
+      "l-19-first-day",
+      "l-20-office-small-talk",
+      "l-21-meeting",
+      "l-22-phone-call",
+      "l-23-interview",
+      "l-24-clarify"
+    ]
+  }
+]

@@ -147,8 +147,8 @@ async def test_full_deletion_cycle_and_reregistration(env) -> None:
         ).scalar_one()
     assert seen == 1
 
-    for d in ("notifications", "social"):
-        await env.bus.publish(ack(uid, request_id, d))
+    for d in ("notifications", "social", "catalog", "diagnostics"):  # спринт 3: контент и диагностика
+        await env.bus.publish(ack(uid, request_id, d, "anonymized" if d == "catalog" else "deleted"))
     await env.flush()
     # без experience-config (отметки просмотра «Что нового») профиль не обезличивается
     req = await request_of(env, uid)

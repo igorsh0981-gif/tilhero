@@ -11,6 +11,7 @@
  */
 import { Type, type Static, type TLiteral, type TSchema, type TSchemaOptions, type TUnion } from "@fastify/type-provider-typebox";
 import type * as C from "@tilhero/contracts/bff";
+import type * as K from "@tilhero/contracts/content";
 
 // ---------- compile-time сверка с контрактом ----------
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
@@ -462,7 +463,10 @@ assertSame<Same<Static<typeof InviteAcceptResultSchema>, C.InviteAcceptResult>>(
 
 // ---------- «Что нового» и новости ----------
 /** Белые списки — packages/contracts/release-notes.json (сверка — test/whatsNew.test.ts). */
-export const NOTE_ROUTES = ["home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news"] as const;
+export const NOTE_ROUTES = [
+  "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
+  "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
+] as const;
 export const NOTE_ICONS = [
   "spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield", "globe", "trophy", "news",
 ] as const;
@@ -627,3 +631,350 @@ assertSame<Same<Static<typeof DeletionResponseSchema>, C.DeletionResponse>>();
 export const IdempotencyHeadersSchema = Type.Object({
   "idempotency-key": Type.Optional(Type.String({ description: "UUID; повтор с тем же ключом возвращает тот же результат" })),
 });
+
+// =====================================================================================================================
+// Спринт 3 — языки, диагностика, карта навыков, траектория, сценарии, медиатека, заявки (bff.ts «Спринт 3»,
+// форматы контента — content.ts). Схемы ответов проверяются и на ответах доменов (src/check.ts): ответ не по контракту
+// → 503, а не 500 сериализатора и не утечка лишнего.
+// =====================================================================================================================
+export const BANDS = ["A0", "A1", "A2", "B1", "B2"] as const;
+const Band = Enum(BANDS);
+assertSame<Same<Static<typeof Band>, K.Band>>();
+const Localized = Type.Object({ ru: Type.String(), uz: Type.String() });
+assertSame<Same<Static<typeof Localized>, K.Localized>>();
+const GoalCode = Enum(["work", "career", "travel", "daily", "study", "exam"]);
+assertSame<Same<Static<typeof GoalCode>, K.GoalCode>>();
+export const TOPIC_CODES = [
+  "small_talk", "travel", "food", "shopping", "work", "interview", "study", "health", "home", "hobbies", "movies", "tech",
+] as const;
+const ContentTopic = Enum(TOPIC_CODES);
+assertSame<Same<Static<typeof ContentTopic>, K.TopicCode>>();
+const SkillArea = Enum(["vocabulary", "grammar", "reading", "listening", "speaking", "writing", "function"]);
+assertSame<Same<Static<typeof SkillArea>, K.SkillArea>>();
+export const MEDIA_TYPES = ["song", "movie", "interview", "dialogue", "own_scene"] as const;
+const MediaType = Enum(MEDIA_TYPES);
+assertSame<Same<Static<typeof MediaType>, K.MediaType>>();
+const MediaUse = Enum(["listen", "show_transcript", "exercises", "dictionary", "translation"]);
+assertSame<Same<Static<typeof MediaUse>, K.MediaUse>>();
+const MediaRequestStatus = Enum(["new", "in_review", "authored_alternative", "licensed", "rejected", "duplicate"]);
+assertSame<Same<Static<typeof MediaRequestStatus>, K.MediaRequestStatus>>();
+const PairStatus = Enum(["planned", "development", "review", "pilot", "published", "archived"]);
+assertSame<Same<Static<typeof PairStatus>, K.PairStatus>>();
+const LessonStageType = Enum(["retrieval", "explanation", "roleplay", "assessment", "summary"]);
+assertSame<Same<Static<typeof LessonStageType>, K.LessonStageType>>();
+
+/** Языковая пара ru-en; по умолчанию — ru-en (единственная опубликованная). */
+export const PAIR_PATTERN = "^[a-z]{2,8}-[a-z]{2,8}$";
+export const DEFAULT_PAIR = "ru-en";
+const PairId = Type.String({ pattern: PAIR_PATTERN, maxLength: 17 });
+/** Идентификаторы контента (content.ts): [a-z0-9][a-z0-9._-]{1,63}. */
+export const CONTENT_ID_PATTERN = "^[a-z0-9][a-z0-9._-]{1,63}$";
+const ContentId = Type.String({ pattern: CONTENT_ID_PATTERN });
+
+// ---------- Языки ----------
+export const LanguagePairDomainSchema = Type.Object({
+  pair_id: Type.String(),
+  source: Type.String(),
+  target: Type.String(),
+  title: Localized,
+  status: PairStatus,
+  course_id: Nullable(Type.String()),
+});
+export const MyLanguagesSchema = Type.Object({
+  active_pair_id: Type.String(),
+  pairs: Type.Array(
+    Type.Object({ pair_id: Type.String(), source: Type.String(), target: Type.String(), title: Localized, status: PairStatus, available: Type.Boolean() }),
+  ),
+});
+assertSame<Same<Static<typeof MyLanguagesSchema>, C.MyLanguages>>();
+
+// ---------- Диагностика ----------
+const DiagnosticArea = Enum(["vocabulary", "grammar", "reading", "listening", "speaking", "writing"]);
+assertSame<Same<Static<typeof DiagnosticArea>, C.DiagnosticArea>>();
+export const TEST_AREAS = ["vocabulary", "grammar", "reading", "listening"] as const;
+const TestArea = Enum(TEST_AREAS);
+assertSame<Same<Static<typeof TestArea>, C.DiagnosticItem["area"]>>();
+const DiagnosticItemType = Enum(["single_choice", "gap_choice", "order_words", "read_choice", "listen_choice"]);
+assertSame<Same<Static<typeof DiagnosticItemType>, C.DiagnosticItemType>>();
+
+export const DiagnosticSessionSchema = Type.Object({
+  session_id: Type.String(),
+  pair_id: Type.String(),
+  test_version: Type.String(),
+  status: Enum(["in_progress", "finished", "abandoned"]),
+  answered: Type.Integer({ minimum: 0 }),
+  total_estimate: Type.Integer({ minimum: 0 }),
+  started_at: IsoTime,
+  expires_at: IsoTime,
+  followup_area: Nullable(DiagnosticArea),
+});
+assertSame<Same<Static<typeof DiagnosticSessionSchema>, C.DiagnosticSession>>();
+
+export const DiagnosticItemSchema = Type.Object({
+  item_id: Type.String(),
+  area: TestArea,
+  type: DiagnosticItemType,
+  instruction: Localized,
+  prompt_en: Type.String(),
+  passage_en: Nullable(Type.String()),
+  audio_text_en: Nullable(Type.String()),
+  options: Type.Array(Type.String()),
+  position: Type.Integer({ minimum: 1 }),
+});
+assertSame<Same<Static<typeof DiagnosticItemSchema>, C.DiagnosticItem>>();
+
+export const DiagnosticDoneSchema = Type.Object({ done: Type.Literal(true) });
+export const DiagnosticNextSchema = Type.Union([DiagnosticItemSchema, DiagnosticDoneSchema]);
+
+export const AnswerRequestSchema = Type.Object(
+  {
+    item_id: Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" }),
+    answer: Type.Union([
+      Type.Integer({ minimum: 0, maximum: 50 }),
+      Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { minItems: 1, maxItems: 40 }),
+      Type.Null(),
+    ]),
+    dont_know: Type.Boolean(),
+    time_ms: Type.Integer({ minimum: 0, maximum: 3_600_000 }),
+  },
+  strict,
+);
+assertSame<Same<Static<typeof AnswerRequestSchema>, C.AnswerRequest>>();
+
+export const AnswerResultSchema = Type.Object({ accepted: Type.Boolean(), next: Nullable(DiagnosticItemSchema), done: Type.Boolean() });
+assertSame<Same<Static<typeof AnswerResultSchema>, C.AnswerResult>>();
+
+export const AreaResultSchema = Type.Object({
+  area: DiagnosticArea,
+  status: Enum(["assessed", "not_assessed"]),
+  band: Nullable(Band),
+  confidence: Nullable(Type.Number({ minimum: 0, maximum: 1 })),
+  reason: Nullable(Enum(["too_few_items", "no_speech_voice", "not_in_test_yet"])),
+  /** основания по полосам: показано и верно (без заданий и без отметок по отдельным заданиям) */
+  evidence: Type.Array(Type.Object({ band: Band, answered: Type.Integer({ minimum: 0 }), correct: Type.Integer({ minimum: 0 }) })),
+  needs_followup: Type.Boolean(),
+});
+assertSame<Same<Static<typeof AreaResultSchema>, C.AreaResult>>();
+
+export const DiagnosticResultSchema = Type.Object({
+  result_id: Type.String(),
+  revision: Type.Integer({ minimum: 1 }),
+  pair_id: Type.String(),
+  test_version: Type.String(),
+  provisional_level: Nullable(Band),
+  areas: Type.Array(AreaResultSchema),
+  weak_areas: Type.Array(DiagnosticArea),
+  recommended_start: Nullable(Type.Object({ lesson_id: Type.String(), title: Localized, level: Band })),
+  cefr_certificate: Type.Literal(false),
+  created_at: IsoTime,
+});
+assertSame<Same<Static<typeof DiagnosticResultSchema>, C.DiagnosticResult>>();
+
+export const DiagnosticStateSchema = Type.Object({
+  pair_id: Type.String(),
+  status: Enum(["none", "in_progress", "completed"]),
+  session: Nullable(DiagnosticSessionSchema),
+  last_result: Nullable(DiagnosticResultSchema),
+  next_allowed_at: Nullable(IsoTime),
+  audience: Enum(["adults", "kids"]),
+});
+assertSame<Same<Static<typeof DiagnosticStateSchema>, C.DiagnosticState>>();
+
+export const DiagnosticResultsSchema = itemsOf(DiagnosticResultSchema);
+export const PairQuerySchema = Type.Object({ pair_id: Type.Optional(PairId) }, strict);
+export const SessionCreateSchema = Type.Object({ pair_id: Type.Optional(PairId) }, strict);
+export const FollowupRequestSchema = Type.Object({ area: TestArea }, strict);
+export const IdParamsSchema = Type.Object({ id: Uuid }, strict);
+export const ContentIdParamsSchema = Type.Object({ id: ContentId }, strict);
+
+// ---------- Карта навыков ----------
+const SkillState = Enum(["not_started", "learning", "demonstrated", "retained"]);
+assertSame<Same<Static<typeof SkillState>, C.SkillState>>();
+const SkillHistory = Type.Object({ source: Enum(["diagnostic", "lesson", "retention"]), outcome: Enum(["positive", "negative"]), at: IsoTime });
+const skillMapFields = {
+  pair_id: Type.String(),
+  course_id: Type.String(),
+  counts: Type.Object({ not_started: Type.Integer(), learning: Type.Integer(), demonstrated: Type.Integer(), retained: Type.Integer() }),
+};
+export const SkillMapSchema = Type.Object({
+  ...skillMapFields,
+  skills: Type.Array(
+    Type.Object({
+      skill_id: Type.String(),
+      area: SkillArea,
+      title: Localized,
+      level: Band,
+      state: SkillState,
+      confidence: Nullable(Type.Number({ minimum: 0, maximum: 1 })),
+      prerequisites: Type.Array(Type.String()),
+      updated_at: Nullable(IsoTime),
+      history: Type.Array(SkillHistory),
+    }),
+  ),
+});
+assertSame<Same<Static<typeof SkillMapSchema>, C.SkillMap>>();
+/** Ответ diagnostics: метаданные навыка (area, title, level) могут быть null — BFF дополняет из снимка курса. */
+export const SkillMapDomainSchema = Type.Object({
+  ...skillMapFields,
+  skills: Type.Array(
+    Type.Object({
+      skill_id: Type.String(),
+      area: Nullable(Type.String()),
+      title: Nullable(Localized),
+      level: Nullable(Type.String()),
+      state: SkillState,
+      confidence: Nullable(Type.Number({ minimum: 0, maximum: 1 })),
+      prerequisites: Type.Array(Type.String()),
+      updated_at: Nullable(IsoTime),
+      history: Type.Array(SkillHistory),
+    }),
+  ),
+});
+
+/** Снимок курса (bff.ts CourseSnapshot) — для BFF нужны только навыки; остальное не проверяется и не отдаётся. */
+export const CourseSnapshotSkillsSchema = Type.Object({
+  course_id: Type.String(),
+  snapshot_version: Type.String(),
+  skills: Type.Array(Type.Object({ skill_id: Type.String(), area: SkillArea, title: Localized, level: Band, prerequisites: Type.Array(Type.String()) })),
+});
+
+// ---------- Траектория ----------
+const ReasonCode = Enum(["start_after_diagnostic", "no_diagnostic", "prerequisite_missing", "weak_area", "goal_match", "topic_match", "next_in_course"]);
+assertSame<Same<Static<typeof ReasonCode>, C.ReasonCode>>();
+const lessonCardFields = {
+  lesson_id: Type.String(),
+  module_id: Type.String(),
+  title: Localized,
+  goal: Localized,
+  level: Band,
+  kind: Enum(["core", "optional"]),
+  duration_min: Type.Integer({ minimum: 1 }),
+  primary_skill_id: Type.String(),
+  scenario_id: Nullable(Type.String()),
+  stages: Type.Array(Type.Object({ type: LessonStageType, minutes: Type.Integer({ minimum: 0 }) })),
+};
+export const LessonCardSchema = Type.Object(lessonCardFields);
+assertSame<Same<Static<typeof LessonCardSchema>, C.LessonCard>>();
+const PlannedLesson = Type.Object({ ...lessonCardFields, reason_codes: Type.Array(ReasonCode) });
+export const TrajectorySchema = Type.Object({
+  pair_id: Type.String(),
+  course_id: Type.String(),
+  revision: Type.Integer({ minimum: 1 }),
+  basis: Type.Object({ diagnostic_result_id: Nullable(Type.String()), goal: Nullable(GoalCode), computed_at: IsoTime }),
+  next: Nullable(Type.Object({ ...lessonCardFields, reason_codes: Type.Array(ReasonCode), explanation: Localized })),
+  mandatory: Type.Array(PlannedLesson),
+  optional: Type.Array(PlannedLesson),
+  completed: Type.Array(LessonCardSchema),
+  lessons_available: Type.Boolean(),
+});
+assertSame<Same<Static<typeof TrajectorySchema>, C.Trajectory>>();
+
+// ---------- Сценарии ----------
+const scenarioCardFields = {
+  scenario_id: Type.String(),
+  title: Localized,
+  task: Localized,
+  level: Band,
+  difficulty: Type.Integer({ minimum: 1, maximum: 5 }),
+  goals: Type.Array(GoalCode),
+  topics: Type.Array(ContentTopic),
+  characters: Type.Array(Type.Object({ name: Type.String(), role: Localized })),
+  access: Type.Literal("free"),
+};
+export const ScenarioCardSchema = Type.Object(scenarioCardFields);
+assertSame<Same<Static<typeof ScenarioCardSchema>, C.ScenarioCard>>();
+export const ScenarioPageSchema = pageOf(ScenarioCardSchema);
+assertSame<Same<Static<typeof ScenarioPageSchema>, C.Page<C.ScenarioCard>>>();
+export const ScenarioDetailSchema = Type.Object({
+  ...scenarioCardFields,
+  completion: Localized,
+  opening: Type.Object({
+    speaker: Type.String(),
+    line_en: Type.String(),
+    gloss: Localized,
+    replies: Type.Array(Type.Object({ description: Localized, example_en: Type.String() })),
+  }),
+  outcomes: Type.Array(Type.Object({ outcome: Enum(["success", "alt_success", "fail"]), summary: Localized })),
+});
+assertSame<Same<Static<typeof ScenarioDetailSchema>, C.ScenarioDetail>>();
+export const ScenarioQuerySchema = Type.Object(
+  {
+    goal: Type.Optional(GoalCode),
+    level: Type.Optional(Band),
+    topic: Type.Optional(ContentTopic),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 20 })),
+    cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+  },
+  strict,
+);
+
+// ---------- Медиатека ----------
+const mediaCardFields = {
+  asset_id: Type.String(),
+  type: MediaType,
+  title: Localized,
+  level: Band,
+  topics: Type.Array(ContentTopic),
+  duration_s: Type.Number({ minimum: 0 }),
+  source_label: Type.String(),
+  allowed_uses: Type.Array(MediaUse),
+  has_audio: Type.Boolean(),
+};
+export const MediaCardSchema = Type.Object(mediaCardFields);
+assertSame<Same<Static<typeof MediaCardSchema>, C.MediaCard>>();
+export const MediaPageSchema = pageOf(MediaCardSchema);
+assertSame<Same<Static<typeof MediaPageSchema>, C.Page<C.MediaCard>>>();
+export const MediaDetailSchema = Type.Object({
+  ...mediaCardFields,
+  attribution: Nullable(Type.String()),
+  transcript: Nullable(
+    Type.Array(Type.Object({ t_start_ms: Type.Integer(), t_end_ms: Type.Integer(), speaker: Type.String(), text_en: Type.String(), gloss: Nullable(Localized) })),
+  ),
+  phrases: Type.Array(Type.Object({ en: Type.String(), gloss: Localized })),
+  voices: Type.Record(Type.String(), Enum(["en-GB", "en-US"])),
+  exercises_available: Type.Boolean(),
+});
+assertSame<Same<Static<typeof MediaDetailSchema>, C.MediaDetail>>();
+export const MediaQuerySchema = Type.Object(
+  {
+    type: Type.Optional(MediaType),
+    level: Type.Optional(Band),
+    topic: Type.Optional(ContentTopic),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, default: 20 })),
+    cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+  },
+  strict,
+);
+/** Аудио медиатеки: байты (audio/mpeg | audio/ogg | audio/mp4), не JSON — сериализатор не применяется. */
+export const AudioBytesSchema = Type.Unsafe<Buffer>({ type: "string", format: "binary", description: "audio/mpeg | audio/ogg | audio/mp4, ≤ 3 МБ" });
+export const AudioHeadersSchema = Type.Object({ "if-none-match": Type.Optional(Type.String({ maxLength: 200 })) });
+
+// ---------- Заявки на песни и фильмы ----------
+const MediaRequestKind = Enum(["song", "movie", "series", "other"]);
+/** Видимый текст: без управляющих символов (кроме перевода строки в комментарии), не из одних пробелов. */
+const PLAIN_TEXT = "^[^\\u0000-\\u001f\\u007f]*[^\\s\\u0000-\\u001f\\u007f][^\\u0000-\\u001f\\u007f]*$";
+const COMMENT_TEXT = "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f]*$";
+export const MediaRequestCreateSchema = Type.Object(
+  {
+    kind: MediaRequestKind,
+    title: Type.String({ minLength: 2, maxLength: 200, pattern: PLAIN_TEXT }),
+    link: Type.Optional(Type.String({ maxLength: 500, pattern: "^https://[^\\s]+$", description: "только https; BFF и catalog ссылку не открывают" })),
+    comment: Type.Optional(Type.String({ maxLength: 500, pattern: COMMENT_TEXT })),
+  },
+  strict,
+);
+assertSame<Same<Static<typeof MediaRequestCreateSchema>, C.MediaRequestCreate>>();
+export const MediaRequestSchema = Type.Object({
+  request_id: Type.String(),
+  kind: MediaRequestKind,
+  title: Type.String(),
+  link: Nullable(Type.String()),
+  comment: Nullable(Type.String()),
+  status: MediaRequestStatus,
+  decision_note: Nullable(Type.String()),
+  linked_asset_id: Nullable(Type.String()),
+  created_at: IsoTime,
+  decided_at: Nullable(IsoTime),
+});
+assertSame<Same<Static<typeof MediaRequestSchema>, C.MediaRequest>>();
+export const MediaRequestListSchema = itemsOf(MediaRequestSchema);

@@ -44,6 +44,8 @@ export function useLoad<T>(loader: () => Promise<T>, deps: readonly unknown[]) {
   const { t, fmt } = useI18n();
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** the error itself (ApiError: a screen may show its own text for a code, e.g. CATALOG_UNAVAILABLE) */
+  const [errorObj, setErrorObj] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const latest = useRef(loader);
   latest.current = loader;
@@ -52,11 +54,15 @@ export function useLoad<T>(loader: () => Promise<T>, deps: readonly unknown[]) {
     const my = ++seq.current;
     setLoading(true);
     setError(null);
+    setErrorObj(null);
     try {
       const v = await latest.current();
       if (my === seq.current) setData(v);
     } catch (e) {
-      if (my === seq.current) setError(errorText(e, t, fmt.mmss));
+      if (my === seq.current) {
+        setError(errorText(e, t, fmt.mmss));
+        setErrorObj(e);
+      }
     } finally {
       if (my === seq.current) setLoading(false);
     }
@@ -65,5 +71,5 @@ export function useLoad<T>(loader: () => Promise<T>, deps: readonly unknown[]) {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
-  return { data, error, loading, reload: load, setData };
+  return { data, error, errorObj, loading, reload: load, setData };
 }

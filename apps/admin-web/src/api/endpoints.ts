@@ -1,5 +1,23 @@
 import type {
   AdminExperience,
+  AdminMediaRequest,
+  AudioBlob,
+  AudioUpload,
+  ContentPublishInput,
+  ContentReviewInput,
+  ContentRollbackInput,
+  ContentRow,
+  ContentSummary,
+  ContentValidationError,
+  ContentVersion,
+  ContentVersionMeta,
+  DiagnosticStats,
+  DiagnosticTestRow,
+  DiagnosticTestVersion,
+  Language,
+  LanguagePair,
+  MediaRequestDecision,
+  PairCard,
   AdminLearnerCard,
   AdminLearnerRow,
   AgeBand,
@@ -55,6 +73,7 @@ import type {
   UiLang,
 } from "@tilhero/contracts/admin";
 import type { Ticket as ClientTicket } from "@tilhero/contracts/bff";
+import type { Band, ContentKind, MediaRequestStatus, ScenarioTestRun, VersionStatus } from "@tilhero/contracts/content";
 import { api } from "./client";
 
 export type { SlaPolicies, SlaPolicy, SupportStats };
@@ -238,4 +257,66 @@ export const Campaigns = {
     api.post<Campaign>(`/notifications/campaigns/${enc(id)}/schedule`, { expected_version, send_at, reason }, { idempotencyKey }),
   unschedule: (id: string, reason: string) => api.post<Campaign>(`/notifications/campaigns/${enc(id)}/unschedule`, { reason }),
   stop: (id: string, reason: string) => api.post<Campaign>(`/notifications/campaigns/${enc(id)}/stop`, { reason }),
+};
+
+/* ---------------------------------------------------------------- content (catalog via admin-bff, sprint 3) */
+
+export interface ContentFilters {
+  q?: string;
+  status?: VersionStatus | "";
+  level?: Band | "";
+  cursor?: string | null;
+  limit?: number;
+}
+
+export const Content = {
+  list: (kind: ContentKind, f: ContentFilters = {}, background = false) =>
+    api.get<Page<ContentRow>>(`/content/${kind}`, { query: { q: f.q, status: f.status, level: f.level, cursor: f.cursor, limit: f.limit ?? 100 }, background }),
+  entity: (kind: ContentKind, key: string) => api.get<{ row: ContentRow; versions: ContentVersionMeta[] }>(`/content/${kind}/${enc(key)}`),
+  version: <P = Record<string, unknown>>(kind: ContentKind, key: string, v: number) => api.get<ContentVersion<P>>(`/content/${kind}/${enc(key)}/versions/${v}`),
+  create: (kind: ContentKind, payload: unknown, idempotencyKey: string) => api.post<ContentVersion>(`/content/${kind}`, { payload }, { idempotencyKey }),
+  newDraft: (kind: ContentKind, key: string, from_version: number, idempotencyKey: string) =>
+    api.post<ContentVersion>(`/content/${kind}/${enc(key)}/versions`, { from_version }, { idempotencyKey }),
+  save: (kind: ContentKind, key: string, v: number, payload: unknown, expected_hash: string) =>
+    api.put<ContentVersion>(`/content/${kind}/${enc(key)}/versions/${v}`, { payload, expected_hash }),
+  validate: (kind: ContentKind, key: string, v: number) => api.post<{ ok: boolean; errors: ContentValidationError[] }>(`/content/${kind}/${enc(key)}/versions/${v}/validate`),
+  submit: (kind: ContentKind, key: string, v: number) => api.post<ContentVersion>(`/content/${kind}/${enc(key)}/versions/${v}/submit`),
+  review: (kind: ContentKind, key: string, v: number, body: ContentReviewInput) => api.post<ContentVersion>(`/content/${kind}/${enc(key)}/versions/${v}/review`, body),
+  publish: (kind: ContentKind, key: string, v: number, reason: string, idempotencyKey: string) =>
+    api.post<ContentVersion>(`/content/${kind}/${enc(key)}/versions/${v}/publish`, { reason } satisfies ContentPublishInput, { idempotencyKey }),
+  archive: (kind: ContentKind, key: string, reason: string) => api.post<{ row: ContentRow }>(`/content/${kind}/${enc(key)}/archive`, { reason }),
+  rollback: (kind: ContentKind, key: string, to_version: number, reason: string) =>
+    api.post<ContentVersion>(`/content/${kind}/${enc(key)}/rollback`, { to_version, reason } satisfies ContentRollbackInput),
+  testRun: (key: string, v: number) => api.post<ScenarioTestRun>(`/content/scenario/${enc(key)}/versions/${v}/test-run`),
+  rightsApprove: (key: string, v: number, note: string) => api.post<ContentVersion>(`/content/media_asset/${enc(key)}/versions/${v}/rights-approve`, { note }),
+  upload: (body: AudioUpload, idempotencyKey: string) => api.post<AudioBlob>("/content/blobs", body, { idempotencyKey }),
+  /** same-origin URL of an uploaded audio file for the preview player (content.read; CSP media-src 'self') */
+  blobUrl: (blobId: string) => api.url(`/content/blobs/${enc(blobId)}`),
+  reviewQueue: (kind?: ContentKind | "", cursor?: string | null) => api.get<Page<ContentRow>>("/content/review-queue", { query: { kind, cursor } }),
+  summary: () => api.get<ContentSummary>("/content/summary"),
+};
+
+export const MediaRequests = {
+  list: (f: { status?: MediaRequestStatus | ""; q?: string; cursor?: string | null }) =>
+    api.get<Page<AdminMediaRequest>>("/content/media-requests", { query: { status: f.status, q: f.q, cursor: f.cursor } }),
+  take: (id: string) => api.post<AdminMediaRequest>(`/content/media-requests/${enc(id)}/take`),
+  decide: (id: string, body: MediaRequestDecision) => api.post<AdminMediaRequest>(`/content/media-requests/${enc(id)}/decide`, body),
+};
+
+/* ---------------------------------------------------------------- languages and pairs (catalog, lang.manage) */
+
+export const Languages = {
+  list: () => api.get<{ items: Language[] }>("/languages"),
+  put: (lang: Language) => api.put<Language>(`/languages/${enc(lang.code)}`, lang),
+  pairs: () => api.get<{ items: PairCard[] }>("/language-pairs"),
+  putPair: (pair: LanguagePair, reason: string) => api.put<PairCard>(`/language-pairs/${enc(pair.pair_id)}`, { ...pair, reason }),
+};
+
+/* ---------------------------------------------------------------- diagnostics (tests and statistics) */
+
+export const Diagnostics = {
+  tests: () => api.get<{ items: DiagnosticTestRow[] }>("/diagnostics/tests"),
+  version: (testId: string, v: number) => api.get<DiagnosticTestVersion>(`/diagnostics/tests/${enc(testId)}/versions/${v}`),
+  publish: (testId: string, v: number, reason: string) => api.post<DiagnosticTestRow>(`/diagnostics/tests/${enc(testId)}/versions/${v}/publish`, { reason }),
+  stats: (period: Period) => api.get<DiagnosticStats>("/diagnostics/stats", { query: { period } }),
 };

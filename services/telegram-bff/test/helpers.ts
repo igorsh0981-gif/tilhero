@@ -6,6 +6,7 @@
  */
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
+import { decodeJwt } from "jose";
 import { verifyInternalToken } from "@tilhero/ts-common";
 import type {
   AgeBand,
@@ -28,6 +29,7 @@ import { buildApp } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
 import type { App } from "../src/http.js";
 import { signInitData } from "../src/telegramAuth.js";
+import { FakeContent } from "./fakeContent.js";
 
 export const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://127.0.0.1:6379/14";
 export const BOT_TOKEN = "7000000001:AAtest-bot-token-for-unit-tests-only-xx";
@@ -43,6 +45,8 @@ const URLS = {
   notifications: "http://notifications.test",
   experience: "http://experience.test",
   social: "http://social.test",
+  catalog: "http://catalog.test",
+  diagnostics: "http://diagnostics.test",
 } as const;
 
 export type Service = keyof typeof URLS;
@@ -54,6 +58,8 @@ const DOMAIN_AUD: Record<Service, string> = {
   notifications: "notifications",
   experience: "experience-config",
   social: "social",
+  catalog: "catalog",
+  diagnostics: "diagnostics",
 };
 
 export function testConfig(env: Record<string, string> = {}): Config {
@@ -74,6 +80,8 @@ export function testConfig(env: Record<string, string> = {}): Config {
     NOTIFICATIONS_URL: URLS.notifications,
     EXPERIENCE_URL: URLS.experience,
     SOCIAL_URL: URLS.social,
+    CATALOG_URL: URLS.catalog,
+    DIAGNOSTICS_URL: URLS.diagnostics,
     UPSTREAM_RETRIES: "0",
     UPSTREAM_TIMEOUT_MS: "2000",
     LOG_LEVEL: "info",
@@ -106,6 +114,8 @@ export interface Call {
   subject: string | undefined;
   body: unknown;
   headers: Record<string, string>;
+  /** все claims внутреннего JWT (после проверки подписи) */
+  claims: Record<string, unknown>;
 }
 
 export interface Req {
@@ -115,6 +125,7 @@ export interface Req {
   subject: string | undefined;
   body: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   headers: Record<string, string>;
+  claims: Record<string, unknown>;
 }
 
 export type Handler = (r: Req) => Response | Promise<Response>;
@@ -221,6 +232,8 @@ export class FakeDomains {
   childSettingsInDetail = true;
   /** Домены, «лежащие» на сетевом уровне (fetch бросает). */
   readonly down = new Set<Service>();
+  /** Спринт 3: catalog, diagnostics и траектория learning-plan (test/fakeContent.ts). */
+  readonly content = new FakeContent();
   private readonly overrides = new Map<string, Handler>();
   private ticketSeq = 3000;
 
@@ -318,12 +331,13 @@ export class FakeDomains {
       return domainError(e.status ?? 401, e.code ?? "INTERNAL_TOKEN_INVALID");
     }
     const query = Object.fromEntries(url.searchParams);
-    this.calls.push({ service, method, path: url.pathname, query, subject, body, headers });
-    const req: Req = { method, path: url.pathname, query, subject, body, headers };
+    const claims = decodeJwt(headers["x-internal-token"] ?? "") as Record<string, unknown>;
+    this.calls.push({ service, method, path: url.pathname, query, subject, body, headers, claims });
+    const req: Req = { method, path: url.pathname, query, subject, body, headers, claims };
     if (this.failAll && !this.failAll.except.has(service)) return domainError(this.failAll.status, this.failAll.code, { from: service });
     const ov = this.overrides.get(`${service} ${method} ${url.pathname}`);
     const res = ov ? await ov(req) : await this.route(service, req);
-    if (!this.decorate || res.status >= 300 || res.status === 204) return res;
+    if (!this.decorate || res.status >= 300 || res.status === 204 || !(res.headers.get("content-type") ?? "").includes("json")) return res;
     const parsed: unknown = JSON.parse(await res.text());
     return json(res.status, this.decorate(parsed));
   };
@@ -348,6 +362,10 @@ export class FakeDomains {
         return this.support(r);
       case "experience":
         return this.experienceRoute(r);
+      case "catalog":
+        return this.content.catalog(r);
+      case "diagnostics":
+        return this.content.diagnostics(r);
     }
   }
 
@@ -711,6 +729,7 @@ export class FakeDomains {
     if (!r.subject) return domainError(401, "SUBJECT_REQUIRED");
     const id = r.subject;
     const key = `${r.method} ${r.path}`;
+    if (key === "GET /internal/v1/plan/trajectory") return this.content.trajectory(r, this.plans.get(id)?.goal ?? null);
     switch (key) {
       case "GET /internal/v1/me/plan":
         return json(200, { ...this.plan(id, r.query.tz), user_id: id, internal_note: "x" });

@@ -7,26 +7,31 @@
 (aievent) без режима AD/LDAP, AI-уровней доступа и прав спринтов 4–9 aievent.
 
 ## Роли и права
-Каталог — зеркало `admin.ts` (`Permission` — 17 прав, `RoleCode` — 8 ролей, `PRIVILEGED_ROLES`), матрица по умолчанию —
-`docs/sprint2/PLAN.md` §«Роли и права», сид — миграция `0001`; дальше матрица меняется только через four-eyes.
+Каталог — зеркало `admin.ts` (`Permission` — 23 права, `RoleCode` — 9 ролей, `PRIVILEGED_ROLES`), матрица по умолчанию —
+`docs/sprint2/PLAN.md` §«Роли и права» + `docs/sprint3/PLAN.md` §«Права и роли», сид — миграции `0001` и `0003`
+(0003 добавляет права к действующей матрице, ничего не затирая); дальше матрица меняется только через four-eyes.
 
 | Роль | Права | MFA |
 |---|---|---|
-| super_admin | все 17 | обязательна |
-| operations | dashboard.read, users.read, support.read, audit.read, config.read, config.edit, config.publish | обязательна |
+| super_admin | все 23 | обязательна |
+| operations | dashboard.read, users.read, support.read, audit.read, config.read, config.edit, config.publish, content.read | обязательна |
 | communications | dashboard.read, whatsnew.manage, whatsnew.publish, notif.templates.manage, notif.campaigns.manage, notif.campaigns.send | обязательна |
 | support | dashboard.read, users.read, support.read, support.reply | по желанию |
-| methodist | dashboard.read, users.read | по желанию |
-| analyst | dashboard.read, users.read | по желанию |
-| auditor | dashboard.read, audit.read | по желанию |
+| methodist | dashboard.read, users.read, content.read, content.edit, content.review, content.publish | обязательна (content.publish) |
+| content_manager (Контент-менеджер) | dashboard.read, content.read, content.edit, media.rights | обязательна (media.rights) |
+| analyst | dashboard.read, users.read, content.read | по желанию |
+| auditor | dashboard.read, audit.read, content.read | по желанию |
 | read_only | dashboard.read | по желанию |
 
-`users.sensitive.read`, `staff.manage`, `roles.manage`, `support.manage` — только super_admin. Роль привилегированна
-(MFA обязательна, назначение — four-eyes), если она из `PRIVILEGED_ROLES` **или** содержит хотя бы одно из прав,
-чьи команды требуют step-up: `users.sensitive.read, staff.manage, roles.manage, config.publish, whatsnew.publish,
-notif.templates.manage, notif.campaigns.send` (без MFA повторный TOTP невозможен). При применении заявки на матрицу
-`roles.privileged` пересчитывается; если роль стала привилегированной — сессии её сотрудников отзываются (при входе —
-подключение MFA). Сверка с контрактом — `tests/test_aid_contract.py` (admin.ts и PLAN.md разбираются регулярками).
+`users.sensitive.read`, `staff.manage`, `roles.manage`, `support.manage`, `lang.manage` — только super_admin. Роль
+привилегированна (MFA обязательна, назначение — four-eyes), если она из `PRIVILEGED_ROLES` **или** содержит хотя бы одно
+из прав, чьи команды требуют step-up: `users.sensitive.read, staff.manage, roles.manage, config.publish,
+whatsnew.publish, notif.templates.manage, notif.campaigns.send` и (спринт 3) `content.publish, media.rights,
+lang.manage` (без MFA повторный TOTP невозможен). Поэтому methodist и content_manager — привилегированные, хотя
+`PRIVILEGED_ROLES` admin.ts их не перечисляет (`Role.privileged` в API — по составу прав). При применении заявки на
+матрицу `roles.privileged` пересчитывается; если роль стала привилегированной — сессии её сотрудников отзываются (при
+входе — подключение MFA). Миграция 0003 делает то же для methodist: его сотрудники перезаходят с подключением TOTP.
+Сверка с контрактом — `tests/test_aid_contract.py` (admin.ts и оба PLAN.md разбираются регулярками).
 
 ## API
 Все вызовы — только от `admin-bff` (внутренний JWT EdDSA; иной издатель → 403 `CALLER_NOT_ALLOWED`).
@@ -120,7 +125,10 @@ HTTP-записи (`POST /internal/v1/records`) у сервиса нет. Не �
 ## Данные
 Миграция `0001`: `staff` (email хранится нормализованным, `CHECK email = lower(email)` вместо citext), `roles`
 (названия RU/EN), `role_permissions` (сид матрицы), `approvals` (частичный UNIQUE `target` для PENDING), `outbox`/`inbox`;
-`0002` — вид заявки `staff.reactivate_privileged` в `ck_approval_kind` (ревью P2-2).
+`0002` — вид заявки `staff.reactivate_privileged` в `ck_approval_kind` (ревью P2-2); `0003` (спринт 3) — права
+`content.read|edit|review|publish`, `media.rights`, `lang.manage`, роль `content_manager`, пересчёт `roles.privileged` и
+отзыв сессий сотрудников ролей, ставших привилегированными (откат: content_manager → read_only, PENDING-заявки с новыми
+правами/ролью → REJECTED).
 Все изменения учёток/ролей/заявок сериализуются `pg_advisory_xact_lock`. Redis: счётчики попыток
 (`{ns}:login:*` по HMAC email, `{ns}:mfa:*` по staff_id), challenge (`{ns}:ch:<sha256>` — сам challenge не хранится),
 idempotency создания сотрудника (без временного пароля).

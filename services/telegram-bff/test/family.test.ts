@@ -144,7 +144,8 @@ describe("согласие родителя для 14–17 (AT-03)", () => {
     const huge = await h.app.inject({ url: `/v1/guardian-consents/${"a".repeat(200)}` });
     expect(huge.statusCode).toBe(404);
     expect(huge.json()).toEqual({ code: "NOT_FOUND", message: "Не найдено", trace_id: expect.any(String), details: {} });
-    expect(huge.body).not.toContain("aaaa");
+    // без эха токена (trace_id — случайный hex и сам может содержать «aaaa»: его не сравниваем)
+    expect(huge.body.replace(huge.json().trace_id, "")).not.toContain("aaaa");
   });
 
   it("взрослому ссылка не нужна → 409 GUARDIAN_CONSENT_NOT_REQUIRED; решение из детского профиля → 403 ADULT_REQUIRED", async () => {

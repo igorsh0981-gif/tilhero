@@ -15,8 +15,11 @@ import { EXTRA_REDACT_PATHS, scrub, type LogSink } from "./logging.js";
 import { createLimiter } from "./rateLimit.js";
 import { auditRoutes } from "./routes/audit.js";
 import { authRoutes } from "./routes/auth.js";
+import { contentRoutes } from "./routes/content.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
+import { diagnosticsRoutes } from "./routes/diagnostics.js";
 import { experienceRoutes } from "./routes/experience.js";
+import { languageRoutes } from "./routes/languages.js";
 import { learnerRoutes } from "./routes/learners.js";
 import { notificationRoutes } from "./routes/notifications.js";
 import { releaseNoteRoutes } from "./routes/releaseNotes.js";
@@ -246,6 +249,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   experienceRoutes(app, ctx);
   releaseNoteRoutes(app, ctx);
   notificationRoutes(app, ctx);
+  contentRoutes(app, ctx);
+  languageRoutes(app, ctx);
+  diagnosticsRoutes(app, ctx);
 
   app.addHook("onClose", async () => {
     redis.off("error", onRedisError);

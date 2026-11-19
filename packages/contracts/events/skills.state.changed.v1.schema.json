@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skills.state.changed.v1.schema.json",
+  "title": "skills.state.changed.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "pair_id",
+    "changes",
+    "occurred_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "pair_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "skill_id",
+          "from",
+          "to",
+          "source"
+        ],
+        "properties": {
+          "skill_id": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "from": {
+            "type": "string",
+            "enum": [
+              "not_started",
+              "learning",
+              "demonstrated",
+              "retained"
+            ]
+          },
+          "to": {
+            "type": "string",
+            "enum": [
+              "not_started",
+              "learning",
+              "demonstrated",
+              "retained"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "diagnostic",
+              "lesson",
+              "retention"
+            ]
+          },
+          "evidence_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "maxItems": 500
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

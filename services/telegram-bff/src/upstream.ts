@@ -16,10 +16,17 @@
  *    401 для Mini App — «сессия истекла» (refresh и повтор), а сессию BFF домен оценить не может (ревью T-4).
  */
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
+import { SignJWT } from "jose";
 import {
   AppError,
+  INTERNAL_ALG,
+  INTERNAL_HEADER,
+  KeyRing,
   ServiceClient,
   UpstreamError,
+  issueInternalToken,
+  outgoingHeaders,
   type InternalKey,
   type RequestOptions,
   type ServiceClientOptions,
@@ -35,6 +42,8 @@ export const DOMAIN = {
   notifications: "notifications",
   experience: "experience-config",
   social: "social",
+  catalog: "catalog",
+  diagnostics: "diagnostics",
 } as const;
 
 /** Отказ внутренней авторизации домена (любой статус). */
@@ -42,8 +51,15 @@ const INTERNAL_AUTH_RE = /^(INTERNAL_|USER_CONTEXT_|CALLER_|ACTOR_)/;
 /** 401 доменов, которые — ответ пользователю (неверный код), а не состояние сессии. */
 export const DOMAIN_BUSINESS_401: ReadonlySet<string> = new Set(["PIN_INVALID", "BIOMETRIC_INVALID", "RESET_CODE_INVALID"]);
 
+/** 503 доменов, которые клиент различает по коду (спринт 3): learning-plan — нет снимка курса и нет кеша. */
+export const DOMAIN_BUSINESS_503: ReadonlySet<string> = new Set(["CATALOG_UNAVAILABLE"]);
+
+export const catalogUnavailable = () =>
+  new AppError(503, "CATALOG_UNAVAILABLE", "Курс временно недоступен, повторите позже", { service: "catalog" });
+
 /** Ошибка домена, которую клиент не должен видеть как есть: сбой домена или конфигурации → 503. */
 export function isDomainFault(status: number, code: string): boolean {
+  if (status === 503 && DOMAIN_BUSINESS_503.has(code)) return false;
   if (status >= 500) return true;
   if (INTERNAL_AUTH_RE.test(code)) return true;
   return status === 401 && !DOMAIN_BUSINESS_401.has(code);
@@ -113,6 +129,7 @@ export class DomainClient extends ServiceClient {
         this.onFailure?.({ service: this.target, status: e.status, code: e.code });
         return upstreamUnavailable(this.target);
       }
+      if (e.status === 503 && e.code === "CATALOG_UNAVAILABLE") return catalogUnavailable();
       return e;
     }
     if (err instanceof AppError) return err;
@@ -129,12 +146,16 @@ export interface Domains {
   notifications: DomainClient;
   experience: DomainClient;
   social: DomainClient;
+  catalog: DomainClient;
+  diagnostics: DomainClient;
+  /** catalog без разбора JSON: снимок курса по ETag (304), байты аудио медиатеки. */
+  catalogRaw: RawClient;
 }
 
 export interface DomainsOptions {
   /** KeyRing telegram-bff (EdDSA) или dev/test-секрет. */
   key: InternalKey;
-  urls: Record<keyof Domains, string>;
+  urls: Record<keyof typeof DOMAIN, string>;
   timeoutMs: number;
   retries: number;
   fetchImpl?: typeof fetch;
@@ -162,7 +183,143 @@ export function createDomains(o: DomainsOptions): Domains {
     notifications: make("notifications"),
     experience: make("experience"),
     social: make("social"),
+    catalog: make("catalog"),
+    diagnostics: make("diagnostics"),
+    catalogRaw: new RawClient({
+      target: DOMAIN.catalog,
+      baseUrl: o.urls.catalog,
+      key: o.key,
+      timeoutMs: o.timeoutMs,
+      retries: o.retries,
+      fetchImpl: o.fetchImpl ?? ((...a) => fetch(...a)),
+      ...(o.onFailure ? { onFailure: o.onFailure } : {}),
+    }),
   };
+}
+
+export interface RawRequest {
+  subject?: string | undefined;
+  query?: Record<string, string | number | undefined | null>;
+  headers?: Record<string, string>;
+  /** Дополнительные claims внутреннего JWT (catalog, заявки: lrn — активный ученик, age_band — возраст аккаунта). */
+  claims?: Record<string, string>;
+  body?: unknown;
+  idempotencyKey?: string;
+}
+
+/** Внутренний JWT v2 в формате ts-common issueInternalToken (EdDSA, kid = iss, aud, iat, exp 60 с, jti) + свои claims.
+ *  ts-common не умеет дополнительные claims (запрос к общему коду, README). Служебные claims перезаписать нельзя. */
+export async function issueWithClaims(
+  key: InternalKey,
+  o: { audience: string; subject?: string | undefined; claims?: Record<string, string> | undefined },
+): Promise<string> {
+  const ring = typeof key === "string" ? KeyRing.derived(key, SERVICE_NAME) : key;
+  const now = Math.floor(Date.now() / 1000);
+  const extra = Object.fromEntries(Object.entries(o.claims ?? {}).filter(([k]) => !["iss", "aud", "sub", "iat", "exp", "jti", "nbf", "actor"].includes(k)));
+  let jwt = new SignJWT(extra)
+    .setProtectedHeader({ alg: INTERNAL_ALG, typ: "JWT", kid: SERVICE_NAME })
+    .setIssuer(SERVICE_NAME)
+    .setAudience(o.audience)
+    .setIssuedAt(now)
+    .setExpirationTime(now + 60)
+    .setJti(randomUUID().replaceAll("-", ""));
+  if (o.subject) jwt = jwt.setSubject(o.subject);
+  return jwt.sign(ring.privateKey);
+}
+
+/**
+ * Вызов домена с доступом к самому ответу (заголовки ETag / Content-Type, 304, байты) — ServiceClient всегда разбирает
+ * JSON. Тот же внутренний JWT (iss = telegram-bff, aud = домен), trace/correlation id и таймаут; ошибки — как у
+ * DomainClient: 4xx домена → клиенту с кодом, сбой → 503 UPSTREAM_UNAVAILABLE. Без повторов: вызывающий сам решает,
+ * отдать ли кеш.
+ */
+export class RawClient {
+  constructor(
+    private readonly o: {
+      target: string;
+      baseUrl: string;
+      key: InternalKey;
+      timeoutMs: number;
+      /** повторы GET при сетевом сбое и 5xx (как ServiceClient); команды не повторяются */
+      retries?: number;
+      fetchImpl: typeof fetch;
+      onFailure?: UpstreamLogger;
+    },
+  ) {}
+
+  get target(): string {
+    return this.o.target;
+  }
+
+  get(path: string, ro: RawRequest = {}): Promise<Response> {
+    return this.request("GET", path, ro);
+  }
+
+  /** JSON-команда с дополнительными claims: ответ разобран, ошибки — как у DomainClient. */
+  async json<T>(method: "GET" | "POST", path: string, ro: RawRequest = {}): Promise<T> {
+    const resp = await this.request(method, path, ro);
+    if (resp.status === 204) return undefined as T;
+    try {
+      return (await resp.json()) as T;
+    } catch {
+      this.o.onFailure?.({ service: this.o.target, status: resp.status, code: "UPSTREAM_BAD_RESPONSE" });
+      throw upstreamUnavailable(this.o.target);
+    }
+  }
+
+  async request(method: "GET" | "POST", path: string, ro: RawRequest = {}): Promise<Response> {
+    const url = new URL(this.o.baseUrl.replace(/\/$/, "") + path);
+    for (const [k, v] of Object.entries(ro.query ?? {})) if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+    const headers: Record<string, string> = {
+      ...(ro.headers ?? {}),
+      ...outgoingHeaders(),
+      [INTERNAL_HEADER]: ro.claims
+        ? await issueWithClaims(this.o.key, { audience: this.o.target, subject: ro.subject, claims: ro.claims })
+        : await issueInternalToken(this.o.key, {
+            issuer: SERVICE_NAME,
+            audience: this.o.target,
+            ...(ro.subject ? { subject: ro.subject } : {}),
+          }),
+    };
+    if (ro.body !== undefined) headers["content-type"] = "application/json";
+    if (ro.idempotencyKey) headers["idempotency-key"] = ro.idempotencyKey;
+    const attempts = method === "GET" ? (this.o.retries ?? 0) + 1 : 1;
+    let resp: Response | null = null;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        resp = await this.o.fetchImpl(url, {
+          method,
+          headers,
+          body: ro.body !== undefined ? JSON.stringify(ro.body) : null,
+          signal: AbortSignal.timeout(this.o.timeoutMs),
+        });
+      } catch {
+        if (attempt < attempts) continue;
+        this.o.onFailure?.({ service: this.o.target, status: 0, code: "UPSTREAM_UNREACHABLE" });
+        throw upstreamUnavailable(this.o.target);
+      }
+      if (resp.status >= 500 && attempt < attempts) {
+        await resp.body?.cancel().catch(() => undefined);
+        continue;
+      }
+      break;
+    }
+    if (!resp) throw upstreamUnavailable(this.o.target);
+    if (resp.status < 400) return resp;
+    let body: { code?: unknown; message?: unknown; details?: unknown } = {};
+    try {
+      body = (await resp.json()) as typeof body;
+    } catch {
+      /* не JSON — ниже как сбой */
+    }
+    const code = typeof body.code === "string" ? body.code : "UPSTREAM_ERROR";
+    if (isDomainFault(resp.status, code) || typeof body.code !== "string") {
+      this.o.onFailure?.({ service: this.o.target, status: resp.status, code });
+      throw upstreamUnavailable(this.o.target);
+    }
+    const details = body.details && typeof body.details === "object" ? (body.details as Record<string, unknown>) : {};
+    throw new AppError(resp.status, code, typeof body.message === "string" ? body.message : code, details);
+  }
 }
 
 /** 404 домена → null (например, семьи нет); прочие ошибки — как есть. */

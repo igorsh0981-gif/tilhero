@@ -1,12 +1,15 @@
 /**
- * «Обзор» (dashboard.read): the four independent blocks of GET /admin/v1/dashboard — learners (user-admin), support,
- * «Что нового» (experience-config) and campaigns (notifications). A block whose source is down answers
- * available=false and shows its own notice; the others keep working (admin.ts Dashboard, always 200).
+ * «Обзор» (dashboard.read): the independent blocks of GET /admin/v1/dashboard — learners (user-admin), support,
+ * «Что нового» (experience-config), campaigns (notifications) and, since sprint 3, content (catalog: versions under
+ * review, media rights expiring in ≤ 14 days with links, suspended media, new learners' requests) and diagnostics
+ * (sessions, levels, not_assessed). A block whose source is down answers available=false and shows its own notice;
+ * the others keep working (admin.ts Dashboard, always 200; a block missing in an older admin-bff counts as down).
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { Dashboard, DashboardBlock, DashboardCampaigns, DashboardLearners, DashboardWhatsNew, SupportStats } from "@tilhero/contracts/admin";
+import type { ContentSummary, Dashboard, DashboardBlock, DashboardCampaigns, DashboardLearners, DashboardWhatsNew, DiagnosticStats, SupportStats } from "@tilhero/contracts/admin";
+import type { ContentKind } from "@tilhero/contracts/content";
 import { DashboardApi, type Period } from "../../api/endpoints";
-import { useI18n } from "../../i18n";
+import { useI18n, type MessageKey } from "../../i18n";
 import { useNav } from "../../shell/navctx";
 import { useSession } from "../../state/session";
 import { Icon, type IconName } from "../../ui/Icon";
@@ -14,7 +17,11 @@ import { LoadError } from "../../ui/LoadError";
 import { Btn, Callout, cx, Seg, Spinner } from "../../ui/kit";
 
 const PERIODS: readonly Period[] = ["today", "7d", "30d"];
-type BlockKey = "learners" | "support" | "whats_new" | "campaigns";
+type BlockKey = "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics";
+const OFF = (service: string) => ({ available: false, data: null, service });
+const DX_AREAS = ["vocabulary", "grammar", "reading", "listening"] as const;
+const LEVELS = ["A0", "A1", "A2", "B1", "B2", "none"] as const;
+const SUMMARY_KINDS: readonly ContentKind[] = ["lesson", "scenario", "rubric", "media_asset", "media_exercise", "skill"];
 
 export function Overview() {
   const i = useI18n();
@@ -76,6 +83,12 @@ export function Overview() {
             <Block<DashboardCampaigns> k="campaigns" icon="megaphone" block={data.campaigns} empty={(x) => x.scheduled + x.sending + x.sent_in_period + x.delivered_in_period === 0}>
               {(x) => <CampaignsBody x={x} period={periodLabel} />}
             </Block>
+            <Block<ContentSummary> k="content" icon="book" block={data.content ?? OFF("catalog")} empty={(x) => Object.values(x.by_kind ?? {}).every((k) => !k.published && !k.drafts && !k.in_review) && !x.new_media_requests}>
+              {(x) => <ContentBody x={x} />}
+            </Block>
+            <Block<DiagnosticStats> k="diagnostics" icon="gauge" block={data.diagnostics ?? OFF("diagnostics")} empty={(x) => x.started === 0 && x.finished === 0}>
+              {(x) => <DiagnosticsBody x={x} period={periodLabel} />}
+            </Block>
           </div>
         </>
       )}
@@ -129,6 +142,14 @@ function Attention({ d }: { d: Dashboard }) {
   if (s) rows.push({ id: "new", label: t("att.waiting"), n: s.open - s.in_progress - s.waiting_customer, go: () => navigate("support"), show: can("support.read") });
   if (w) rows.push({ id: "drafts", label: t("att.drafts"), n: w.drafts, go: () => navigate("news", "whatsnew"), show: can("whatsnew.manage") });
   if (c) rows.push({ id: "sending", label: t("att.sending"), n: c.sending + c.scheduled, go: () => navigate("news", "campaigns"), show: can("notif.campaigns.manage") });
+  const ct = d.content?.available ? d.content.data : null;
+  if (ct) {
+    rows.push({ id: "review", label: t("att.review"), n: ct.in_review, go: () => navigate("content", "review"), show: can("content.review") });
+    rows.push({ id: "rights", label: t("att.rights"), n: ct.rights_expiring.length, go: () => navigate("content", "media"), show: can("content.read") });
+    rows.push({ id: "suspended", label: t("att.suspended"), n: ct.suspended_media, go: () => navigate("content", "media"), show: can("content.read") });
+    // the requests register is media.rights only: others see the count without a link
+    rows.push({ id: "requests", label: t("att.requests"), n: ct.new_media_requests, go: () => navigate("content", "requests"), show: can("media.rights") });
+  }
   const live = rows.filter((r) => r.n > 0);
   if (!live.length) return null;
   return (
@@ -300,6 +321,88 @@ function CampaignsBody({ x, period }: { x: DashboardCampaigns; period: string })
           <Btn size="sm" icon="megaphone" label={t("dc.open")} onClick={() => navigate("news", "campaigns")} />
         </div>
       )}
+    </>
+  );
+}
+
+function ContentBody({ x }: { x: ContentSummary }) {
+  const { t, fmt } = useI18n();
+  const { can } = useSession();
+  const { navigate } = useNav();
+  const read = can("content.read");
+  return (
+    <>
+      <Row k={t("dct.inReview")} v={can("content.review") && x.in_review ? <button type="button" className="tr" onClick={() => navigate("content", "review")} data-testid="dct-review">{fmt.num(x.in_review)}</button> : fmt.num(x.in_review)} testId="dct-in-review" />
+      <Row k={t("dct.suspended")} v={<span className={x.suspended_media ? "bad-ink b" : undefined}>{fmt.num(x.suspended_media)}</span>} testId="dct-suspended" />
+      <Row k={t("dct.requests")} v={can("media.rights") && x.new_media_requests ? <button type="button" className="tr" onClick={() => navigate("content", "requests")} data-testid="dct-requests">{fmt.num(x.new_media_requests)}</button> : fmt.num(x.new_media_requests)} testId="dct-new-requests" />
+      <div className="blk-sub">{t("dct.expiring")}</div>
+      {x.rights_expiring.length ? (
+        <ul className="plain-list exp-list" data-testid="dct-expiring">
+          {x.rights_expiring.slice(0, 6).map((r) => (
+            <li key={r.asset_id}>
+              {read ? (
+                <button type="button" className="tr" onClick={() => navigate("content", `media/${r.asset_id}`)} data-testid={`dct-exp-${r.asset_id}`}>
+                  {r.title.ru || r.asset_id}
+                </button>
+              ) : (
+                <span>{r.title.ru || r.asset_id}</span>
+              )}
+              <span className="pill warn">{t("dct.until", { d: fmt.date(`${r.valid_to}T00:00:00Z`) })}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="sub small">{t("dct.noExpiring")}</p>
+      )}
+      <div className="blk-sub">{t("dct.byKind")}</div>
+      <table className="tbl dense mini-tbl">
+        <thead>
+          <tr>
+            <th scope="col">{t("dct.kind")}</th>
+            <th scope="col" className="r">{t("dct.published")}</th>
+            <th scope="col" className="r">{t("dct.drafts")}</th>
+            <th scope="col" className="r">{t("dct.review")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {SUMMARY_KINDS.map((k) => {
+            const v = x.by_kind?.[k] ?? { published: 0, drafts: 0, in_review: 0 };
+            return (
+              <tr key={k}>
+                <td>{t(`kinds.${k}` as MessageKey)}</td>
+                <td className="r num">{fmt.num(v.published)}</td>
+                <td className="r num">{fmt.num(v.drafts)}</td>
+                <td className="r num">{fmt.num(v.in_review)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {read && (
+        <div className="acts">
+          <Btn size="sm" icon="book" label={t("dct.open")} onClick={() => navigate("content")} />
+        </div>
+      )}
+    </>
+  );
+}
+
+function DiagnosticsBody({ x, period }: { x: DiagnosticStats; period: string }) {
+  const { t, fmt } = useI18n();
+  const total = LEVELS.reduce((a, b) => a + (x.by_level[b] ?? 0), 0);
+  return (
+    <>
+      <Row k={t("ddx.started", { p: period })} v={fmt.num(x.started)} />
+      <Row k={t("ddx.finished", { p: period })} v={fmt.num(x.finished)} testId="ddx-finished" />
+      <Row k={t("ddx.median")} v={fmt.minutes(x.median_minutes)} />
+      <Row k={t("ddx.followups")} v={fmt.num(x.followups)} />
+      <div className="blk-sub">{t("ddx.levels")}</div>
+      {total ? <Split parts={LEVELS.map((b) => ({ k: b, n: x.by_level[b] ?? 0, label: b === "none" ? t("ddx.none") : b }))} label={t("ddx.levels")} /> : <p className="sub small">{t("dash.noData")}</p>}
+      <div className="blk-sub">{t("ddx.na")}</div>
+      {DX_AREAS.map((a) => (
+        <Row key={a} k={t(`area.${a}` as MessageKey)} v={fmt.pct(x.not_assessed_pct[a] ?? 0)} testId={`ddx-na-${a}`} />
+      ))}
+      <p className="xs muted">{t("ddx.note")}</p>
     </>
   );
 }

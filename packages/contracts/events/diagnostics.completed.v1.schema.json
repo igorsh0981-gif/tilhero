@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "diagnostics.completed.v1.schema.json",
+  "title": "diagnostics.completed.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "pair_id",
+    "result_id",
+    "revision",
+    "test_id",
+    "test_version",
+    "areas",
+    "completed_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "pair_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "result_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "test_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "test_version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "provisional_level": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "A0",
+            "A1",
+            "A2",
+            "B1",
+            "B2"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "areas": {
+      "type": "object",
+      "maxProperties": 8,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "assessed",
+              "not_assessed"
+            ]
+          },
+          "band": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "A0",
+              "A1",
+              "A2",
+              "B1",
+              "B2",
+              null
+            ]
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    "recommended_start_lesson_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

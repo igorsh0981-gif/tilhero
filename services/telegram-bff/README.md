@@ -91,6 +91,28 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 | GET | `/v1/support/tickets/{id}` | support | UUID или `TCK-NNNN`; 404 `SUPPORT_TICKET_NOT_FOUND` |
 | POST | `/v1/support/tickets/{id}/messages`, `/close` | support | 409 `SUPPORT_TICKET_CLOSED` |
 | GET | `/v1/support/categories` | support | категории TilHero RU/UZ |
+| GET | `/v1/languages` | catalog `/pairs` | `MyLanguages`: `ru-en` активна, прочие пары (кроме archived) — `available=false` («скоро»); кеш `PAIRS_CACHE_SECONDS`, при сбое catalog — последний список |
+| GET | `/v1/diagnostics/state?pair_id=` | diagnostics (ученик), `?audience=` | `DiagnosticState`; 409 `PAIR_NOT_AVAILABLE`; 410 `USER_DELETED` |
+| POST | `/v1/diagnostics/sessions` | diagnostics, `?audience=` | `Idempotency-Key` обязателен; 201; 409 `DIAGNOSTIC_TOO_SOON {next_allowed_at}` / `PAIR_NOT_AVAILABLE` |
+| GET | `/v1/diagnostics/sessions/{id}/next` | diagnostics | `DiagnosticItem` (явная сборка полей — ключ ответа не уходит) или `{done: true}`; 404 `DIAGNOSTIC_SESSION_NOT_FOUND`; 409 `DIAGNOSTIC_SESSION_EXPIRED` / `_CLOSED` |
+| POST | `/v1/diagnostics/sessions/{id}/answers` | diagnostics | `AnswerResult` без правильности; «Не знаю» с ответом → 422 `ANSWER_INVALID`; 409 `ITEM_NOT_CURRENT` |
+| POST | `/v1/diagnostics/sessions/{id}/listening-unavailable` | diagnostics | 204 |
+| POST | `/v1/diagnostics/sessions/{id}/finish` | diagnostics | `DiagnosticResult`; 422 `DIAGNOSTIC_EMPTY` |
+| POST | `/v1/diagnostics/results/{id}/followup` | diagnostics | `{area}` (только vocabulary/grammar/reading/listening) → 201 `DiagnosticSession`; 409 `FOLLOWUP_NOT_AVAILABLE {area, reason}` |
+| GET | `/v1/diagnostics/results?pair_id=` | diagnostics (`?limit=50`) | `{items}` — история |
+| GET | `/v1/skills/map?pair_id=` | diagnostics + снимок курса catalog | названия, область, уровень, предпосылки — из снимка (ETag, `If-None-Match` не чаще `COURSE_SNAPSHOT_REVALIDATE_SECONDS`); навык вне курса не показывается, `counts` пересчитаны; снимка нет — 503 `CATALOG_UNAVAILABLE` |
+| GET | `/v1/plan/trajectory?pair_id=` | learning-plan (ученик), `?audience=` | `Trajectory`; 409 `PAIR_NOT_AVAILABLE`; 410; 503 `CATALOG_UNAVAILABLE` (код домена передаётся как есть) |
+| GET | `/v1/scenarios?goal=&level=&topic=&cursor=&limit=` | catalog (ученик), `?audience=` | `Page<ScenarioCard>`; элемент не по контракту отбрасывается |
+| GET | `/v1/scenarios/{id}` | catalog, `?audience=` | `ScenarioDetail` без графа; 404 `SCENARIO_NOT_FOUND` |
+| GET | `/v1/media?type=&level=&topic=&cursor=&limit=` | catalog, `?audience=` | `Page<MediaCard>` |
+| GET | `/v1/media/{id}` | catalog, `?audience=` | `MediaDetail`; без `show_transcript` — `transcript: null` и в BFF; 404 `MEDIA_NOT_AVAILABLE` |
+| GET | `/v1/media/{id}/audio` | catalog (байты), `?audience=` | прокси: `Content-Type` из ответа (только audio/mpeg\|ogg\|mp4), ≤ 3 МБ (больше — 503 без чтения в память), `ETag`, `Cache-Control: private, max-age=3600`, `If-None-Match` клиента → 304; кеш байтов `AUDIO_CACHE_MB`, но каждый запрос перепроверяется в catalog (`If-None-Match` → 304) — права и аудитория проверяются всегда |
+| GET / POST | `/v1/media/requests` | catalog (**аккаунт**, claims `lrn`, `age_band`) | детский профиль → 403 `KIDS_NOT_ALLOWED` до вызова catalog; POST: `Idempotency-Key` обязателен, 201, `ui_locale` — язык аккаунта; > 5 в сутки → 429 `MEDIA_REQUEST_LIMIT {retry_after}` + `Retry-After`; ссылка только `https://`, BFF её не открывает |
+
+Сегмент ученика `audience` (kids / teens / adults) — по возрасту активного ученика, как для «Что нового»: детский профиль
+(`lrn ≠ sub`) — всегда kids без запроса к identity; возраст аккаунта не выбран — kids (самый строгий набор). Кеш
+`AUDIENCE_CACHE_SECONDS`, сбрасывается при `PUT /v1/profile/age`. Ответы catalog, diagnostics и learning-plan сверяются
+со схемой контракта до ответа Mini App (`src/check.ts`): не по контракту → 503 `UPSTREAM_UNAVAILABLE {service}`.
 
 ## Переменные окружения
 
@@ -109,6 +131,9 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 | `MINIAPP_ORIGIN` | `http://localhost:5173` | CORS, список через запятую |
 | `TELEGRAM_APP_LINK` | `https://t.me/tilhero_dev_bot/app` | прямая ссылка Mini App `https://t.me/<bot>/<app>` (без query) — для ссылки согласия родителя `?startapp=gc_<token>`; в stage/prod обязательна |
 | `IDENTITY_URL`, `LEARNING_PLAN_URL`, `SUPPORT_URL`, `NOTIFICATIONS_URL`, `EXPERIENCE_URL`, `SOCIAL_URL` | `http://127.0.0.1:8101 / 8102 / 8103 / 8104 / 8106 / 8109` | адреса доменов (Railway: `http://<svc>.railway.internal:<port>`) |
+| `CATALOG_URL`, `DIAGNOSTICS_URL` | `http://127.0.0.1:8110 / 8111` | спринт 3; в stage/prod обязательны |
+| `COURSE_SNAPSHOT_REVALIDATE_SECONDS` / `PAIRS_CACHE_SECONDS` | `60` / `60` | перепроверка снимка курса по ETag / кеш языковых пар |
+| `AUDIO_CACHE_MB` / `AUDIENCE_CACHE_SECONDS` | `32` / `30` | кеш байтов аудио медиатеки (LRU, 0 — выключен) / кеш сегмента ученика |
 | `UPSTREAM_TIMEOUT_MS` / `UPSTREAM_RETRIES` | `3000` / `1` | таймаут и повторы (GET и команды с `Idempotency-Key`) |
 | `EXPERIENCE_CACHE_SECONDS` | `60` | кэш конфига интерфейса |
 | `RATE_LIMIT_USER_PER_MIN` / `RATE_LIMIT_SESSION_IP_PER_MIN` / `RATE_LIMIT_PIN_PER_MIN` / `RATE_LIMIT_PUBLIC_IP_PER_MIN` | `120` / `10` / `5` / `120` | политики `tg.user`, `tg.session_ip`, `tg.pin` (код родителя, в т. ч. при выходе из детского профиля; сброс — отдельный счётчик), `tg.public_ip`; `tg.support_create` — из каталога |
@@ -124,7 +149,9 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 - `user_id` — только из сессии; учебный субъект — только `lrn`, выставленный BFF после проверки опекунства в identity и сверяемый с сессией в Redis на каждом запросе. Тела и query — `additionalProperties: false` (лишние поля, в т. ч. `user_id`, → 422).
 - Код родителя проверяется на формат в BFF (`^(\d{4}|\d{6})$` → `422 PIN_FORMAT`), мусор не тратит попытку.
 - Логи — JSON без PII: redact-пути + рекурсивная вычистка ключей (`init_data`, `pin`, `*_token`, `token`, `text`, `display_name`, `teen_display_name`, `inviter_display_name`, `link`, `start_param`, `startapp`, `telegram_user_id`, `username`, …); пользователь — только `user_pid` (псевдоним аккаунта); access-лог пишет шаблон маршрута (`/v1/guardian-consents/:token`), не путь.
-- Ответы с токенами и данными — `Cache-Control: no-store`; `X-Content-Type-Options: nosniff`; CORS — только `MINIAPP_ORIGIN` (разрешены `idempotency-key`, `if-match`, `x-timezone`), без credentials.
+- Ответы с токенами и данными — `Cache-Control: no-store`; `X-Content-Type-Options: nosniff`; CORS — только `MINIAPP_ORIGIN` (разрешены `idempotency-key`, `if-match`, `if-none-match`, `x-timezone`), без credentials.
+- Спринт 3: в логах не бывает текста заявок (`comment`, `decision_note`, `link`) и ответов диагностики (`answer`);
+  проверка ответа домена пишет только сервис, имя проверки, путь и правило схемы — без значений.
 - Сбой Redis → `503` (fail-closed).
 
 ## Отклонения от контракта и обходы
@@ -135,6 +162,19 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 - **`locale` в детском профиле** применяется к аккаунту (у ребёнка своего `locale` в API identity нет; язык интерфейса ученика — `plan.ui_lang`).
 - Детский профиль: `403 ADULT_REQUIRED` для поддержки, кода родителя, удаления, создания детей, решения по согласию подростка, согласий и возраста аккаунта — решение BFF по CONVENTIONS §8 и §10–§11 (возраст — защита в глубину по рекомендации ревью T-5).
 - `TOKEN_EXPIRED {reason: learner_switched}` — access-токен выдан до переключения ученика.
+- **Claims внутреннего JWT для catalog** (`lrn`, `age_band` — catalog README): на всех вызовах catalog от ученика
+  (`/scenarios`, `/scenarios/{id}`, `/media`, `/media/{id}`, `/media/{id}/audio`, заявки) `sub` — аккаунт, `lrn` — активный
+  ученик, `age_band` — возраст аккаунта (в детском профиле не передаётся). `issueInternalToken` ts-common не умеет
+  дополнительные claims; BFF подписывает такой токен сам тем же ключом и в том же формате (`issueWithClaims`,
+  `src/upstream.ts`), GET повторяется при сетевой ошибке/5xx. Запрос к ts-common: `RequestOptions.claims`.
+- **`AreaResult.evidence`** (по уровням): BFF отдаёт только `{band, answered, correct}`, для `not_assessed` — `[]`;
+  `correct > answered` у домена → 503 `UPSTREAM_UNAVAILABLE`.
+- **`409 DIAGNOSTIC_TOO_SOON`** бывает и после трёх незаконченных результатов, но причина в `details` не приходит —
+  Mini App выводит её из последнего результата (нет оценённой области → «Слишком много незаконченных проверок…»).
+  Запрос к diagnostics: `details.reason`.
+- `POST /v1/diagnostics/sessions` и `…/followup` всегда отвечают 201 (повтор с тем же ключом домен отдаёт 200 — клиенту
+  статус не важен, тело то же).
+- `GET /v1/diagnostics/results/{id}?revision=` домена в контракте BFF нет — Mini App показывает историю из списка.
 
 ## Локальная разработка
 

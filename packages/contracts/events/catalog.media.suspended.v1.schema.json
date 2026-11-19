@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "catalog.media.suspended.v1.schema.json",
+  "title": "catalog.media.suspended.v1",
+  "type": "object",
+  "required": [
+    "asset_id",
+    "version",
+    "reason",
+    "suspended_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "asset_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "rights_expired",
+        "rights_revoked"
+      ]
+    },
+    "suspended_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

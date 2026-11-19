@@ -5,6 +5,7 @@ import type { FastifyBaseLogger } from "fastify";
 import type { Redis } from "ioredis";
 import { AppError } from "@tilhero/ts-common";
 import type { Config } from "./config.js";
+import type { AudienceResolver, AudioCache, PairsCache, SnapshotCache } from "./content.js";
 import type { ExperienceCache } from "./experience.js";
 import type { RateLimiter } from "./rateLimit.js";
 import type { SessionStore } from "./sessions.js";
@@ -19,6 +20,11 @@ export interface BffContext {
   tokens: AccessTokens;
   domains: Domains;
   experience: ExperienceCache;
+  /** Спринт 3: сегмент ученика для контента и кеши catalog (content.ts). */
+  audience: AudienceResolver;
+  pairs: PairsCache;
+  snapshots: SnapshotCache;
+  audio: AudioCache;
   log: FastifyBaseLogger;
   /** Вызов хранилища сессий/лимитов: сбой Redis → 503 (fail-closed), без деталей наружу. */
   store<T>(fn: () => Promise<T>): Promise<T>;

@@ -1,5 +1,21 @@
 import type {
   ActivityRequest,
+  AnswerRequest,
+  AnswerResult,
+  DiagnosticArea,
+  DiagnosticItem,
+  DiagnosticResult,
+  DiagnosticSession,
+  DiagnosticState,
+  MediaCard,
+  MediaDetail,
+  MediaRequest,
+  MediaRequestCreate,
+  MyLanguages,
+  ScenarioCard,
+  ScenarioDetail,
+  SkillMap,
+  Trajectory,
   AgeRequest,
   ConsentRequest,
   ConsentState,
@@ -37,6 +53,17 @@ import type {
   WhatsNewNote,
 } from "@tilhero/contracts/bff";
 import type { ApiClient } from "./client";
+
+export interface ScenarioFilters {
+  goal?: string | null;
+  level?: string | null;
+  topic?: string | null;
+}
+export interface MediaFilters {
+  type?: string | null;
+  level?: string | null;
+  topic?: string | null;
+}
 
 export interface SupportCategory {
   code: TicketCategory;
@@ -132,6 +159,28 @@ export function createBff(client: ApiClient) {
     createTicket: (body: CreateTicketRequest, key: string) => client.request<Ticket>("POST", "/v1/support/tickets", { body, idempotencyKey: key }),
     replyTicket: (id: string, text: string) => client.request<Ticket>("POST", `/v1/support/tickets/${enc(id)}/messages`, { body: { text } }),
     closeTicket: (id: string) => client.request<Ticket>("POST", `/v1/support/tickets/${enc(id)}/close`),
+
+    // ---- sprint 3: languages, diagnostics, skills, trajectory, scenarios, media, requests ----
+    languages: () => get<MyLanguages>("/v1/languages"),
+    diagnosticsState: (quiet = false) => get<DiagnosticState>("/v1/diagnostics/state", undefined, quiet),
+    /** one key per «Начать проверку» tap; a retry after a lost answer reuses it (the same session) */
+    startDiagnostic: (key: string) => client.request<DiagnosticSession>("POST", "/v1/diagnostics/sessions", { body: { pair_id: "ru-en" }, idempotencyKey: key }),
+    diagnosticNext: (id: string) => get<DiagnosticItem | { done: true }>(`/v1/diagnostics/sessions/${enc(id)}/next`),
+    diagnosticAnswer: (id: string, body: AnswerRequest) => client.request<AnswerResult>("POST", `/v1/diagnostics/sessions/${enc(id)}/answers`, { body }),
+    listeningUnavailable: (id: string) => client.request<void>("POST", `/v1/diagnostics/sessions/${enc(id)}/listening-unavailable`),
+    finishDiagnostic: (id: string) => client.request<DiagnosticResult>("POST", `/v1/diagnostics/sessions/${enc(id)}/finish`),
+    followup: (resultId: string, area: DiagnosticArea) =>
+      client.request<DiagnosticSession>("POST", `/v1/diagnostics/results/${enc(resultId)}/followup`, { body: { area } }),
+    diagnosticResults: () => get<{ items: DiagnosticResult[] }>("/v1/diagnostics/results"),
+    skillMap: () => get<SkillMap>("/v1/skills/map"),
+    trajectory: (quiet = false) => get<Trajectory>("/v1/plan/trajectory", undefined, quiet),
+    scenarios: (f: ScenarioFilters, cursor: string | null) => get<Page<ScenarioCard>>("/v1/scenarios", { ...f, cursor, limit: 20 }),
+    scenario: (id: string) => get<ScenarioDetail>(`/v1/scenarios/${enc(id)}`),
+    media: (f: MediaFilters, cursor: string | null) => get<Page<MediaCard>>("/v1/media", { ...f, cursor, limit: 20 }),
+    mediaItem: (id: string) => get<MediaDetail>(`/v1/media/${enc(id)}`),
+    mediaAudio: (id: string) => client.blob(`/v1/media/${enc(id)}/audio`),
+    mediaRequests: () => get<{ items: MediaRequest[] }>("/v1/media/requests"),
+    createMediaRequest: (body: MediaRequestCreate, key: string) => client.request<MediaRequest>("POST", "/v1/media/requests", { body, idempotencyKey: key }),
 
     // ---- deletion ----
     requestDeletion: (body: DeletionRequest) => client.request<DeletionResponse>("POST", "/v1/profile/delete-request", { body }),

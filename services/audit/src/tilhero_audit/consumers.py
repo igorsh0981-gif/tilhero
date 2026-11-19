@@ -22,6 +22,7 @@ AUDIT_EVENT = "admin.audit.recorded.v1"
 # docs/sprint2/INTERNAL_API.md §1: аудит auth.*, staff.*, role.*, approval.* через admin.audit.recorded.v1).
 AUDIT_EVENT_PRODUCERS = frozenset({
     "identity-consent", "learning-plan", "social", "experience-config", "support", "notifications", "admin-identity",
+    "catalog", "diagnostics",
 })
 SECURITY_EVENT_PRODUCERS = frozenset({"identity-consent"})
 

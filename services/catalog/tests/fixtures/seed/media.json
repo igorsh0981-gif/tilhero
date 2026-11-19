@@ -1,0 +1,116 @@
+[
+  {
+    "asset_id": "m-own-coffee-order",
+    "type": "own_scene",
+    "origin": "own_recording",
+    "title": {
+      "ru": "Сценка: в кафе",
+      "uz": "Sahna: kafeda"
+    },
+    "original_title": null,
+    "language": "en",
+    "level": "A1",
+    "topics": [
+      "food"
+    ],
+    "skill_ids": [
+      "en.func.order-drink"
+    ],
+    "audience": [
+      "kids",
+      "teens",
+      "adults"
+    ],
+    "duration_s": 24,
+    "transcript": [
+      {
+        "t_start_ms": 0,
+        "t_end_ms": 3500,
+        "speaker": "Mia",
+        "text_en": "Hi! What would you like?",
+        "gloss": {
+          "ru": "Привет! Что бы вы хотели?",
+          "uz": "Salom! Nima xohlaysiz?"
+        }
+      },
+      {
+        "t_start_ms": 4000,
+        "t_end_ms": 7500,
+        "speaker": "Tim",
+        "text_en": "A hot chocolate, please.",
+        "gloss": {
+          "ru": "Горячий шоколад, пожалуйста.",
+          "uz": "Issiq shokolad, iltimos."
+        }
+      },
+      {
+        "t_start_ms": 8000,
+        "t_end_ms": 11500,
+        "speaker": "Mia",
+        "text_en": "Small or large?",
+        "gloss": {
+          "ru": "Маленький или большой?",
+          "uz": "Kichikmi yoki kattami?"
+        }
+      },
+      {
+        "t_start_ms": 12000,
+        "t_end_ms": 15000,
+        "speaker": "Tim",
+        "text_en": "Small, please. Thank you!",
+        "gloss": {
+          "ru": "Маленький, пожалуйста. Спасибо!",
+          "uz": "Kichik, iltimos. Rahmat!"
+        }
+      },
+      {
+        "t_start_ms": 15500,
+        "t_end_ms": 19000,
+        "speaker": "Mia",
+        "text_en": "Here you go. Have a nice day!",
+        "gloss": {
+          "ru": "Пожалуйста. Хорошего дня!",
+          "uz": "Marhamat. Kuningiz yaxshi oʻtsin!"
+        }
+      }
+    ],
+    "phrases": [
+      {
+        "en": "What would you like?",
+        "gloss": {
+          "ru": "Что бы вы хотели?",
+          "uz": "Nima xohlaysiz?"
+        },
+        "t_ms": 0
+      },
+      {
+        "en": "Small or large?",
+        "gloss": {
+          "ru": "Маленький или большой?",
+          "uz": "Kichikmi yoki kattami?"
+        },
+        "t_ms": 8000
+      }
+    ],
+    "audio_blob_id": null,
+    "embed": null,
+    "rights": {
+      "owner": "TilHero",
+      "license_type": "own",
+      "license_ref": null,
+      "attribution": null,
+      "territories": [
+        "UZ"
+      ],
+      "valid_from": "2026-11-01",
+      "valid_to": null,
+      "allowed_uses": [
+        "listen",
+        "show_transcript",
+        "exercises",
+        "dictionary",
+        "translation"
+      ]
+    }
+  }
+]

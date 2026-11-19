@@ -11,11 +11,14 @@ import { AppError, KeyRing, buildBase, errorBody } from "@tilhero/ts-common";
 import { registerAuth } from "./auth.js";
 import type { Config } from "./config.js";
 import { makeStoreGuard, type BffContext } from "./context.js";
+import { AudienceResolver, AudioCache, PairsCache, SnapshotCache } from "./content.js";
 import { ExperienceCache } from "./experience.js";
 import { schemaErrors, type App } from "./http.js";
 import { EXTRA_REDACT_PATHS, scrub, type LogSink } from "./logging.js";
 import { createLimiter } from "./rateLimit.js";
 import { familyRoutes } from "./routes/family.js";
+import { contentRoutes } from "./routes/content.js";
+import { diagnosticsRoutes } from "./routes/diagnostics.js";
 import { notificationsRoutes } from "./routes/notifications.js";
 import { planRoutes } from "./routes/plan.js";
 import { profileRoutes } from "./routes/profile.js";
@@ -132,7 +135,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   await app.register(cors, {
     origin: config.miniappOrigins,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allowedHeaders: ["authorization", "content-type", "idempotency-key", "if-match", "x-timezone", "x-trace-id", "x-correlation-id"],
+    allowedHeaders: ["authorization", "content-type", "idempotency-key", "if-match", "if-none-match", "x-timezone", "x-trace-id", "x-correlation-id"],
     exposedHeaders: ["x-trace-id", "x-correlation-id", "retry-after"],
     credentials: false,
     maxAge: 600,
@@ -164,6 +167,11 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
           { name: "whats-new" },
           { name: "experience" },
           { name: "support" },
+          { name: "languages" },
+          { name: "diagnostics" },
+          { name: "skills" },
+          { name: "scenarios" },
+          { name: "media" },
         ],
       },
       hideUntagged: true,
@@ -180,6 +188,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
       notifications: config.notificationsUrl,
       experience: config.experienceUrl,
       social: config.socialUrl,
+      catalog: config.catalogUrl,
+      diagnostics: config.diagnosticsUrl,
     },
     timeoutMs: config.upstreamTimeoutMs,
     retries: config.upstreamRetries,
@@ -197,6 +207,10 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
     experience: new ExperienceCache(domains.experience, config.experienceCacheSeconds * 1000, () =>
       log.warn({ upstream: "experience-config" }, "experience-config unavailable, serving stale config"),
     ),
+    audience: new AudienceResolver(config.audienceCacheSeconds * 1000),
+    pairs: new PairsCache(domains.catalog, config.pairsCacheSeconds * 1000, log),
+    snapshots: new SnapshotCache(domains.catalogRaw, config.courseSnapshotRevalidateSeconds * 1000, log),
+    audio: new AudioCache(config.audioCacheBytes),
     log,
     store: makeStoreGuard(log),
   };
@@ -231,6 +245,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   notificationsRoutes(app, ctx);
   whatsNewRoutes(app, ctx);
   supportRoutes(app, ctx);
+  diagnosticsRoutes(app, ctx);
+  contentRoutes(app, ctx);
 
   if (!config.isSecure) {
     app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());

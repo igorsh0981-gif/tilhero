@@ -228,7 +228,7 @@ describe("раскрытие Telegram ID", () => {
   });
 });
 
-describe("дашборд: 4 независимых блока", () => {
+describe("дашборд: 6 независимых блоков", () => {
   it("все источники доступны: блоки с данными, period передаётся (кроме «Что нового»)", async () => {
     const { s } = await loginAs(h, "read_only");
     const res = await get(s, "/admin/v1/dashboard?period=30d");
@@ -236,7 +236,7 @@ describe("дашборд: 4 независимых блока", () => {
     const d = res.json() as Dashboard;
     expect(d.period).toBe("30d");
     expect(Date.parse(d.generated_at)).not.toBeNaN();
-    for (const b of [d.learners, d.support, d.whats_new, d.campaigns]) expect(b.available).toBe(true);
+    for (const b of [d.learners, d.support, d.whats_new, d.campaigns, d.content, d.diagnostics]) expect(b.available).toBe(true);
     expect(d.learners.data?.by_age_band["18+"]).toBe(95);
     expect(d.whats_new.data?.latest?.views_total).toBe(57);
     expect(d.campaigns.data?.delivered_in_period).toBe(1500);
@@ -277,11 +277,11 @@ describe("дашборд: 4 независимых блока", () => {
 
   it("все источники недоступны — всё равно 200, нули не подставляются", async () => {
     const { s } = await loginAs(h, "read_only");
-    for (const svc of ["userAdmin", "support", "experience", "notifications"] as const) h.fake.down.add(svc);
+    for (const svc of ["userAdmin", "support", "experience", "notifications", "catalog", "diagnostics"] as const) h.fake.down.add(svc);
     const res = await get(s, "/admin/v1/dashboard");
     expect(res.statusCode).toBe(200);
     const d = res.json() as Dashboard;
-    for (const b of [d.learners, d.support, d.whats_new, d.campaigns]) expect(b).toMatchObject({ available: false, data: null });
+    for (const b of [d.learners, d.support, d.whats_new, d.campaigns, d.content, d.diagnostics]) expect(b).toMatchObject({ available: false, data: null });
   });
 });
 

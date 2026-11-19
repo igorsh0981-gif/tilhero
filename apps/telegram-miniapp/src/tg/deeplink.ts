@@ -1,12 +1,15 @@
 import type { ReleaseNoteRoute } from "@tilhero/contracts/bff";
 
+/** Routes of packages/contracts/release-notes.json (bff.ts ReleaseNoteRoute, sprint 3 routes included). */
+export type AppRoute = ReleaseNoteRoute;
+
 /**
  * Deep links (start_param / ?startapp=, InboxItem.startapp). Telegram allows [A-Za-z0-9_-]{1,64}.
  *  - inv_<token>        — invitation link (family / friend / referral) → POST /v1/invites/open;
  *  - invite_<uuid>      — reminder about an opened invitation → GET /v1/invites/{id}/preview;
  *  - gc_<token>         — a teen asks the parent for consent → GET /v1/guardian-consents/{token};
  *  - ticket_TCK-NNNN    — support ticket;
- *  - route_<route>      — a screen of the app (ReleaseNoteRoute).
+ *  - route_<route>      — a screen of the app (AppRoute: the release-notes catalogue).
  * Anything else is ignored (never interpreted as a URL or HTML).
  */
 export type DeepLink =
@@ -14,16 +17,17 @@ export type DeepLink =
   | { kind: "invitePreview"; inviteId: string }
   | { kind: "guardian"; token: string }
   | { kind: "ticket"; number: string }
-  | { kind: "route"; route: ReleaseNoteRoute };
+  | { kind: "route"; route: AppRoute };
 
-export const ROUTES: readonly ReleaseNoteRoute[] = [
+export const ROUTES: readonly AppRoute[] = [
   "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
+  "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
 ];
 const ROUTE_SET: ReadonlySet<string> = new Set(ROUTES);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TOKEN = /^[A-Za-z0-9_-]{8,60}$/;
 
-export function isRoute(v: unknown): v is ReleaseNoteRoute {
+export function isRoute(v: unknown): v is AppRoute {
   return typeof v === "string" && ROUTE_SET.has(v);
 }
 

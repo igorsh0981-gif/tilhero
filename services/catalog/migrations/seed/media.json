@@ -1,0 +1,2015 @@
+[
+  {
+    "asset_id": "m-own-hello-song",
+    "type": "song",
+    "origin": "own_recording",
+    "title": {
+      "ru": "Песенка «Hello, hello»",
+      "uz": "«Hello, hello» qoʻshigʻi"
+    },
+    "original_title": "Hello, Hello",
+    "language": "en",
+    "level": "A0",
+    "topics": [
+      "small_talk"
+    ],
+    "skill_ids": [
+      "en.func.greet",
+      "en.func.introduce"
+    ],
+    "audience": [
+      "kids",
+      "teens",
+      "adults"
+    ],
+    "duration_s": 44,
+    "transcript": [
+      {
+        "t_start_ms": 1000,
+        "t_end_ms": 4000,
+        "speaker": "Singer",
+        "text_en": "Hello, hello, hello, my friend!",
+        "gloss": {
+          "ru": "Привет, привет, привет, мой друг!",
+          "uz": "Salom, salom, salom, doʻstim!"
+        }
+      },
+      {
+        "t_start_ms": 4200,
+        "t_end_ms": 7200,
+        "speaker": "Singer",
+        "text_en": "Wave your hand and say it again!",
+        "gloss": {
+          "ru": "Помаши рукой и скажи ещё раз!",
+          "uz": "Qoʻl silkit va yana bir bor ayt!"
+        }
+      },
+      {
+        "t_start_ms": 7400,
+        "t_end_ms": 10400,
+        "speaker": "All",
+        "text_en": "Hello, hello, hello, my friend!",
+        "gloss": {
+          "ru": "Привет, привет, привет, мой друг!",
+          "uz": "Salom, salom, salom, doʻstim!"
+        }
+      },
+      {
+        "t_start_ms": 10600,
+        "t_end_ms": 13600,
+        "speaker": "Tim",
+        "text_en": "I'm Tim, I'm Tim. And what's your name?",
+        "gloss": {
+          "ru": "Я Тим, я Тим. А как тебя зовут?",
+          "uz": "Men Timman, men Timman. Sening isming nima?"
+        }
+      },
+      {
+        "t_start_ms": 13800,
+        "t_end_ms": 16800,
+        "speaker": "Lola",
+        "text_en": "I'm Lola, Lola! Let's play a game!",
+        "gloss": {
+          "ru": "Я Лола, Лола! Давай играть!",
+          "uz": "Men Lola, Lola! Kel, oʻynaymiz!"
+        }
+      },
+      {
+        "t_start_ms": 17000,
+        "t_end_ms": 20000,
+        "speaker": "Tim",
+        "text_en": "Nice to meet you, Lola!",
+        "gloss": {
+          "ru": "Приятно познакомиться, Лола!",
+          "uz": "Tanishganimdan xursandman, Lola!"
+        }
+      },
+      {
+        "t_start_ms": 20200,
+        "t_end_ms": 23200,
+        "speaker": "Lola",
+        "text_en": "Nice to meet you, too!",
+        "gloss": {
+          "ru": "Мне тоже приятно познакомиться!",
+          "uz": "Men ham tanishganimdan xursandman!"
+        }
+      },
+      {
+        "t_start_ms": 23400,
+        "t_end_ms": 26400,
+        "speaker": "Tim",
+        "text_en": "Good morning, Lola! How are you?",
+        "gloss": {
+          "ru": "Доброе утро, Лола! Как дела?",
+          "uz": "Xayrli tong, Lola! Ishlaring qalay?"
+        }
+      },
+      {
+        "t_start_ms": 26600,
+        "t_end_ms": 29600,
+        "speaker": "Lola",
+        "text_en": "I'm fine, thank you! I'm happy today!",
+        "gloss": {
+          "ru": "Хорошо, спасибо! Мне сегодня весело!",
+          "uz": "Yaxshi, rahmat! Bugun kayfiyatim zoʻr!"
+        }
+      },
+      {
+        "t_start_ms": 29800,
+        "t_end_ms": 32800,
+        "speaker": "All",
+        "text_en": "Hello, hello, hip, hip, hooray!",
+        "gloss": {
+          "ru": "Привет, привет, гип-гип-ура!",
+          "uz": "Salom, salom, hip-hip, ura!"
+        }
+      },
+      {
+        "t_start_ms": 33000,
+        "t_end_ms": 36000,
+        "speaker": "Singer",
+        "text_en": "Goodbye, goodbye, see you soon!",
+        "gloss": {
+          "ru": "Пока, пока, до скорой встречи!",
+          "uz": "Xayr, xayr, tez orada koʻrishamiz!"
+        }
+      },
+      {
+        "t_start_ms": 36200,
+        "t_end_ms": 39200,
+        "speaker": "Singer",
+        "text_en": "Wave to the sun and wave to the moon!",
+        "gloss": {
+          "ru": "Помаши солнцу и помаши луне!",
+          "uz": "Quyoshga qoʻl silkit, oyga qoʻl silkit!"
+        }
+      },
+      {
+        "t_start_ms": 39400,
+        "t_end_ms": 42400,
+        "speaker": "All",
+        "text_en": "Hello, hello, hello, my friend!",
+        "gloss": {
+          "ru": "Привет, привет, привет, мой друг!",
+          "uz": "Salom, salom, salom, doʻstim!"
+        }
+      }
+    ],
+    "phrases": [
+      {
+        "en": "Hello, my friend!",
+        "gloss": {
+          "ru": "Привет, мой друг!",
+          "uz": "Salom, doʻstim!"
+        },
+        "t_ms": 1000
+      },
+      {
+        "en": "What's your name?",
+        "gloss": {
+          "ru": "Как тебя зовут?",
+          "uz": "Isming nima?"
+        },
+        "t_ms": 10600
+      },
+      {
+        "en": "Let's play a game!",
+        "gloss": {
+          "ru": "Давай поиграем!",
+          "uz": "Kel, oʻynaymiz!"
+        },
+        "t_ms": 13800
+      },
+      {
+        "en": "Nice to meet you",
+        "gloss": {
+          "ru": "Приятно познакомиться",
+          "uz": "Tanishganimdan xursandman"
+        },
+        "t_ms": 17000
+      },
+      {
+        "en": "How are you?",
+        "gloss": {
+          "ru": "Как дела?",
+          "uz": "Ahvolingiz qanday?"
+        },
+        "t_ms": 23400
+      },
+      {
+        "en": "I'm fine, thank you",
+        "gloss": {
+          "ru": "Хорошо, спасибо",
+          "uz": "Yaxshi, rahmat"
+        },
+        "t_ms": 26600
+      },
+      {
+        "en": "See you soon!",
+        "gloss": {
+          "ru": "До скорой встречи!",
+          "uz": "Tez orada koʻrishamiz!"
+        },
+        "t_ms": 33000
+      }
+    ],
+    "audio_blob_id": null,
+    "embed": null,
+    "rights": {
+      "owner": "TilHero",
+      "license_type": "own",
+      "license_ref": null,
+      "attribution": null,
+      "territories": [
+        "UZ"
+      ],
+      "valid_from": "2026-11-01",
+      "valid_to": null,
+      "allowed_uses": [
+        "listen",
+        "show_transcript",
+        "exercises",
+        "dictionary",
+        "translation"
+      ]
+    }
+  },
+  {
+    "asset_id": "m-own-coffee-order",
+    "type": "own_scene",
+    "origin": "own_recording",
+    "title": {
+      "ru": "Сценка «В кафе»",
+      "uz": "Sahna: kafeda"
+    },
+    "original_title": "At the Café",
+    "language": "en",
+    "level": "A1",
+    "topics": [
+      "food"
+    ],
+    "skill_ids": [
+      "en.func.order-drink",
+      "en.gram.would-like",
+      "en.voc.food-drink"
+    ],
+    "audience": [
+      "kids",
+      "teens",
+      "adults"
+    ],
+    "duration_s": 53,
+    "transcript": [
+      {
+        "t_start_ms": 500,
+        "t_end_ms": 3510,
+        "speaker": "Ella",
+        "text_en": "Hi! What can I get you today?",
+        "gloss": {
+          "ru": "Здравствуйте! Что вам предложить?",
+          "uz": "Salom! Bugun sizga nima beray?"
+        }
+      },
+      {
+        "t_start_ms": 3810,
+        "t_end_ms": 7050,
+        "speaker": "Adam",
+        "text_en": "Hi! I'd like a cup of tea, please.",
+        "gloss": {
+          "ru": "Здравствуйте! Я бы хотел чашку чая, пожалуйста.",
+          "uz": "Salom! Bir piyola choy xohlardim, iltimos."
+        }
+      },
+      {
+        "t_start_ms": 7350,
+        "t_end_ms": 10130,
+        "speaker": "Ella",
+        "text_en": "Sure. Black tea or green tea?",
+        "gloss": {
+          "ru": "Конечно. Чёрный или зелёный?",
+          "uz": "Albatta. Qora choymi yoki koʻk choy?"
+        }
+      },
+      {
+        "t_start_ms": 10430,
+        "t_end_ms": 14130,
+        "speaker": "Adam",
+        "text_en": "Green tea, please. And a hot chocolate for my son.",
+        "gloss": {
+          "ru": "Зелёный, пожалуйста. И горячий шоколад для сына.",
+          "uz": "Koʻk choy, iltimos. Oʻgʻlimga esa issiq shokolad."
+        }
+      },
+      {
+        "t_start_ms": 14430,
+        "t_end_ms": 16520,
+        "speaker": "Ella",
+        "text_en": "Small or large?",
+        "gloss": {
+          "ru": "Маленький или большой?",
+          "uz": "Kichikmi yoki kattami?"
+        }
+      },
+      {
+        "t_start_ms": 16820,
+        "t_end_ms": 20060,
+        "speaker": "Sami",
+        "text_en": "Small, please! Can I have cream on top?",
+        "gloss": {
+          "ru": "Маленький, пожалуйста! А можно сверху сливки?",
+          "uz": "Kichigi, iltimos! Ustiga qaymoq qoʻshsa boʻladimi?"
+        }
+      },
+      {
+        "t_start_ms": 20360,
+        "t_end_ms": 22910,
+        "speaker": "Ella",
+        "text_en": "Of course! Anything to eat?",
+        "gloss": {
+          "ru": "Конечно! Что-нибудь поесть?",
+          "uz": "Albatta! Biror yegulik olasizmi?"
+        }
+      },
+      {
+        "t_start_ms": 23210,
+        "t_end_ms": 25530,
+        "speaker": "Adam",
+        "text_en": "Two apple muffins, please.",
+        "gloss": {
+          "ru": "Два яблочных маффина, пожалуйста.",
+          "uz": "Ikkita olmali keks, iltimos."
+        }
+      },
+      {
+        "t_start_ms": 25830,
+        "t_end_ms": 29070,
+        "speaker": "Ella",
+        "text_en": "Sorry, we've only got one apple muffin left.",
+        "gloss": {
+          "ru": "Извините, остался только один яблочный маффин.",
+          "uz": "Kechirasiz, faqat bitta olmali keks qoldi."
+        }
+      },
+      {
+        "t_start_ms": 29370,
+        "t_end_ms": 31920,
+        "speaker": "Ella",
+        "text_en": "We've got banana muffins, too.",
+        "gloss": {
+          "ru": "Есть ещё банановые маффины.",
+          "uz": "Bananli keks ham bor."
+        }
+      },
+      {
+        "t_start_ms": 32220,
+        "t_end_ms": 35000,
+        "speaker": "Sami",
+        "text_en": "Banana is OK! I love bananas.",
+        "gloss": {
+          "ru": "Банановый подойдёт! Я люблю бананы.",
+          "uz": "Bananlisi ham boʻlaveradi! Men bananni yaxshi koʻraman."
+        }
+      },
+      {
+        "t_start_ms": 35300,
+        "t_end_ms": 38540,
+        "speaker": "Ella",
+        "text_en": "Great. To drink here or to take away?",
+        "gloss": {
+          "ru": "Отлично. Здесь или с собой?",
+          "uz": "Ajoyib. Shu yerdami yoki olib ketasizmi?"
+        }
+      },
+      {
+        "t_start_ms": 38840,
+        "t_end_ms": 42080,
+        "speaker": "Adam",
+        "text_en": "To drink here, please. How much is that?",
+        "gloss": {
+          "ru": "Здесь, пожалуйста. Сколько с нас?",
+          "uz": "Shu yerda, iltimos. Qancha boʻladi?"
+        }
+      },
+      {
+        "t_start_ms": 42380,
+        "t_end_ms": 44930,
+        "speaker": "Ella",
+        "text_en": "That's nine pounds fifty, please.",
+        "gloss": {
+          "ru": "С вас девять фунтов пятьдесят.",
+          "uz": "Toʻqqiz funt ellik pens boʻladi."
+        }
+      },
+      {
+        "t_start_ms": 45230,
+        "t_end_ms": 47780,
+        "speaker": "Adam",
+        "text_en": "Here you are. Thank you!",
+        "gloss": {
+          "ru": "Вот, пожалуйста. Спасибо!",
+          "uz": "Marhamat. Rahmat!"
+        }
+      },
+      {
+        "t_start_ms": 48080,
+        "t_end_ms": 51320,
+        "speaker": "Ella",
+        "text_en": "Thank you! I'll bring it to your table.",
+        "gloss": {
+          "ru": "Спасибо! Я принесу к вашему столику.",
+          "uz": "Rahmat! Stolingizga olib boraman."
+        }
+      }
+    ],
+    "phrases": [
+      {
+        "en": "What can I get you",
+        "gloss": {
+          "ru": "Что вам предложить?",
+          "uz": "Sizga nima beray?"
+        },
+        "t_ms": 500
+      },
+      {
+        "en": "I'd like a cup of tea",
+        "gloss": {
+          "ru": "Я бы хотел(а) чашку чая",
+          "uz": "Bir piyola choy xohlardim"
+        },
+        "t_ms": 3810
+      },
+      {
+        "en": "Can I have cream on top?",
+        "gloss": {
+          "ru": "Можно сверху сливки?",
+          "uz": "Ustiga qaymoq qoʻshsa boʻladimi?"
+        },
+        "t_ms": 16820
+      },
+      {
+        "en": "Anything to eat?",
+        "gloss": {
+          "ru": "Что-нибудь поесть?",
+          "uz": "Biror yegulik olasizmi?"
+        },
+        "t_ms": 20360
+      },
+      {
+        "en": "to take away",
+        "gloss": {
+          "ru": "с собой",
+          "uz": "olib ketish uchun"
+        },
+        "t_ms": 35300
+      },
+      {
+        "en": "How much is that?",
+        "gloss": {
+          "ru": "Сколько это стоит?",
+          "uz": "Bu qancha turadi?"
+        },
+        "t_ms": 38840
+      },
+      {
+        "en": "Here you are",
+        "gloss": {
+          "ru": "Вот, пожалуйста",
+          "uz": "Marhamat"
+        },
+        "t_ms": 45230
+      }
+    ],
+    "audio_blob_id": null,
+    "embed": null,
+    "rights": {
+      "owner": "TilHero",
+      "license_type": "own",
+      "license_ref": null,
+      "attribution": null,
+      "territories": [
+        "UZ"
+      ],
+      "valid_from": "2026-11-01",
+      "valid_to": null,
+      "allowed_uses": [
+        "listen",
+        "show_transcript",
+        "exercises",
+        "dictionary",
+        "translation"
+      ]
+    }
+  },
+  {
+    "asset_id": "m-own-market-chat",
+    "type": "dialogue",
+    "origin": "own_recording",
+    "title": {
+      "ru": "Диалог на рынке",
+      "uz": "Bozordagi suhbat"
+    },
+    "original_title": "At the Market",
+    "language": "en",
+    "level": "A1",
+    "topics": [
+      "shopping",
+      "food"
+    ],
+    "skill_ids": [
+      "en.func.ask-price",
+      "en.voc.numbers",
+      "en.listen.numbers-times"
+    ],
+    "audience": [
+      "kids",
+      "teens",
+      "adults"
+    ],
+    "duration_s": 50,
+    "transcript": [
+      {
+        "t_start_ms": 500,
+        "t_end_ms": 3280,
+        "speaker": "Frank",
+        "text_en": "Good morning! Fresh fruit and vegetables!",
+        "gloss": {
+          "ru": "Доброе утро! Свежие фрукты и овощи!",
+          "uz": "Xayrli tong! Yangi meva va sabzavotlar!"
+        }
+      },
+      {
+        "t_start_ms": 3580,
+        "t_end_ms": 6590,
+        "speaker": "Mira",
+        "text_en": "Good morning! How much are the tomatoes?",
+        "gloss": {
+          "ru": "Доброе утро! Сколько стоят помидоры?",
+          "uz": "Xayrli tong! Pomidor qancha turadi?"
+        }
+      },
+      {
+        "t_start_ms": 6890,
+        "t_end_ms": 9440,
+        "speaker": "Frank",
+        "text_en": "They're three pounds a kilo.",
+        "gloss": {
+          "ru": "Три фунта за килограмм.",
+          "uz": "Kilosi uch funt."
+        }
+      },
+      {
+        "t_start_ms": 9740,
+        "t_end_ms": 11830,
+        "speaker": "Mira",
+        "text_en": "And the cucumbers?",
+        "gloss": {
+          "ru": "А огурцы?",
+          "uz": "Bodring-chi?"
+        }
+      },
+      {
+        "t_start_ms": 12130,
+        "t_end_ms": 15370,
+        "speaker": "Frank",
+        "text_en": "Two pounds a kilo. They're very fresh today.",
+        "gloss": {
+          "ru": "Два фунта за килограмм. Сегодня очень свежие.",
+          "uz": "Kilosi ikki funt. Bugun juda yangi."
+        }
+      },
+      {
+        "t_start_ms": 15670,
+        "t_end_ms": 19370,
+        "speaker": "Mira",
+        "text_en": "One kilo of tomatoes and two kilos of cucumbers, please.",
+        "gloss": {
+          "ru": "Килограмм помидоров и два килограмма огурцов, пожалуйста.",
+          "uz": "Bir kilo pomidor va ikki kilo bodring, iltimos."
+        }
+      },
+      {
+        "t_start_ms": 19670,
+        "t_end_ms": 22220,
+        "speaker": "Frank",
+        "text_en": "Here you are. Anything else?",
+        "gloss": {
+          "ru": "Пожалуйста. Что-нибудь ещё?",
+          "uz": "Marhamat. Yana biror narsa kerakmi?"
+        }
+      },
+      {
+        "t_start_ms": 22520,
+        "t_end_ms": 24840,
+        "speaker": "Mira",
+        "text_en": "Are these melons sweet?",
+        "gloss": {
+          "ru": "Эти дыни сладкие?",
+          "uz": "Bu qovunlar shirinmi?"
+        }
+      },
+      {
+        "t_start_ms": 25140,
+        "t_end_ms": 27920,
+        "speaker": "Frank",
+        "text_en": "Very sweet! They're five pounds each.",
+        "gloss": {
+          "ru": "Очень сладкие! Пять фунтов за штуку.",
+          "uz": "Juda shirin! Har biri besh funt."
+        }
+      },
+      {
+        "t_start_ms": 28220,
+        "t_end_ms": 31000,
+        "speaker": "Mira",
+        "text_en": "Five pounds? That's a bit expensive.",
+        "gloss": {
+          "ru": "Пять фунтов? Дороговато.",
+          "uz": "Besh funtmi? Biroz qimmat-ku."
+        }
+      },
+      {
+        "t_start_ms": 31300,
+        "t_end_ms": 34310,
+        "speaker": "Frank",
+        "text_en": "OK, four pounds fifty, just for you!",
+        "gloss": {
+          "ru": "Ладно, четыре пятьдесят — только для вас!",
+          "uz": "Mayli, toʻrt funt ellik pens — faqat siz uchun!"
+        }
+      },
+      {
+        "t_start_ms": 34610,
+        "t_end_ms": 37620,
+        "speaker": "Mira",
+        "text_en": "Deal! How much is that all together?",
+        "gloss": {
+          "ru": "Договорились! Сколько всего?",
+          "uz": "Kelishdik! Hammasi qancha boʻladi?"
+        }
+      },
+      {
+        "t_start_ms": 37920,
+        "t_end_ms": 41390,
+        "speaker": "Frank",
+        "text_en": "Three, plus four, plus four fifty. Eleven pounds fifty.",
+        "gloss": {
+          "ru": "Три, плюс четыре, плюс четыре пятьдесят. Одиннадцать фунтов пятьдесят.",
+          "uz": "Uch, qoʻshuv toʻrt, qoʻshuv toʻrt ellik. Oʻn bir funt ellik pens."
+        }
+      },
+      {
+        "t_start_ms": 41690,
+        "t_end_ms": 43780,
+        "speaker": "Mira",
+        "text_en": "Here's twenty pounds.",
+        "gloss": {
+          "ru": "Вот двадцать фунтов.",
+          "uz": "Mana yigirma funt."
+        }
+      },
+      {
+        "t_start_ms": 44080,
+        "t_end_ms": 48010,
+        "speaker": "Frank",
+        "text_en": "And here's your change: eight pounds fifty. Have a nice day!",
+        "gloss": {
+          "ru": "А вот ваша сдача: восемь фунтов пятьдесят. Хорошего дня!",
+          "uz": "Mana qaytimingiz: sakkiz funt ellik pens. Kuningiz yaxshi oʻtsin!"
+        }
+      }
+    ],
+    "phrases": [
+      {
+        "en": "How much are the tomatoes?",
+        "gloss": {
+          "ru": "Сколько стоят помидоры?",
+          "uz": "Pomidor qancha turadi?"
+        },
+        "t_ms": 3580
+      },
+      {
+        "en": "three pounds a kilo",
+        "gloss": {
+          "ru": "три фунта за килограмм",
+          "uz": "kilosi uch funt"
+        },
+        "t_ms": 6890
+      },
+      {
+        "en": "five pounds each",
+        "gloss": {
+          "ru": "пять фунтов за штуку",
+          "uz": "har biri besh funt"
+        },
+        "t_ms": 25140
+      },
+      {
+        "en": "That's a bit expensive",
+        "gloss": {
+          "ru": "Это дороговато",
+          "uz": "Bu biroz qimmat"
+        },
+        "t_ms": 28220
+      },
+      {
+        "en": "Deal!",
+        "gloss": {
+          "ru": "Договорились!",
+          "uz": "Kelishdik!"
+        },
+        "t_ms": 34610
+      },
+      {
+        "en": "all together",
+        "gloss": {
+          "ru": "всего, вместе",
+          "uz": "hammasi birga"
+        },
+        "t_ms": 34610
+      },
+      {
+        "en": "your change",
+        "gloss": {
+          "ru": "ваша сдача",
+          "uz": "qaytimingiz"
+        },
+        "t_ms": 44080
+      }
+    ],
+    "audio_blob_id": null,
+    "embed": null,
+    "rights": {
+      "owner": "TilHero",
+      "license_type": "own",
+      "license_ref": null,
+      "attribution": null,
+      "territories": [
+        "UZ"
+      ],
+      "valid_from": "2026-11-01",
+      "valid_to": null,
+      "allowed_uses": [
+        "listen",
+        "show_transcript",
+        "exercises",
+        "dictionary",
+        "translation"
+      ]
+    }
+  },
+  {
+    "asset_id": "m-own-lost-in-city",
+    "type": "own_scene",
+    "origin": "own_recording",
+    "title": {
+      "ru": "Сценка «Как пройти к музею?»",
+      "uz": "Sahna: muzeyga qanday borish mumkin?"
+    },
+    "original_title": "Lost in the City",
+    "language": "en",
+    "level": "A1",
+    "topics": [
+      "travel"
+    ],
+    "skill_ids": [
+      "en.func.ask-way",
+      "en.voc.city-places",
+      "en.gram.prepositions-place-time"
+    ],
+    "audience": [
+      "kids",
+      "teens",
+      "adults"
+    ],
+    "duration_s": 45,
+    "transcript": [
+      {
+        "t_start_ms": 500,
+        "t_end_ms": 4200,
+        "speaker": "Kate",
+        "text_en": "Excuse me! Can you help me? I think I'm lost.",
+        "gloss": {
+          "ru": "Простите! Вы можете мне помочь? Кажется, я заблудилась.",
+          "uz": "Kechirasiz! Menga yordam bera olasizmi? Adashib qoldim shekilli."
+        }
+      },
+      {
+        "t_start_ms": 4500,
+        "t_end_ms": 7740,
+        "speaker": "Timur",
+        "text_en": "Of course! Where do you want to go?",
+        "gloss": {
+          "ru": "Конечно! Куда вам нужно?",
+          "uz": "Albatta! Qayerga bormoqchisiz?"
+        }
+      },
+      {
+        "t_start_ms": 8040,
+        "t_end_ms": 11280,
+        "speaker": "Kate",
+        "text_en": "To the history museum. Is it near here?",
+        "gloss": {
+          "ru": "В исторический музей. Это недалеко?",
+          "uz": "Tarix muzeyiga. U shu yaqindami?"
+        }
+      },
+      {
+        "t_start_ms": 11580,
+        "t_end_ms": 15510,
+        "speaker": "Timur",
+        "text_en": "Yes, it's not far. Go straight on to the traffic lights.",
+        "gloss": {
+          "ru": "Да, недалеко. Идите прямо до светофора.",
+          "uz": "Ha, uzoq emas. Svetoforgacha toʻgʻriga yuring."
+        }
+      },
+      {
+        "t_start_ms": 15810,
+        "t_end_ms": 18820,
+        "speaker": "Kate",
+        "text_en": "Straight on to the traffic lights. OK.",
+        "gloss": {
+          "ru": "Прямо до светофора. Понятно.",
+          "uz": "Svetoforgacha toʻgʻriga. Xoʻp."
+        }
+      },
+      {
+        "t_start_ms": 19120,
+        "t_end_ms": 23050,
+        "speaker": "Timur",
+        "text_en": "Then turn right. The museum is next to a big park.",
+        "gloss": {
+          "ru": "Потом поверните направо. Музей рядом с большим парком.",
+          "uz": "Keyin oʻngga buriling. Muzey katta bogʻning yonida."
+        }
+      },
+      {
+        "t_start_ms": 23350,
+        "t_end_ms": 26820,
+        "speaker": "Kate",
+        "text_en": "Turn right, next to the park. Is it far?",
+        "gloss": {
+          "ru": "Направо, рядом с парком. Это далеко?",
+          "uz": "Oʻngga, bogʻ yonida. Uzoqmi?"
+        }
+      },
+      {
+        "t_start_ms": 27120,
+        "t_end_ms": 30130,
+        "speaker": "Timur",
+        "text_en": "No, it's about five minutes on foot.",
+        "gloss": {
+          "ru": "Нет, минут пять пешком.",
+          "uz": "Yoʻq, piyoda besh daqiqacha."
+        }
+      },
+      {
+        "t_start_ms": 30430,
+        "t_end_ms": 33670,
+        "speaker": "Kate",
+        "text_en": "Great! Is there a café near the museum?",
+        "gloss": {
+          "ru": "Отлично! А рядом с музеем есть кафе?",
+          "uz": "Zoʻr! Muzey yaqinida kafe bormi?"
+        }
+      },
+      {
+        "t_start_ms": 33970,
+        "t_end_ms": 37210,
+        "speaker": "Timur",
+        "text_en": "Yes, there's a nice café opposite the museum.",
+        "gloss": {
+          "ru": "Да, напротив музея есть хорошее кафе.",
+          "uz": "Ha, muzeyning qarshisida yaxshi kafe bor."
+        }
+      },
+      {
+        "t_start_ms": 37510,
+        "t_end_ms": 39830,
+        "speaker": "Kate",
+        "text_en": "Thank you so much!",
+        "gloss": {
+          "ru": "Большое спасибо!",
+          "uz": "Katta rahmat!"
+        }
+      },
+      {
+        "t_start_ms": 40130,
+        "t_end_ms": 43140,
+        "speaker": "Timur",
+        "text_en": "You're welcome! Enjoy your day in Tashkent!",
+        "gloss": {
+          "ru": "Не за что! Хорошего дня в Ташкенте!",
+          "uz": "Arzimaydi! Toshkentda kuningiz yaxshi oʻtsin!"
+        }
+      }
+    ],
+    "phrases": [
+      {
+        "en": "I think I'm lost",
+        "gloss": {
+          "ru": "Кажется, я заблудился(-ась)",
+          "uz": "Adashib qoldim shekilli"
+        },
+        "t_ms": 500
+      },
+      {
+        "en": "Go straight on",
+        "gloss": {
+          "ru": "Идите прямо",
+          "uz": "Toʻgʻriga yuring"
+        },
+        "t_ms": 11580
+      },
+      {
+        "en": "traffic lights",
+        "gloss": {
+          "ru": "светофор",
+          "uz": "svetofor"
+        },
+        "t_ms": 11580
+      },
+      {
+        "en": "turn right",
+        "gloss": {
+          "ru": "поверните направо",
+          "uz": "oʻngga buriling"
+        },
+        "t_ms": 19120
+      },
+      {
+        "en": "next to",
+        "gloss": {
+          "ru": "рядом с",
+          "uz": "yonida"
+        },
+        "t_ms": 19120
+      },
+      {
+        "en": "on foot",
+        "gloss": {
+          "ru": "пешком",
+          "uz": "piyoda"
+        },
+        "t_ms": 27120
+      },
+      {
+        "en": "opposite",
+        "gloss": {
+          "ru": "напротив",
+          "uz": "qarshisida"
+        },
+        "t_ms": 33970
+      }
+    ],
+    "audio_blob_id": null,
+    "embed": null,
+    "rights": {
+      "owner": "TilHero",
+      "license_type": "own",
+      "license_ref": null,
+      "attribution": null,
+      "territories": [
+        "UZ"
+      ],
+      "valid_from": "2026-11-01",
+      "valid_to": null,
+      "allowed_uses": [
+        "listen",
+        "show_transcript",
+        "exercises",
+        "dictionary",
+        "translation"
+      ]
+    }
+  },
+  {
+    "asset_id": "m-own-hotel-reception",
+    "type": "own_scene",
+    "origin": "own_recording",
+    "title": {
+      "ru": "Сценка «На ресепшене отеля»",
+      "uz": "Sahna: mehmonxona qabulxonasida"
+    },
+    "original_title": "At Hotel Reception",
+    "language": "en",
+    "level": "A2",
+    "topics": [
+      "travel"
+    ],
+    "skill_ids": [
+      "en.func.hotel-check-in",
+      "en.listen.numbers-times",
+      "en.voc.travel"
+    ],
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "duration_s": 54,
+    "transcript": [
+      {
+        "t_start_ms": 500,
+        "t_end_ms": 4700,
+        "speaker": "Anna",
+        "text_en": "Good evening, welcome to the Green Garden Hotel. How can I help you?",
+        "gloss": {
+          "ru": "Добрый вечер, добро пожаловать в отель «Green Garden». Чем могу помочь?",
+          "uz": "Xayrli kech, «Green Garden» mehmonxonasiga xush kelibsiz. Qanday yordam bera olaman?"
+        }
+      },
+      {
+        "t_start_ms": 5000,
+        "t_end_ms": 8700,
+        "speaker": "Farrukh",
+        "text_en": "Hi, I have a reservation. My name is Farrukh Saidov.",
+        "gloss": {
+          "ru": "Здравствуйте, у меня бронь. Меня зовут Фаррух Саидов.",
+          "uz": "Salom, mening bronim bor. Ismim Farrux Saidov."
+        }
+      },
+      {
+        "t_start_ms": 9000,
+        "t_end_ms": 12010,
+        "speaker": "Anna",
+        "text_en": "Could you spell your last name, please?",
+        "gloss": {
+          "ru": "Продиктуйте, пожалуйста, фамилию по буквам.",
+          "uz": "Familiyangizni harfma-harf aytib bera olasizmi?"
+        }
+      },
+      {
+        "t_start_ms": 12310,
+        "t_end_ms": 14310,
+        "speaker": "Farrukh",
+        "text_en": "S-A-I-D-O-V.",
+        "gloss": {
+          "ru": "С-А-И-Д-О-В.",
+          "uz": "S-A-I-D-O-V."
+        }
+      },
+      {
+        "t_start_ms": 14610,
+        "t_end_ms": 18810,
+        "speaker": "Anna",
+        "text_en": "Thank you. A single room for three nights. Can I see your passport?",
+        "gloss": {
+          "ru": "Спасибо. Одноместный номер на три ночи. Можно ваш паспорт?",
+          "uz": "Rahmat. Uch kechaga bir kishilik xona. Pasportingizni koʻrsam boʻladimi?"
+        }
+      },
+      {
+        "t_start_ms": 19110,
+        "t_end_ms": 21200,
+        "speaker": "Farrukh",
+        "text_en": "Here you are.",
+        "gloss": {
+          "ru": "Вот, пожалуйста.",
+          "uz": "Marhamat."
+        }
+      },
+      {
+        "t_start_ms": 21500,
+        "t_end_ms": 24970,
+        "speaker": "Anna",
+        "text_en": "Thanks. You're in room four-oh-eight, on the fourth floor.",
+        "gloss": {
+          "ru": "Спасибо. Ваш номер — 408, на четвёртом этаже.",
+          "uz": "Rahmat. Xonangiz — 408, toʻrtinchi qavatda."
+        }
+      },
+      {
+        "t_start_ms": 25270,
+        "t_end_ms": 27590,
+        "speaker": "Farrukh",
+        "text_en": "What time is breakfast?",
+        "gloss": {
+          "ru": "Во сколько завтрак?",
+          "uz": "Nonushta soat nechada?"
+        }
+      },
+      {
+        "t_start_ms": 27890,
+        "t_end_ms": 32090,
+        "speaker": "Anna",
+        "text_en": "From seven to half past ten, in the restaurant on the ground floor.",
+        "gloss": {
+          "ru": "С семи до половины одиннадцатого, в ресторане на первом этаже.",
+          "uz": "Soat yettidan oʻn yarimgacha, birinchi qavatdagi restoranda."
+        }
+      },
+      {
+        "t_start_ms": 32390,
+        "t_end_ms": 35170,
+        "speaker": "Farrukh",
+        "text_en": "Is there Wi-Fi in the room?",
+        "gloss": {
+          "ru": "В номере есть Wi-Fi?",
+          "uz": "Xonada Wi-Fi bormi?"
+        }
+      },
+      {
+        "t_start_ms": 35470,
+        "t_end_ms": 38710,
+        "speaker": "Anna",
+        "text_en": "Yes, the password is on your key card.",
+        "gloss": {
+          "ru": "Да, пароль на вашей карте-ключе.",
+          "uz": "Ha, parol kalit-kartangizda yozilgan."
+        }
+      },
+      {
+        "t_start_ms": 39010,
+        "t_end_ms": 42480,
+        "speaker": "Farrukh",
+        "text_en": "Great. Could I have a late check-out on Sunday?",
+        "gloss": {
+          "ru": "Отлично. Можно в воскресенье выехать попозже?",
+          "uz": "Ajoyib. Yakshanba kuni kechroq chiqib ketsam boʻladimi?"
+        }
+      },
+      {
+        "t_start_ms": 42780,
+        "t_end_ms": 46480,
+        "speaker": "Anna",
+        "text_en": "Let me see... Yes, you can stay until one o'clock.",
+        "gloss": {
+          "ru": "Сейчас посмотрю... Да, можете остаться до часу.",
+          "uz": "Hozir qarayman... Ha, soat birgacha qolishingiz mumkin."
+        }
+      },
+      {
+        "t_start_ms": 46780,
+        "t_end_ms": 49330,
+        "speaker": "Farrukh",
+        "text_en": "Perfect. Thank you very much.",
+        "gloss": {
+          "ru": "Отлично. Большое спасибо.",
+          "uz": "Ajoyib. Katta rahmat."
+        }
+      },
+      {
+        "t_start_ms": 49630,
+        "t_end_ms": 52180,
+        "speaker": "Anna",
+        "text_en": "You're welcome. Enjoy your stay!",
+        "gloss": {
+          "ru": "Пожалуйста. Приятного пребывания!",
+          "uz": "Arzimaydi. Dam olishingiz yoqimli oʻtsin!"
+        }
+      }
+    ],
+    "phrases": [
+      {
+        "en": "I have a reservation",
+        "gloss": {
+          "ru": "У меня бронь",
+          "uz": "Mening bronim bor"
+        },
+        "t_ms": 5000
+      },
+      {
+        "en": "Could you spell your last name",
+        "gloss": {
+          "ru": "Продиктуйте фамилию по буквам",
+          "uz": "Familiyangizni harfma-harf ayting"
+        },
+        "t_ms": 9000
+      },
+      {
+        "en": "a single room",
+        "gloss": {
+          "ru": "одноместный номер",
+          "uz": "bir kishilik xona"
+        },
+        "t_ms": 14610
+      },
+      {
+        "en": "on the fourth floor",
+        "gloss": {
+          "ru": "на четвёртом этаже",
+          "uz": "toʻrtinchi qavatda"
+        },
+        "t_ms": 21500
+      },
+      {
+        "en": "ground floor",
+        "gloss": {
+          "ru": "первый этаж (в Великобритании)",
+          "uz": "birinchi qavat (Buyuk Britaniyada)"
+        },
+        "t_ms": 27890
+      },
+      {
+        "en": "key card",
+        "gloss": {
+          "ru": "карта-ключ",
+          "uz": "kalit-karta"
+        },
+        "t_ms": 35470
+      },
+      {
+        "en": "a late check-out",
+        "gloss": {
+          "ru": "поздний выезд",
+          "uz": "kechroq chiqib ketish"
+        },
+        "t_ms": 39010
+      }
+    ],
+    "audio_blob_id": null,
+    "embed": null,
+    "rights": {
+      "owner": "TilHero",
+      "license_type": "own",
+      "license_ref": null,
+      "attribution": null,
+      "territories": [
+        "UZ"
+      ],
+      "valid_from": "2026-11-01",
+      "valid_to": null,
+      "allowed_uses": [
+        "listen",
+        "show_transcript",
+        "exercises",
+        "dictionary",
+        "translation"
+      ]
+    }
+  },
+  {
+    "asset_id": "m-own-airport-announcement",
+    "type": "interview",
+    "origin": "own_recording",
+    "title": {
+      "ru": "Объявление в аэропорту и интервью с пассажиром",
+      "uz": "Aeroportdagi eʼlon va yoʻlovchi bilan intervyu"
+    },
+    "original_title": "Airport Announcement and Interview",
+    "language": "en",
+    "level": "A2",
+    "topics": [
+      "travel"
+    ],
+    "skill_ids": [
+      "en.func.check-in-flight",
+      "en.listen.numbers-times",
+      "en.gram.future-going-to"
+    ],
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "duration_s": 54,
+    "transcript": [
+      {
+        "t_start_ms": 500,
+        "t_end_ms": 4430,
+        "speaker": "Announcer",
+        "text_en": "Attention, please. Flight 215 to London is delayed by forty minutes.",
+        "gloss": {
+          "ru": "Внимание! Рейс 215 в Лондон задерживается на сорок минут.",
+          "uz": "Diqqat! Londonga uchadigan 215-reys qirq daqiqaga kechikmoqda."
+        }
+      },
+      {
+        "t_start_ms": 4730,
+        "t_end_ms": 7740,
+        "speaker": "Announcer",
+        "text_en": "The new departure time is eleven fifty.",
+        "gloss": {
+          "ru": "Новое время вылета — 11:50.",
+          "uz": "Yangi uchish vaqti — 11:50."
+        }
+      },
+      {
+        "t_start_ms": 8040,
+        "t_end_ms": 11510,
+        "speaker": "Announcer",
+        "text_en": "Boarding will start at eleven twenty, at gate eight.",
+        "gloss": {
+          "ru": "Посадка начнётся в 11:20, выход 8.",
+          "uz": "Bortga chiqish soat 11:20 da, 8-chiqish eshigidan boshlanadi."
+        }
+      },
+      {
+        "t_start_ms": 11810,
+        "t_end_ms": 15970,
+        "speaker": "Sara",
+        "text_en": "Hello! Can I ask you a few questions for our travel podcast?",
+        "gloss": {
+          "ru": "Здравствуйте! Можно задать вам несколько вопросов для нашего подкаста о путешествиях?",
+          "uz": "Salom! Sayohat haqidagi podkastimiz uchun sizga bir nechta savol bersam boʻladimi?"
+        }
+      },
+      {
+        "t_start_ms": 16270,
+        "t_end_ms": 18360,
+        "speaker": "Ravshan",
+        "text_en": "Sure, no problem.",
+        "gloss": {
+          "ru": "Конечно, без проблем.",
+          "uz": "Albatta, bemalol."
+        }
+      },
+      {
+        "t_start_ms": 18660,
+        "t_end_ms": 21210,
+        "speaker": "Sara",
+        "text_en": "Where are you flying today?",
+        "gloss": {
+          "ru": "Куда вы сегодня летите?",
+          "uz": "Bugun qayerga uchyapsiz?"
+        }
+      },
+      {
+        "t_start_ms": 21510,
+        "t_end_ms": 24750,
+        "speaker": "Ravshan",
+        "text_en": "To London. I'm going to visit my sister.",
+        "gloss": {
+          "ru": "В Лондон. Собираюсь навестить сестру.",
+          "uz": "Londonga. Opamni koʻrgani boryapman."
+        }
+      },
+      {
+        "t_start_ms": 25050,
+        "t_end_ms": 28290,
+        "speaker": "Sara",
+        "text_en": "Your flight is delayed. How do you feel?",
+        "gloss": {
+          "ru": "Ваш рейс задерживается. Как вы к этому относитесь?",
+          "uz": "Reysingiz kechikmoqda. Bunga qanday qaraysiz?"
+        }
+      },
+      {
+        "t_start_ms": 28590,
+        "t_end_ms": 31370,
+        "speaker": "Ravshan",
+        "text_en": "It's OK. Forty minutes isn't long.",
+        "gloss": {
+          "ru": "Ничего страшного. Сорок минут — это недолго.",
+          "uz": "Hechqisi yoʻq. Qirq daqiqa uzoq emas."
+        }
+      },
+      {
+        "t_start_ms": 31670,
+        "t_end_ms": 35370,
+        "speaker": "Ravshan",
+        "text_en": "I'm going to have a coffee and read my book.",
+        "gloss": {
+          "ru": "Выпью кофе и почитаю книгу.",
+          "uz": "Qahva ichib, kitobimni oʻqiyman."
+        }
+      },
+      {
+        "t_start_ms": 35670,
+        "t_end_ms": 38450,
+        "speaker": "Sara",
+        "text_en": "Do you often travel by plane?",
+        "gloss": {
+          "ru": "Вы часто летаете на самолёте?",
+          "uz": "Samolyotda tez-tez uchasizmi?"
+        }
+      },
+      {
+        "t_start_ms": 38750,
+        "t_end_ms": 42680,
+        "speaker": "Ravshan",
+        "text_en": "Two or three times a year. I always check in online.",
+        "gloss": {
+          "ru": "Два-три раза в год. Я всегда регистрируюсь онлайн.",
+          "uz": "Yiliga ikki-uch marta. Men doim onlayn roʻyxatdan oʻtaman."
+        }
+      },
+      {
+        "t_start_ms": 42980,
+        "t_end_ms": 45530,
+        "speaker": "Sara",
+        "text_en": "Any tips for other travellers?",
+        "gloss": {
+          "ru": "Есть советы для других путешественников?",
+          "uz": "Boshqa sayohatchilarga maslahatlaringiz bormi?"
+        }
+      },
+      {
+        "t_start_ms": 45830,
+        "t_end_ms": 49300,
+        "speaker": "Ravshan",
+        "text_en": "Yes! Come early, and always listen to the announcements.",
+        "gloss": {
+          "ru": "Да! Приезжайте заранее и всегда слушайте объявления.",
+          "uz": "Ha! Erta keling va eʼlonlarni doim tinglang."
+        }
+      },
+      {
+        "t_start_ms": 49600,
+        "t_end_ms": 52380,
+        "speaker": "Sara",
+        "text_en": "Great tip! Have a good flight!",
+        "gloss": {
+          "ru": "Отличный совет! Хорошего полёта!",
+          "uz": "Ajoyib maslahat! Parvozingiz xayrli boʻlsin!"
+        }
+      }
+    ],
+    "phrases": [
+      {
+        "en": "is delayed",
+        "gloss": {
+          "ru": "задерживается",
+          "uz": "kechikmoqda"
+        },
+        "t_ms": 500
+      },
+      {
+        "en": "departure time",
+        "gloss": {
+          "ru": "время вылета",
+          "uz": "uchish vaqti"
+        },
+        "t_ms": 4730
+      },
+      {
+        "en": "Boarding will start",
+        "gloss": {
+          "ru": "Посадка начнётся",
+          "uz": "Bortga chiqish boshlanadi"
+        },
+        "t_ms": 8040
+      },
+      {
+        "en": "gate eight",
+        "gloss": {
+          "ru": "выход номер восемь",
+          "uz": "8-chiqish eshigi"
+        },
+        "t_ms": 8040
+      },
+      {
+        "en": "I'm going to visit my sister",
+        "gloss": {
+          "ru": "Я собираюсь навестить сестру",
+          "uz": "Opamni koʻrgani boraman"
+        },
+        "t_ms": 21510
+      },
+      {
+        "en": "check in online",
+        "gloss": {
+          "ru": "регистрироваться онлайн",
+          "uz": "onlayn roʻyxatdan oʻtish"
+        },
+        "t_ms": 38750
+      },
+      {
+        "en": "Come early",
+        "gloss": {
+          "ru": "Приезжайте заранее",
+          "uz": "Erta keling"
+        },
+        "t_ms": 45830
+      }
+    ],
+    "audio_blob_id": null,
+    "embed": null,
+    "rights": {
+      "owner": "TilHero",
+      "license_type": "own",
+      "license_ref": null,
+      "attribution": null,
+      "territories": [
+        "UZ"
+      ],
+      "valid_from": "2026-11-01",
+      "valid_to": null,
+      "allowed_uses": [
+        "listen",
+        "show_transcript",
+        "exercises",
+        "dictionary",
+        "translation"
+      ]
+    }
+  },
+  {
+    "asset_id": "m-own-first-day-office",
+    "type": "own_scene",
+    "origin": "own_recording",
+    "title": {
+      "ru": "Сценка «Первый день в офисе»",
+      "uz": "Sahna: ofisdagi birinchi kun"
+    },
+    "original_title": "First Day at the Office",
+    "language": "en",
+    "level": "A2",
+    "topics": [
+      "work"
+    ],
+    "skill_ids": [
+      "en.func.work-introduce",
+      "en.voc.work",
+      "en.func.ask-clarify"
+    ],
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "duration_s": 55,
+    "transcript": [
+      {
+        "t_start_ms": 500,
+        "t_end_ms": 4200,
+        "speaker": "Rebecca",
+        "text_en": "Good morning! You must be Javlon. Welcome to the team!",
+        "gloss": {
+          "ru": "Доброе утро! Вы, должно быть, Жавлон. Добро пожаловать в команду!",
+          "uz": "Xayrli tong! Siz Javlon boʻlsangiz kerak. Jamoaga xush kelibsiz!"
+        }
+      },
+      {
+        "t_start_ms": 4500,
+        "t_end_ms": 7970,
+        "speaker": "Javlon",
+        "text_en": "Good morning! Yes, I'm Javlon. Nice to meet you.",
+        "gloss": {
+          "ru": "Доброе утро! Да, я Жавлон. Приятно познакомиться.",
+          "uz": "Xayrli tong! Ha, men Javlonman. Tanishganimdan xursandman."
+        }
+      },
+      {
+        "t_start_ms": 8270,
+        "t_end_ms": 11970,
+        "speaker": "Rebecca",
+        "text_en": "Nice to meet you too. I'm Rebecca, the office manager.",
+        "gloss": {
+          "ru": "Мне тоже приятно. Я Ребекка, офис-менеджер.",
+          "uz": "Men ham xursandman. Men Rebekka, ofis menejeriman."
+        }
+      },
+      {
+        "t_start_ms": 12270,
+        "t_end_ms": 16470,
+        "speaker": "Rebecca",
+        "text_en": "Let me show you around. This is the kitchen. Tea and coffee are free.",
+        "gloss": {
+          "ru": "Давайте я вам всё покажу. Это кухня. Чай и кофе бесплатно.",
+          "uz": "Keling, sizga hammasini koʻrsataman. Bu oshxona. Choy va qahva bepul."
+        }
+      },
+      {
+        "t_start_ms": 16770,
+        "t_end_ms": 19320,
+        "speaker": "Javlon",
+        "text_en": "Great! Where is my desk?",
+        "gloss": {
+          "ru": "Отлично! А где мой стол?",
+          "uz": "Zoʻr! Mening stolim qayerda?"
+        }
+      },
+      {
+        "t_start_ms": 19620,
+        "t_end_ms": 22630,
+        "speaker": "Rebecca",
+        "text_en": "It's over there, next to the window.",
+        "gloss": {
+          "ru": "Вон там, у окна.",
+          "uz": "Ana u yerda, deraza yonida."
+        }
+      },
+      {
+        "t_start_ms": 22930,
+        "t_end_ms": 26630,
+        "speaker": "Rebecca",
+        "text_en": "And this is Tom. He works in the marketing team.",
+        "gloss": {
+          "ru": "А это Том. Он работает в отделе маркетинга.",
+          "uz": "Bu esa Tom. U marketing jamoasida ishlaydi."
+        }
+      },
+      {
+        "t_start_ms": 26930,
+        "t_end_ms": 29710,
+        "speaker": "Tom",
+        "text_en": "Hi, Javlon! What do you do?",
+        "gloss": {
+          "ru": "Привет, Жавлон! Чем вы занимаетесь?",
+          "uz": "Salom, Javlon! Siz nima ish qilasiz?"
+        }
+      },
+      {
+        "t_start_ms": 30010,
+        "t_end_ms": 33710,
+        "speaker": "Javlon",
+        "text_en": "I'm a junior accountant. I work with the finance team.",
+        "gloss": {
+          "ru": "Я младший бухгалтер. Работаю с финансовым отделом.",
+          "uz": "Men kichik hisobchiman. Moliya jamoasi bilan ishlayman."
+        }
+      },
+      {
+        "t_start_ms": 34010,
+        "t_end_ms": 38210,
+        "speaker": "Tom",
+        "text_en": "Cool. We usually have lunch at one. Do you want to join us?",
+        "gloss": {
+          "ru": "Здорово. Мы обычно обедаем в час. Хотите с нами?",
+          "uz": "Zoʻr. Biz odatda soat birda tushlik qilamiz. Bizga qoʻshilasizmi?"
+        }
+      },
+      {
+        "t_start_ms": 38510,
+        "t_end_ms": 41060,
+        "speaker": "Javlon",
+        "text_en": "Yes, I'd love to. Thanks!",
+        "gloss": {
+          "ru": "Да, с удовольствием. Спасибо!",
+          "uz": "Ha, jon deb. Rahmat!"
+        }
+      },
+      {
+        "t_start_ms": 41360,
+        "t_end_ms": 44830,
+        "speaker": "Rebecca",
+        "text_en": "Your first meeting is at eleven, in room three.",
+        "gloss": {
+          "ru": "Ваша первая встреча в одиннадцать, в комнате три.",
+          "uz": "Birinchi yigʻilishingiz soat oʻn birda, uchinchi xonada."
+        }
+      },
+      {
+        "t_start_ms": 45130,
+        "t_end_ms": 47220,
+        "speaker": "Javlon",
+        "text_en": "Sorry, which room?",
+        "gloss": {
+          "ru": "Простите, в какой комнате?",
+          "uz": "Kechirasiz, qaysi xonada?"
+        }
+      },
+      {
+        "t_start_ms": 47520,
+        "t_end_ms": 50300,
+        "speaker": "Rebecca",
+        "text_en": "Room three, on the second floor.",
+        "gloss": {
+          "ru": "В третьей, на втором этаже.",
+          "uz": "Uchinchi xonada, ikkinchi qavatda."
+        }
+      },
+      {
+        "t_start_ms": 50600,
+        "t_end_ms": 52920,
+        "speaker": "Javlon",
+        "text_en": "Got it. Thank you!",
+        "gloss": {
+          "ru": "Понял. Спасибо!",
+          "uz": "Tushundim. Rahmat!"
+        }
+      }
+    ],
+    "phrases": [
+      {
+        "en": "Welcome to the team!",
+        "gloss": {
+          "ru": "Добро пожаловать в команду!",
+          "uz": "Jamoaga xush kelibsiz!"
+        },
+        "t_ms": 500
+      },
+      {
+        "en": "Let me show you around",
+        "gloss": {
+          "ru": "Давайте я вам всё покажу",
+          "uz": "Keling, sizga hammasini koʻrsataman"
+        },
+        "t_ms": 12270
+      },
+      {
+        "en": "next to the window",
+        "gloss": {
+          "ru": "у окна",
+          "uz": "deraza yonida"
+        },
+        "t_ms": 19620
+      },
+      {
+        "en": "What do you do?",
+        "gloss": {
+          "ru": "Чем вы занимаетесь?",
+          "uz": "Nima ish qilasiz?"
+        },
+        "t_ms": 26930
+      },
+      {
+        "en": "I work with the finance team",
+        "gloss": {
+          "ru": "Я работаю с финансовым отделом",
+          "uz": "Moliya jamoasi bilan ishlayman"
+        },
+        "t_ms": 30010
+      },
+      {
+        "en": "Do you want to join us?",
+        "gloss": {
+          "ru": "Хотите присоединиться к нам?",
+          "uz": "Bizga qoʻshilasizmi?"
+        },
+        "t_ms": 34010
+      },
+      {
+        "en": "Sorry, which room?",
+        "gloss": {
+          "ru": "Простите, какая комната?",
+          "uz": "Kechirasiz, qaysi xona?"
+        },
+        "t_ms": 45130
+      },
+      {
+        "en": "Got it",
+        "gloss": {
+          "ru": "Понял(а)",
+          "uz": "Tushundim"
+        },
+        "t_ms": 50600
+      }
+    ],
+    "audio_blob_id": null,
+    "embed": null,
+    "rights": {
+      "owner": "TilHero",
+      "license_type": "own",
+      "license_ref": null,
+      "attribution": null,
+      "territories": [
+        "UZ"
+      ],
+      "valid_from": "2026-11-01",
+      "valid_to": null,
+      "allowed_uses": [
+        "listen",
+        "show_transcript",
+        "exercises",
+        "dictionary",
+        "translation"
+      ]
+    }
+  },
+  {
+    "asset_id": "m-own-weekend-plans",
+    "type": "dialogue",
+    "origin": "own_recording",
+    "title": {
+      "ru": "Диалог «Планы на выходные»",
+      "uz": "Suhbat: dam olish kunlari rejalari"
+    },
+    "original_title": "Weekend Plans",
+    "language": "en",
+    "level": "A2",
+    "topics": [
+      "hobbies",
+      "small_talk"
+    ],
+    "skill_ids": [
+      "en.func.free-time",
+      "en.gram.future-going-to",
+      "en.gram.past-simple"
+    ],
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "duration_s": 55,
+    "transcript": [
+      {
+        "t_start_ms": 500,
+        "t_end_ms": 3510,
+        "speaker": "Aziza",
+        "text_en": "Hi, Jack! Any plans for the weekend?",
+        "gloss": {
+          "ru": "Привет, Джек! Есть планы на выходные?",
+          "uz": "Salom, Jek! Dam olish kunlariga rejalaring bormi?"
+        }
+      },
+      {
+        "t_start_ms": 3810,
+        "t_end_ms": 7740,
+        "speaker": "Jack",
+        "text_en": "Yes! On Saturday I'm going to play football with my friends.",
+        "gloss": {
+          "ru": "Да! В субботу собираюсь играть в футбол с друзьями.",
+          "uz": "Ha! Shanba kuni doʻstlarim bilan futbol oʻynamoqchiman."
+        }
+      },
+      {
+        "t_start_ms": 8040,
+        "t_end_ms": 10590,
+        "speaker": "Aziza",
+        "text_en": "Nice! Where do you play?",
+        "gloss": {
+          "ru": "Здорово! А где вы играете?",
+          "uz": "Zoʻr! Qayerda oʻynaysizlar?"
+        }
+      },
+      {
+        "t_start_ms": 10890,
+        "t_end_ms": 14820,
+        "speaker": "Jack",
+        "text_en": "In the park near my house. We play every Saturday morning.",
+        "gloss": {
+          "ru": "В парке рядом с домом. Мы играем каждую субботу утром.",
+          "uz": "Uyim yaqinidagi bogʻda. Har shanba ertalab oʻynaymiz."
+        }
+      },
+      {
+        "t_start_ms": 15120,
+        "t_end_ms": 18590,
+        "speaker": "Jack",
+        "text_en": "What about you? What are you going to do?",
+        "gloss": {
+          "ru": "А ты? Что собираешься делать?",
+          "uz": "Sen-chi? Nima qilmoqchisan?"
+        }
+      },
+      {
+        "t_start_ms": 18890,
+        "t_end_ms": 22130,
+        "speaker": "Aziza",
+        "text_en": "I'm going to visit my grandma in Samarkand.",
+        "gloss": {
+          "ru": "Собираюсь навестить бабушку в Самарканде.",
+          "uz": "Samarqanddagi buvimni koʻrgani bormoqchiman."
+        }
+      },
+      {
+        "t_start_ms": 22430,
+        "t_end_ms": 25670,
+        "speaker": "Jack",
+        "text_en": "Oh! How are you going to get there?",
+        "gloss": {
+          "ru": "О! А как ты туда доберёшься?",
+          "uz": "Voy! U yerga qanday borasan?"
+        }
+      },
+      {
+        "t_start_ms": 25970,
+        "t_end_ms": 28980,
+        "speaker": "Aziza",
+        "text_en": "By train. It takes about two hours.",
+        "gloss": {
+          "ru": "На поезде. Это около двух часов.",
+          "uz": "Poyezdda. Taxminan ikki soat yuradi."
+        }
+      },
+      {
+        "t_start_ms": 29280,
+        "t_end_ms": 32520,
+        "speaker": "Jack",
+        "text_en": "That's quick! What do you usually do there?",
+        "gloss": {
+          "ru": "Быстро! А что ты там обычно делаешь?",
+          "uz": "Tez ekan! U yerda odatda nima qilasan?"
+        }
+      },
+      {
+        "t_start_ms": 32820,
+        "t_end_ms": 36290,
+        "speaker": "Aziza",
+        "text_en": "We cook together and walk in the old city.",
+        "gloss": {
+          "ru": "Мы вместе готовим и гуляем по старому городу.",
+          "uz": "Birga ovqat pishiramiz va eski shaharda sayr qilamiz."
+        }
+      },
+      {
+        "t_start_ms": 36590,
+        "t_end_ms": 40060,
+        "speaker": "Jack",
+        "text_en": "Sounds lovely. Last weekend I just stayed at home.",
+        "gloss": {
+          "ru": "Звучит чудесно. А я в прошлые выходные просто сидел дома.",
+          "uz": "Juda yoqimli. Men oʻtgan dam olish kunlari shunchaki uyda qoldim."
+        }
+      },
+      {
+        "t_start_ms": 40360,
+        "t_end_ms": 42910,
+        "speaker": "Aziza",
+        "text_en": "Really? What did you do?",
+        "gloss": {
+          "ru": "Правда? И что делал?",
+          "uz": "Rostdanmi? Nima qilding?"
+        }
+      },
+      {
+        "t_start_ms": 43210,
+        "t_end_ms": 46450,
+        "speaker": "Jack",
+        "text_en": "I watched films and cleaned my room. Boring!",
+        "gloss": {
+          "ru": "Смотрел фильмы и убирался в комнате. Скукота!",
+          "uz": "Kino koʻrdim va xonamni yigʻishtirdim. Zerikarli!"
+        }
+      },
+      {
+        "t_start_ms": 46750,
+        "t_end_ms": 49990,
+        "speaker": "Aziza",
+        "text_en": "Ha-ha! Well, have a great game on Saturday!",
+        "gloss": {
+          "ru": "Ха-ха! Что ж, хорошей игры в субботу!",
+          "uz": "Ha-ha! Xoʻp, shanba kungi oʻyining zoʻr oʻtsin!"
+        }
+      },
+      {
+        "t_start_ms": 50290,
+        "t_end_ms": 52840,
+        "speaker": "Jack",
+        "text_en": "Thanks! Have a good trip!",
+        "gloss": {
+          "ru": "Спасибо! Хорошей поездки!",
+          "uz": "Rahmat! Yoʻling bexatar boʻlsin!"
+        }
+      }
+    ],
+    "phrases": [
+      {
+        "en": "Any plans for the weekend?",
+        "gloss": {
+          "ru": "Есть планы на выходные?",
+          "uz": "Dam olish kunlariga rejalar bormi?"
+        },
+        "t_ms": 500
+      },
+      {
+        "en": "I'm going to play football",
+        "gloss": {
+          "ru": "Я собираюсь играть в футбол",
+          "uz": "Futbol oʻynamoqchiman"
+        },
+        "t_ms": 3810
+      },
+      {
+        "en": "every Saturday morning",
+        "gloss": {
+          "ru": "каждую субботу утром",
+          "uz": "har shanba ertalab"
+        },
+        "t_ms": 10890
+      },
+      {
+        "en": "What about you?",
+        "gloss": {
+          "ru": "А ты? / А вы?",
+          "uz": "Sen-chi? / Siz-chi?"
+        },
+        "t_ms": 15120
+      },
+      {
+        "en": "It takes about two hours",
+        "gloss": {
+          "ru": "Это занимает около двух часов",
+          "uz": "Taxminan ikki soat vaqt oladi"
+        },
+        "t_ms": 25970
+      },
+      {
+        "en": "I just stayed at home",
+        "gloss": {
+          "ru": "Я просто остался(-ась) дома",
+          "uz": "Shunchaki uyda qoldim"
+        },
+        "t_ms": 36590
+      },
+      {
+        "en": "Have a good trip!",
+        "gloss": {
+          "ru": "Хорошей поездки!",
+          "uz": "Yoʻlingiz bexatar boʻlsin!"
+        },
+        "t_ms": 50290
+      }
+    ],
+    "audio_blob_id": null,
+    "embed": null,
+    "rights": {
+      "owner": "TilHero",
+      "license_type": "own",
+      "license_ref": null,
+      "attribution": null,
+      "territories": [
+        "UZ"
+      ],
+      "valid_from": "2026-11-01",
+      "valid_to": null,
+      "allowed_uses": [
+        "listen",
+        "show_transcript",
+        "exercises",
+        "dictionary",
+        "translation"
+      ]
+    }
+  }
+]

@@ -3,7 +3,10 @@
  * Every interface string of admin-web lives here or in en.ts (test: no Cyrillic outside src/i18n). Learner-facing
  * texts of the previews (RU/UZ) live in learner.ts.
  */
+import { ruContent } from "./ru.content";
+
 export const ru = {
+  ...ruContent,
   /* account */
   "account.changePwd": "Сменить пароль",
   "account.idle": "Выход после {n} мин бездействия",
@@ -837,7 +840,7 @@ export const ru = {
   "role.desc.analyst": "обзор и ученики, только чтение",
   "role.desc.auditor": "обзор и журнал аудита",
   "role.desc.communications": "«Что нового», шаблоны уведомлений, рассылки",
-  "role.desc.methodist": "ученики без раскрытия; контент — спринт 3",
+  "role.desc.methodist": "курс, уроки, сценарии, рубрики: правка, проверка, публикация; ученики без раскрытия",
   "role.desc.operations": "конфигурация, поддержка, ученики, аудит",
   "role.desc.read_only": "только обзор",
   "role.desc.super_admin": "все права, MFA обязательна",

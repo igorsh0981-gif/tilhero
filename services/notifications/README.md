@@ -67,6 +67,7 @@ admin.ts, `*_name` сотрудников — `null` (заполняет admin-b
 | | `social.family.member_added.v1` | `role=owner` — проекция владельца семьи (`family_owners`); `child` — без сообщения (добавил сам родитель); `adult`/`teen` → `family.joined` владельцу, ключ `family.joined:<owner>:<member>`; владелец неизвестен → без сообщения (WARNING) |
 | `notifications.support` | `support.ticket.replied.v1`, `support.ticket.status.changed.v1` (→ RESOLVED) | `support.reply` / `support.resolved` (`support` — всегда включена), кнопка `ticket_<number>`; текст ответа в уведомление не кладётся |
 | `notifications.product` | `experience.release_note.published.v1` | сохраняется в `broadcasts`; запись центра (`release_note.published`, `product`, `in_app_only`) создаётся ученику при чтении центра — см. «Что нового» |
+| `notifications.catalog` | `catalog.media_request.decided.v1` (спринт 3, только от `catalog`: от другого издателя — WARNING без `user_id`, без записи) | `media_request.decided` → ученику, `support` (всегда включена), ключ `media_request.decided:<request>:<status>` (повтор того же решения — без дубля, изменённое решение — новое сообщение); дальше — общая политика (выключатель, тихие часы, правила детей 6–13, хотя заявки бывают только у аккаунтов 14+). Название заявки в журнал (лог) не пишется |
 | `notifications.user_deleted` | `user.deletion.requested.v1` (только от `identity-consent`, ревью P-7: от другого издателя — предупреждение в логе с типом события и издателем, без `user_id`; подтверждение шине без удаления и без ACK) | `deleted_users` + удаление журнала/центра ученика, записей других учеников с его именем (`subject_user_id`), `missed_state`, `inbox_state`, проекции семьи, кэшей → `user.domain.deleted.v1 {domain: notifications, mode: deleted}`; запоздавшие события для удалённого — без записи |
 | `notifications.delivery_cache` | `user.status.changed.v1`, `consent.revoked.v1`, `user.notification_settings.changed.v1`, `user.profile.updated.v1` | сброс кэша адресации и имени |
 
@@ -111,11 +112,18 @@ scheduled | unscheduled | stopped | finished | failed | test_sent` (object_type 
 | `invite.pending` | social | `invite_<invite_id>` |
 | `support.reply`, `support.resolved` | support | `ticket_<number>` |
 | `release_note.published` | product | `route_news` |
+| `media_request.decided` (спринт 3) | support | `route_media_requests` |
 | `pin.reset_code` (только синхронный HTTP, не в центре) | service | — |
 
 Детские тексты — родителю, с именем ребёнка, мягкие: без «потери серии», «провала», давления (тест
 `test_kid_texts_are_soft_and_name_the_child`). PII в текстах — только имя ребёнка родителю и имя
 пригласившего/принявшего/нового участника семьи (identity-consent `/public`, без username и Telegram ID).
+
+`media_request.decided` (AT-30): плейсхолдеры `{request_title}` (название из заявки ученика: очищено от управляющих
+символов, ≤ 80 символов с «…») и `{decision}` (на языке ученика: authored_alternative — «подобран авторский аналог»,
+licensed — «материал лицензирован и добавлен», rejected — «заявка отклонена», duplicate — «такая заявка уже есть»).
+Комментарий сотрудника (`decision_note`) в уведомление не кладётся — его нет в событии, ученик читает его на экране
+заявок в Mini App (как текст ответа поддержки). Детского варианта нет.
 
 ## Версии шаблонов (спринт 2)
 Код (`templates.py`) — тексты по умолчанию; у редактируемого `TemplateSpec` — `description`, `placeholder_names`,
@@ -135,7 +143,9 @@ scheduled | unscheduled | stopped | finished | failed | test_sent` (object_type 
 503). Chat id — только в настройке: в ответе маска, в логах и аудите — индекс.
 
 ## Рассылки (спринт 2, AT-22)
-Категория `product`, kind `campaign`. Аудиторию отбирает identity-consent (`GET /internal/v1/audience[/count]?ui_lang=&age=&onboarded=&active_days=`,
+Категория `product`, kind `campaign`. Маршрут кнопки — из каталога `packages/contracts/release-notes.json`
+(`campaigns.ROUTES`; спринт 3 — + `diagnostics`, `plan`, `skills`, `scenarios`, `media`, `media_requests`,
+`languages`). Аудиторию отбирает identity-consent (`GET /internal/v1/audience[/count]?ui_lang=&age=&onboarded=&active_days=`,
 `age` по умолчанию `adults`). `POST …:dispatch` сначала выполняет шаги рассылок (`campaigns.Runner`, не больше
 `CAMPAIGN_MAX_BATCHES_PER_CALL`), затем отправку: 1) `scheduled` с `send_at ≤ now` → `sending`, фиксация
 `audience_count` (identity-consent недоступен — запуск при следующем вызове); 2) страницы аудитории по

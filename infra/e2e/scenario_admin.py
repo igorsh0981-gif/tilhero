@@ -70,6 +70,8 @@ ALL_PERMS = {
     "dashboard.read", "users.read", "users.sensitive.read", "support.read", "support.reply", "support.manage",
     "audit.read", "config.read", "config.edit", "config.publish", "whatsnew.manage", "whatsnew.publish",
     "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send", "staff.manage", "roles.manage",
+    # спринт 3 (admin-identity 0003): контент, права на медиа, языки
+    "content.read", "content.edit", "content.review", "content.publish", "media.rights", "lang.manage",
 }
 COMMS_PERMS = {"dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage",
                "notif.campaigns.manage", "notif.campaigns.send"}

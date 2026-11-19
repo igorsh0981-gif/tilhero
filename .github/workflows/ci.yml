@@ -33,6 +33,8 @@ jobs:
           - services/experience-config
           - services/admin-identity
           - services/user-admin
+          - services/catalog
+          - services/diagnostics
           - apps/telegram-bot-gateway
           - infra/n8n
           - infra/railway
@@ -98,6 +100,8 @@ jobs:
           - services/experience-config
           - services/admin-identity
           - services/user-admin
+          - services/catalog
+          - services/diagnostics
           - apps/telegram-bot-gateway
           - infra/n8n
           - infra/railway
@@ -172,6 +176,8 @@ jobs:
           - services/experience-config
           - services/admin-identity
           - services/user-admin
+          - services/catalog
+          - services/diagnostics
           - apps/telegram-bot-gateway
           - services/telegram-bff
           - apps/telegram-miniapp

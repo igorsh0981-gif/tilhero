@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TilHero — сквозной локальный стенд спринтов 1–2: все сервисы на реальных PG/Redis/NATS + мок Telegram Bot API.
+# TilHero — сквозной локальный стенд спринтов 1–3: все сервисы на реальных PG/Redis/NATS + мок Telegram Bot API.
 # Перенесён из aievent (infra/e2e/run_local.sh) — только то, что нужно TilHero, без туристического контура.
 #
 #   infra/e2e/run_local.sh up        — ключи внутреннего JWT (Ed25519 на издателя, как в prod), bootstrap ролей БД
@@ -9,6 +9,8 @@
 #                                      (спринт 1, Mini App) + infra/e2e/scenario_admin.py (спринт 2, админка через
 #                                      admin-bff); у каждого — PASS/FAIL по шагам и «Итого: N/M PASS»
 #   infra/e2e/run_local.sh admin     — сброс учёток admin-identity + up + только infra/e2e/scenario_admin.py
+#   infra/e2e/run_local.sh content   — сброс учёток admin-identity + up + только infra/e2e/scenario_content.py
+#                                      (спринт 3: контент, диагностика, план, практика — Mini App и админка)
 #   infra/e2e/run_local.sh ui [TGID] — дополнительно Mini App (vite :5173) с VITE_DEV_INIT_DATA для Telegram ID TGID
 #   infra/e2e/run_local.sh status    — состояние процессов и /health/ready
 #   infra/e2e/run_local.sh restart [name] — перезапустить один сервис (после правки кода) или всё
@@ -17,7 +19,9 @@
 # Порты (docs/ARCHITECTURE.md): identity-consent 8101, learning-plan 8102, support 8103, notifications 8104, audit 8105,
 # experience-config 8106, telegram-bot-gateway 8107 (публичный: webhook + health) + 8108 (внутренний API),
 # social 8109, telegram-bff 8001, мок Telegram 8190, Mini App 5173; админ-контур (спринт 2): admin-identity 8120,
-# user-admin 8121, admin-bff 8002 (Node, tsx; Origin admin-web — E2E_ADMIN_ORIGIN, сам admin-web не поднимается).
+# user-admin 8121, admin-bff 8002 (Node, tsx; Origin admin-web — E2E_ADMIN_ORIGIN, сам admin-web не поднимается);
+# контент (спринт 3): catalog 8110 (сид курса, сценариев и медиа — миграцией), diagnostics 8111 (сид тестов — миграцией).
+# catalog:tick (истечение прав медиа) на стенде вызывает сценарий с E2E_SCHEDULER_TOKEN, как n8n.
 # Сценарий спринта 2 входит bootstrap-учёткой admin-identity (временный пароль → смена → TOTP), а bootstrap срабатывает
 # только при старте admin-identity и только без активного super_admin, — поэтому `test` и `admin` перед прогоном
 # сбрасывают сотрудников и заявки admin-identity (матрица ролей — сид миграции — остаётся) и их ключи Redis (reset_admin).
@@ -81,6 +85,8 @@ PY_SERVICES=(
   "notifications|services/notifications|tilhero_notifications.main:app|8104|notifications"
   "admin-identity|services/admin-identity|tilhero_admin_identity.main:app|8120|admin_identity"
   "user-admin|services/user-admin|tilhero_user_admin.main:app|8121|user_admin"
+  "catalog|services/catalog|tilhero_catalog.main:app|8110|catalog"
+  "diagnostics|services/diagnostics|tilhero_diagnostics.main:app|8111|diagnostics"
 )
 
 log() { printf '\033[1;34m[e2e]\033[0m %s\n' "$*"; }
@@ -126,7 +132,11 @@ svc_env() {
       env="$env IDENTITY_CONSENT_URL=http://127.0.0.1:8101 LEARNING_PLAN_URL=http://127.0.0.1:8102"
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN" ;;
     learning-plan)
+      env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110" ;;
+    catalog)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN" ;;
+    diagnostics)
+      env="$env CATALOG_URL=http://127.0.0.1:8110" ;;
     social)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN INVITE_TOKEN_KEY=$E2E_INVITE_TOKEN_KEY"
       env="$env TELEGRAM_APP_LINK=$E2E_TELEGRAM_APP_LINK IDENTITY_CONSENT_URL=http://127.0.0.1:8101" ;;
@@ -240,6 +250,7 @@ up() {
     TELEGRAM_APP_LINK="$E2E_TELEGRAM_APP_LINK" \
     IDENTITY_URL=http://127.0.0.1:8101 LEARNING_PLAN_URL=http://127.0.0.1:8102 SUPPORT_URL=http://127.0.0.1:8103 \
     NOTIFICATIONS_URL=http://127.0.0.1:8104 EXPERIENCE_URL=http://127.0.0.1:8106 SOCIAL_URL=http://127.0.0.1:8109 \
+    CATALOG_URL=http://127.0.0.1:8110 DIAGNOSTICS_URL=http://127.0.0.1:8111 \
     RATE_LIMIT_SESSION_IP_PER_MIN="${E2E_RATE_LIMIT_SESSION_IP_PER_MIN:-500}" \
     RATE_LIMIT_USER_PER_MIN="${E2E_RATE_LIMIT_USER_PER_MIN:-600}" \
     RATE_LIMIT_PUBLIC_IP_PER_MIN="${E2E_RATE_LIMIT_PUBLIC_IP_PER_MIN:-600}" \
@@ -256,6 +267,7 @@ up() {
     ADMIN_IDENTITY_URL=http://127.0.0.1:8120 USER_ADMIN_URL=http://127.0.0.1:8121 \
     IDENTITY_URL=http://127.0.0.1:8101 SUPPORT_URL=http://127.0.0.1:8103 NOTIFICATIONS_URL=http://127.0.0.1:8104 \
     AUDIT_URL=http://127.0.0.1:8105 EXPERIENCE_URL=http://127.0.0.1:8106 \
+    CATALOG_URL=http://127.0.0.1:8110 DIAGNOSTICS_URL=http://127.0.0.1:8111 \
     RATE_LIMIT_LOGIN_IP_PER_MIN="${E2E_RATE_LIMIT_LOGIN_IP_PER_MIN:-60}" \
     RATE_LIMIT_AUTH_STEP_IP_PER_MIN="${E2E_RATE_LIMIT_AUTH_STEP_IP_PER_MIN:-120}" \
     npx tsx src/main.ts
@@ -321,7 +333,7 @@ stop_one() {
 
 stop() {
   local f
-  for f in miniapp admin-bff telegram-bff user-admin admin-identity notifications telegram-bot-gateway social support \
+  for f in miniapp admin-bff telegram-bff diagnostics catalog user-admin admin-identity notifications telegram-bot-gateway social support \
            learning-plan identity-consent experience-config audit mock-telegram; do
     stop_one "$f"
   done
@@ -352,11 +364,16 @@ case "${1:-up}" in
     uv run --quiet python infra/e2e/scenario.py "${@:2}" || rc=1
     echo
     uv run --quiet python infra/e2e/scenario_admin.py || rc=1
+    # сценарий спринта 3 тоже входит bootstrap-учёткой, а scenario_admin уже сменил её пароль — свежий bootstrap
+    if [ -f infra/e2e/scenario_content.py ]; then
+      echo; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_content.py || rc=1
+    fi
     exit $rc ;;
+  content) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_content.py "$@" ;;
   admin) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_admin.py "$@" ;;  # уборка — в шаге A00
   stop|down) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi ;;
   restart) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi; up ;;
   status) status ;;
-  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|ui [tg_id]|status|stop [name]|restart [name]"
+  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|content [аргументы]|ui [tg_id]|status|stop [name]|restart [name]"
      exit 2 ;;
 esac

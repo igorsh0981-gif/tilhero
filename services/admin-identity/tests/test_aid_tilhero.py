@@ -233,14 +233,118 @@ async def test_migration_downgrade_and_reapply() -> None:
     conn = await asyncpg.connect(TEST_ADMIN_URL, server_settings={"search_path": schema})
     try:
         await migrate(SERVICE_DIR, settings)
-        assert await conn.fetchval("SELECT count(*) FROM role_permissions") == 17 + 7 + 6 + 4 + 2 + 2 + 2 + 1
+        # 0001: 17 + 7 + 6 + 4 + 2 + 2 + 2 + 1; 0003: super_admin +6, methodist +4, content_manager 4,
+        # operations / analyst / auditor +1
+        assert await conn.fetchval("SELECT count(*) FROM role_permissions") == 41 + 6 + 4 + 4 + 3
         await asyncio.to_thread(command.downgrade, cfg, "base")
         tables = {r[0] for r in await conn.fetch(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = $1", schema)}
         assert tables <= {"alembic_version"}
         await migrate(SERVICE_DIR, settings)
-        assert await conn.fetchval("SELECT count(*) FROM roles") == 8
-        assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0002"
+        assert await conn.fetchval("SELECT count(*) FROM roles") == 9
+        assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0003"
     finally:
         await conn.close()
         await drop_schema(schema)
+
+
+# ---------------------------------------------------------------- спринт 3: права контента (миграция 0003)
+
+async def test_migration_0003_on_live_matrix() -> None:
+    """0003 поверх действующей матрицы спринта 2: права добавляются, а не заменяют изменённые через four-eyes;
+    methodist становится привилегированным — сессии его сотрудников отзываются (как при role.permissions_change),
+    остальные не трогаются; откат к 0002 возвращает матрицу и переводит content_manager в read_only."""
+    schema = unique_schema("adminid_m3")
+    await create_schema(schema)
+    settings = make_settings(database_url=TEST_ADMIN_URL, db_schema=schema)
+    cfg = Config(str(Path(SERVICE_DIR) / "alembic.ini"))
+    cfg.set_main_option("script_location", str(Path(SERVICE_DIR) / "migrations"))
+    cfg.attributes["settings"] = settings
+    conn = await asyncpg.connect(TEST_ADMIN_URL, server_settings={"search_path": schema})
+    meth, an = uuid.uuid4(), uuid.uuid4()
+    try:
+        await asyncio.to_thread(command.upgrade, cfg, "0002")
+        # матрица изменена через four-eyes в спринте 2: аналитикам выдан журнал аудита
+        await conn.execute("INSERT INTO role_permissions (role, permission) VALUES ('analyst', 'audit.read')")
+        for sid, role, email in ((meth, "methodist", "m@tilhero.test"), (an, "analyst", "a@tilhero.test")):
+            await conn.execute("INSERT INTO staff (staff_id, email, display_name, role) VALUES ($1, $2, 'X', $3)",
+                               sid, email, role)
+        assert not await conn.fetchval("SELECT privileged FROM roles WHERE code = 'methodist'")
+
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+        perms = {r: sorted(p for (role, p) in await conn.fetch("SELECT role, permission FROM role_permissions")
+                           if role == r) for r in ("analyst", "methodist", "content_manager", "super_admin")}
+        assert perms["analyst"] == ["audit.read", "content.read", "dashboard.read", "users.read"]
+        assert perms["methodist"] == ["content.edit", "content.publish", "content.read", "content.review",
+                                      "dashboard.read", "users.read"]
+        assert perms["content_manager"] == ["content.edit", "content.read", "dashboard.read", "media.rights"]
+        assert len(perms["super_admin"]) == 23
+        privileged = {r["code"] for r in await conn.fetch("SELECT code FROM roles WHERE privileged")}
+        assert privileged == {"super_admin", "operations", "communications", "methodist", "content_manager"}
+        versions = {r["staff_id"]: r["session_version"] for r in await conn.fetch(
+            "SELECT staff_id, session_version FROM staff")}
+        assert versions[meth] == 2 and versions[an] == 1
+        name = await conn.fetchrow("SELECT name_ru, name_en FROM roles WHERE code = 'content_manager'")
+        assert tuple(name) == ("Контент-менеджер", "Content manager")
+        # повторный прогон безопасен (ON CONFLICT): head → 0002 → head
+        cm = uuid.uuid4()
+        await conn.execute("INSERT INTO staff (staff_id, email, display_name, role) VALUES ($1, 'c@tilhero.test', "
+                           "'C', 'content_manager')", cm)
+        await asyncio.to_thread(command.downgrade, cfg, "0002")
+        assert await conn.fetchval("SELECT count(*) FROM roles WHERE code = 'content_manager'") == 0
+        assert await conn.fetchval("SELECT role FROM staff WHERE staff_id = $1", cm) == "read_only"
+        assert await conn.fetchval("SELECT count(*) FROM role_permissions WHERE permission LIKE 'content.%' "
+                                   "OR permission IN ('media.rights', 'lang.manage')") == 0
+        privileged = {r["code"] for r in await conn.fetch("SELECT code FROM roles WHERE privileged")}
+        assert privileged == {"super_admin", "operations", "communications"}
+        assert await conn.fetchval("SELECT count(*) FROM role_permissions WHERE role = 'analyst' "
+                                   "AND permission = 'audit.read'") == 1
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+        assert await conn.fetchval("SELECT count(*) FROM roles") == 9
+    finally:
+        await conn.close()
+        await drop_schema(schema)
+
+
+async def test_sprint3_roles_privileged_by_step_up_rights(env: Env, root: Person, root2: Person) -> None:
+    """methodist (content.publish) и content_manager (media.rights) — привилегированные по правилу спринта 2:
+    назначение — four-eyes (учётка создаётся в read_only), вход — с обязательным TOTP; principal несёт права
+    контента; права только на чтение (operations/analyst/auditor + content.read) роль не делают привилегированной."""
+    for code, perms in (("methodist", {"content.read", "content.edit", "content.review", "content.publish"}),
+                        ("content_manager", {"content.read", "content.edit", "media.rights", "dashboard.read"})):
+        c = await env.create_staff(root.actor, new_email(code.replace("_", "")), code)
+        assert c.status_code == 201, c.text
+        body = c.json()
+        assert body["approval"]["kind"] == "staff.create_privileged" and body["staff"]["role"] == "read_only"
+        assert body["temporary_password"] is None
+        ok = await env.approve(root2.actor, body["approval"]["approval_id"])
+        assert ok.status_code == 200 and ok.json()["status"] == "APPLIED"
+        temp = ok.json()["temporary_password"]
+        person = await env.first_login(body["staff"]["email"], temp)
+        assert person.secret is not None and person.principal["mfa_enabled"] is True
+        assert person.principal["staff"]["role"] == code
+        assert perms <= set(person.principal["permissions"])
+        assert "lang.manage" not in person.principal["permissions"]
+    roles = {r["code"]: r for r in (await env.c.get("/admin/v1/roles", headers=env.h(root.actor))).json()["items"]}
+    for code in ("operations", "analyst", "auditor"):
+        assert "content.read" in roles[code]["permissions"], code
+    assert roles["analyst"]["privileged"] is False and roles["auditor"]["privileged"] is False
+    assert roles["content_manager"]["name"] == {"ru": "Контент-менеджер", "en": "Content manager"}
+
+
+async def test_role_update_accepts_sprint3_permissions(env: Env, root: Person, root2: Person) -> None:
+    """Через four-eyes роли можно выдать новые права; lang.manage (step-up) делает роль привилегированной —
+    сессии её сотрудников отзываются, вход — с подключением TOTP."""
+    an = await env.onboard(root.actor, new_email("an3"), "analyst")
+    assert an.secret is None
+    upd = await env.c.put("/admin/v1/roles/analyst",
+                          json={"permissions": ["dashboard.read", "users.read", "content.read", "lang.manage"],
+                                "reason": "Аналитики ведут справочник языков"}, headers=env.h(root.actor))
+    assert upd.status_code == 202, upd.text
+    assert (await env.approve(root2.actor, upd.json()["approval"]["approval_id"])).status_code == 200
+    p = (await env.principal(an.staff_id)).json()
+    assert p["session_version"] == an.principal["session_version"] + 1 and "lang.manage" in p["permissions"]
+    assert (await env.login(an.email, an.password)).json()["next"] == "mfa_enroll"
+    bad = await env.c.put("/admin/v1/roles/analyst", json={"permissions": ["content.delete"], "reason": "Нет"},
+                          headers=env.h(root.actor))
+    assert bad.status_code == 422

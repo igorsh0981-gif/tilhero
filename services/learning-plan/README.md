@@ -5,8 +5,11 @@
 учёт занятий, слоты графика → события «напомнить» и «пропуск» (INTERNAL_API §2, PLAN.md «Правила напоминаний»,
 AT-04…08).
 
+Спринт 3: **траектория уроков** — последовательность уроков опубликованного курса по цели, диагностике и карте
+навыков, обязательные и дополнительные, «почему следующий», ревизии с историей (INTERNAL_API спринта 3 §3, AT-36, AT-34).
+
 Порт 8102, схема PostgreSQL `learning_plan`, внутренний JWT с `aud = learning-plan`. Redis не нужен.
-Пакет `tilhero_learning_plan`.
+Пакет `tilhero_learning_plan`. Исходящие вызовы: catalog (снимок курса).
 
 ## API
 Клиентский API вызывает только `telegram-bff` (`iss`); ученик — только из `sub` токена (BFF кладёт туда активного
@@ -22,6 +25,8 @@ AT-04…08).
 | GET | `/internal/v1/directory/goals`, `/internal/v1/directory/topics` | → `{items: DirectoryItem[]}` (6 целей, 12 тем, RU/UZ) |
 | POST | `/internal/v1/plan:tick` | n8n, `Authorization: Bearer <SCHEDULER_TOKEN>` → `{plans_checked, reminders, missed, skipped}`; пока идёт предыдущий tick — сразу 200 `{…, skipped: true}` |
 | GET | `/admin/v1/plans?updated_after=&cursor=&limit=` | спринт 2, **только `user-admin`** (внутренний JWT без actor; actor от него — 403 `ACTOR_NOT_ALLOWED`) → `{items: [{user_id, goal, level_self, ui_lang, schedule, onboarding_completed_at, updated_at}], next_cursor}` — сверка read-модели админки. Курсор `(updated_at, user_id)` по возрастанию (индекс `ix_plans_updated`, миграция 0002); `updated_after` — ISO-8601 с часовым поясом, строго позже (без зоны — 422); `limit` 1..500 (100); 400 `INVALID_CURSOR`. План по умолчанию (без события) тоже выгружается; планов удалённых учеников нет |
+
+| GET | `/internal/v1/plan/trajectory?pair_id=&audience=` | спринт 3 → `Trajectory` (bff.ts); `pair_id` `^[a-z]{2,8}-[a-z]{2,8}$`, по умолчанию `DEFAULT_PAIR` (ru-en); `audience` (`kids\|teens\|adults`, необязательный, **расширение контракта**) — сегмент активного ученика от BFF (как `audience=` у catalog). 409 `PAIR_NOT_AVAILABLE {pair_id}` (пары нет в `PAIR_COURSES` или catalog: курс не опубликован — 404), 410 `USER_DELETED`, 503 `CATALOG_UNAVAILABLE` (catalog недоступен и снимка в кеше нет), 422 `VALIDATION_ERROR` |
 
 План по умолчанию: `goal`/`level_self` null, тем нет, `ui_lang`/`explain_lang` = ru, `course_pair` = ru-en,
 `daily` (1..7), 19:00, 20 минут, напоминания выключены, `version` = 1. Создание по умолчанию — не правка: события нет.
@@ -63,6 +68,51 @@ AT-04…08).
 нет → 400 `IDEMPOTENCY_KEY_REQUIRED`, неверный → 422 `IDEMPOTENCY_KEY_INVALID`; повтор с тем же телом → тот же
 результат + `Idempotent-Replayed: true` без новой записи и события; с другим телом → 422 `IDEMPOTENCY_KEY_REUSED`.
 Занятие задним числом за день пропуска снимает пропуск в `week` и не рвёт серию.
+
+## Траектория уроков (спринт 3)
+Навык `curriculum_planner` — детерминированными правилами без LLM (`domain/curriculum.py`, чистые функции):
+
+1. **Аудитория**: детям 6–13 — только уроки с `audience ∋ kids`, подросткам — `∋ teens`, взрослым — `∋ adults`.
+   Сегмент: `?audience=` от BFF, иначе проекция профиля (`learner_audience`); **детский «липкий»** — если ребёнок по
+   любому источнику, только детские уроки (подсказка BFF и событие профиля его не понижают); ничего не известно —
+   `kids` (самый строгий набор). Порядок курса — модули снимка по порядку, внутри — `lesson_ids` модуля.
+2. **Старт**: есть диагностика — `recommended_start_lesson_id` (если core и подходит аудитории), иначе правило
+   diagnostics: первый core-урок, чей основной навык не освоен и не **строго ниже** уровня ученика, с закрытыми
+   предпосылками (нет такого — первый из не освоенных и не ниже уровня, предпосылки вставляются; все ниже уровня —
+   первый не освоенный урок высшего уровня курса, нет — обязательных нет); нет диагностики — начало курса.
+   Следующий урок плана после диагностики = её рекомендация (тест `test_lp_diagnostics_consistency.py` на сиде
+   catalog и банках diagnostics).
+3. **Обязательные** — core-уроки от старта по порядку, кроме уроков с освоенным основным навыком (`demonstrated |
+   retained`). Перед уроком вставляются уроки, дающие его недостающие предпосылки (`prerequisite_skill_ids` урока ∪
+   `prerequisites` основного навыка; рекурсивно, без повторов и циклов; урок-«учитель» — core раньше optional).
+   Предпосылка закрыта, если навык освоен, его даёт урок выше в плане или уровень навыка **не выше** полосы,
+   оценённой диагностикой в его области; для функций, говорения, письма и неоценённых областей — не выше
+   предварительного уровня; уровня нет — только оценённые области (одно правило с diagnostics, ревью спринта 3;
+   версия алгоритма `cp-2` — траектории пересчитываются при следующем чтении).
+4. **Дополнительные** — optional-уроки с совпадением цели или тем (≤ `OPTIONAL_LESSONS_MAX` = 8): больше совпадений —
+   выше, затем порядок курса; с освоенным навыком и уже стоящие в плане — нет.
+5. **Следующий** — первый обязательный (нет — первый дополнительный, нет и их — `null`).
+6. **Причины**: основная — `start_after_diagnostic` / `no_diagnostic` (первый урок от старта), `prerequisite_missing`
+   (вставленный), `next_in_course`; уточняющие — `weak_area` (область основного навыка ниже предварительного уровня
+   диагностики), `goal_match`, `topic_match`. Объяснение следующего — Localized RU/UZ из кодов (цель — названием из
+   справочника); детям — мягкие формулировки без сравнения.
+
+**Ревизии** (`trajectories`, PK `(user_id, pair_id, revision)`): чтение сравнивает входы `basis` {algorithm,
+audience, goal, topics, diagnostic_result_id, diagnostic_revision, course_snapshot_version, skills_hash (освоенные
+навыки)} с последней ревизией: совпали — отдаётся она (без события), иначе — новая ревизия + `learning.trajectory.updated.v1`
+в той же транзакции (под advisory-блокировкой ученика). Прежние ревизии хранятся и неизменяемы (триггер запрещает
+UPDATE и роли сервиса; удаление — только сага). `items` ревизии самодостаточны (карточки уроков на момент расчёта).
+`lessons_available: false`, `completed: []` — уроки появятся в спринте 4.
+
+**Пересчёт отложенный** (при следующем чтении): события-входы и смена цели/тем в `PATCH /me/plan` только обновляют
+проекции и пометки — без обращения к catalog. Смена языка интерфейса, графика, уровня-самооценки траекторию не меняет.
+
+**Снимок курса**: `GET {CATALOG_URL}/internal/v1/courses/{course_id}/snapshot` (внутренний JWT `iss=learning-plan`,
+без `sub`; `course_id` — из `PAIR_COURSES`). Кеш — таблица `course_snapshots` (общая для реплик): моложе
+`CATALOG_SNAPSHOT_MAX_AGE_SECONDS` (300) и не помечен — без запроса; иначе `If-None-Match` → 304 (подтверждён) или 200
+(заменён). Пометку «устарел» ставит `catalog.version.published.v1` и снимает только запрос, начатый после неё.
+catalog недоступен (сеть, 5xx, circuit breaker, ответ не по контракту `CourseSnapshot`): есть кеш — расчёт по нему
+(WARNING), нет — 503. HTTP — вне транзакции БД.
 
 ## plan:tick (n8n `plan-tick`, каждые 5 мин)
 Вход: `Authorization: Bearer <SCHEDULER_TOKEN>` (сравнение за постоянное время). Пустой `SCHEDULER_TOKEN` выключает
@@ -115,19 +165,32 @@ explain_lang, preset, days, preferred_time, duration_min, reminders_enabled, tim
 `learning.reminder.due.v1`, `learning.session.missed.v1`, `learning.activity.recorded.v1`, `user.domain.deleted.v1`
 (`domain = learning-plan`, `mode = deleted`).
 
-Потребляет: `user.deletion.requested.v1` (durable `learning-plan.user_deletion`) — только от издателя
-`identity-consent` (ревью P-7, как experience-config и support): от другого издателя — предупреждение в логе (тип
-события и издатель, без `user_id`), событие подтверждается шине без удаления и без ACK саге. `user.profile.created/updated.v1` не
-потребляются: `is_minor`/`age_band` нет ни в одном payload learning-plan, правила для детей применяет notifications по
-`DeliveryInfo`.
+Спринт 3: `learning.trajectory.updated.v1 {user_id, pair_id, revision, next_lesson_id, reason_codes (следующего),
+computed_at}` — на каждую новую ревизию траектории.
+
+Потребляет (издатель проверяется — защита в глубину, ревью P-7: от другого издателя — предупреждение в логе с типом
+события и издателем, без `user_id`, событие подтверждается шине без действия; невалидный payload — DLQ):
+
+| Durable | События (издатель) | Действие |
+|---|---|---|
+| `learning-plan.user_deletion` | `user.deletion.requested.v1` (identity-consent) | сага удаления, ACK `user.domain.deleted.v1` |
+| `learning-plan.diagnostics` | `diagnostics.completed.v1` (diagnostics) | `learner_diagnostics` — последний результат по паре (старее по `completed_at`, затем `revision` — не перезаписывает) |
+| | `skills.state.changed.v1` (diagnostics) | `skill_states` — локальная карта навыков (изменение старше сохранённого по `occurred_at` — не применяется) |
+| `learning-plan.catalog` | `catalog.version.published.v1` (catalog) | kind `course\|module\|lesson\|skill` → снимок курса (`course_id` события; нет — все) помечается устаревшим |
+| `learning-plan.profiles` | `user.profile.created.v1`, `user.profile.updated.v1` (identity-consent) | `learner_audience`: детский профиль / 6–13 → kids, 14–17 → teens, иначе adults (возраст не хранится; `age_band: null` в обновлении — без изменений; kids не понижается) |
+
+События удалённого ученика проекции не воскрешают (`deleted_users` под той же блокировкой). Правила доставки детям
+по-прежнему применяет notifications по `DeliveryInfo`.
 
 ## Данные
 Схема `learning_plan`: `plans` (+ `schedule_set_at`), `activities` (`UNIQUE(user_id, idempotency_key)`),
 `slot_marks` (PK user_id, local_date, kind), `tick_state` (одна строка), `deleted_users` (отметка исполненного удаления:
 псевдонимный `user_id` + `request_id`, без PII), `outbox`/`inbox`. Миграции 0001; 0002 (спринт 2) — индекс
-`ix_plans_updated (updated_at, user_id)` для `GET /admin/v1/plans`.
+`ix_plans_updated (updated_at, user_id)` для `GET /admin/v1/plans`; 0003 (спринт 3) — `trajectories` (ревизии, триггер
+`trajectories_no_update`), `course_snapshots` (кеш снимка: etag, snapshot_version, payload, fetched_at, checked_at,
+stale_since), проекции `learner_diagnostics`, `skill_states`, `learner_audience`.
 
-Сага удаления: план, занятия и отметки удаляются физически, затем ACK; повтор саги (тот же `request_id`, новый
+Сага удаления: план, занятия, отметки, траектории и проекции ученика удаляются физически, затем ACK; повтор саги (тот же `request_id`, новый
 `event_id`) снова подтверждается; после удаления `/me/*` → 410 `USER_DELETED`.
 
 ## Настройки
@@ -135,8 +198,21 @@ explain_lang, preset, days, preferred_time, duration_min, reminders_enabled, tim
 пусто, т. е. вход выключен, или ≥ 32 символов, иначе сервис не стартует; ревью P-8),
 `DEFAULT_TIMEZONE` (Asia/Tashkent), `TICK_MAX_LOOKBACK_HOURS` (24), `TICK_BATCH_SIZE` (500),
 `ACTIVITY_MAX_AGE_DAYS` (7), `ACTIVITY_FUTURE_SKEW_SECONDS` (300), внутренний JWT (`INTERNAL_JWT_*`).
+Спринт 3: `CATALOG_URL` (`http://127.0.0.1:8110`; **в stage/prod обязателен** — без него сервис не стартует;
+Railway — приватный адрес catalog), `CATALOG_TIMEOUT_SECONDS` (3),
+`CATALOG_SNAPSHOT_MAX_AGE_SECONDS` (300), `PAIR_COURSES` (JSON, `{"ru-en": "en-core"}`), `DEFAULT_PAIR` (ru-en; обязан
+быть ключом `PAIR_COURSES`, иначе сервис не стартует), `OPTIONAL_LESSONS_MAX` (8). catalog должен принимать
+вызывающего `learning-plan` (его открытый ключ — в `INTERNAL_JWT_PUBLIC_KEYS` catalog).
 
 ## Runbook
+- Траектория 503 `CATALOG_UNAVAILABLE`: catalog недоступен и кеша нет (первый запуск) — проверить catalog
+  (`/health/ready`), `CATALOG_URL`, ключ `learning-plan` в catalog; WARNING `catalog unavailable, cached course
+  snapshot used` — работаем по кешу (`course_snapshots.checked_at`). Принудительная перепроверка снимка:
+  `UPDATE course_snapshots SET stale_since = now()`.
+- План не изменился после публикации курса: событие `catalog.version.published.v1` (durable `learning-plan.catalog`),
+  `course_snapshots.stale_since` / `snapshot_version`; страховка — TTL `CATALOG_SNAPSHOT_MAX_AGE_SECONDS`.
+- Ребёнку показаны недетские уроки: `learner_audience` ученика и `basis->>'audience'` последней ревизии
+  `trajectories`; сегмент без проекции и подсказки BFF — `kids`.
 - Ответ `skipped: true` — предыдущий tick ещё идёт (норма для повтора n8n). Если `skipped` подряд дольше 10 мин —
   искать зависшую сессию: `SELECT pid, state, query_start FROM pg_locks JOIN pg_stat_activity USING (pid) WHERE
   locktype = 'advisory' AND classid = 1280332873` (`'LPTI'`), при необходимости `pg_terminate_backend(pid)`.

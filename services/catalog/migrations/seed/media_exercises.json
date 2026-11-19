@@ -1,0 +1,499 @@
+[
+  {
+    "exercise_id": "mx-hello-song-1",
+    "asset_id": "m-own-hello-song",
+    "type": "comprehension",
+    "skill_id": "en.func.introduce",
+    "level": "A0",
+    "instruction": {
+      "ru": "Послушайте песенку и выберите ответ.",
+      "uz": "Qoʻshiqni tinglang va javobni tanlang."
+    },
+    "prompt_en": "What is the girl's name?",
+    "options": [
+      "Lola",
+      "Lily",
+      "Tim",
+      "Sam"
+    ],
+    "answer": 0,
+    "line_index": null,
+    "rubric_id": "r-kids"
+  },
+  {
+    "exercise_id": "mx-hello-song-2",
+    "asset_id": "m-own-hello-song",
+    "type": "gap_fill",
+    "skill_id": "en.func.greet",
+    "level": "A0",
+    "instruction": {
+      "ru": "Послушайте песенку и впишите пропущенное слово.",
+      "uz": "Qoʻshiqni tinglang va tushib qolgan soʻzni yozing."
+    },
+    "prompt_en": "Nice to meet you, ___!",
+    "options": [],
+    "answer": [
+      "too"
+    ],
+    "line_index": 6,
+    "rubric_id": "r-kids"
+  },
+  {
+    "exercise_id": "mx-hello-song-3",
+    "asset_id": "m-own-hello-song",
+    "type": "order_lines",
+    "skill_id": "en.func.greet",
+    "level": "A0",
+    "instruction": {
+      "ru": "Расставьте строчки песенки по порядку.",
+      "uz": "Qoʻshiq satrlarini tartib bilan joylashtiring."
+    },
+    "prompt_en": null,
+    "options": [
+      "Nice to meet you, Lola!",
+      "I'm Tim, I'm Tim. And what's your name?",
+      "Nice to meet you, too!",
+      "I'm Lola, Lola! Let's play a game!"
+    ],
+    "answer": [
+      1,
+      3,
+      0,
+      2
+    ],
+    "line_index": null,
+    "rubric_id": "r-kids"
+  },
+  {
+    "exercise_id": "mx-coffee-order-1",
+    "asset_id": "m-own-coffee-order",
+    "type": "comprehension",
+    "skill_id": "en.voc.food-drink",
+    "level": "A1",
+    "instruction": {
+      "ru": "Послушайте и выберите правильный ответ.",
+      "uz": "Tinglang va toʻgʻri javobni tanlang."
+    },
+    "prompt_en": "What does the boy drink?",
+    "options": [
+      "Green tea",
+      "A hot chocolate",
+      "Orange juice",
+      "Black tea"
+    ],
+    "answer": 1,
+    "line_index": null,
+    "rubric_id": "r-kids"
+  },
+  {
+    "exercise_id": "mx-coffee-order-2",
+    "asset_id": "m-own-coffee-order",
+    "type": "gap_fill",
+    "skill_id": "en.gram.would-like",
+    "level": "A1",
+    "instruction": {
+      "ru": "Послушайте и впишите пропущенное слово.",
+      "uz": "Tinglang va tushib qolgan soʻzni yozing."
+    },
+    "prompt_en": "Hi! I'd ___ a cup of tea, please.",
+    "options": [],
+    "answer": [
+      "like"
+    ],
+    "line_index": 1,
+    "rubric_id": "r-kids"
+  },
+  {
+    "exercise_id": "mx-coffee-order-3",
+    "asset_id": "m-own-coffee-order",
+    "type": "phrase_meaning",
+    "skill_id": "en.func.order-drink",
+    "level": "A1",
+    "instruction": {
+      "ru": "Что значит эта фраза? Выберите вариант.",
+      "uz": "Bu ibora nimani anglatadi? Variantni tanlang."
+    },
+    "prompt_en": "What does \"to take away\" mean?",
+    "options": [
+      "to drink it here",
+      "to take it with you",
+      "to give it back"
+    ],
+    "answer": 1,
+    "line_index": null,
+    "rubric_id": "r-kids"
+  },
+  {
+    "exercise_id": "mx-market-chat-1",
+    "asset_id": "m-own-market-chat",
+    "type": "comprehension",
+    "skill_id": "en.listen.numbers-times",
+    "level": "A1",
+    "instruction": {
+      "ru": "Послушайте диалог и выберите правильную цену.",
+      "uz": "Suhbatni tinglang va toʻgʻri narxni tanlang."
+    },
+    "prompt_en": "How much is the melon in the end?",
+    "options": [
+      "Five pounds",
+      "Four pounds",
+      "Four pounds fifty",
+      "Eleven pounds fifty"
+    ],
+    "answer": 2,
+    "line_index": null,
+    "rubric_id": "r-kids"
+  },
+  {
+    "exercise_id": "mx-market-chat-2",
+    "asset_id": "m-own-market-chat",
+    "type": "gap_fill",
+    "skill_id": "en.func.ask-price",
+    "level": "A1",
+    "instruction": {
+      "ru": "Послушайте и впишите пропущенное слово.",
+      "uz": "Tinglang va tushib qolgan soʻzni yozing."
+    },
+    "prompt_en": "Good morning! How ___ are the tomatoes?",
+    "options": [],
+    "answer": [
+      "much"
+    ],
+    "line_index": 1,
+    "rubric_id": "r-kids"
+  },
+  {
+    "exercise_id": "mx-market-chat-3",
+    "asset_id": "m-own-market-chat",
+    "type": "order_lines",
+    "skill_id": "en.voc.numbers",
+    "level": "A1",
+    "instruction": {
+      "ru": "Расставьте реплики в том порядке, в котором они звучат.",
+      "uz": "Gaplarni eshitilgan tartibda joylashtiring."
+    },
+    "prompt_en": null,
+    "options": [
+      "Three, plus four, plus four fifty. Eleven pounds fifty.",
+      "And here's your change: eight pounds fifty. Have a nice day!",
+      "Deal! How much is that all together?",
+      "Here's twenty pounds."
+    ],
+    "answer": [
+      2,
+      0,
+      3,
+      1
+    ],
+    "line_index": null,
+    "rubric_id": "r-kids"
+  },
+  {
+    "exercise_id": "mx-lost-in-city-1",
+    "asset_id": "m-own-lost-in-city",
+    "type": "comprehension",
+    "skill_id": "en.gram.prepositions-place-time",
+    "level": "A1",
+    "instruction": {
+      "ru": "Послушайте и выберите правильный ответ.",
+      "uz": "Tinglang va toʻgʻri javobni tanlang."
+    },
+    "prompt_en": "Where is the museum?",
+    "options": [
+      "Next to a big park",
+      "Opposite the traffic lights",
+      "Behind the café"
+    ],
+    "answer": 0,
+    "line_index": null,
+    "rubric_id": "r-kids"
+  },
+  {
+    "exercise_id": "mx-lost-in-city-2",
+    "asset_id": "m-own-lost-in-city",
+    "type": "gap_fill",
+    "skill_id": "en.func.ask-way",
+    "level": "A1",
+    "instruction": {
+      "ru": "Послушайте и впишите пропущенное слово.",
+      "uz": "Tinglang va tushib qolgan soʻzni yozing."
+    },
+    "prompt_en": "Then turn ___. The museum is next to a big park.",
+    "options": [],
+    "answer": [
+      "right"
+    ],
+    "line_index": 5,
+    "rubric_id": "r-kids"
+  },
+  {
+    "exercise_id": "mx-lost-in-city-3",
+    "asset_id": "m-own-lost-in-city",
+    "type": "phrase_meaning",
+    "skill_id": "en.voc.city-places",
+    "level": "A1",
+    "instruction": {
+      "ru": "Что значит эта фраза? Выберите вариант.",
+      "uz": "Bu ibora nimani anglatadi? Variantni tanlang."
+    },
+    "prompt_en": "What does \"on foot\" mean?",
+    "options": [
+      "by bus",
+      "walking",
+      "by taxi"
+    ],
+    "answer": 1,
+    "line_index": null,
+    "rubric_id": "r-kids"
+  },
+  {
+    "exercise_id": "mx-hotel-reception-1",
+    "asset_id": "m-own-hotel-reception",
+    "type": "comprehension",
+    "skill_id": "en.listen.numbers-times",
+    "level": "A2",
+    "instruction": {
+      "ru": "Послушайте сценку и выберите номер комнаты.",
+      "uz": "Sahnani tinglang va xona raqamini tanlang."
+    },
+    "prompt_en": "What is the guest's room number?",
+    "options": [
+      "408",
+      "480",
+      "804",
+      "418"
+    ],
+    "answer": 0,
+    "line_index": null,
+    "rubric_id": "r-media"
+  },
+  {
+    "exercise_id": "mx-hotel-reception-2",
+    "asset_id": "m-own-hotel-reception",
+    "type": "gap_fill",
+    "skill_id": "en.func.hotel-check-in",
+    "level": "A2",
+    "instruction": {
+      "ru": "Послушайте и впишите пропущенное слово.",
+      "uz": "Tinglang va tushib qolgan soʻzni yozing."
+    },
+    "prompt_en": "Great. Could I have a late ___ on Sunday?",
+    "options": [],
+    "answer": [
+      "check-out",
+      "checkout",
+      "check out"
+    ],
+    "line_index": 11,
+    "rubric_id": "r-media"
+  },
+  {
+    "exercise_id": "mx-hotel-reception-3",
+    "asset_id": "m-own-hotel-reception",
+    "type": "order_lines",
+    "skill_id": "en.listen.short-dialogues",
+    "level": "A2",
+    "instruction": {
+      "ru": "Расставьте реплики в том порядке, в котором они звучат.",
+      "uz": "Gaplarni eshitilgan tartibda joylashtiring."
+    },
+    "prompt_en": null,
+    "options": [
+      "Yes, the password is on your key card.",
+      "What time is breakfast?",
+      "Is there Wi-Fi in the room?",
+      "From seven to half past ten, in the restaurant on the ground floor."
+    ],
+    "answer": [
+      1,
+      3,
+      2,
+      0
+    ],
+    "line_index": null,
+    "rubric_id": "r-media"
+  },
+  {
+    "exercise_id": "mx-airport-announcement-1",
+    "asset_id": "m-own-airport-announcement",
+    "type": "comprehension",
+    "skill_id": "en.listen.numbers-times",
+    "level": "A2",
+    "instruction": {
+      "ru": "Послушайте объявление и выберите правильное время.",
+      "uz": "Eʼlonni tinglang va toʻgʻri vaqtni tanlang."
+    },
+    "prompt_en": "What time does boarding start?",
+    "options": [
+      "At 11:20",
+      "At 11:50",
+      "At 12:20",
+      "At 8:00"
+    ],
+    "answer": 0,
+    "line_index": null,
+    "rubric_id": "r-media"
+  },
+  {
+    "exercise_id": "mx-airport-announcement-2",
+    "asset_id": "m-own-airport-announcement",
+    "type": "gap_fill",
+    "skill_id": "en.gram.future-going-to",
+    "level": "A2",
+    "instruction": {
+      "ru": "Послушайте и впишите пропущенное слово.",
+      "uz": "Tinglang va tushib qolgan soʻzni yozing."
+    },
+    "prompt_en": "To London. I'm going ___ visit my sister.",
+    "options": [],
+    "answer": [
+      "to"
+    ],
+    "line_index": 6,
+    "rubric_id": "r-media"
+  },
+  {
+    "exercise_id": "mx-airport-announcement-3",
+    "asset_id": "m-own-airport-announcement",
+    "type": "phrase_meaning",
+    "skill_id": "en.func.check-in-flight",
+    "level": "A2",
+    "instruction": {
+      "ru": "Что значит эта фраза? Выберите вариант.",
+      "uz": "Bu ibora nimani anglatadi? Variantni tanlang."
+    },
+    "prompt_en": "What does \"the flight is delayed\" mean?",
+    "options": [
+      "The flight is cancelled.",
+      "The flight leaves later.",
+      "The flight leaves earlier."
+    ],
+    "answer": 1,
+    "line_index": null,
+    "rubric_id": "r-media"
+  },
+  {
+    "exercise_id": "mx-first-day-office-1",
+    "asset_id": "m-own-first-day-office",
+    "type": "comprehension",
+    "skill_id": "en.voc.work",
+    "level": "A2",
+    "instruction": {
+      "ru": "Послушайте и выберите правильный ответ.",
+      "uz": "Tinglang va toʻgʻri javobni tanlang."
+    },
+    "prompt_en": "What is Javlon's job?",
+    "options": [
+      "A junior accountant",
+      "An office manager",
+      "A marketing specialist",
+      "A designer"
+    ],
+    "answer": 0,
+    "line_index": null,
+    "rubric_id": "r-media"
+  },
+  {
+    "exercise_id": "mx-first-day-office-2",
+    "asset_id": "m-own-first-day-office",
+    "type": "gap_fill",
+    "skill_id": "en.func.work-introduce",
+    "level": "A2",
+    "instruction": {
+      "ru": "Послушайте и впишите пропущенное слово.",
+      "uz": "Tinglang va tushib qolgan soʻzni yozing."
+    },
+    "prompt_en": "I'm a junior accountant. I ___ with the finance team.",
+    "options": [],
+    "answer": [
+      "work"
+    ],
+    "line_index": 8,
+    "rubric_id": "r-media"
+  },
+  {
+    "exercise_id": "mx-first-day-office-3",
+    "asset_id": "m-own-first-day-office",
+    "type": "order_lines",
+    "skill_id": "en.func.ask-clarify",
+    "level": "A2",
+    "instruction": {
+      "ru": "Расставьте реплики в том порядке, в котором они звучат.",
+      "uz": "Gaplarni eshitilgan tartibda joylashtiring."
+    },
+    "prompt_en": null,
+    "options": [
+      "Room three, on the second floor.",
+      "Your first meeting is at eleven, in room three.",
+      "Got it. Thank you!",
+      "Sorry, which room?"
+    ],
+    "answer": [
+      1,
+      3,
+      0,
+      2
+    ],
+    "line_index": null,
+    "rubric_id": "r-media"
+  },
+  {
+    "exercise_id": "mx-weekend-plans-1",
+    "asset_id": "m-own-weekend-plans",
+    "type": "comprehension",
+    "skill_id": "en.listen.short-dialogues",
+    "level": "A2",
+    "instruction": {
+      "ru": "Послушайте диалог и выберите ответ.",
+      "uz": "Suhbatni tinglang va javobni tanlang."
+    },
+    "prompt_en": "How is Aziza going to travel to Samarkand?",
+    "options": [
+      "By plane",
+      "By train",
+      "By car",
+      "By bus"
+    ],
+    "answer": 1,
+    "line_index": null,
+    "rubric_id": "r-media"
+  },
+  {
+    "exercise_id": "mx-weekend-plans-2",
+    "asset_id": "m-own-weekend-plans",
+    "type": "gap_fill",
+    "skill_id": "en.gram.future-going-to",
+    "level": "A2",
+    "instruction": {
+      "ru": "Послушайте и впишите пропущенное слово.",
+      "uz": "Tinglang va tushib qolgan soʻzni yozing."
+    },
+    "prompt_en": "I'm going to ___ my grandma in Samarkand.",
+    "options": [],
+    "answer": [
+      "visit"
+    ],
+    "line_index": 5,
+    "rubric_id": "r-media"
+  },
+  {
+    "exercise_id": "mx-weekend-plans-3",
+    "asset_id": "m-own-weekend-plans",
+    "type": "phrase_meaning",
+    "skill_id": "en.func.free-time",
+    "level": "A2",
+    "instruction": {
+      "ru": "Что значит эта фраза? Выберите вариант.",
+      "uz": "Bu ibora nimani anglatadi? Variantni tanlang."
+    },
+    "prompt_en": "What does \"Any plans for the weekend?\" mean?",
+    "options": [
+      "What are you going to do at the weekend?",
+      "Where were you last weekend?",
+      "Do you like weekends?"
+    ],
+    "answer": 0,
+    "line_index": null,
+    "rubric_id": "r-media"
+  }
+]

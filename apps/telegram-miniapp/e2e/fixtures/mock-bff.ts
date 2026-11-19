@@ -23,6 +23,7 @@ import type {
   UserSummary,
   WhatsNew,
 } from "@tilhero/contracts/bff";
+import { MockContent, type ContentScenario } from "./content";
 import * as F from "./data";
 
 /**
@@ -62,6 +63,10 @@ export interface Scenario {
   grants?: GuardianConsentGrant[];
   /** Remote Experience Config answered instead of the seed (e.g. theme notebook_dark) */
   config?: ExperienceConfig;
+  /** sprint 3: placement test, skill map, plan, practice, requests */
+  content?: ContentScenario;
+  /** start in a child profile 6–9 of the (adult) account, onboarded */
+  child?: boolean;
 }
 
 export interface Recorded {
@@ -111,6 +116,7 @@ export class MockBff {
   pin: string | null;
   /** the new code of a pending reset (review T-8): it does not work until security.pin_reset_effective_at */
   pendingPin: string | null;
+  readonly content: MockContent;
   private access = 0;
   private failOnce: Record<string, number | [number, string]>;
   private conflictOnce: boolean;
@@ -138,6 +144,15 @@ export class MockBff {
     this.tickets = sc.tickets ?? [];
     this.failOnce = { ...(sc.failOnce ?? {}) };
     this.conflictOnce = !!sc.conflictOnce;
+    this.content = new MockContent(sc.content ?? {});
+    if (sc.child) {
+      const id = "7a1c2b3a-2222-4a2b-9c3d-000000000777";
+      this.learners.push({ learner_id: id, kind: "child", display_name: "Мадина", age_band: "6-9", is_active: true, onboarding_completed: true });
+      this.plans[id] = F.onboardedPlan(id);
+      this.settings[id] = F.settings();
+      this.seen[id] = new Set([F.WELCOME.id, F.UPDATE_1.id, F.UPDATE_2.id]);
+      this.active = id;
+    }
   }
 
   async install(page: Page): Promise<void> {
@@ -578,6 +593,14 @@ export class MockBff {
       if (m[2] === "close") t.status = "CLOSED";
       return this.ok(route, t);
     }
+
+    // ---- sprint 3 ----
+    const s3 = this.content.handle(method, path, url.searchParams, b, headers, { kid: this.learner().kind === "child", goal: this.plan().goal, idem: this.idem }, (status, out, code, details, raw) => {
+      if (raw) return route.fulfill({ status, contentType: raw.contentType, body: raw.body, headers: { etag: '"e2e-audio"', "cache-control": "private, max-age=3600" } });
+      if (code) return this.err(route, status, code, details ?? {});
+      return this.ok(route, out, status);
+    });
+    if (s3) return s3;
 
     // ---- deletion ----
     if (key === "POST /v1/profile/delete-request") {

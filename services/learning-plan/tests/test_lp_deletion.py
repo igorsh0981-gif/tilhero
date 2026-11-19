@@ -23,9 +23,14 @@ def requested(user: uuid.UUID, request_id: uuid.UUID, attempt: int | None = None
     return ev
 
 
+TABLES = ("plans", "activities", "slot_marks", "trajectories", "learner_diagnostics", "skill_states",
+          "learner_audience")
+EMPTY = dict.fromkeys(TABLES, 0)
+
+
 async def rows(env, user: uuid.UUID) -> dict[str, int]:
     out = {}
-    for table in ("plans", "activities", "slot_marks"):
+    for table in TABLES:
         [(n,)] = await env.sql(f"SELECT count(*) FROM {table} WHERE user_id = :u", u=user)  # noqa: S608
         out[table] = n
     return out
@@ -35,6 +40,11 @@ async def seed(env, user: uuid.UUID) -> None:
     await env.onboard(user, at=MON)
     await env.practice(user, at=datetime(2026, 11, 16, 5, 0, tzinfo=UTC))
     await env.tick(datetime(2026, 11, 17, 19, 0, tzinfo=UTC), since=datetime(2026, 11, 16, 19, 0, tzinfo=UTC))
+    # спринт 3: проекции входов траектории и сама траектория
+    await env.profile(user)
+    await env.diagnostic(user)
+    await env.skills(user, {"s.greet": "demonstrated"})
+    await env.trajectory(user)
     assert all(v > 0 for v in (await rows(env, user)).values())
 
 
@@ -47,7 +57,7 @@ async def test_deletion_removes_data_and_acks(env) -> None:
     acks = [e for e in await env.events("user.domain.deleted.v1")]
     assert [e.payload for e in acks] == [{"user_id": str(user), "request_id": str(rid), "domain": "learning-plan",
                                           "mode": "deleted"}]
-    assert await rows(env, user) == {"plans": 0, "activities": 0, "slot_marks": 0}
+    assert await rows(env, user) == EMPTY
     assert await rows(env, other) == before_other
     # после удаления план не воскрешается запросом с ещё живым токеном
     for method, path in (("GET", "/internal/v1/me/plan"), ("PATCH", "/internal/v1/me/plan"),
@@ -56,7 +66,7 @@ async def test_deletion_removes_data_and_acks(env) -> None:
         assert r.status_code == 410 and r.json()["code"] == "USER_DELETED", path
     r = await env.practice(user, at=datetime(2026, 11, 18, 5, 0, tzinfo=UTC))
     assert r.status_code == 410
-    assert await rows(env, user) == {"plans": 0, "activities": 0, "slot_marks": 0}
+    assert await rows(env, user) == EMPTY
     # tick удалённого ученика больше не видит
     r = await env.tick(datetime(2026, 11, 18, 19, 0, tzinfo=UTC))
     assert r["plans_checked"] == 1
@@ -71,7 +81,7 @@ async def test_retry_and_redelivery_are_acked_once_per_event(env) -> None:
     await asyncio.gather(spec.handler(first), spec.handler(retry), spec.handler(first))  # дубль доставки — inbox
     acks = [e for e in await env.events("user.domain.deleted.v1") if e.payload["request_id"] == str(rid)]
     assert len(acks) == 2 and sorted(e.causation_id for e in acks) == sorted([first.event_id, retry.event_id])
-    assert await rows(env, user) == {"plans": 0, "activities": 0, "slot_marks": 0}
+    assert await rows(env, user) == EMPTY
 
 
 async def test_unknown_user_still_acked(env) -> None:
@@ -107,4 +117,4 @@ async def test_deletion_from_other_producer_is_ignored(env, caplog) -> None:
     # тот же запрос от identity-consent исполняется
     await env.bus.publish(requested(user, rid))
     assert len(await env.events("user.domain.deleted.v1")) == 1
-    assert await rows(env, user) == {"plans": 0, "activities": 0, "slot_marks": 0}
+    assert await rows(env, user) == EMPTY

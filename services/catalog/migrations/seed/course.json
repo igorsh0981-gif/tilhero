@@ -1,0 +1,20 @@
+{
+  "course_id": "en-core",
+  "pair_id": "ru-en",
+  "title": {
+    "ru": "Английский: от нуля до A2",
+    "uz": "Ingliz tili: noldan A2 gacha"
+  },
+  "description": {
+    "ru": "Разговорный английский для тех, кто говорит по-русски или по-узбекски: знакомство, город, путешествия и работа. В каждом уроке — одна реальная задача, ролевой диалог и короткая проверка без подсказок.",
+    "uz": "Rus yoki oʻzbek tilida gaplashadiganlar uchun soʻzlashuv ingliz tili: tanishuv, shahar, sayohat va ish. Har bir darsda — bitta hayotiy vazifa, rolli dialog va yordamsiz qisqa tekshiruv."
+  },
+  "level_start": "A0",
+  "level_end": "A2",
+  "module_ids": [
+    "m1-meet",
+    "m2-city",
+    "m3-travel",
+    "m4-work"
+  ]
+}

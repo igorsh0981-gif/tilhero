@@ -1,0 +1,1063 @@
+[
+  {
+    "skill_id": "en.func.greet",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Приветствие и прощание",
+      "uz": "Salomlashish va xayrlashish"
+    },
+    "description": {
+      "ru": "Поздороваться и попрощаться, ответить на How are you?",
+      "uz": "Salomlashish va xayrlashish, How are you? savoliga javob berish"
+    },
+    "level": "A0",
+    "prerequisites": [],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.greet"
+    ]
+  },
+  {
+    "skill_id": "en.func.introduce",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Представиться",
+      "uz": "Oʻzini tanishtirish"
+    },
+    "description": {
+      "ru": "Назвать своё имя, спросить имя собеседника и сказать, что приятно познакомиться",
+      "uz": "Ismini aytish, suhbatdoshning ismini soʻrash va tanishganidan xursandligini aytish"
+    },
+    "level": "A0",
+    "prerequisites": [
+      "en.func.greet",
+      "en.gram.to-be",
+      "en.gram.pronouns-possessives"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.introduce"
+    ]
+  },
+  {
+    "skill_id": "en.func.where-from",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Откуда вы",
+      "uz": "Qayerdansiz"
+    },
+    "description": {
+      "ru": "Спросить и сказать, из какой страны и какого города человек",
+      "uz": "Odam qaysi mamlakat va shahardan ekanini soʻrash va aytish"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.func.introduce",
+      "en.gram.to-be"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.where-from"
+    ]
+  },
+  {
+    "skill_id": "en.func.numbers-phone",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Номер телефона",
+      "uz": "Telefon raqami"
+    },
+    "description": {
+      "ru": "Продиктовать и записать номер телефона, переспросить цифры",
+      "uz": "Telefon raqamini aytib berish va yozib olish, raqamlarni qayta soʻrash"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.func.introduce",
+      "en.voc.numbers",
+      "en.listen.numbers-times"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.numbers-phone"
+    ]
+  },
+  {
+    "skill_id": "en.func.talk-family",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Рассказ о семье",
+      "uz": "Oila haqida gapirish"
+    },
+    "description": {
+      "ru": "Рассказать о членах семьи: кто это, как зовут, сколько лет",
+      "uz": "Oila aʼzolari haqida gapirish: kim, ismi nima, necha yoshda"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.func.introduce",
+      "en.voc.family",
+      "en.gram.pronouns-possessives"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.talk-family"
+    ]
+  },
+  {
+    "skill_id": "en.func.talk-job",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Работа и учёба",
+      "uz": "Ish va oʻqish"
+    },
+    "description": {
+      "ru": "Сказать, кем и где вы работаете или учитесь, и спросить об этом собеседника",
+      "uz": "Kim boʻlib va qayerda ishlashingiz yoki oʻqishingizni aytish, suhbatdoshdan ham soʻrash"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.func.introduce",
+      "en.gram.present-simple",
+      "en.gram.questions-do"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.talk-job"
+    ]
+  },
+  {
+    "skill_id": "en.func.free-time",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Свободное время",
+      "uz": "Boʻsh vaqt"
+    },
+    "description": {
+      "ru": "Рассказать о хобби и выходных и спросить, что любит собеседник",
+      "uz": "Sevimli mashgʻulot va dam olish kunlari haqida gapirish, suhbatdosh nimani yoqtirishini soʻrash"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.gram.present-simple",
+      "en.gram.questions-do"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.free-time"
+    ]
+  },
+  {
+    "skill_id": "en.func.order-drink",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Заказ напитка",
+      "uz": "Ichimlik buyurtma qilish"
+    },
+    "description": {
+      "ru": "Заказать напиток в кафе, выбрать размер и добавки",
+      "uz": "Kafeda ichimlik buyurtma qilish, hajmi va qoʻshimchalarini tanlash"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.func.greet",
+      "en.gram.can-requests",
+      "en.voc.food-drink"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.order-drink"
+    ]
+  },
+  {
+    "skill_id": "en.func.order-food",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Заказ еды",
+      "uz": "Taom buyurtma qilish"
+    },
+    "description": {
+      "ru": "Заказать блюда в ресторане, спросить о меню и попросить счёт",
+      "uz": "Restoranda taom buyurtma qilish, menyu haqida soʻrash va hisobni soʻrash"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.func.order-drink",
+      "en.gram.would-like",
+      "en.gram.countable-some-any"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.order-food"
+    ]
+  },
+  {
+    "skill_id": "en.func.shop-size",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Покупка одежды",
+      "uz": "Kiyim xarid qilish"
+    },
+    "description": {
+      "ru": "Спросить нужный размер и цвет, попросить примерить",
+      "uz": "Kerakli oʻlcham va rangni soʻrash, kiyib koʻrishni soʻrash"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.voc.clothes-colors",
+      "en.voc.numbers",
+      "en.gram.can-requests"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.shop-size"
+    ]
+  },
+  {
+    "skill_id": "en.func.ask-price",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Узнать цену",
+      "uz": "Narxni bilish"
+    },
+    "description": {
+      "ru": "Спросить, сколько стоит, и понять цену на слух",
+      "uz": "Necha pul ekanini soʻrash va narxni eshitib tushunish"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.voc.numbers",
+      "en.listen.numbers-times"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.ask-price"
+    ]
+  },
+  {
+    "skill_id": "en.func.ask-way",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Спросить дорогу",
+      "uz": "Yoʻl soʻrash"
+    },
+    "description": {
+      "ru": "Спросить, как пройти, и понять простое объяснение маршрута",
+      "uz": "Qanday borishni soʻrash va yoʻlning oddiy tushuntirishini tushunish"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.voc.city-places",
+      "en.gram.there-is",
+      "en.gram.prepositions-place-time"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.ask-way"
+    ]
+  },
+  {
+    "skill_id": "en.func.describe-symptoms",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Описать самочувствие",
+      "uz": "Oʻzini qanday his qilayotganini aytish"
+    },
+    "description": {
+      "ru": "Объяснить, что болит, и понять совет фармацевта",
+      "uz": "Nima ogʻriyotganini tushuntirish va farmatsevt maslahatini tushunish"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.voc.health",
+      "en.gram.present-simple",
+      "en.gram.can-requests"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.describe-symptoms"
+    ]
+  },
+  {
+    "skill_id": "en.func.check-in-flight",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Регистрация на рейс",
+      "uz": "Reysga roʻyxatdan oʻtish"
+    },
+    "description": {
+      "ru": "Пройти регистрацию: сдать багаж, выбрать место, понять выход и время посадки",
+      "uz": "Roʻyxatdan oʻtish: bagaj topshirish, oʻrin tanlash, chiqish eshigi va bortga chiqish vaqtini tushunish"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.voc.travel",
+      "en.gram.can-requests",
+      "en.listen.numbers-times"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.check-in-flight"
+    ]
+  },
+  {
+    "skill_id": "en.func.passport-answers",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Паспортный контроль",
+      "uz": "Pasport nazorati"
+    },
+    "description": {
+      "ru": "Ответить на вопросы о цели и сроке поездки и о том, где вы остановитесь",
+      "uz": "Safar maqsadi, muddati va qayerda turishingiz haqidagi savollarga javob berish"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.func.where-from",
+      "en.voc.travel",
+      "en.gram.future-going-to"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.passport-answers"
+    ]
+  },
+  {
+    "skill_id": "en.func.hotel-check-in",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Заселение в гостиницу",
+      "uz": "Mehmonxonaga joylashish"
+    },
+    "description": {
+      "ru": "Заселиться по брони и узнать главное: номер, завтрак, Wi-Fi, время выезда",
+      "uz": "Bron boʻyicha joylashish va asosiysini bilish: xona, nonushta, Wi-Fi, xonani boʻshatish vaqti"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.func.introduce",
+      "en.voc.travel",
+      "en.gram.can-requests"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.hotel-check-in"
+    ]
+  },
+  {
+    "skill_id": "en.func.complain-politely",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Вежливая жалоба",
+      "uz": "Odobli shikoyat"
+    },
+    "description": {
+      "ru": "Спокойно описать проблему и попросить её решить",
+      "uz": "Muammoni xotirjam tushuntirish va uni hal qilishni soʻrash"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.gram.can-requests",
+      "en.gram.present-simple",
+      "en.gram.past-simple"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.complain-politely"
+    ]
+  },
+  {
+    "skill_id": "en.func.transport-tickets",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Такси и билеты",
+      "uz": "Taksi va chiptalar"
+    },
+    "description": {
+      "ru": "Договориться с таксистом, купить билет, узнать цену и время в пути",
+      "uz": "Taksi haydovchisi bilan kelishish, chipta olish, narx va yoʻl vaqtini bilish"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.voc.travel",
+      "en.func.ask-price",
+      "en.gram.can-requests"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.transport-tickets"
+    ]
+  },
+  {
+    "skill_id": "en.func.book-by-phone",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Бронирование по телефону",
+      "uz": "Telefonda bron qilish"
+    },
+    "description": {
+      "ru": "Забронировать услугу по телефону и подтвердить детали",
+      "uz": "Telefonda xizmatni bron qilish va tafsilotlarni tasdiqlash"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.func.numbers-phone",
+      "en.gram.would-like",
+      "en.gram.future-going-to"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.book-by-phone"
+    ]
+  },
+  {
+    "skill_id": "en.func.work-introduce",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Представиться на работе",
+      "uz": "Ishda oʻzini tanishtirish"
+    },
+    "description": {
+      "ru": "Представиться команде: должность, отдел и чем вы будете заниматься",
+      "uz": "Jamoaga oʻzini tanishtirish: lavozim, boʻlim va nima bilan shugʻullanishi"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.func.talk-job",
+      "en.voc.work"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.work-introduce"
+    ]
+  },
+  {
+    "skill_id": "en.func.small-talk-work",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Разговор с коллегами",
+      "uz": "Hamkasblar bilan suhbat"
+    },
+    "description": {
+      "ru": "Поддержать короткий разговор о выходных, планах и текущей работе",
+      "uz": "Dam olish kunlari, rejalar va hozirgi ish haqida qisqa suhbatni davom ettirish"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.func.greet",
+      "en.gram.questions-do",
+      "en.gram.past-simple"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.small-talk-work"
+    ]
+  },
+  {
+    "skill_id": "en.func.schedule-meeting",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Назначить встречу",
+      "uz": "Uchrashuv belgilash"
+    },
+    "description": {
+      "ru": "Договориться о дне, времени и месте встречи или перенести её",
+      "uz": "Uchrashuv kuni, vaqti va joyini kelishish yoki uni boshqa vaqtga koʻchirish"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.gram.prepositions-place-time",
+      "en.gram.present-continuous",
+      "en.gram.can-requests"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.schedule-meeting"
+    ]
+  },
+  {
+    "skill_id": "en.func.phone-call",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Рабочий звонок",
+      "uz": "Ish yuzasidan qoʻngʻiroq"
+    },
+    "description": {
+      "ru": "Позвонить, попросить нужного человека и оставить сообщение",
+      "uz": "Qoʻngʻiroq qilish, kerakli odamni soʻrash va xabar qoldirish"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.func.numbers-phone",
+      "en.gram.can-requests",
+      "en.gram.present-continuous"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.phone-call"
+    ]
+  },
+  {
+    "skill_id": "en.func.interview-answers",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Ответы на собеседовании",
+      "uz": "Ish suhbatidagi javoblar"
+    },
+    "description": {
+      "ru": "Рассказать о себе, своём опыте и сильных сторонах",
+      "uz": "Oʻzingiz, tajribangiz va kuchli tomonlaringiz haqida gapirish"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.func.talk-job",
+      "en.voc.work",
+      "en.gram.past-simple"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.interview-answers"
+    ]
+  },
+  {
+    "skill_id": "en.func.ask-clarify",
+    "course_id": "en-core",
+    "area": "function",
+    "title": {
+      "ru": "Переспросить и уточнить",
+      "uz": "Qayta soʻrash va aniqlashtirish"
+    },
+    "description": {
+      "ru": "Попросить повторить или объяснить слово, подтвердить детали",
+      "uz": "Takrorlashni yoki soʻzni tushuntirishni soʻrash, tafsilotlarni tasdiqlash"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.gram.can-requests",
+      "en.gram.questions-do",
+      "en.listen.short-dialogues"
+    ],
+    "rubric_id": "r-roleplay",
+    "diagnostic_tags": [
+      "func.ask-clarify"
+    ]
+  },
+  {
+    "skill_id": "en.gram.to-be",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "Глагол to be",
+      "uz": "To be feʼli"
+    },
+    "description": {
+      "ru": "am, is, are в утверждениях, вопросах и отрицаниях",
+      "uz": "am, is, are darak, soʻroq va inkor gaplarda"
+    },
+    "level": "A0",
+    "prerequisites": [],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "gram.to-be"
+    ]
+  },
+  {
+    "skill_id": "en.gram.pronouns-possessives",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "Местоимения: I, my, his, her",
+      "uz": "Olmoshlar: I, my, his, her"
+    },
+    "description": {
+      "ru": "Личные местоимения I, you, he, she и притяжательные my, your, his, her",
+      "uz": "Kishilik olmoshlari I, you, he, she va egalik olmoshlari my, your, his, her"
+    },
+    "level": "A0",
+    "prerequisites": [
+      "en.gram.to-be"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "gram.pronouns-possessives"
+    ]
+  },
+  {
+    "skill_id": "en.gram.present-simple",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "Present simple: привычные действия",
+      "uz": "Present simple: odatiy harakatlar"
+    },
+    "description": {
+      "ru": "Привычные действия и факты: I work, she works",
+      "uz": "Odatiy harakatlar va faktlar: I work, she works"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.gram.to-be",
+      "en.gram.pronouns-possessives"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "gram.present-simple"
+    ]
+  },
+  {
+    "skill_id": "en.gram.questions-do",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "Вопросы с do и does",
+      "uz": "do va does bilan savollar"
+    },
+    "description": {
+      "ru": "Вопросы в present simple и краткие ответы: Do you…? — Yes, I do",
+      "uz": "Present simple zamonidagi savollar va qisqa javoblar: Do you…? — Yes, I do"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.gram.present-simple"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "gram.questions-do"
+    ]
+  },
+  {
+    "skill_id": "en.gram.can-requests",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "Просьбы с can и could",
+      "uz": "can va could bilan iltimoslar"
+    },
+    "description": {
+      "ru": "Вежливые просьбы: Can I have…? Could you…?",
+      "uz": "Odobli iltimoslar: Can I have…? Could you…?"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.gram.pronouns-possessives"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "gram.can-requests"
+    ]
+  },
+  {
+    "skill_id": "en.gram.there-is",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "There is и there are",
+      "uz": "There is va there are"
+    },
+    "description": {
+      "ru": "Сказать, что где-то что-то есть, и спросить об этом",
+      "uz": "Biror joyda biror narsa borligini aytish va bu haqda soʻrash"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.gram.to-be"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "gram.there-is"
+    ]
+  },
+  {
+    "skill_id": "en.gram.countable-some-any",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "Исчисляемые, some и any",
+      "uz": "Sanaladigan otlar, some va any"
+    },
+    "description": {
+      "ru": "Исчисляемые и неисчисляемые существительные, some и any",
+      "uz": "Sanaladigan va sanalmaydigan otlar, some va any"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.voc.food-drink"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "gram.countable-some-any"
+    ]
+  },
+  {
+    "skill_id": "en.gram.prepositions-place-time",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "Предлоги места и времени",
+      "uz": "Joy va vaqt predloglari"
+    },
+    "description": {
+      "ru": "Предлоги in, on, at, next to, opposite, from… to…",
+      "uz": "in, on, at, next to, opposite, from… to… predloglari"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.gram.to-be"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "gram.prepositions-place-time"
+    ]
+  },
+  {
+    "skill_id": "en.gram.would-like",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "Would like: вежливое желание",
+      "uz": "Would like: odobli istak"
+    },
+    "description": {
+      "ru": "Вежливо сказать, что вы хотите: I'd like…, Would you like…?",
+      "uz": "Nima xohlashingizni odob bilan aytish: I'd like…, Would you like…?"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.gram.can-requests"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "gram.would-like"
+    ]
+  },
+  {
+    "skill_id": "en.gram.present-continuous",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "Present continuous: сейчас и планы",
+      "uz": "Present continuous: hozir va rejalar"
+    },
+    "description": {
+      "ru": "Действие сейчас и договорённости на ближайшее время: I'm working, I'm meeting…",
+      "uz": "Hozirgi harakat va yaqin kunlarga kelishilgan ishlar: I'm working, I'm meeting…"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.gram.present-simple"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "gram.present-continuous"
+    ]
+  },
+  {
+    "skill_id": "en.gram.past-simple",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "Past simple: рассказ о прошлом",
+      "uz": "Past simple: oʻtgan voqealar"
+    },
+    "description": {
+      "ru": "Правильные и частые неправильные глаголы: worked, went, had",
+      "uz": "Toʻgʻri va koʻp uchraydigan notoʻgʻri feʼllar: worked, went, had"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.gram.present-simple",
+      "en.gram.questions-do"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "gram.past-simple"
+    ]
+  },
+  {
+    "skill_id": "en.gram.future-going-to",
+    "course_id": "en-core",
+    "area": "grammar",
+    "title": {
+      "ru": "Going to: планы",
+      "uz": "Going to: rejalar"
+    },
+    "description": {
+      "ru": "Планы и намерения: I'm going to visit…",
+      "uz": "Rejalar va niyatlar: I'm going to visit…"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.gram.present-continuous"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "gram.future-going-to"
+    ]
+  },
+  {
+    "skill_id": "en.voc.numbers",
+    "course_id": "en-core",
+    "area": "vocabulary",
+    "title": {
+      "ru": "Числа",
+      "uz": "Sonlar"
+    },
+    "description": {
+      "ru": "Числа от 0 до 100 и тысячи: возраст, цены, номера",
+      "uz": "0 dan 100 gacha sonlar va minglar: yosh, narx, raqamlar"
+    },
+    "level": "A0",
+    "prerequisites": [],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "voc.numbers"
+    ]
+  },
+  {
+    "skill_id": "en.voc.family",
+    "course_id": "en-core",
+    "area": "vocabulary",
+    "title": {
+      "ru": "Семья",
+      "uz": "Oila"
+    },
+    "description": {
+      "ru": "Члены семьи и близкие родственники",
+      "uz": "Oila aʼzolari va yaqin qarindoshlar"
+    },
+    "level": "A0",
+    "prerequisites": [],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "voc.family"
+    ]
+  },
+  {
+    "skill_id": "en.voc.food-drink",
+    "course_id": "en-core",
+    "area": "vocabulary",
+    "title": {
+      "ru": "Еда и напитки",
+      "uz": "Taom va ichimliklar"
+    },
+    "description": {
+      "ru": "Блюда, напитки, фрукты и продукты на рынке",
+      "uz": "Taomlar, ichimliklar, mevalar va bozordagi mahsulotlar"
+    },
+    "level": "A1",
+    "prerequisites": [],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "voc.food-drink"
+    ]
+  },
+  {
+    "skill_id": "en.voc.clothes-colors",
+    "course_id": "en-core",
+    "area": "vocabulary",
+    "title": {
+      "ru": "Одежда и цвета",
+      "uz": "Kiyim va ranglar"
+    },
+    "description": {
+      "ru": "Одежда, обувь, цвета и размеры",
+      "uz": "Kiyim, poyabzal, ranglar va oʻlchamlar"
+    },
+    "level": "A1",
+    "prerequisites": [],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "voc.clothes-colors"
+    ]
+  },
+  {
+    "skill_id": "en.voc.city-places",
+    "course_id": "en-core",
+    "area": "vocabulary",
+    "title": {
+      "ru": "Места в городе",
+      "uz": "Shahardagi joylar"
+    },
+    "description": {
+      "ru": "Магазины, остановки, музеи и другие места в городе",
+      "uz": "Doʻkonlar, bekatlar, muzeylar va shahardagi boshqa joylar"
+    },
+    "level": "A1",
+    "prerequisites": [],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "voc.city-places"
+    ]
+  },
+  {
+    "skill_id": "en.voc.travel",
+    "course_id": "en-core",
+    "area": "vocabulary",
+    "title": {
+      "ru": "Путешествия",
+      "uz": "Sayohat"
+    },
+    "description": {
+      "ru": "Аэропорт, гостиница, билеты и транспорт",
+      "uz": "Aeroport, mehmonxona, chiptalar va transport"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.voc.city-places",
+      "en.voc.numbers"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "voc.travel"
+    ]
+  },
+  {
+    "skill_id": "en.voc.work",
+    "course_id": "en-core",
+    "area": "vocabulary",
+    "title": {
+      "ru": "Работа и офис",
+      "uz": "Ish va ofis"
+    },
+    "description": {
+      "ru": "Должности, отделы, встречи и рабочие задачи",
+      "uz": "Lavozimlar, boʻlimlar, uchrashuvlar va ish vazifalari"
+    },
+    "level": "A2",
+    "prerequisites": [],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "voc.work"
+    ]
+  },
+  {
+    "skill_id": "en.voc.health",
+    "course_id": "en-core",
+    "area": "vocabulary",
+    "title": {
+      "ru": "Здоровье",
+      "uz": "Salomatlik"
+    },
+    "description": {
+      "ru": "Части тела, симптомы и аптека",
+      "uz": "Tana aʼzolari, alomatlar va dorixona"
+    },
+    "level": "A2",
+    "prerequisites": [],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "voc.health"
+    ]
+  },
+  {
+    "skill_id": "en.read.signs-menus",
+    "course_id": "en-core",
+    "area": "reading",
+    "title": {
+      "ru": "Меню, вывески и табло",
+      "uz": "Menyu, yozuvlar va tablolar"
+    },
+    "description": {
+      "ru": "Понять меню и цены, вывески и табло в аэропорту",
+      "uz": "Menyu va narxlarni, yozuvlarni va aeroport tablosini tushunish"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.voc.food-drink",
+      "en.voc.numbers"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "read.signs-menus"
+    ]
+  },
+  {
+    "skill_id": "en.read.short-messages",
+    "course_id": "en-core",
+    "area": "reading",
+    "title": {
+      "ru": "Короткие сообщения",
+      "uz": "Qisqa xabarlar"
+    },
+    "description": {
+      "ru": "Понять короткое сообщение или записку: время, место, просьба",
+      "uz": "Qisqa xabar yoki yozuvni tushunish: vaqt, joy, iltimos"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.read.signs-menus",
+      "en.gram.prepositions-place-time"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "read.short-messages"
+    ]
+  },
+  {
+    "skill_id": "en.listen.numbers-times",
+    "course_id": "en-core",
+    "area": "listening",
+    "title": {
+      "ru": "Числа и время на слух",
+      "uz": "Son va vaqtni eshitib tushunish"
+    },
+    "description": {
+      "ru": "Расслышать цены, номера телефонов и время",
+      "uz": "Narx, telefon raqami va vaqtni eshitib tushunish"
+    },
+    "level": "A1",
+    "prerequisites": [
+      "en.voc.numbers"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "listen.numbers-times"
+    ]
+  },
+  {
+    "skill_id": "en.listen.short-dialogues",
+    "course_id": "en-core",
+    "area": "listening",
+    "title": {
+      "ru": "Короткие диалоги на слух",
+      "uz": "Qisqa dialoglarni eshitib tushunish"
+    },
+    "description": {
+      "ru": "Понять главное и нужные детали в коротком диалоге",
+      "uz": "Qisqa dialogdagi asosiy fikr va kerakli tafsilotlarni tushunish"
+    },
+    "level": "A2",
+    "prerequisites": [
+      "en.listen.numbers-times",
+      "en.gram.questions-do"
+    ],
+    "rubric_id": "r-lesson-core",
+    "diagnostic_tags": [
+      "listen.short-dialogues"
+    ]
+  }
+]

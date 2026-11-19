@@ -135,3 +135,63 @@ class AdminPlanOut(BaseModel):
 class AdminPlanPage(BaseModel):
     items: list[AdminPlanOut]
     next_cursor: str | None
+
+
+# ---------------------------------------------------------------- спринт 3: траектория уроков (bff.ts Trajectory)
+
+Band = Literal["A0", "A1", "A2", "B1", "B2"]
+ReasonCode = Literal[
+    "start_after_diagnostic", "no_diagnostic", "prerequisite_missing", "weak_area", "goal_match", "topic_match",
+    "next_in_course",
+]
+LessonStageType = Literal["retrieval", "explanation", "roleplay", "assessment", "summary"]
+AudienceSegment = Literal["kids", "teens", "adults"]
+
+
+class LocalizedOut(BaseModel):
+    ru: str
+    uz: str
+
+
+class LessonStageOut(BaseModel):
+    type: LessonStageType
+    minutes: int
+
+
+class LessonCardOut(BaseModel):
+    lesson_id: str
+    module_id: str
+    title: LocalizedOut
+    goal: LocalizedOut
+    level: Band
+    kind: Literal["core", "optional"]
+    duration_min: int
+    primary_skill_id: str
+    scenario_id: str | None
+    stages: list[LessonStageOut]
+
+
+class PlannedLessonOut(LessonCardOut):
+    reason_codes: list[ReasonCode]
+
+
+class NextLessonOut(PlannedLessonOut):
+    explanation: LocalizedOut
+
+
+class TrajectoryBasisOut(BaseModel):
+    diagnostic_result_id: str | None
+    goal: Goal | None
+    computed_at: datetime
+
+
+class TrajectoryOut(BaseModel):
+    pair_id: str
+    course_id: str
+    revision: int
+    basis: TrajectoryBasisOut
+    next: NextLessonOut | None
+    mandatory: list[PlannedLessonOut]
+    optional: list[PlannedLessonOut]
+    completed: list[LessonCardOut]
+    lessons_available: bool

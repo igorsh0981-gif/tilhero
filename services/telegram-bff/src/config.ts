@@ -78,9 +78,22 @@ export interface Config {
   experienceUrl: string;
   /** social (8109): приглашения и семья. */
   socialUrl: string;
+  /** catalog (8110, спринт 3): языки и пары, снимок курса, сценарии, медиатека, заявки на песни и фильмы. */
+  catalogUrl: string;
+  /** diagnostics (8111, спринт 3): входная диагностика, результаты, карта навыков. */
+  diagnosticsUrl: string;
   upstreamTimeoutMs: number;
   upstreamRetries: number;
   experienceCacheSeconds: number;
+  /** Снимок курса catalog (названия навыков для карты): перепроверка по ETag не чаще раза в N секунд. */
+  courseSnapshotRevalidateSeconds: number;
+  /** Справочник языковых пар catalog: кеш в памяти, секунды. */
+  pairsCacheSeconds: number;
+  /** Кеш аудио медиатеки в памяти (байты всех файлов, LRU); 0 — без кеша. Каждый ответ всё равно перепроверяется в
+   *  catalog (If-None-Match): права и аудитория проверяются при каждом запросе. */
+  audioCacheBytes: number;
+  /** Сегмент возраста ученика (kids/teens/adults) для контента: кеш в памяти, секунды. */
+  audienceCacheSeconds: number;
 
   rateLimits: RateLimits;
   rateLimiting: RateLimiting;
@@ -101,6 +114,8 @@ export const DEV_DEFAULTS = {
   NOTIFICATIONS_URL: "http://127.0.0.1:8104",
   EXPERIENCE_URL: "http://127.0.0.1:8106",
   SOCIAL_URL: "http://127.0.0.1:8109",
+  CATALOG_URL: "http://127.0.0.1:8110",
+  DIAGNOSTICS_URL: "http://127.0.0.1:8111",
 } as const;
 
 export class ConfigError extends Error {
@@ -301,9 +316,15 @@ export function loadConfig(env: Env = process.env): Config {
     notificationsUrl: url("NOTIFICATIONS_URL"),
     experienceUrl: url("EXPERIENCE_URL"),
     socialUrl: url("SOCIAL_URL"),
+    catalogUrl: url("CATALOG_URL"),
+    diagnosticsUrl: url("DIAGNOSTICS_URL"),
     upstreamTimeoutMs: int("UPSTREAM_TIMEOUT_MS", 3000, 100, 60_000),
     upstreamRetries: int("UPSTREAM_RETRIES", 1, 0, 5),
     experienceCacheSeconds: int("EXPERIENCE_CACHE_SECONDS", 60, 0, 3600),
+    courseSnapshotRevalidateSeconds: int("COURSE_SNAPSHOT_REVALIDATE_SECONDS", 60, 0, 3600),
+    pairsCacheSeconds: int("PAIRS_CACHE_SECONDS", 60, 0, 3600),
+    audioCacheBytes: int("AUDIO_CACHE_MB", 32, 0, 512) * 1024 * 1024,
+    audienceCacheSeconds: int("AUDIENCE_CACHE_SECONDS", 30, 0, 600),
     rateLimits: {
       userPerMinute: int("RATE_LIMIT_USER_PER_MIN", 120, 1, 100_000),
       sessionPerIpPerMinute: int("RATE_LIMIT_SESSION_IP_PER_MIN", 10, 1, 100_000),

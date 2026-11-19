@@ -24,7 +24,7 @@ test("communications: «news» with the three tabs; the 15 menu ids and groups o
   await expect(page.getByTestId("news-tab-campaigns")).toBeVisible();
 });
 
-test("super admin: 15 sections in 5 groups; a «soon» section shows its sprint", async ({ page }) => {
+test("super admin: 15 sections in 5 groups; a «soon» section shows its sprint; content and languages are live (sprint 3)", async ({ page }) => {
   await openAs(page, "admin@tilhero.local");
   expect(await menu(page)).toEqual(["overview", "users", "content", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit"]);
   await expect(page.locator(".sn-group")).toHaveCount(5);
@@ -32,7 +32,10 @@ test("super admin: 15 sections in 5 groups; a «soon» section shows its sprint"
   await expect(page.getByTestId("soon")).toBeVisible();
   await expect(page.getByTestId("soon-sprint")).toContainText("6");
   await page.locator('[data-nav="content"]').click();
-  await expect(page.getByTestId("soon-sprint")).toContainText("3");
+  await expect(page.getByTestId("content")).toBeVisible();
+  await expect(page.getByTestId("soon")).toHaveCount(0);
+  await page.locator('[data-nav="langs"]').click();
+  await expect(page.getByTestId("langs")).toBeVisible();
 });
 
 test("a role without whatsnew.publish does not see the publish button (and the server would answer 403)", async ({ page }) => {

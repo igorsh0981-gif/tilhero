@@ -1,0 +1,18 @@
+{
+  "course_id": "en-core",
+  "pair_id": "ru-en",
+  "title": {
+    "ru": "Английский: первые шаги",
+    "uz": "Ingliz tili: ilk qadamlar"
+  },
+  "description": {
+    "ru": "Курс RU→EN от нуля до A2: разговорные ситуации, навыки и сценарии",
+    "uz": "Noldan A2 gacha RU→EN kursi: suhbat vaziyatlari, koʻnikmalar va ssenariylar"
+  },
+  "level_start": "A0",
+  "level_end": "A2",
+  "module_ids": [
+    "m1-meet",
+    "m2-city"
+  ]
+}

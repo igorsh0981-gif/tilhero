@@ -1,6 +1,7 @@
 /**
  * Безопасность admin-bff: все сессионные маршруты без cookie → 401, реестр маршрутов = admin.ts, step-up по шапке
- * admin.ts, fail-closed регистрация, RBAC до вызова домена (матрица 8 ролей), actor-токен, CSRF и Origin на каждом
+ * admin.ts и разделу «Контент и диагностика», fail-closed регистрация, RBAC до вызова домена (матрица 9 ролей),
+ * actor-токен, CSRF и Origin на каждом
  * небезопасном маршруте, лимиты входа и команд, имперсонация (только dev), заголовки ответов, логи без PII и секретов.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -39,6 +40,8 @@ afterAll(closeRedis);
 /** Подставить значения параметров пути (валидные по схеме). */
 export function concrete(url: string): string {
   return url
+    .replace(":kind", "lesson")
+    .replace(":pairId", "ru-en")
     .replace(":app", "admin")
     .replace(":code", "support")
     .replace(":version", "1.0.0")
@@ -120,6 +123,36 @@ const CONTRACT_ROUTES = [
   "POST /admin/v1/notifications/campaigns/:id/schedule",
   "POST /admin/v1/notifications/campaigns/:id/unschedule",
   "POST /admin/v1/notifications/campaigns/:id/stop",
+  // спринт 3 — контент и диагностика (catalog, diagnostics)
+  "GET /admin/v1/content/:kind",
+  "GET /admin/v1/content/:kind/:key",
+  "GET /admin/v1/content/:kind/:key/versions/:v",
+  "POST /admin/v1/content/:kind",
+  "POST /admin/v1/content/:kind/:key/versions",
+  "PUT /admin/v1/content/:kind/:key/versions/:v",
+  "POST /admin/v1/content/:kind/:key/versions/:v/validate",
+  "POST /admin/v1/content/:kind/:key/versions/:v/submit",
+  "POST /admin/v1/content/:kind/:key/versions/:v/review",
+  "POST /admin/v1/content/:kind/:key/versions/:v/publish",
+  "POST /admin/v1/content/:kind/:key/archive",
+  "POST /admin/v1/content/:kind/:key/rollback",
+  "POST /admin/v1/content/scenario/:key/versions/:v/test-run",
+  "POST /admin/v1/content/media_asset/:key/versions/:v/rights-approve",
+  "POST /admin/v1/content/blobs",
+  "GET /admin/v1/content/blobs/:blobId",
+  "GET /admin/v1/content/review-queue",
+  "GET /admin/v1/content/summary",
+  "GET /admin/v1/content/media-requests",
+  "POST /admin/v1/content/media-requests/:id/take",
+  "POST /admin/v1/content/media-requests/:id/decide",
+  "GET /admin/v1/languages",
+  "PUT /admin/v1/languages/:code",
+  "GET /admin/v1/language-pairs",
+  "PUT /admin/v1/language-pairs/:pairId",
+  "GET /admin/v1/diagnostics/tests",
+  "GET /admin/v1/diagnostics/tests/:id/versions/:v",
+  "POST /admin/v1/diagnostics/tests/:id/versions/:v/publish",
+  "GET /admin/v1/diagnostics/stats",
 ];
 
 describe("реестр маршрутов", () => {
@@ -168,6 +201,18 @@ describe("реестр маршрутов", () => {
         "POST /admin/v1/experience/:app/rollback",
         // раскрытие Telegram ID
         "POST /admin/v1/learners/:id/reveal",
+        // спринт 3: публикация, снятие и откат контента (content.publish)
+        "POST /admin/v1/content/:kind/:key/versions/:v/publish",
+        "POST /admin/v1/content/:kind/:key/archive",
+        "POST /admin/v1/content/:kind/:key/rollback",
+        // права медиа и решения по заявкам учеников (media.rights)
+        "POST /admin/v1/content/media_asset/:key/versions/:v/rights-approve",
+        "POST /admin/v1/content/media-requests/:id/decide",
+        // языки и пары (lang.manage)
+        "PUT /admin/v1/languages/:code",
+        "PUT /admin/v1/language-pairs/:pairId",
+        // публикация версии теста диагностики (content.publish)
+        "POST /admin/v1/diagnostics/tests/:id/versions/:v/publish",
         // все команды по сотрудникам, ролям, заявкам
         "POST /admin/v1/staff",
         "PATCH /admin/v1/staff/:id",
@@ -182,13 +227,22 @@ describe("реестр маршрутов", () => {
 
   it("права и роли admin-bff = каталог admin.ts; матрица по умолчанию — PLAN.md", () => {
     expect([...ALL_PERMISSIONS].sort()).toEqual([...PERMISSIONS].sort());
-    expect([...ROLE_CODES].sort()).toEqual(
-      ["super_admin", "operations", "communications", "support", "methodist", "analyst", "auditor", "read_only"].sort(),
-    );
+    expect([...ROLE_CODES]).toEqual([
+      "super_admin", "operations", "communications", "support", "methodist", "content_manager", "analyst", "auditor", "read_only",
+    ]);
     expect(PRIVILEGED_ROLES).toEqual(["super_admin", "operations", "communications"]);
     expect([...DEFAULT_ROLE_MATRIX.operations].sort()).toEqual(
-      ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read"].sort(),
+      ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read"].sort(),
     );
+    // спринт 3 (docs/sprint3/PLAN.md «Права и роли»)
+    expect([...DEFAULT_ROLE_MATRIX.methodist].sort()).toEqual(
+      ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish"].sort(),
+    );
+    expect([...DEFAULT_ROLE_MATRIX.content_manager].sort()).toEqual(["content.read", "content.edit", "media.rights", "dashboard.read"].sort());
+    for (const r of ["analyst", "auditor"] as const) expect(DEFAULT_ROLE_MATRIX[r]).toContain("content.read");
+    expect(DEFAULT_ROLE_MATRIX.super_admin).toEqual(ALL_PERMISSIONS);
+    for (const r of ROLE_CODES) expect(DEFAULT_ROLE_MATRIX[r].includes("lang.manage"), r).toBe(r === "super_admin");
+    for (const r of ROLE_CODES) expect(DEFAULT_ROLE_MATRIX[r].includes("content.review"), r).toBe(r === "super_admin" || r === "methodist");
     expect([...DEFAULT_ROLE_MATRIX.communications].sort()).toEqual(
       ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"].sort(),
     );
@@ -214,7 +268,7 @@ describe("fail-closed регистрация маршрутов", () => {
   });
 });
 
-describe("RBAC до вызова домена: матрица 8 ролей × все маршруты", () => {
+describe("RBAC до вызова домена: матрица 9 ролей × все маршруты", () => {
   beforeEach(async () => {
     h = await makeHarness();
   });
@@ -236,7 +290,7 @@ describe("RBAC до вызова домена: матрица 8 ролей × в
         denied++;
       }
     }
-    expect(denied).toBeGreaterThan(200);
+    expect(denied).toBeGreaterThan(400);
   });
 
   it("у каждой роли есть разрешённый маршрут кроме /me и dashboard (роль не «пустая», кроме read_only)", () => {
@@ -244,7 +298,8 @@ describe("RBAC до вызова домена: матрица 8 ролей × в
     for (const role of ROLE_CODES) {
       const own = new Set<string>(DEFAULT_ROLE_MATRIX[role]);
       const n = routes.filter((r) => r.guard.split("|").some((p) => own.has(p as Permission)) || r.guard === `role:${role}`).length;
-      if (role === "read_only") expect(n, role).toBe(1); // support/stats (dashboard.read)
+      // support/stats, content/summary, diagnostics/stats (dashboard.read)
+      if (role === "read_only") expect(n, role).toBe(3);
       else expect(n, role).toBeGreaterThan(1);
     }
   });
