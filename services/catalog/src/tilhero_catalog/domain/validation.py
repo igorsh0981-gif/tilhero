@@ -418,10 +418,17 @@ class _Checker:
                 if not isinstance(answer, list) or not answer or any(not a.strip() for a in answer):
                     self.add(f"{path}.answer", "ANSWER_INVALID", "Укажите допустимые ответы")
             elif kind == "order_words":
+                # R1-13: варианты — слова для порядка (ученику показываются перемешанными); не пусто и не в порядке
+                # ответа, иначе задание решается без знаний
                 if not isinstance(answer, list) or len(answer) < 2:
                     self.add(f"{path}.answer", "ANSWER_INVALID", "Ответ — слова в правильном порядке")
-                elif options and sorted(options) != sorted(answer):
+                elif not options:
+                    self.add(f"{path}.options", "ANSWER_INVALID", "Укажите слова для порядка")
+                elif sorted(options) != sorted(answer):
                     self.add(f"{path}.answer", "ANSWER_INVALID", "Порядок слов должен состоять из слов вариантов")
+                elif list(options) == list(answer):
+                    self.add(f"{path}.options", "ANSWER_INVALID",
+                             "Слова в вариантах стоят в порядке ответа — перемешайте их")
 
     def rubric(self) -> None:
         p = self.p
@@ -578,13 +585,16 @@ class _Checker:
             self.add("payload.line_index", "ANSWER_INVALID", "Строки с таким номером нет в транскрипте")
 
     def _order_lines(self, options: list[str], answer: Any, asset: dict[str, Any] | None) -> None:
-        """options — перемешанные реплики транскрипта, answer — индексы options в правильном порядке."""
+        """options — перемешанные реплики транскрипта, answer — индексы options в правильном порядке. Реплики в порядке
+        ответа (answer = 0, 1, 2, …) — задание решается без знаний (R1-13)."""
         if len(options) < 2:
             self.add("payload.options", "ANSWER_INVALID", "Нужно не меньше двух реплик")
         if not isinstance(answer, list) or len(answer) != len(options) or sorted(
                 a for a in answer if isinstance(a, int)) != list(range(len(options))):
             self.add("payload.answer", "ANSWER_INVALID", "Ответ — правильный порядок индексов реплик")
             return
+        if len(options) >= 2 and list(answer) == list(range(len(options))):
+            self.add("payload.options", "ANSWER_INVALID", "Реплики в вариантах стоят в порядке ответа — перемешайте их")
         if asset is None:
             return
         lines = [str(t.get("text_en")) for t in asset.get("transcript") or []]

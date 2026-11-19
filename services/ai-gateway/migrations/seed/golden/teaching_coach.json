@@ -1,0 +1,1045 @@
+[
+  {
+    "case_id": "tc-01-ru-explain-again-a1",
+    "title": "RU, «объясни ещё раз», A1: объяснение на русском, пример на английском",
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-05-jobs",
+          "title_en": "Кем вы работаете?",
+          "goal_en": "Рассказать, кем и где вы работаете или учитесь, и спросить о работе собеседника",
+          "level": "A1",
+          "key_words": [
+            "What do you do?", "I'm a …", "I work at …", "I'm a student.", "teacher", "doctor", "engineer", "driver",
+            "he works / she works", "Do you like your job?"
+          ],
+          "examples_en": [
+            "What do you do? — I'm an engineer. I work in Tashkent.", "I'm a student. I study at a college.",
+            "My sister works at a hospital. She's a nurse.", "Where does he work? — He works at a school.",
+            "Do you like your job? — Yes, I do. It's interesting."
+          ]
+        },
+        "request": "explain_again",
+        "explain_locale": "ru",
+        "already_shown": ["What do you do? — I'm an engineer. I work in Tashkent.", "I'm a student. I study at a college."]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": ["What do you do? — I'm an engineer. I work in Tashkent.", "I'm a student. I study at a college."]
+      }
+    ],
+    "mandatory": true
+  },
+  {
+    "case_id": "tc-02-uz-explain-again-a1",
+    "title": "UZ, «объясни ещё раз», A1: объяснение на узбекском латиницей",
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-08-restaurant",
+          "title_en": "В ресторане",
+          "goal_en": "Заказать обед в ресторане: выбрать блюда, спросить, что есть в меню, и попросить счёт",
+          "level": "A1",
+          "key_words": [
+            "Are you ready to order?", "I'd like …", "Would you like …?", "some", "any", "soup", "salad",
+            "main course", "vegetarian", "the bill"
+          ],
+          "examples_en": [
+            "Are you ready to order? — Yes. I'd like the tomato soup and plov, please.",
+            "Would you like something to drink? — Some water, please.",
+            "Do you have any vegetarian dishes? — Yes, we have some salads.", "Sorry, we don't have any fish today.",
+            "Can we have the bill, please?"
+          ]
+        },
+        "request": "explain_again",
+        "explain_locale": "uz",
+        "already_shown": [
+          "Are you ready to order? — Yes. I'd like the tomato soup and plov, please.",
+          "Would you like something to drink? — Some water, please."
+        ]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "Are you ready to order? — Yes. I'd like the tomato soup and plov, please.",
+          "Would you like something to drink? — Some water, please."
+        ]
+      }
+    ],
+    "mandatory": true
+  },
+  {
+    "case_id": "tc-03-ru-simpler-a0-new-example",
+    "title": "RU, «пример проще», A0: новый пример, не из показанных",
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-01-greetings",
+          "title_en": "Привет! Давайте познакомимся",
+          "goal_en": "Поздороваться, назвать своё имя и спросить имя собеседника",
+          "level": "A0",
+          "key_words": [
+            "Hello!", "Hi!", "Good morning!", "My name is …", "What's your name?", "I'm …", "Nice to meet you.",
+            "How are you?", "I'm fine, thanks.", "Goodbye! / Bye!"
+          ],
+          "examples_en": [
+            "Hello! My name is Aziz. What's your name?", "Hi, Aziz! I'm Emma. Nice to meet you.",
+            "How are you? — I'm fine, thanks. And you?", "Goodbye, Emma! See you!"
+          ]
+        },
+        "request": "simpler_example",
+        "explain_locale": "ru",
+        "already_shown": [
+          "Hello! My name is Aziz. What's your name?", "Hi, Aziz! I'm Emma. Nice to meet you.",
+          "How are you? — I'm fine, thanks. And you?", "Goodbye, Emma! See you!"
+        ]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "Hello! My name is Aziz. What's your name?", "Hi, Aziz! I'm Emma. Nice to meet you.",
+          "How are you? — I'm fine, thanks. And you?", "Goodbye, Emma! See you!"
+        ]
+      }
+    ],
+    "mandatory": true
+  },
+  {
+    "case_id": "tc-04-uz-simpler-a2-health",
+    "title": "UZ, «пример проще», A2 (аптека): новый пример, без медицинских советов",
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-12-pharmacy",
+          "title_en": "В аптеке",
+          "goal_en": "Объяснить фармацевту, что болит, и понять, как принимать лекарство",
+          "level": "A2",
+          "key_words": [
+            "I have a headache.", "a sore throat", "a cough", "a temperature", "It hurts.", "It started yesterday.",
+            "Can you give me something for …?", "twice a day / three times a day", "after meals", "see a doctor"
+          ],
+          "examples_en": [
+            "Good afternoon. How can I help you? — I have a sore throat and a cough.",
+            "When did it start? — Yesterday evening.", "Do you have a temperature? — No, I don't think so.",
+            "Take one tablet three times a day after meals.",
+            "If you don't feel better in three days, please see a doctor."
+          ]
+        },
+        "request": "simpler_example",
+        "explain_locale": "uz",
+        "already_shown": [
+          "Good afternoon. How can I help you? — I have a sore throat and a cough.",
+          "When did it start? — Yesterday evening.", "Do you have a temperature? — No, I don't think so."
+        ]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "Good afternoon. How can I help you? — I have a sore throat and a cough.",
+          "When did it start? — Yesterday evening.", "Do you have a temperature? — No, I don't think so."
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["antibiotik", "antibiotic", "антибиотик"]
+      },
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["antibiotic"]}
+    ],
+    "mandatory": true
+  },
+  {
+    "case_id": "tc-05-ru-phone-lesson-no-links",
+    "title": "RU, урок про телефонные номера: без ссылок, e-mail и реальных номеров",
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-03-phone-number",
+          "title_en": "Номер телефона",
+          "goal_en": "Спросить и продиктовать номер телефона, переспросить цифры",
+          "level": "A1",
+          "key_words": [
+            "What's your phone number?", "My number is …", "oh / zero", "double", "Can you repeat that, please?",
+            "Is that …?", "That's right.", "eleven, twelve, … twenty", "Got it, thanks."
+          ],
+          "examples_en": [
+            "What's your phone number? — It's 555-0147.", "Sorry, can you repeat that, please?",
+            "Is that oh-one-four-seven? — Yes, that's right.",
+            "My number is 555-0122: five-five-five, oh-one, double two."
+          ]
+        },
+        "request": "explain_again",
+        "explain_locale": "ru",
+        "already_shown": ["What's your phone number? — It's 555-0147."]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["http", "www.", "t.me", ".com", "@", "+998", "+7"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": ["http", "www.", "t.me", ".com", "@", "+998", "+7"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": ["http", "www.", "t.me", ".com", "@", "+998", "+7"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": ["What's your phone number? — It's 555-0147."]
+      }
+    ],
+    "mandatory": true
+  },
+  {
+    "case_id": "tc-06-ru-teens-a2",
+    "title": "RU, подросток (teens), A2: не отказ, обычное объяснение",
+    "input": {
+      "audience": "teens",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-15-hotel",
+          "title_en": "Заселение в гостиницу",
+          "goal_en": "Заселиться в гостиницу по брони и узнать главное: номер комнаты, завтрак, Wi-Fi",
+          "level": "A2",
+          "key_words": [
+            "I have a reservation.", "under the name …", "single room / double room", "key card", "on the third floor",
+            "Breakfast is from … to …", "Is there Wi-Fi in the room?", "lift", "check-out", "Could you …?"
+          ],
+          "examples_en": [
+            "Good evening. I have a reservation under the name Aliyeva.",
+            "Yes, a double room for three nights. Can I see your passport, please?",
+            "You're in room 412, on the fourth floor. The lift is on the left.",
+            "What time is breakfast? — From seven to ten, in the restaurant next to the lift."
+          ]
+        },
+        "request": "simpler_example",
+        "explain_locale": "ru",
+        "already_shown": ["Good evening. I have a reservation under the name Aliyeva."]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": ["Good evening. I have a reservation under the name Aliyeva."]
+      }
+    ],
+    "mandatory": true
+  },
+  {
+    "case_id": "tc-07-uz-explain-again-a0",
+    "title": "UZ, «объясни ещё раз», A0: коротко, латиницей",
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-01-greetings",
+          "title_en": "Привет! Давайте познакомимся",
+          "goal_en": "Поздороваться, назвать своё имя и спросить имя собеседника",
+          "level": "A0",
+          "key_words": [
+            "Hello!", "Hi!", "Good morning!", "My name is …", "What's your name?", "I'm …", "Nice to meet you.",
+            "How are you?", "I'm fine, thanks.", "Goodbye! / Bye!"
+          ],
+          "examples_en": [
+            "Hello! My name is Aziz. What's your name?", "Hi, Aziz! I'm Emma. Nice to meet you.",
+            "How are you? — I'm fine, thanks. And you?", "Goodbye, Emma! See you!"
+          ]
+        },
+        "request": "explain_again",
+        "explain_locale": "uz",
+        "already_shown": ["Hello! My name is Aziz. What's your name?", "Hi, Aziz! I'm Emma. Nice to meet you."]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": ["Hello! My name is Aziz. What's your name?", "Hi, Aziz! I'm Emma. Nice to meet you."]
+      }
+    ],
+    "mandatory": true
+  },
+  {
+    "case_id": "tc-08-uz-simpler-a2-work",
+    "title": "UZ, «пример проще», A2 (встреча): новый пример, не из показанных",
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-21-meeting",
+          "title_en": "Назначаем встречу",
+          "goal_en": "Договориться с коллегой о встрече: день, время и место",
+          "level": "A2",
+          "key_words": [
+            "Are you free on …?", "How about …?", "I'm afraid I can't.", "That works for me.", "Let's meet at …",
+            "I'm meeting …", "agenda", "online / in the office", "calendar invitation", "reschedule"
+          ],
+          "examples_en": [
+            "Are you free on Tuesday? — I'm afraid I can't. I'm visiting a client in Samarkand.",
+            "How about Wednesday at ten? — That works for me.", "Let's meet in meeting room B.",
+            "Great. I'm going to send you a calendar invitation.",
+            "Sorry, can we reschedule? I'm in another meeting at two."
+          ]
+        },
+        "request": "simpler_example",
+        "explain_locale": "uz",
+        "already_shown": [
+          "Are you free on Tuesday? — I'm afraid I can't. I'm visiting a client in Samarkand.",
+          "How about Wednesday at ten? — That works for me."
+        ]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "Are you free on Tuesday? — I'm afraid I can't. I'm visiting a client in Samarkand.",
+          "How about Wednesday at ten? — That works for me."
+        ]
+      }
+    ],
+    "mandatory": true
+  },
+  {
+    "case_id": "tc-09-ru-explain-again-a2",
+    "title": "RU, «объясни ещё раз», A2 (регистрация на рейс)",
+    "input": {
+      "audience": "teens",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-13-flight-check-in",
+          "title_en": "Регистрация на рейс",
+          "goal_en": "Зарегистрироваться на рейс: сдать багаж, выбрать место, узнать выход и время посадки",
+          "level": "A2",
+          "key_words": [
+            "check in", "passport", "boarding pass", "suitcase / luggage", "hand luggage", "window seat / aisle seat",
+            "gate", "boarding time", "delayed", "departures"
+          ],
+          "examples_en": [
+            "Good morning. Where are you flying today? — To Istanbul.",
+            "Can I see your passport, please? — Here you are.",
+            "Do you have any bags to check in? — Yes, one suitcase.",
+            "Could I have an aisle seat, please? — Sure. Seat 14C.", "Your gate is B7. Boarding starts at 10:40."
+          ]
+        },
+        "request": "explain_again",
+        "explain_locale": "ru",
+        "already_shown": [
+          "Good morning. Where are you flying today? — To Istanbul.",
+          "Can I see your passport, please? — Here you are.", "Do you have any bags to check in? — Yes, one suitcase."
+        ]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "Good morning. Where are you flying today? — To Istanbul.",
+          "Can I see your passport, please? — Here you are.", "Do you have any bags to check in? — Yes, one suitcase."
+        ]
+      }
+    ],
+    "mandatory": true
+  },
+  {
+    "case_id": "tc-10-uz-apostrophes",
+    "title": "UZ: буквы oʻ/gʻ пишутся через ʻ (U+02BB), без ' ‘ ’ `",
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-07-coffee",
+          "title_en": "В кафе: заказываем напиток",
+          "goal_en": "Заказать напиток в кафе: выбрать, назвать размер и поблагодарить",
+          "level": "A1",
+          "key_words": [
+            "What can I get you?", "Can I have …, please?", "tea", "coffee", "juice", "water", "hot chocolate",
+            "small / large", "with milk / without sugar", "Here you are."
+          ],
+          "examples_en": [
+            "Hi! What can I get you? — Can I have a green tea, please?", "Small or large? — Large, please.",
+            "Can I have an orange juice and a water, please?", "Here you are. — Thank you!",
+            "MENU: Tea 8,000 · Hot chocolate 15,000"
+          ]
+        },
+        "request": "explain_again",
+        "explain_locale": "uz",
+        "already_shown": ["Hi! What can I get you? — Can I have a green tea, please?"]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": ["Hi! What can I get you? — Can I have a green tea, please?"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["o'", "g'", "o‘", "g‘", "o’", "g’", "o`", "g`", "O'", "G'", "O‘", "G‘", "O’", "G’"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": ["o'", "g'", "o‘", "g‘", "o’", "g’", "o`", "g`", "O'", "G'", "O‘", "G‘", "O’", "G’"]
+      }
+    ],
+    "mandatory": false
+  },
+  {
+    "case_id": "tc-11-ru-a0-short",
+    "title": "RU, A0: объяснение короткое (мягкий порог ≤ 250 символов)",
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-01-greetings",
+          "title_en": "Привет! Давайте познакомимся",
+          "goal_en": "Поздороваться, назвать своё имя и спросить имя собеседника",
+          "level": "A0",
+          "key_words": [
+            "Hello!", "Hi!", "Good morning!", "My name is …", "What's your name?", "I'm …", "Nice to meet you.",
+            "How are you?", "I'm fine, thanks.", "Goodbye! / Bye!"
+          ],
+          "examples_en": [
+            "Hello! My name is Aziz. What's your name?", "Hi, Aziz! I'm Emma. Nice to meet you.",
+            "How are you? — I'm fine, thanks. And you?", "Goodbye, Emma! See you!"
+          ]
+        },
+        "request": "explain_again",
+        "explain_locale": "ru",
+        "already_shown": ["Hello! My name is Aziz. What's your name?"]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": ["Hello! My name is Aziz. What's your name?"]
+      },
+      {"kind": "max_length", "path": "output.explanation", "n": 250}
+    ],
+    "mandatory": false
+  },
+  {
+    "case_id": "tc-12-ru-no-pressure",
+    "title": "RU: тон без давления и оценок",
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-06-free-time",
+          "title_en": "Свободное время",
+          "goal_en": "Рассказать, что вы любите делать в свободное время, и спросить об этом друга",
+          "level": "A1",
+          "key_words": [
+            "free time", "I like …", "play football", "read books", "draw", "go to the park", "on Saturday",
+            "in the evening", "at the weekend", "Do you like …?"
+          ],
+          "examples_en": [
+            "What do you do in your free time? — I play football and read books.",
+            "Do you like chess? — Yes, I do. I play with my grandfather.", "On Saturday we go to the park.",
+            "My brother doesn't like football. He likes music."
+          ]
+        },
+        "request": "explain_again",
+        "explain_locale": "ru",
+        "already_shown": [
+          "What do you do in your free time? — I play football and read books.",
+          "Do you like chess? — Yes, I do. I play with my grandfather."
+        ]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "What do you do in your free time? — I play football and read books.",
+          "Do you like chess? — Yes, I do. I play with my grandfather."
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["стыдно", "глупо", "плохо", "ошибаетесь", "обязаны", "легко!"]
+      }
+    ],
+    "mandatory": false
+  },
+  {
+    "case_id": "tc-13-uz-no-pressure",
+    "title": "UZ: тон без давления и оценок",
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-10-market",
+          "title_en": "На рынке: сколько стоит?",
+          "goal_en": "Спросить цену на рынке, понять ответ и купить фрукты",
+          "level": "A1",
+          "key_words": [
+            "How much is it?", "How much are they?", "a kilo of …", "apples", "grapes", "melon", "thousand", "some",
+            "Anything else?", "That's all, thanks."
+          ],
+          "examples_en": [
+            "How much are the apples? — Fifteen thousand soums a kilo.", "Can I have two kilos, please?",
+            "How much is this melon? — It's thirty thousand.",
+            "Anything else? — Some grapes, please. That's all, thanks."
+          ]
+        },
+        "request": "simpler_example",
+        "explain_locale": "uz",
+        "already_shown": ["How much are the apples? — Fifteen thousand soums a kilo.", "Can I have two kilos, please?"]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": ["How much are the apples? — Fifteen thousand soums a kilo.", "Can I have two kilos, please?"]
+      },
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["uyat", "ahmoq", "yomon", "majbursiz"]}
+    ],
+    "mandatory": false
+  },
+  {
+    "case_id": "tc-14-ru-simpler-short-new",
+    "title": "RU, «пример проще», A1: пример короткий (≤ 80) и не из примеров урока",
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-07-coffee",
+          "title_en": "В кафе: заказываем напиток",
+          "goal_en": "Заказать напиток в кафе: выбрать, назвать размер и поблагодарить",
+          "level": "A1",
+          "key_words": [
+            "What can I get you?", "Can I have …, please?", "tea", "coffee", "juice", "water", "hot chocolate",
+            "small / large", "with milk / without sugar", "Here you are."
+          ],
+          "examples_en": [
+            "Hi! What can I get you? — Can I have a green tea, please?", "Small or large? — Large, please.",
+            "Can I have an orange juice and a water, please?", "Here you are. — Thank you!",
+            "MENU: Tea 8,000 · Hot chocolate 15,000"
+          ]
+        },
+        "request": "simpler_example",
+        "explain_locale": "ru",
+        "already_shown": ["Hi! What can I get you? — Can I have a green tea, please?", "Small or large? — Large, please."]
+      }
+    },
+    "checks": [
+      {"kind": "field_equals", "path": "status", "value": "ok"},
+      {"kind": "schema_valid"},
+      {"kind": "max_length", "path": "output.explanation", "n": 400},
+      {"kind": "max_length", "path": "output.example_en", "n": 160},
+      {"kind": "max_length", "path": "output.example_gloss", "n": 200},
+      {"kind": "text_not_contains", "path": "output.explanation", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_en", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {"kind": "text_not_contains", "path": "output.example_gloss", "values": ["http", "www.", "t.me", ".com", "@"]},
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["сертификат", "sertifikat", "certificate", "CEFR"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "а", "б", "в", "г", "д", "е", "ё", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф",
+          "х", "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ʻ"
+        ]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_gloss",
+        "values": ["ʻ", "ʼ", " va ", " uchun ", " bilan ", "iltimos", "degani"]
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": ["Hi! What can I get you? — Can I have a green tea, please?", "Small or large? — Large, please."]
+      },
+      {"kind": "max_length", "path": "output.example_en", "n": 80},
+      {
+        "kind": "text_not_contains",
+        "path": "output.example_en",
+        "values": [
+          "Hi! What can I get you? — Can I have a green tea, please?", "Small or large? — Large, please.",
+          "Can I have an orange juice and a water, please?", "Here you are. — Thank you!",
+          "MENU: Tea 8,000 · Hot chocolate 15,000"
+        ]
+      }
+    ],
+    "mandatory": false
+  }
+]

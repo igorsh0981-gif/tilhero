@@ -1,14 +1,12 @@
-import type { HomeSectionType, TodayPlan } from "@tilhero/contracts/bff";
-import { useRef } from "react";
+import type { HomeSectionType, LessonSession, TodayPlan } from "@tilhero/contracts/bff";
 import { flag, homeSections } from "../../config/experience";
+import { isOpen } from "../../domain/lessons";
 import { useI18n, type MessageKey } from "../../i18n";
 import { useApp, usePlan } from "../../state/app";
 import { useAction, useLoad } from "../../state/hooks";
-import { newIdempotencyKey } from "../../api/client";
-import { haptic } from "../../tg";
 import { Icon } from "../../ui/Icon";
-import { Btn, cx, ErrorLine, HERO, Hero, Margin, NoBreakHyphens, Skeleton } from "../../ui/kit";
-import { showToast } from "../../ui/overlays";
+import { Btn, cx, ErrorLine, HERO, Hero, Margin, NoBreakHyphens, Pill, Skeleton } from "../../ui/kit";
+import { ActiveCard } from "../lessons/LessonsTab";
 import { scheduleSummary } from "../schedule/parts";
 
 /** ISO weekday (1=Mon … 7=Sun) of a plan date "YYYY-MM-DD" (calendar arithmetic, no time zone). */
@@ -26,15 +24,18 @@ export function greetingKey(hour: number): MessageKey {
 }
 
 /**
- * Home: the plan for today by the learner's own schedule (slot, duration, «Начать занятие» → «Уроки», marking a
- * session), the week, the hero
- * and the sections of Remote Experience Config. Lessons, reviews and the hero's growth arrive in later sprints.
+ * Home: the plan for today by the learner's own schedule (slot, duration, «Начать занятие» → the next lesson, an
+ * unfinished one — «Продолжить урок»), the week, the hero and the sections of Remote Experience Config. Sessions are
+ * counted from the lessons themselves (sprint 4): there is no manual «Отметить занятие» any more.
  */
 export function Home() {
   const { bff, session, config, nav } = useApp();
   const plan = usePlan();
   const { t, tp } = useI18n();
   const today = useLoad(() => bff.today(), [plan.learner_id, plan.version]);
+  // an unfinished lesson: «Продолжить урок» instead of «Начать занятие» (a failure just hides it)
+  const active = useLoad(() => bff.activeSession(true).catch(() => ({ session: null })), [plan.learner_id]);
+  const activeSession = active.data?.session ?? null;
   const kid = session.learner.kind === "child";
   const news = flag(config, "news");
   const sections = homeSections(config).filter(
@@ -68,7 +69,7 @@ export function Home() {
         {sections
           .filter((s, i) => !(s === "news" && sections.slice(0, i).includes("whats_new")))
           .map((s) => (
-            <Section key={s} type={s} today={today} />
+            <Section key={s} type={s} today={today} active={activeSession} withToday={sections.includes("today_plan")} />
           ))}
 
         {kid ? (
@@ -91,12 +92,12 @@ export function Home() {
   );
 }
 
-function Section({ type, today }: { type: HomeSectionType; today: ReturnType<typeof useLoad<TodayPlan>> }) {
+function Section({ type, today, active, withToday }: { type: HomeSectionType; today: ReturnType<typeof useLoad<TodayPlan>>; active: LessonSession | null; withToday: boolean }) {
   switch (type) {
     case "today_plan":
-      return <TodaySection today={today} />;
+      return <TodaySection today={today} active={active} />;
     case "lesson_of_day":
-      return <LearningSection />;
+      return <LearningSection active={withToday ? null : active} />;
     case "whats_new":
     case "news":
       return <NewsCard />;
@@ -109,19 +110,20 @@ function Section({ type, today }: { type: HomeSectionType; today: ReturnType<typ
   }
 }
 
-function TodaySection({ today }: { today: ReturnType<typeof useLoad<TodayPlan>> }) {
+function TodaySection({ today, active }: { today: ReturnType<typeof useLoad<TodayPlan>>; active: LessonSession | null }) {
   const { bff, nav, session } = useApp();
   const plan = usePlan();
-  const { t, fmt } = useI18n();
-  const key = useRef<string | null>(null);
-  const mark = useAction(async () => {
-    // one key per tap; a retry after a lost answer reuses it, so the session is counted once
-    key.current ??= newIdempotencyKey();
-    const res = await bff.recordActivity({ kind: "practice", minutes: plan.schedule.duration_min }, key.current);
-    key.current = null;
-    today.setData(res);
-    haptic.notify("success");
-    showToast(t("home.marked", { n: plan.schedule.duration_min }));
+  const { t, l, fmt } = useI18n();
+  const open = isOpen(active) ? active : null;
+  // «Начать занятие» leads to the lesson: an unfinished one, else the next lesson of the plan, else the «Уроки» tab
+  const go = useAction(async () => {
+    if (open) {
+      nav.push({ name: "player", sessionId: open.session_id });
+      return;
+    }
+    const tr = await bff.trajectory(true).catch(() => null);
+    if (tr?.next && tr.lessons_available) nav.push({ name: "lessonCard", id: tr.next.lesson_id });
+    else nav.goTab("lessons");
   });
   const d = today.data;
   const kid = session.learner.kind === "child";
@@ -150,20 +152,16 @@ function TodaySection({ today }: { today: ReturnType<typeof useLoad<TodayPlan>> 
           <p className="h2">
             {d.done_today ? t("home.doneLine") : d.is_scheduled_today ? t("home.slotLine", { time: slot }) : d.next_slot ? t("home.nextLine", { day: dayName(d.next_slot.local_date, t, fmt.localDate), time: d.next_slot.time }) : t("home.noSlot")}
           </p>
-          <ErrorLine text={mark.error} />
-          {/* owner's decision: lessons arrive by the sprint plan (3–4) — «Начать занятие» leads to «Уроки» (the honest
-              «скоро» screen); marking a session done on one's own stays as the secondary action */}
+          <ErrorLine text={go.error} />
+          {/* sprint 4: sessions are counted from the lessons — the day card leads to the lesson (no manual marking) */}
           <div className="plan-actions">
-            <Btn onClick={() => nav.goTab("lessons")} data-testid="start-lesson">
-              <Icon name="lessons" size={18} />
-              {t("home.start")}
-            </Btn>
-            <Btn variant="secondary" busy={mark.busy} onClick={() => void mark.run()} data-testid="mark-activity">
-              <Icon name="check" size={18} />
-              {d.done_today ? t("home.markMore") : t("home.mark")}
+            <Btn busy={go.busy} onClick={() => void go.run()} data-testid="start-lesson">
+              <Icon name={open ? "play" : "lessons"} size={18} />
+              {open ? t("ls.continue") : t("home.start")}
             </Btn>
           </div>
-          <p className="sub small">{d.done_today ? t("home.doneHint", { n: d.minutes_today }) : t("home.markHint")}</p>
+          {open ? <p className="sub small" data-testid="today-active">{t("home.continueCap")} · {l(open.title)}</p> : null}
+          <p className="sub small">{d.done_today ? t("home.doneHint", { n: d.minutes_today }) : t("home.startHint")}</p>
           {!plan.schedule.reminders_enabled ? (
             <Btn variant="link" onClick={() => nav.route("schedule")}>
               <Icon name="bell" size={18} />
@@ -234,7 +232,7 @@ function HeroCard() {
  * «Продолжить»; done → «Следующий урок» from the trajectory with «почему» (explanation), «Начать урок» (the honest
  * «скоро» of the lessons tab), links to «Мой план» and «Карта навыков»; then «Практика».
  */
-function LearningSection() {
+function LearningSection({ active }: { active: LessonSession | null }) {
   const { bff, nav, session } = useApp();
   const plan = usePlan();
   const { t, l } = useI18n();
@@ -285,7 +283,10 @@ function LearningSection() {
               <div className="cap" id="home-next-cap">{t("home.next.cap", { level: next.level, n: next.duration_min })}</div>
               <h2 className="h2"><NoBreakHyphens text={l(next.title)} /></h2>
               <p className="sub" data-testid="home-next-why">{l(next.explanation)}</p>
-              <Btn onClick={() => nav.goTab("lessons")} data-testid="home-start-lesson">
+              {next.reason_codes.includes("repeat") ? (
+                <div className="pills"><Pill tone="mute">{t("plan.reason.repeat")}</Pill></div>
+              ) : null}
+              <Btn disabled={!tr.data?.lessons_available} onClick={() => nav.push({ name: "lessonCard", id: next.lesson_id })} data-testid="home-start-lesson">
                 <Icon name="lessons" size={18} />
                 {t("home.next.start")}
               </Btn>
@@ -313,6 +314,7 @@ function LearningSection() {
   }
   return (
     <>
+      {active ? <ActiveCard session={active} compact /> : null}
       {card}
       <Margin>
         <button type="button" className="row boxed" onClick={() => nav.push({ name: "practice" })} data-testid="home-practice">

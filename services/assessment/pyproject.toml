@@ -1,0 +1,16 @@
+[project]
+name = "tilhero-assessment"
+version = "0.1.0"
+description = "TilHero assessment: независимая оценка по рубрике — закрытые задания по ключам, независимый оценщик, исходы навыков, переоценка, апелляции"
+requires-python = ">=3.12"
+dependencies = ["tilhero-common"]
+
+[tool.uv.sources]
+tilhero-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tilhero_assessment"]

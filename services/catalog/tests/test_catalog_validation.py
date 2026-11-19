@@ -142,6 +142,20 @@ def test_lesson_answers_checked_by_type() -> None:
     assert {("ANSWER_INVALID", f"payload.control_items[{i}].answer") for i in range(3)} <= set(found)
 
 
+def test_order_words_options_required_and_shuffled() -> None:
+    """R1-13: у order_words варианты обязательны (слова для порядка) и не стоят в порядке ответа."""
+    p = lesson("l-x")
+    i, item = next((i, c) for i, c in enumerate(p["control_items"]) if c["type"] == "order_words")
+    assert item["options"] and item["options"] != item["answer"] and codes("lesson", p) == []
+    path = f"payload.control_items[{i}].options"
+    item["options"] = []
+    assert issues("lesson", p) == [("ANSWER_INVALID", path)]
+    item["options"] = list(item["answer"])
+    assert issues("lesson", p) == [("ANSWER_INVALID", path)]
+    item["options"] = list(reversed(item["answer"]))
+    assert codes("lesson", p) == []
+
+
 def test_unknown_refs_submit_vs_publish() -> None:
     p = lesson("l-x")
     p["primary_skill_id"] = "en.func.nope"
@@ -427,8 +441,13 @@ def test_media_exercise_rules() -> None:
     assert codes("media_exercise", order) == []
     order["answer"] = [2, 1, 0]  # перестановка, но не порядок транскрипта
     assert ("ANSWER_INVALID", "payload.answer") in issues("media_exercise", order)
-    order.update(options=["Hello!", *lines[1:]], answer=[0, 1, 2])
+    order.update(options=["Hello!", *lines[1:]], answer=[2, 0, 1])
     assert ("ANSWER_INVALID", "payload.options") in issues("media_exercise", order)
+    # R1-13: реплики в вариантах в порядке ответа — задание решается без знаний
+    order.update(options=[lines[1], lines[2], lines[0]], answer=[0, 1, 2])
+    assert issues("media_exercise", order) == [("ANSWER_INVALID", "payload.options")]
+    order.update(options=[lines[2], lines[1], lines[0]], answer=[1, 0, 2])
+    assert codes("media_exercise", order) == []
     # gap_fill: строка с ___; line_index — реплика-источник (допустим, в пределах транскрипта)
     gap = {**exercise("ex-4"), "type": "gap_fill", "prompt_en": "Small or ___?", "options": [], "answer": ["large"],
            "line_index": 2}

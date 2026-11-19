@@ -65,7 +65,8 @@ def test_scheduler_and_service_specific_secrets():
     assert gw["MINIAPP_URL"].startswith("https://") and "localhost" not in gw["MINIAPP_URL"]
     n8n = env_of(files, "n8n")
     assert {k for k in n8n if k.endswith("_URL")} == {"LEARNING_PLAN_URL", "NOTIFICATIONS_URL", "SOCIAL_URL",
-                                                       "USER_ADMIN_URL", "CATALOG_URL"}
+                                                       "USER_ADMIN_URL", "CATALOG_URL", "LESSONS_URL",
+                                                       "ASSESSMENT_URL"}
     assert n8n["RAILWAY_RUN_UID"] == "0" and len(n8n["N8N_ENCRYPTION_KEY"]) >= 32
 
 
@@ -77,7 +78,7 @@ def test_db_passwords_cover_every_role_and_secrets_are_unique():
     assert set(roles) == schemas | {f"{x}_owner" for x in schemas}
     assert all(f"'{x}'" in bootstrap for x in schemas)
     values = [*sec.passwords.values(), sec.scheduler, sec.session_jwt, sec.invite_key, sec.webhook, sec.internal_hmac,
-              sec.n8n_key, sec.mfa_key, sec.admin_password]
+              sec.n8n_key, sec.mfa_key, sec.admin_password, sec.user_ref]
     assert len(values) == len(set(values))
 
 
@@ -122,7 +123,7 @@ def test_admin_services_sprint2():
     assert "INTERNAL_JWT_SECRET" not in bff and bff["INTERNAL_JWT_PRIVATE_KEY"]
     assert {k for k in bff if k.endswith("_URL") and k != "REDIS_URL"} == {
         "ADMIN_IDENTITY_URL", "USER_ADMIN_URL", "IDENTITY_URL", "SUPPORT_URL", "AUDIT_URL", "EXPERIENCE_URL",
-        "NOTIFICATIONS_URL", "CATALOG_URL", "DIAGNOSTICS_URL"}
+        "NOTIFICATIONS_URL", "CATALOG_URL", "DIAGNOSTICS_URL", "AI_GATEWAY_URL", "LESSONS_URL", "ASSESSMENT_URL"}
     assert not rs.by_name("admin-bff").public and rs.by_name("admin-web").public
     web = env_of(files, "admin-web")
     assert web["ADMIN_BFF_URL"] == "http://${{admin-bff.RAILWAY_PRIVATE_DOMAIN}}:8002"
@@ -157,3 +158,41 @@ def test_content_services_sprint3():
     assert env_of(files, "learning-plan")["CATALOG_URL"].endswith(":8110")
     bff = env_of(files, "telegram-bff")
     assert bff["CATALOG_URL"].endswith(":8110") and bff["DIAGNOSTICS_URL"].endswith(":8111")
+
+
+def test_lesson_services_sprint4():
+    """Спринт 4: lessons, assessment, ai-gateway — приватные, со своими схемами; ключ провайдера ИИ — пустой
+    (вводит владелец), только у ai-gateway; адреса у вызывающих."""
+    sec = rs.Secrets.new()
+    files = rs.build(sec, env="prod", bot_username="TilHeroBot", app_name="app")
+    for name, port, schema in (("lessons", 8112, "lessons"), ("assessment", 8113, "assessment"),
+                               ("ai-gateway", 8114, "ai_gateway")):
+        svc = rs.by_name(name)
+        assert not svc.public and svc.port == port and svc.schema == schema
+        env = env_of(files, name)
+        assert env["DATABASE_URL"].startswith(f"postgresql://{schema}:") and env["INTERNAL_JWT_PRIVATE_KEY"]
+    gw = env_of(files, "ai-gateway")
+    assert gw["AI_PROVIDER"] == "anthropic" and gw["ANTHROPIC_API_KEY"] == "${{shared.ANTHROPIC_API_KEY}}"
+    assert all("ANTHROPIC_API_KEY" not in env_of(files, s.name) for s in rs.SERVICES if s.name != "ai-gateway")
+    assert not any(line.startswith("ANTHROPIC_API_KEY=sk-") for f in files.values() for line in f.splitlines())
+    lessons = env_of(files, "lessons")
+    assert lessons["SCHEDULER_TOKEN"] == sec.scheduler
+    # R2-06: секрет псевдонима ученика (HMAC user_ref) — только у lessons, ≥ 32 символов, свой
+    assert lessons["USER_REF_SECRET"] == sec.user_ref and len(sec.user_ref) >= 32
+    assert all("USER_REF_SECRET" not in env_of(files, s.name) for s in rs.SERVICES if s.name != "lessons")
+    assert sec.user_ref != rs.Secrets.new().user_ref
+    for callee, port in (("CATALOG_URL", 8110), ("AI_GATEWAY_URL", 8114), ("ASSESSMENT_URL", 8113),
+                         ("LEARNING_PLAN_URL", 8102), ("DIAGNOSTICS_URL", 8111)):
+        assert lessons[callee].endswith(f":{port}")
+    assessment = env_of(files, "assessment")
+    assert assessment["CATALOG_URL"].endswith(":8110") and assessment["AI_GATEWAY_URL"].endswith(":8114")
+    bff = env_of(files, "telegram-bff")
+    assert bff["LESSONS_URL"].endswith(":8112") and bff["ASSESSMENT_URL"].endswith(":8113")
+    admin = env_of(files, "admin-bff")
+    assert {admin["AI_GATEWAY_URL"][-5:], admin["LESSONS_URL"][-5:], admin["ASSESSMENT_URL"][-5:]} == {
+        ":8114", ":8112", ":8113"}
+    assert env_of(files, "n8n")["LESSONS_URL"].endswith(":8112")
+    # assessment-tick (стирание текста апелляций, R1-14): адрес у n8n, общий SCHEDULER_TOKEN у assessment
+    assert env_of(files, "n8n")["ASSESSMENT_URL"].endswith(":8113")
+    assert assessment["SCHEDULER_TOKEN"] == sec.scheduler
+

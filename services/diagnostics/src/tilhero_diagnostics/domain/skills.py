@@ -1,6 +1,7 @@
 """Карта навыков ученика по паре (INTERNAL_API §2.4, AT-35).
 
-Состояние меняется только механизмом оценки (сейчас — диагностика): на каждый результат (ревизию) и навык —
+Состояние меняется только механизмом оценки (диагностика; со спринта 4 — ещё оценки уроков, `lesson_outcomes.py`):
+на каждый результат диагностики (ревизию) и навык —
 одно свидетельство (positive | negative) с полосой; переход — engine.transition. История свидетельств не меняется
 и не удаляется (кроме саги удаления ученика). Изменения — событие skills.state.changed.v1.
 """
@@ -93,10 +94,12 @@ async def apply_diagnostic(
         supported = (o.outcome == "positive") == (after in ("demonstrated", "retained"))
         if row is None:
             row = SkillState(user_id=user_id, pair_id=pair_id, skill_id=o.skill_id, state=after,
-                             confidence=o.confidence, updated_at=now, source="diagnostic")
+                             confidence=o.confidence, updated_at=now, source="diagnostic", state_ref=str(result_id))
             session.add(row)
             current[o.skill_id] = row
         elif supported:
+            if after != row.state:
+                row.state_ref = str(result_id)  # свидетельство, установившее новое состояние (спринт 4)
             row.state, row.confidence, row.updated_at, row.source = after, o.confidence, now, "diagnostic"
         if after != before:
             changes.append({"skill_id": o.skill_id, "from": before, "to": after, "source": "diagnostic",

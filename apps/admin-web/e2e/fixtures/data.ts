@@ -28,14 +28,16 @@ export const ALL_PERMS: Permission[] = [...PERMISSIONS];
 /** Default matrix (PLAN.md «Роли и права»; super_admin — all; users.sensitive.read, staff.manage, roles.manage — only super_admin). */
 export const MATRIX: Record<RoleCode, Permission[]> = {
   super_admin: [...ALL_PERMS],
-  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read"],
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage"],
   communications: ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"],
   support: ["dashboard.read", "users.read", "support.read", "support.reply"],
   // sprint 3 (PLAN «Права и роли»)
-  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish"],
+  // sprint 4: + agents, dialogue QA, costs
+  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish", "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review"],
   content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights"],
-  analyst: ["dashboard.read", "users.read", "content.read"],
-  auditor: ["dashboard.read", "audit.read", "content.read"],
+  qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts"],
+  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read"],
   read_only: ["dashboard.read"],
 };
 
@@ -46,6 +48,7 @@ export const ROLE_NAMES: Record<RoleCode, { ru: string; en: string }> = {
   support: { ru: "Поддержка", en: "Support" },
   methodist: { ru: "Методист", en: "Methodist" },
   content_manager: { ru: "Контент-менеджер", en: "Content manager" },
+  qa_analyst: { ru: "QA-аналитик", en: "QA analyst" },
   analyst: { ru: "Аналитик", en: "Analyst" },
   auditor: { ru: "Аудитор", en: "Auditor" },
   read_only: { ru: "Только чтение", en: "Read only" },
@@ -75,6 +78,8 @@ export const ID = {
   former: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a09",
   methodist2: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a10",
   content: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a11",
+  qa: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a12",
+  analyst: "0b6c3e1a-7d2f-4f0e-9a51-1c2d3e4f5a13",
 };
 
 function staff(id: string, email: string, display_name: string, role: RoleCode, extra: Partial<Staff> = {}): Staff {
@@ -106,6 +111,9 @@ export function accounts(): Account[] {
     { staff: staff(ID.methodist, "methodist@tilhero.local", "Гульнора", "methodist"), password: PASSWORD },
     { staff: staff(ID.methodist2, "methodist2@tilhero.local", "Камила", "methodist"), password: PASSWORD },
     { staff: staff(ID.content, "content@tilhero.local", "Ольга", "content_manager"), password: PASSWORD },
+    // sprint 4
+    { staff: staff(ID.qa, "qa@tilhero.local", "Зарина", "qa_analyst"), password: PASSWORD },
+    { staff: staff(ID.analyst, "analyst@tilhero.local", "Бобур", "analyst"), password: PASSWORD },
     { staff: staff(ID.auditor, "auditor@tilhero.local", "Сардор", "auditor", { mfa_enabled: false }), password: PASSWORD },
     { staff: staff(ID.newbie, "newbie@tilhero.local", "Новый сотрудник", "operations", { mfa_enabled: false, must_change_password: true, last_login_at: null }), password: "Temp-Pass-0001" },
     // disabled privileged account: re-enabling it is a four-eyes request (review P2-2)

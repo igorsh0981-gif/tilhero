@@ -10,6 +10,8 @@ resolution-markers = [
 [manifest]
 members = [
     "tilhero-admin-identity",
+    "tilhero-ai-gateway",
+    "tilhero-assessment",
     "tilhero-audit",
     "tilhero-botgw",
     "tilhero-catalog",
@@ -18,6 +20,7 @@ members = [
     "tilhero-experience",
     "tilhero-identity",
     "tilhero-learning-plan",
+    "tilhero-lessons",
     "tilhero-notifications",
     "tilhero-social",
     "tilhero-support",
@@ -1667,6 +1670,28 @@ requires-dist = [
 ]
 
 [[package]]
+name = "tilhero-ai-gateway"
+version = "0.1.0"
+source = { editable = "services/ai-gateway" }
+dependencies = [
+    { name = "tilhero-common" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
+
+[[package]]
+name = "tilhero-assessment"
+version = "0.1.0"
+source = { editable = "services/assessment" }
+dependencies = [
+    { name = "tilhero-common" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
+
+[[package]]
 name = "tilhero-audit"
 version = "0.1.0"
 source = { editable = "services/audit" }
@@ -1775,6 +1800,17 @@ requires-dist = [
 name = "tilhero-learning-plan"
 version = "0.1.0"
 source = { editable = "services/learning-plan" }
+dependencies = [
+    { name = "tilhero-common" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
+
+[[package]]
+name = "tilhero-lessons"
+version = "0.1.0"
+source = { editable = "services/lessons" }
 dependencies = [
     { name = "tilhero-common" },
 ]

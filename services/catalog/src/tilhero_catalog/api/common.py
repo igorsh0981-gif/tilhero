@@ -24,12 +24,18 @@ from tilhero_common.redis_tools import IdempotencyStore, fingerprint
 
 log = logging.getLogger("tilhero.catalog.api")
 
-# Вызывающие (INTERNAL_API §1.4–1.5): сотрудники — только admin-bff с actor; ученик — telegram-bff;
-# снимок курса и пары — ещё learning-plan и diagnostics; заявка по id — notifications.
+# Вызывающие (INTERNAL_API §1.4–1.5 спринта 3, §4 спринта 4): сотрудники — только admin-bff с actor; ученик —
+# telegram-bff (заявки на песни и фильмы — только он); снимок курса и пары — ещё learning-plan, diagnostics и lessons;
+# каталог сценариев и медиа (карточки, детали) — telegram-bff и lessons; аудио — только telegram-bff (прокси для
+# Mini App); заявка по id — notifications; версии контента с ключами — только lessons и assessment; упражнения
+# к медиа (без ключей) — lessons.
 staff_auth = InternalAuth({"admin-bff"})
 learner_auth = InternalAuth({"telegram-bff"})
-course_readers = InternalAuth({"telegram-bff", "learning-plan", "diagnostics"})
+content_readers = InternalAuth({"telegram-bff", "lessons"})
+course_readers = InternalAuth({"telegram-bff", "learning-plan", "diagnostics", "lessons"})
 request_readers = InternalAuth({"telegram-bff", "notifications"})
+version_readers = InternalAuth({"lessons", "assessment"})
+exercise_readers = InternalAuth({"lessons"})
 no_service = InternalAuth(set())
 
 IdempotencyKey = Header(default=None, alias="Idempotency-Key", min_length=8, max_length=128,

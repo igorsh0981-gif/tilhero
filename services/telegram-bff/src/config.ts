@@ -82,6 +82,15 @@ export interface Config {
   catalogUrl: string;
   /** diagnostics (8111, спринт 3): входная диагностика, результаты, карта навыков. */
   diagnosticsUrl: string;
+  /** lessons (8112, спринт 4): карточка урока, сессии урока / сценария / медиа, шаги, итоги, история. */
+  lessonsUrl: string;
+  /** assessment (8113, спринт 4): оценка ученика, апелляции. */
+  assessmentUrl: string;
+  /** Таймаут вызовов lessons и assessment, мс (25 000). Должен быть больше таймаута ИИ в lessons (20 с): шаг ролевой
+   *  ситуации и «проще» ждут ИИ; меньший таймаут даёт ученику 503, хотя lessons ответ уже сохранил (ревью R2-02). */
+  lessonsTimeoutMs: number;
+  /** Таймаут завершения урока, мс (45 000): lessons ждёт оценку assessment до 32 с плюс вспомогательные вызовы. */
+  lessonsFinishTimeoutMs: number;
   upstreamTimeoutMs: number;
   upstreamRetries: number;
   experienceCacheSeconds: number;
@@ -116,6 +125,8 @@ export const DEV_DEFAULTS = {
   SOCIAL_URL: "http://127.0.0.1:8109",
   CATALOG_URL: "http://127.0.0.1:8110",
   DIAGNOSTICS_URL: "http://127.0.0.1:8111",
+  LESSONS_URL: "http://127.0.0.1:8112",
+  ASSESSMENT_URL: "http://127.0.0.1:8113",
 } as const;
 
 export class ConfigError extends Error {
@@ -318,6 +329,10 @@ export function loadConfig(env: Env = process.env): Config {
     socialUrl: url("SOCIAL_URL"),
     catalogUrl: url("CATALOG_URL"),
     diagnosticsUrl: url("DIAGNOSTICS_URL"),
+    lessonsUrl: url("LESSONS_URL"),
+    assessmentUrl: url("ASSESSMENT_URL"),
+    lessonsTimeoutMs: int("LESSONS_TIMEOUT_MS", 25_000, 1000, 60_000),
+    lessonsFinishTimeoutMs: int("LESSONS_FINISH_TIMEOUT_MS", 45_000, 5000, 120_000),
     upstreamTimeoutMs: int("UPSTREAM_TIMEOUT_MS", 3000, 100, 60_000),
     upstreamRetries: int("UPSTREAM_RETRIES", 1, 0, 5),
     experienceCacheSeconds: int("EXPERIENCE_CACHE_SECONDS", 60, 0, 3600),

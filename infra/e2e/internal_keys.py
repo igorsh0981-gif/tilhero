@@ -36,6 +36,9 @@ ISSUERS = (
     "telegram-bot-gateway",
     "catalog",  # спринт 3: контент, языки, медиа (аудит и события — шина; сам никого не вызывает)
     "diagnostics",  # спринт 3: диагностика и карта навыков (вызывает catalog: пары, снимок курса)
+    "lessons",  # спринт 4: сессии урока (вызывает catalog, ai-gateway, assessment, learning-plan, diagnostics)
+    "assessment",  # спринт 4: независимая оценка (вызывает catalog, ai-gateway)
+    "ai-gateway",  # спринт 4: вызовы агентов (провайдер на стенде — fake)
 )
 
 

@@ -40,7 +40,7 @@ def test_editable_registry_excludes_service_templates() -> None:
     assert "pin.reset_code" not in EDITABLE and "pin.reset_scheduled" not in EDITABLE
     assert set(EDITABLE) == {n for n in TEMPLATES if not n.startswith("pin.")}
     kids = {n for n in EDITABLE if TEMPLATES[n].kid}
-    assert kids == {"lesson.reminder.kid", "lesson.missed.kid", "lesson.comeback.kid"}
+    assert kids == {"lesson.reminder.kid", "lesson.missed.kid", "lesson.comeback.kid", "appeal_decided.kid"}
 
 
 @pytest.mark.parametrize("name", EDITABLE)

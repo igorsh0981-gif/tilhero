@@ -1,4 +1,4 @@
-"""Модели diagnostics — зеркало миграции 0001 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
+"""Модели diagnostics — зеркало миграций 0001 и 0003 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
 
 user_id везде — ученик (learner) из `sub` внутреннего токена; PII сервис не хранит (только ответы на задания,
 псевдонимный user_id и возрастной сегмент из событий identity-consent).
@@ -157,7 +157,9 @@ class Result(Base):
 
 
 class SkillState(Base):
-    """Состояние навыка ученика по паре (AT-35). Меняется только механизмом оценки (сейчас — диагностика)."""
+    """Состояние навыка ученика по паре (AT-35, AT-46). Меняется только механизмом оценки: диагностика и (спринт 4)
+    оценки уроков assessment. state_ref — ref_id свидетельства, установившего текущее состояние (result_id
+    диагностики | evaluation_id оценки урока; null — до спринта 4)."""
 
     __tablename__ = "skill_states"
     __table_args__ = (
@@ -173,6 +175,7 @@ class SkillState(Base):
     confidence: Mapped[float | None] = mapped_column(Float())
     updated_at: Mapped[datetime] = mapped_column(TS, nullable=False)
     source: Mapped[str] = mapped_column(String(16), nullable=False)
+    state_ref: Mapped[str | None] = mapped_column(String(64))
 
 
 class SkillEvidence(Base):
@@ -195,6 +198,28 @@ class SkillEvidence(Base):
     outcome: Mapped[str] = mapped_column(String(8), nullable=False)
     band: Mapped[str | None] = mapped_column(String(2))
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class LessonEvaluation(Base):
+    """Полученная оценка урока (assessment.completed.v1 / assessment.reevaluated.v1, спринт 4): повтор оценки — без
+    изменений; цепочка переоценок (supersedes) — какие оценки заменены; practice_only — навыки не меняются.
+    outcomes — skill_outcomes события [{skill_id, outcome}]. Неизменяема (UPDATE запрещён; DELETE — сага)."""
+
+    __tablename__ = "lesson_evaluations"
+    __table_args__ = (
+        CheckConstraint("jsonb_typeof(outcomes) = 'array'", name="ck_lesson_evaluations_outcomes"),
+        Index("ix_lesson_evaluations_supersedes", "user_id", "supersedes"),
+    )
+
+    evaluation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    pair_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    supersedes: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    practice_only: Mapped[bool] = mapped_column(Boolean(), nullable=False)
+    outcomes: Mapped[list[dict[str, Any]]] = mapped_column(JSONB(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
 
 
 class LearnerProfile(Base):

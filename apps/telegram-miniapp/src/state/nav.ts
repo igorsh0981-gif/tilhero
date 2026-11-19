@@ -1,4 +1,5 @@
-import type { DiagnosticResult } from "@tilhero/contracts/bff";
+import type { DiagnosticResult, LessonSummary } from "@tilhero/contracts/bff";
+import type { Localized } from "@tilhero/contracts/content";
 import { useCallback, useMemo, useState } from "react";
 import type { AppRoute } from "../tg/deeplink";
 
@@ -30,7 +31,12 @@ export type Pushed =
   | { name: "scenario"; id: string }
   | { name: "mediaItem"; id: string }
   | { name: "mediaRequests" }
-  | { name: "languages" };
+  | { name: "languages" }
+  // sprint 4
+  | { name: "lessonCard"; id: string }
+  | { name: "player"; sessionId: string }
+  | { name: "lessonSummary"; sessionId: string; summary?: LessonSummary }
+  | { name: "appeal"; evaluationId: string; title: Localized };
 
 export type PracticeTab = "scenarios" | "media";
 
@@ -41,6 +47,8 @@ export interface NavState {
 
 export interface Nav extends NavState {
   push(p: Pushed): void;
+  /** the top screen gives way to another (the player → the summary): «Назад» does not return to it */
+  replace(p: Pushed): void;
   back(): void;
   goTab(t: Tab): void;
   /** a route from «Что нового», a notification or a deep link */
@@ -85,9 +93,13 @@ export function routeTarget(r: AppRoute, cur: NavState): NavState {
 export function useNav(initial: NavState = { tab: "home", stack: [] }): Nav {
   const [state, setState] = useState<NavState>(initial);
   const push = useCallback((p: Pushed) => setState((s) => ({ ...s, stack: [...s.stack, p] })), []);
+  const replace = useCallback((p: Pushed) => setState((s) => ({ ...s, stack: [...s.stack.slice(0, -1), p] })), []);
   const back = useCallback(() => setState((s) => (s.stack.length ? { ...s, stack: s.stack.slice(0, -1) } : s.tab !== "home" ? { tab: "home", stack: [] } : s)), []);
   const goTab = useCallback((t: Tab) => setState({ tab: t, stack: [] }), []);
   const route = useCallback((r: AppRoute) => setState((s) => routeTarget(r, s)), []);
   const reset = useCallback(() => setState({ tab: "home", stack: [] }), []);
-  return useMemo(() => ({ ...state, push, back, goTab, route, reset, top: state.stack.length ? state.stack[state.stack.length - 1]! : null }), [state, push, back, goTab, route, reset]);
+  return useMemo(
+    () => ({ ...state, push, replace, back, goTab, route, reset, top: state.stack.length ? state.stack[state.stack.length - 1]! : null }),
+    [state, push, replace, back, goTab, route, reset],
+  );
 }

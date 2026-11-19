@@ -13,7 +13,7 @@ from tilhero_common.messaging import Envelope, make_envelope
 from tilhero_common.testing import assert_event_conforms
 
 CONSUMER = "diagnostics.user_deletion"
-TABLES = ("sessions", "results", "skill_states", "skill_evidence", "learner_profiles")
+TABLES = ("sessions", "results", "skill_states", "skill_evidence", "learner_profiles", "lesson_evaluations")
 
 
 def requested(user: uuid.UUID, request_id: uuid.UUID, attempt: int | None = None,
@@ -42,6 +42,11 @@ async def seed(env, user: uuid.UUID) -> dict:
         "user_id": str(user), "kind": "account", "age_band": "18+", "created_at": "2026-11-18T10:00:00Z"},
         producer="identity-consent"))
     result = await env.complete(user, up_to("A1"))
+    # спринт 4: оценка урока
+    await env.bus.publish(make_envelope("assessment.completed.v1", {
+        "evaluation_id": str(uuid.uuid4()), "user_id": str(user), "pair_id": "ru-en", "session_id": str(uuid.uuid4()),
+        "kind": "lesson", "skill_outcomes": [{"skill_id": "en.func.greet", "outcome": "learning"}], "passed": False,
+        "practice_only": False, "supersedes": None, "created_at": "2026-11-19T08:00:00Z"}, producer="assessment"))
     assert all(v > 0 for v in (await rows(env, user)).values())
     return result
 

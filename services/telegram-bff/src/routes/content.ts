@@ -67,7 +67,7 @@ const KID_BANDS: ReadonlySet<string> = new Set(["6-9", "10-13"]);
 /** Claims внутреннего JWT для catalog (защита в глубину, INTERNAL_API «Решения по ревью»): sub — аккаунт, lrn — активный
  *  ученик, age_band — возраст аккаунта. Детский профиль catalog распознаёт сам (lrn ≠ sub или детский age_band) и
  *  принудительно сужает аудиторию до kids. */
-function claimsOf(auth: AccessClaims, accountAgeBand: string | null): Record<string, string> {
+export function claimsOf(auth: AccessClaims, accountAgeBand: string | null): Record<string, string> {
   return { lrn: auth.learnerId, ...(accountAgeBand ? { age_band: accountAgeBand } : {}) };
 }
 
@@ -85,7 +85,7 @@ function requestClaims(auth: AccessClaims, me: IdentityMe): Record<string, strin
 }
 
 /** Страница списка домена: обёртка обязана быть по контракту; элемент не по схеме отбрасывается (с предупреждением). */
-function pageView<S extends TSchema>(ctx: BffContext, service: string, what: string, item: S, res: unknown) {
+export function pageView<S extends TSchema>(ctx: BffContext, service: string, what: string, item: S, res: unknown) {
   const page = res as { items?: unknown; next_cursor?: unknown } | null;
   if (!page || typeof page !== "object" || !Array.isArray(page.items) || !(page.next_cursor === null || page.next_cursor === undefined || typeof page.next_cursor === "string")) {
     return expectShape(ctx.log, service, what, Type.Object({ items: Type.Array(item), next_cursor: Type.Union([Type.String(), Type.Null()]) }), res);

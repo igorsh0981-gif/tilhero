@@ -24,6 +24,7 @@ from tilhero_diagnostics.api.common import (
     pair_param,
     seed_factory_of,
     settings_of,
+    skill_map_user,
 )
 from tilhero_diagnostics.domain import sessions as svc
 from tilhero_diagnostics.domain import skills as skills_domain
@@ -192,7 +193,7 @@ async def get_result(result_id: uuid.UUID, revision: int | None = Query(default=
 @router.get("/skills/map", response_model=SkillMapOut,
             responses={409: {"description": "PAIR_NOT_AVAILABLE {pair_id}"}, 410: {"description": "USER_DELETED"}})
 async def get_skill_map(request: Request, pair_id: str = Depends(pair_param),
-                        user_id: uuid.UUID = Depends(current_user),
+                        user_id: uuid.UUID = Depends(skill_map_user),
                         rt: Runtime = Depends(get_runtime)) -> dict[str, Any]:
     available, course = await _available_pair(request, pair_id)
     if not available:

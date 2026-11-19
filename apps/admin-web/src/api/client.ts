@@ -27,6 +27,8 @@ export interface RequestOptions {
    * idle session for it, and it does not count as the operator's activity on the client either.
    */
   background?: boolean;
+  /** extra request headers (If-Match of the agent version draft); never secrets */
+  headers?: Record<string, string>;
   signal?: AbortSignal;
 }
 
@@ -123,7 +125,7 @@ export class AdminApi {
     opts: RequestOptions,
     idemKey: string | undefined,
   ): Promise<{ ok: true; data: unknown } | { ok: false; error: ApiError }> {
-    const headers: Record<string, string> = { Accept: "application/json" };
+    const headers: Record<string, string> = { ...(opts.headers ?? {}), Accept: "application/json" };
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (method !== "GET" && method !== "HEAD" && this.csrf) headers["X-CSRF-Token"] = this.csrf;
     if (idemKey) headers["Idempotency-Key"] = idemKey;

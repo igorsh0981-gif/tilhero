@@ -50,13 +50,16 @@ ADMIN = [
 
 # (метод, путь, разрешённые вызывающие)
 INTERNAL = [
-    ("GET", "/internal/v1/pairs", {"telegram-bff", "learning-plan", "diagnostics"}),
-    ("GET", "/internal/v1/courses/en-core/snapshot", {"telegram-bff", "learning-plan", "diagnostics"}),
-    ("GET", "/internal/v1/scenarios?audience=adults", {"telegram-bff"}),
-    ("GET", "/internal/v1/scenarios/sc-cafe-coffee?audience=adults", {"telegram-bff"}),
-    ("GET", "/internal/v1/media?audience=adults", {"telegram-bff"}),
-    ("GET", "/internal/v1/media/m-own-coffee-order?audience=adults", {"telegram-bff"}),
+    ("GET", "/internal/v1/pairs", {"telegram-bff", "learning-plan", "diagnostics", "lessons"}),
+    ("GET", "/internal/v1/courses/en-core/snapshot", {"telegram-bff", "learning-plan", "diagnostics", "lessons"}),
+    ("GET", "/internal/v1/scenarios?audience=adults", {"telegram-bff", "lessons"}),
+    ("GET", "/internal/v1/scenarios/sc-cafe-coffee?audience=adults", {"telegram-bff", "lessons"}),
+    ("GET", "/internal/v1/media?audience=adults", {"telegram-bff", "lessons"}),
+    ("GET", "/internal/v1/media/m-own-coffee-order?audience=adults", {"telegram-bff", "lessons"}),
     ("GET", "/internal/v1/media/m-own-coffee-order/audio", {"telegram-bff"}),
+    ("GET", "/internal/v1/media/m-own-coffee-order/exercises?audience=adults", {"lessons"}),
+    ("GET", "/internal/v1/versions/lesson/l-01-greetings/1", {"lessons", "assessment"}),
+    ("GET", "/internal/v1/versions/lesson/l-01-greetings", {"lessons", "assessment"}),
     ("GET", "/internal/v1/media/requests", {"telegram-bff"}),
     ("POST", "/internal/v1/media/requests", {"telegram-bff"}),
     ("GET", f"/internal/v1/media/requests/{RID}", {"telegram-bff", "notifications"}),
@@ -85,7 +88,8 @@ async def test_internal_route_callers(env, method: str, path: str, allowed: set[
     body = {"kind": "song", "title": "Песня"} if method == "POST" else None
     r = await _call(env, method, path, body, {})
     assert r.status_code == 401
-    for caller in ("telegram-bff", "learning-plan", "diagnostics", "notifications", "admin-bff", "support"):
+    for caller in ("telegram-bff", "learning-plan", "diagnostics", "notifications", "admin-bff", "support", "lessons",
+                   "assessment", "ai-gateway"):
         r = await _call(env, method, path, body, env.svc(caller, str(uuid.uuid4())))
         if caller in allowed:
             assert r.status_code not in (401, 403), (caller, r.text)

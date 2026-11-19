@@ -47,7 +47,7 @@ export interface SessionPolicy {
   principalCacheSeconds: number;
 }
 
-/** Адреса доменов (INTERNAL_API спринтов 2–3): все обязательны в stage/prod. */
+/** Адреса доменов (INTERNAL_API спринтов 2–4): все обязательны в stage/prod. */
 export interface DomainUrls {
   adminIdentity: string;
   userAdmin: string;
@@ -60,6 +60,12 @@ export interface DomainUrls {
   catalog: string;
   /** спринт 3: тесты диагностики и статистика */
   diagnostics: string;
+  /** спринт 4: агенты, версии, золотые тесты, модели, бюджет, затраты ИИ */
+  aiGateway: string;
+  /** спринт 4: журнал сессий уроков и практики, карточка сессии, реплики */
+  lessons: string;
+  /** спринт 4: оценки, переоценка, апелляции */
+  assessment: string;
 }
 
 export interface Config {
@@ -87,7 +93,8 @@ export interface Config {
   urls: DomainUrls;
   upstreamTimeoutMs: number;
   upstreamRetries: number;
-  /** Таймаут одного блока дашборда (блоки независимы: медленный источник → available=false). */
+  /** Таймаут одного независимого блока: блок дашборда, блок карточки сессии «Контроля диалогов», затраты строки
+   *  журнала сессий (медленный источник → блок недоступен, остальное показывается). */
   dashboardTimeoutMs: number;
 
   session: SessionPolicy;
@@ -109,6 +116,9 @@ export const DEV_DEFAULTS = {
   EXPERIENCE_URL: "http://127.0.0.1:8106",
   CATALOG_URL: "http://127.0.0.1:8110",
   DIAGNOSTICS_URL: "http://127.0.0.1:8111",
+  LESSONS_URL: "http://127.0.0.1:8112",
+  ASSESSMENT_URL: "http://127.0.0.1:8113",
+  AI_GATEWAY_URL: "http://127.0.0.1:8114",
 } as const;
 
 /** Переменные адресов доменов (порядок — как в DomainUrls). */
@@ -122,6 +132,9 @@ export const DOMAIN_URL_VARS = {
   notifications: "NOTIFICATIONS_URL",
   catalog: "CATALOG_URL",
   diagnostics: "DIAGNOSTICS_URL",
+  aiGateway: "AI_GATEWAY_URL",
+  lessons: "LESSONS_URL",
+  assessment: "ASSESSMENT_URL",
 } as const satisfies Record<keyof DomainUrls, keyof typeof DEV_DEFAULTS>;
 
 export class ConfigError extends Error {

@@ -8,6 +8,12 @@ AT-04…08).
 Спринт 3: **траектория уроков** — последовательность уроков опубликованного курса по цели, диагностике и карте
 навыков, обязательные и дополнительные, «почему следующий», ревизии с историей (INTERNAL_API спринта 3 §3, AT-36, AT-34).
 
+Спринт 4: **занятия по реальным урокам и пройденные уроки** — события `lesson.session.completed.v1` (lessons) дают
+занятие дня (график, серия, пропуски и напоминания считаются по ним) и пройденный урок в траектории (`completed`,
+следующий — первый не пройденный успешно, без зачёта — «повторить»); оценка (`assessment.completed.v1`, в т. ч.
+полученная после завершения сессии) и переоценка (`assessment.reevaluated.v1`) задают исход урока — сопоставление по
+`session_id`, порядок событий любой (INTERNAL_API спринта 4 §5, AT-46, AT-47, ревью R1-05).
+
 Порт 8102, схема PostgreSQL `learning_plan`, внутренний JWT с `aud = learning-plan`. Redis не нужен.
 Пакет `tilhero_learning_plan`. Исходящие вызовы: catalog (снимок курса).
 
@@ -26,7 +32,7 @@ AT-04…08).
 | POST | `/internal/v1/plan:tick` | n8n, `Authorization: Bearer <SCHEDULER_TOKEN>` → `{plans_checked, reminders, missed, skipped}`; пока идёт предыдущий tick — сразу 200 `{…, skipped: true}` |
 | GET | `/admin/v1/plans?updated_after=&cursor=&limit=` | спринт 2, **только `user-admin`** (внутренний JWT без actor; actor от него — 403 `ACTOR_NOT_ALLOWED`) → `{items: [{user_id, goal, level_self, ui_lang, schedule, onboarding_completed_at, updated_at}], next_cursor}` — сверка read-модели админки. Курсор `(updated_at, user_id)` по возрастанию (индекс `ix_plans_updated`, миграция 0002); `updated_after` — ISO-8601 с часовым поясом, строго позже (без зоны — 422); `limit` 1..500 (100); 400 `INVALID_CURSOR`. План по умолчанию (без события) тоже выгружается; планов удалённых учеников нет |
 
-| GET | `/internal/v1/plan/trajectory?pair_id=&audience=` | спринт 3 → `Trajectory` (bff.ts); `pair_id` `^[a-z]{2,8}-[a-z]{2,8}$`, по умолчанию `DEFAULT_PAIR` (ru-en); `audience` (`kids\|teens\|adults`, необязательный, **расширение контракта**) — сегмент активного ученика от BFF (как `audience=` у catalog). 409 `PAIR_NOT_AVAILABLE {pair_id}` (пары нет в `PAIR_COURSES` или catalog: курс не опубликован — 404), 410 `USER_DELETED`, 503 `CATALOG_UNAVAILABLE` (catalog недоступен и снимка в кеше нет), 422 `VALIDATION_ERROR` |
+| GET | `/internal/v1/plan/trajectory?pair_id=&audience=` | спринт 3 → `Trajectory` (bff.ts); вызывающие — telegram-bff и (спринт 4) **lessons** (следующий урок в итогах), ученик — из `sub`; `pair_id` `^[a-z]{2,8}-[a-z]{2,8}$`, по умолчанию `DEFAULT_PAIR` (ru-en); `audience` (`kids\|teens\|adults`, необязательный, **расширение контракта**) — сегмент активного ученика от BFF (как `audience=` у catalog). 409 `PAIR_NOT_AVAILABLE {pair_id}` (пары нет в `PAIR_COURSES` или catalog: курс не опубликован — 404), 410 `USER_DELETED`, 503 `CATALOG_UNAVAILABLE` (catalog недоступен и снимка в кеше нет), 422 `VALIDATION_ERROR` |
 
 План по умолчанию: `goal`/`level_self` null, тем нет, `ui_lang`/`explain_lang` = ru, `course_pair` = ru-en,
 `daily` (1..7), 19:00, 20 минут, напоминания выключены, `version` = 1. Создание по умолчанию — не правка: события нет.
@@ -69,6 +75,15 @@ AT-04…08).
 результат + `Idempotent-Replayed: true` без новой записи и события; с другим телом → 422 `IDEMPOTENCY_KEY_REUSED`.
 Занятие задним числом за день пропуска снимает пропуск в `week` и не рвёт серию.
 
+**Спринт 4 — занятия из событий уроков.** `lesson.session.completed.v1` со `status = completed` → запись в
+`activities`: kind `lesson` (сессия урока) или `practice` (сценарий, медиа, повтор ошибок `review`), минуты из
+события (не больше 240), `local_date` — из события, а если её нет — дата `finished_at` в зоне плана (плана нет —
+`DEFAULT_TIMEZONE`; план событием не создаётся), `recorded_at` = `finished_at`, `session_id` — сессия lessons.
+Одна запись на сессию (частичный уникальный индекс `uq_activities_session`; ключ `lesson/<session_id>` — с «/»,
+недопустимым в ключах клиента): повтор доставки или повторная публикация минуты не удваивает. Новая запись —
+`learning.activity.recorded.v1`, как у ручной. `cancelled` / `failed` — не занятие. Ручная активность Mini App
+(`POST /me/activities`) больше не нужна Mini App, но работает (совместимость) и суммируется с уроками.
+
 ## Траектория уроков (спринт 3)
 Навык `curriculum_planner` — детерминированными правилами без LLM (`domain/curriculum.py`, чистые функции):
 
@@ -102,7 +117,18 @@ audience, goal, topics, diagnostic_result_id, diagnostic_revision, course_snapsh
 навыки)} с последней ревизией: совпали — отдаётся она (без события), иначе — новая ревизия + `learning.trajectory.updated.v1`
 в той же транзакции (под advisory-блокировкой ученика). Прежние ревизии хранятся и неизменяемы (триггер запрещает
 UPDATE и роли сервиса; удаление — только сага). `items` ревизии самодостаточны (карточки уроков на момент расчёта).
-`lessons_available: false`, `completed: []` — уроки появятся в спринте 4.
+Спринт 4 (алгоритм `cp-3`): **пройденные уроки** — `completed_lessons` (строка на завершённую сессию урока; актуальна
+последняя сессия урока по `completed_at`). Пройденный с зачётом (`passed = true`) в обязательные и дополнительные не
+входит, его основной навык закрывает предпосылки (урок-«учитель» не вставляется); пройденный без зачёта
+(`passed = false`, а также `null` — оценка без вердикта) остаётся на своём месте с пометкой «повторить»: в
+объяснении — своя фраза первой («Повторим этот урок — в прошлый раз зачёт не получен»; детям — «Пройдём этот урок ещё
+раз — так дальше будет легче»), в `reason_codes` — **`weak_area`** как ближайший существующий код (кода `repeat` в
+`ReasonCode` bff.ts нет — запрос к контракту; детям код-заменитель не ставится, чтобы не показывать «слабая
+область»). `completed` ответа — `LessonCard & {passed, evaluation_id, completed_at}` по последней сессии каждого урока,
+новые первыми, карточка из снимка курса (урок, которого в курсе больше нет, не показывается); хранится в `items`
+ревизии (ревизии спринта 3 — пустой список). В `basis` — `completed_hash` (урок, сессия, passed, evaluation_id):
+новая сессия урока или переоценка → новая ревизия при следующем чтении. `lessons_available` — флаг
+`LESSONS_AVAILABLE` (true; не часть ревизии).
 
 **Пересчёт отложенный** (при следующем чтении): события-входы и смена цели/тем в `PATCH /me/plan` только обновляют
 проекции и пометки — без обращения к catalog. Смена языка интерфейса, графика, уровня-самооценки траекторию не меняет.
@@ -178,6 +204,9 @@ computed_at}` — на каждую новую ревизию траектори
 | | `skills.state.changed.v1` (diagnostics) | `skill_states` — локальная карта навыков (изменение старше сохранённого по `occurred_at` — не применяется) |
 | `learning-plan.catalog` | `catalog.version.published.v1` (catalog) | kind `course\|module\|lesson\|skill` → снимок курса (`course_id` события; нет — все) помечается устаревшим |
 | `learning-plan.profiles` | `user.profile.created.v1`, `user.profile.updated.v1` (identity-consent) | `learner_audience`: детский профиль / 6–13 → kids, 14–17 → teens, иначе adults (возраст не хранится; `age_band: null` в обновлении — без изменений; kids не понижается) |
+| `learning-plan.lessons` | `lesson.session.completed.v1` (lessons) | спринт 4: `completed` → занятие (`activities`, + `learning.activity.recorded.v1`) и для kind `lesson` — пройденный урок (`completed_lessons`); идемпотентно по `session_id`; `cancelled`/`failed` — без действия |
+| | `assessment.completed.v1` (assessment) | спринт 4 (R1-05): kind `lesson` → проекция `lesson_evaluations` (session_id из события); пройденному уроку сессии — актуальная оценка (`evaluation_id`, `passed`). Оценка, полученная после завершения (assessment был недоступен при finish, событие сессии ушло с null), доходит до траектории; пришла раньше события сессии — применяется при его записи. Остальные kind — без действия |
+| | `assessment.reevaluated.v1` (assessment) | спринт 4: `session_id` в схеме v1 нет (появится в событии — используется напрямую) — сессия берётся у заменённой оценки (`supersedes`: проекция или пройденный урок с этой оценкой); заменённая ещё не пришла — запись ждёт с `session_id = null`, затем он протягивается по цепочке. Актуальна последняя оценка цепочки (`created_at`); чужая оценка не трогается; повтор — без изменений |
 
 События удалённого ученика проекции не воскрешают (`deleted_users` под той же блокировкой). Правила доставки детям
 по-прежнему применяет notifications по `DeliveryInfo`.
@@ -188,9 +217,13 @@ computed_at}` — на каждую новую ревизию траектори
 псевдонимный `user_id` + `request_id`, без PII), `outbox`/`inbox`. Миграции 0001; 0002 (спринт 2) — индекс
 `ix_plans_updated (updated_at, user_id)` для `GET /admin/v1/plans`; 0003 (спринт 3) — `trajectories` (ревизии, триггер
 `trajectories_no_update`), `course_snapshots` (кеш снимка: etag, snapshot_version, payload, fetched_at, checked_at,
-stale_since), проекции `learner_diagnostics`, `skill_states`, `learner_audience`.
+stale_since), проекции `learner_diagnostics`, `skill_states`, `learner_audience`; 0004 (спринт 4) —
+`activities.session_id` + `uq_activities_session`, `completed_lessons` (session_id PK, user_id, pair_id, lesson_id,
+passed, evaluation_id, completed_at, recorded_at, updated_at; индексы по ученику/уроку и ученику/оценке); 0005
+(спринт 4, R1-05) — `lesson_evaluations` (evaluation_id PK, user_id, session_id | null, supersedes, passed, created_at,
+recorded_at; индексы ученик/сессия/время и ученик/supersedes) — проекция оценок уроков.
 
-Сага удаления: план, занятия, отметки, траектории и проекции ученика удаляются физически, затем ACK; повтор саги (тот же `request_id`, новый
+Сага удаления: план, занятия, отметки, траектории, проекции, пройденные уроки и их оценки ученика удаляются физически, затем ACK; повтор саги (тот же `request_id`, новый
 `event_id`) снова подтверждается; после удаления `/me/*` → 410 `USER_DELETED`.
 
 ## Настройки
@@ -201,7 +234,8 @@ stale_since), проекции `learner_diagnostics`, `skill_states`, `learner_a
 Спринт 3: `CATALOG_URL` (`http://127.0.0.1:8110`; **в stage/prod обязателен** — без него сервис не стартует;
 Railway — приватный адрес catalog), `CATALOG_TIMEOUT_SECONDS` (3),
 `CATALOG_SNAPSHOT_MAX_AGE_SECONDS` (300), `PAIR_COURSES` (JSON, `{"ru-en": "en-core"}`), `DEFAULT_PAIR` (ru-en; обязан
-быть ключом `PAIR_COURSES`, иначе сервис не стартует), `OPTIONAL_LESSONS_MAX` (8). catalog должен принимать
+быть ключом `PAIR_COURSES`, иначе сервис не стартует), `OPTIONAL_LESSONS_MAX` (8). Спринт 4: `LESSONS_AVAILABLE`
+(true) — `Trajectory.lessons_available`; вызывающий `lessons` — его открытый ключ в `INTERNAL_JWT_PUBLIC_KEYS`. catalog должен принимать
 вызывающего `learning-plan` (его открытый ключ — в `INTERNAL_JWT_PUBLIC_KEYS` catalog).
 
 ## Runbook

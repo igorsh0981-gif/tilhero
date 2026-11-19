@@ -39,6 +39,8 @@ class Settings(ServiceSettings):
     pair_courses: dict[str, str] = Field(default_factory=lambda: {"ru-en": "en-core"})
     default_pair: str = "ru-en"
     optional_lessons_max: int = Field(default=8, ge=0, le=50)
+    # Спринт 4: Trajectory.lessons_available — уроки проходятся в Mini App; false — уроки отключены флагом
+    lessons_available: bool = True
 
     @field_validator("pair_courses", mode="before")
     @classmethod

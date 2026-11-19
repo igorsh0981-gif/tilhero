@@ -38,11 +38,14 @@ describe("ApiClient / BFF routes", () => {
     const { client, bff, calls } = setup((url) => (url.endsWith("/session/telegram") ? json(200, session(1)) : json(200, {})));
     await client.startSession("hash=a");
     await bff.patchPlan({ schedule: { duration_min: 30 } }, 7);
-    await bff.recordActivity({ kind: "practice", minutes: 20 }, "k-1");
+    // sprint 4: sessions start with an Idempotency-Key; the manual activity is gone from the client
+    await bff.startLesson("l-a1-03-cafe", "k-1");
     await bff.createInvite("family", "k-2");
     expect(hdr(calls[1]!.init)["If-Match"]).toBe("7");
     expect(calls[1]!.init.method).toBe("PATCH");
+    expect(calls[2]!.url).toBe("/bff/v1/lessons/l-a1-03-cafe/sessions");
     expect(hdr(calls[2]!.init)["Idempotency-Key"]).toBe("k-1");
+    expect("recordActivity" in bff).toBe(false);
     expect(hdr(calls[3]!.init)["Idempotency-Key"]).toBe("k-2");
     expect(JSON.parse(String(calls[3]!.init.body))).toEqual({ kind: "family" });
   });

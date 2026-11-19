@@ -12,6 +12,7 @@
 import { Type, type Static, type TLiteral, type TSchema, type TSchemaOptions, type TUnion } from "@fastify/type-provider-typebox";
 import type * as C from "@tilhero/contracts/bff";
 import type * as K from "@tilhero/contracts/content";
+import type * as AI from "@tilhero/contracts/ai";
 
 // ---------- compile-time сверка с контрактом ----------
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
@@ -839,7 +840,7 @@ export const CourseSnapshotSkillsSchema = Type.Object({
 });
 
 // ---------- Траектория ----------
-const ReasonCode = Enum(["start_after_diagnostic", "no_diagnostic", "prerequisite_missing", "weak_area", "goal_match", "topic_match", "next_in_course"]);
+const ReasonCode = Enum(["start_after_diagnostic", "no_diagnostic", "prerequisite_missing", "weak_area", "goal_match", "topic_match", "next_in_course", "repeat"]);
 assertSame<Same<Static<typeof ReasonCode>, C.ReasonCode>>();
 const lessonCardFields = {
   lesson_id: Type.String(),
@@ -856,6 +857,8 @@ const lessonCardFields = {
 export const LessonCardSchema = Type.Object(lessonCardFields);
 assertSame<Same<Static<typeof LessonCardSchema>, C.LessonCard>>();
 const PlannedLesson = Type.Object({ ...lessonCardFields, reason_codes: Type.Array(ReasonCode) });
+/** спринт 4: пройденный урок — по последней завершённой сессии (зачтён ли, оценка, когда) */
+const CompletedLesson = Type.Object({ ...lessonCardFields, passed: Nullable(Type.Boolean()), evaluation_id: Nullable(Type.String()), completed_at: IsoTime });
 export const TrajectorySchema = Type.Object({
   pair_id: Type.String(),
   course_id: Type.String(),
@@ -864,7 +867,7 @@ export const TrajectorySchema = Type.Object({
   next: Nullable(Type.Object({ ...lessonCardFields, reason_codes: Type.Array(ReasonCode), explanation: Localized })),
   mandatory: Type.Array(PlannedLesson),
   optional: Type.Array(PlannedLesson),
-  completed: Type.Array(LessonCardSchema),
+  completed: Type.Array(CompletedLesson),
   lessons_available: Type.Boolean(),
 });
 assertSame<Same<Static<typeof TrajectorySchema>, C.Trajectory>>();
@@ -978,3 +981,300 @@ export const MediaRequestSchema = Type.Object({
 });
 assertSame<Same<Static<typeof MediaRequestSchema>, C.MediaRequest>>();
 export const MediaRequestListSchema = itemsOf(MediaRequestSchema);
+
+// =====================================================================================================================
+// Спринт 4 — урок, практика сценариев и медиа, оценка, апелляции (bff.ts «Спринт 4»). Ответы lessons и assessment
+// сверяются с этими схемами до сборки ответа Mini App (src/check.ts), шаг урока — по дискриминатору `type`
+// (routes/lessons.ts); ответ Mini App собирается явно, поле за полем: ключей ответов в нём нет по построению.
+// =====================================================================================================================
+
+const SessionKind = Enum(["lesson", "scenario", "media", "review"]);
+assertSame<Same<Static<typeof SessionKind>, AI.SessionKind>>();
+export const SESSION_KINDS = ["lesson", "scenario", "media", "review"] as const;
+const SessionStatus = Enum(["ready", "in_progress", "paused", "completed", "failed", "cancelled"]);
+assertSame<Same<Static<typeof SessionStatus>, C.SessionStatus>>();
+const SessionStage = Enum(["retrieval", "explanation", "roleplay", "assessment", "summary", "listen", "exercises"]);
+assertSame<Same<Static<typeof SessionStage>, C.SessionStage>>();
+const Outcome = Enum(["success", "alt_success", "fail"]);
+const Voice = Enum(["en-GB", "en-US"]);
+const RubricCriterionCode = Enum(["task", "vocabulary", "grammar", "independence", "pronunciation", "fluency", "comprehension"]);
+assertSame<Same<Static<typeof RubricCriterionCode>, AI.RubricCriterionCode>>();
+
+/** Номер шага урока: s1, s2, … */
+export const STEP_ID_PATTERN = "^s[1-9][0-9]{0,3}$";
+const StepId = Type.String({ pattern: STEP_ID_PATTERN });
+
+// ---------- Карточка урока ----------
+export const LessonCardDetailSchema = Type.Object({
+  ...lessonCardFields,
+  version: Type.Integer({ minimum: 1 }),
+  primary_skill: Type.Object({ skill_id: Type.String(), title: Localized }),
+  stages_detail: Type.Array(Type.Object({ type: LessonStageType, minutes: Type.Integer({ minimum: 0 }), instructions: Localized })),
+  key_words_count: Type.Integer({ minimum: 0 }),
+  roleplay_mode: Nullable(Enum(["full", "choices"])),
+  available: Type.Boolean(),
+  unavailable_reason: Nullable(Enum(["audience", "pair_not_available"])),
+  active_session_id: Nullable(Uuid),
+});
+assertSame<Same<Static<typeof LessonCardDetailSchema>, C.LessonCardDetail>>();
+
+// ---------- Сессия ----------
+export const LessonSessionSchema = Type.Object({
+  session_id: Uuid,
+  kind: SessionKind,
+  title: Localized,
+  lesson_id: Nullable(Type.String()),
+  scenario_id: Nullable(Type.String()),
+  asset_id: Nullable(Type.String()),
+  status: SessionStatus,
+  stage: Nullable(SessionStage),
+  stages: Type.Array(Type.Object({ type: SessionStage, status: Enum(["done", "current", "pending", "skipped"]) })),
+  ai_mode: Enum(["full", "choices"]),
+  ai_degraded: Type.Boolean(),
+  started_at: Nullable(IsoTime),
+  paused_at: Nullable(IsoTime),
+  finished_at: Nullable(IsoTime),
+  expires_at: Nullable(IsoTime),
+  minutes: Type.Integer({ minimum: 0 }),
+});
+assertSame<Same<Static<typeof LessonSessionSchema>, C.LessonSession>>();
+export const ActiveSessionSchema = Type.Object({ session: Nullable(LessonSessionSchema) });
+assertSame<Same<Static<typeof ActiveSessionSchema>, { session: C.LessonSession | null }>>();
+
+// ---------- Шаги ----------
+const StepItemType = Enum([
+  "single_choice", "gap_fill", "order_words", "translate_choice", "comprehension", "gap_fill_media", "order_lines", "phrase_meaning", "meaning_check",
+]);
+assertSame<Same<Static<typeof StepItemType>, C.StepItemType>>();
+/** Задание шага: варианты или слова для порядка — ключа ответа нет (схема и явная сборка stepView). */
+export const StepItemSchema = Type.Object({
+  item_id: Type.String({ minLength: 1, maxLength: 128 }),
+  item_type: StepItemType,
+  instruction: Localized,
+  prompt_en: Type.String(),
+  options: Type.Array(Type.String()),
+});
+assertSame<Same<Static<typeof StepItemSchema>, C.StepItem>>();
+
+const stepBase = {
+  step_id: StepId,
+  stage: SessionStage,
+  position: Type.Integer({ minimum: 0 }),
+  stage_total: Type.Integer({ minimum: 0 }),
+};
+export const NoticeStepSchema = Type.Object({ ...stepBase, type: Type.Literal("notice"), text: Localized });
+export const ExplanationStepSchema = Type.Object({
+  ...stepBase,
+  type: Type.Literal("explanation"),
+  instructions: Localized,
+  examples: Type.Array(Type.Object({ en: Type.String(), gloss: Localized })),
+  key_words: Type.Array(Type.Object({ en: Type.String(), gloss: Localized, example_en: Type.String() })),
+  can_simplify: Type.Boolean(),
+});
+export const ItemStepSchema = Type.Object({
+  ...stepBase,
+  type: Type.Literal("item"),
+  item: StepItemSchema,
+  hint_available: Type.Boolean(),
+  hints_used: Type.Integer({ minimum: 0 }),
+  graded_later: Type.Boolean(),
+});
+export const RoleplayStepSchema = Type.Object({
+  ...stepBase,
+  type: Type.Literal("roleplay"),
+  node_id: Type.String(),
+  character: Type.Object({ id: Type.String(), name: Type.String(), role: Localized, voice: Voice }),
+  line_en: Type.String(),
+  gloss: Localized,
+  choices: Type.Array(Type.Object({ choice_id: Type.String({ minLength: 1, maxLength: 64 }), text_en: Type.String() })),
+  free_text_allowed: Type.Boolean(),
+  hint_available: Type.Boolean(),
+  hints_used: Type.Integer({ minimum: 0 }),
+  history: Type.Array(
+    Type.Object({ turn_id: Type.String(), speaker: Enum(["learner", "character"]), text_en: Type.String(), character_id: Nullable(Type.String()) }),
+  ),
+  unclear_attempts: Type.Integer({ minimum: 0 }),
+});
+export const RoleplayEndStepSchema = Type.Object({ ...stepBase, type: Type.Literal("roleplay_end"), outcome: Outcome, summary: Localized, can_retry: Type.Boolean() });
+export const ListenStepSchema = Type.Object({
+  ...stepBase,
+  type: Type.Literal("listen"),
+  asset_id: Type.String(),
+  title: Localized,
+  has_audio: Type.Boolean(),
+  transcript: Nullable(Type.Array(Type.Object({ speaker: Type.String(), text_en: Type.String(), gloss: Nullable(Localized) }))),
+  voices: Type.Record(Type.String(), Voice),
+  can_listen: Type.Boolean(),
+});
+export const OpenAnswerStepSchema = Type.Object({ ...stepBase, type: Type.Literal("open_answer"), prompt: Localized, max_length: Type.Integer({ minimum: 1, maximum: 1000 }) });
+export const DoneStepSchema = Type.Object({ ...stepBase, type: Type.Literal("done") });
+
+/** Схема шага по дискриминатору `type` — проверка ответа lessons начинается с неё. */
+export const STEP_SCHEMAS = {
+  notice: NoticeStepSchema,
+  explanation: ExplanationStepSchema,
+  item: ItemStepSchema,
+  roleplay: RoleplayStepSchema,
+  roleplay_end: RoleplayEndStepSchema,
+  listen: ListenStepSchema,
+  open_answer: OpenAnswerStepSchema,
+  done: DoneStepSchema,
+} as const;
+export const LessonStepSchema = Type.Union([
+  NoticeStepSchema,
+  ExplanationStepSchema,
+  ItemStepSchema,
+  RoleplayStepSchema,
+  RoleplayEndStepSchema,
+  ListenStepSchema,
+  OpenAnswerStepSchema,
+  DoneStepSchema,
+]);
+assertSame<Same<Static<typeof LessonStepSchema>, C.LessonStep>>();
+
+/** Свободный текст ученика: без управляющих символов (кроме перевода строки), не из одних пробелов. */
+const LEARNER_TEXT = "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f]*[^\\s\\u0000-\\u001f\\u007f][^\\u0000-\\u0009\\u000b-\\u001f\\u007f]*$";
+export const STEP_TEXT_MAX = 500;
+export const StepAnswerSchema = Type.Object(
+  {
+    answer: Type.Optional(
+      Type.Union([
+        Type.Integer({ minimum: 0, maximum: 50 }),
+        Type.Array(Type.String({ minLength: 1, maxLength: 300 }), { minItems: 1, maxItems: 40 }),
+        Type.String({ minLength: 1, maxLength: 200, pattern: PLAIN_TEXT }),
+        Type.Null(),
+      ]),
+    ),
+    dont_know: Type.Optional(Type.Boolean()),
+    choice_id: Type.Optional(Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$" })),
+    text: Type.Optional(Type.String({ minLength: 1, maxLength: STEP_TEXT_MAX, pattern: LEARNER_TEXT })),
+  },
+  strict,
+);
+assertSame<Same<Static<typeof StepAnswerSchema>, C.StepAnswer>>();
+
+export const StepResultSchema = Type.Object({
+  accepted: Type.Boolean(),
+  feedback: Nullable(Type.Object({ correct: Type.Boolean(), correct_answer: Nullable(Type.String()) })),
+  reply: Nullable(Type.Object({ character_id: Type.String(), text_en: Type.String(), gloss: Nullable(Localized), clarification: Type.Boolean() })),
+  next: LessonStepSchema,
+});
+assertSame<Same<Static<typeof StepResultSchema>, C.StepResult>>();
+/** Ответ домена: next проверяется отдельно, по дискриминатору (checkStep). */
+export const StepResultDomainSchema = Type.Object({
+  accepted: Type.Boolean(),
+  feedback: StepResultSchema.properties.feedback,
+  reply: StepResultSchema.properties.reply,
+  next: Type.Object({ type: Type.String() }),
+});
+
+export const HintSchema = Type.Object({ hint: Localized });
+export const SimplerExplanationSchema = Type.Object({
+  explanation: Nullable(Localized),
+  example_en: Type.String(),
+  example_gloss: Localized,
+  source: Enum(["ai", "lesson"]),
+});
+assertSame<Same<Static<typeof SimplerExplanationSchema>, C.SimplerExplanation>>();
+
+// ---------- Оценка, апелляции, итоги ----------
+export const ConfirmedErrorSchema = Type.Object({
+  turn_id: Type.String(),
+  evidence: Type.String(),
+  correction: Type.String(),
+  error_code: Type.String(),
+  severity: Enum(["low", "medium", "high"]),
+});
+assertSame<Same<Static<typeof ConfirmedErrorSchema>, AI.ConfirmedError>>();
+
+export const APPEAL_REASON_MAX = 500;
+export const AppealSchema = Type.Object({
+  appeal_id: Uuid,
+  evaluation_id: Uuid,
+  status: Enum(["new", "in_review", "upheld", "corrected"]),
+  /** null — текст стёрт по сроку хранения (90 дней после решения) */
+  reason: Nullable(Type.String()),
+  decision_note: Nullable(Type.String()),
+  new_evaluation_id: Nullable(Uuid),
+  created_at: IsoTime,
+  decided_at: Nullable(IsoTime),
+});
+assertSame<Same<Static<typeof AppealSchema>, C.Appeal>>();
+export const AppealListSchema = itemsOf(AppealSchema);
+export const AppealRequestSchema = Type.Object(
+  { reason: Type.String({ minLength: 1, maxLength: APPEAL_REASON_MAX, pattern: LEARNER_TEXT }) },
+  strict,
+);
+
+const Score = Type.Union([Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3), Type.Null()]);
+export const EvaluationViewSchema = Type.Object({
+  evaluation_id: Uuid,
+  status: Enum(["ok", "partial", "insufficient_evidence", "pending_review"]),
+  passed: Nullable(Type.Boolean()),
+  task_completed: Nullable(Type.Boolean()),
+  scores: Type.Array(Type.Object({ code: RubricCriterionCode, title: Localized, score: Score })),
+  key_errors: Type.Array(ConfirmedErrorSchema),
+  items: Type.Array(
+    Type.Object({
+      item_id: Type.String(),
+      prompt_en: Type.String(),
+      your_answer: Nullable(Type.String()),
+      correct: Type.Boolean(),
+      hinted: Type.Boolean(),
+      correct_answer: Nullable(Type.String()),
+    }),
+  ),
+  practice_only: Type.Boolean(),
+  rubric_version: Type.String(),
+  evaluator: Nullable(Type.Object({ model_id: Type.String(), prompt_version: Type.String() })),
+  superseded_by: Nullable(Uuid),
+  appeal: Nullable(AppealSchema),
+  created_at: IsoTime,
+});
+assertSame<Same<Static<typeof EvaluationViewSchema>, C.EvaluationView>>();
+
+export const LessonSummarySchema = Type.Object({
+  session_id: Uuid,
+  kind: SessionKind,
+  title: Localized,
+  status: Enum(["completed", "failed", "cancelled"]),
+  outcome: Nullable(Outcome),
+  minutes: Type.Integer({ minimum: 0 }),
+  evaluation: Nullable(EvaluationViewSchema),
+  skills: Type.Array(Type.Object({ skill_id: Type.String(), title: Localized, from: SkillState, to: SkillState })),
+  key_words: Type.Array(Type.Object({ en: Type.String(), gloss: Localized })),
+  next_lesson: Nullable(LessonCardSchema),
+  can_review: Type.Boolean(),
+});
+assertSame<Same<Static<typeof LessonSummarySchema>, C.LessonSummary>>();
+
+export const LessonHistoryItemSchema = Type.Object({
+  session_id: Uuid,
+  kind: SessionKind,
+  title: Localized,
+  status: SessionStatus,
+  outcome: Nullable(Outcome),
+  passed: Nullable(Type.Boolean()),
+  minutes: Type.Integer({ minimum: 0 }),
+  evaluation_id: Nullable(Uuid),
+  finished_at: Nullable(IsoTime),
+  started_at: Nullable(IsoTime),
+});
+assertSame<Same<Static<typeof LessonHistoryItemSchema>, C.LessonHistoryItem>>();
+export const LessonHistoryPageSchema = pageOf(LessonHistoryItemSchema);
+assertSame<Same<Static<typeof LessonHistoryPageSchema>, C.Page<C.LessonHistoryItem>>>();
+export const HistoryQuerySchema = Type.Object(
+  {
+    kind: Type.Optional(SessionKind),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, default: 20 })),
+    cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+  },
+  strict,
+);
+
+/** Язык ученика для вариантов проверки понимания и объяснения ИИ («проще»); иначе — Accept-Language, иначе ru. */
+export const LocaleQuerySchema = Type.Object({ locale: Type.Optional(UiLang) }, strict);
+
+// ---------- Параметры путей ----------
+export const LessonParamsSchema = Type.Object({ lesson_id: ContentId }, strict);
+export const StepParamsSchema = Type.Object({ id: Uuid, step_id: StepId }, strict);

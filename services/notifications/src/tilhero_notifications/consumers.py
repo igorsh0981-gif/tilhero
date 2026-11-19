@@ -20,6 +20,9 @@
 - catalog.media_request.decided.v1 (спринт 3, только от catalog) → media_request.decided → ученику, категория
   support (media_request.decided:<request>:<status>; повтор того же решения — без дубля, изменённое решение — новое
   сообщение); заявки бывают только у аккаунтов 14+, но общая политика (в т.ч. правила детей) не обходится;
+- assessment.appeal.decided.v1 (спринт 4, только от assessment) → appeal_decided(.kid) → ученику, ребёнку —
+  опекуну, категория support (appeal_decided:<appeal>; одно сообщение на апелляцию, повтор — без дубля); текст
+  решения сотрудника не включается; кнопка → «Уроки» (route_lessons);
 - user.deletion.requested.v1 (только от identity-consent) → удаление → user.domain.deleted.v1 {domain: notifications};
 - user.status.changed / consent.revoked / user.notification_settings.changed / user.profile.updated — сброс кэша
   адресации.
@@ -64,6 +67,9 @@ DELETION_REQUESTED = "user.deletion.requested.v1"
 MEDIA_REQUEST_DECIDED = "catalog.media_request.decided.v1"
 # Решения по заявкам публикует только catalog (защита в глубину: чужой издатель — лог и подтверждение без записи)
 CATALOG_PRODUCERS = frozenset({"catalog"})
+APPEAL_DECIDED = "assessment.appeal.decided.v1"
+# Решения по апелляциям публикует только assessment (спринт 4)
+ASSESSMENT_PRODUCERS = frozenset({"assessment"})
 # Сагу удаления ведёт только identity-consent: запрос от другого издателя не исполняется (защита в глубину, P-7)
 DELETION_PRODUCERS = frozenset({"identity-consent"})
 CACHE_EVENTS = [
@@ -150,6 +156,14 @@ class MediaRequestDecided(_Payload):
     status: Literal["authored_alternative", "licensed", "rejected", "duplicate"]
     title: Annotated[str, Field(min_length=1, max_length=200)]
     linked_asset_id: Annotated[str, Field(max_length=200)] | None = None
+    decided_at: datetime
+
+
+class AppealDecided(_Payload):
+    appeal_id: uuid.UUID
+    evaluation_id: uuid.UUID
+    user_id: uuid.UUID
+    decision: Literal["upheld", "corrected"]
     decided_at: datetime
 
 
@@ -421,6 +435,25 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
             dedup_key=f"media_request.decided:{d.request_id}:{d.status}",
         )
 
+    # ---------------------------------------------------------------- assessment (спринт 4)
+
+    async def on_assessment(session: AsyncSession, env: Envelope) -> None:
+        """Решение по апелляции на оценку урока (AT-47) → запись ученику (ребёнку — опекуну) через общую политику
+        доставки: тихие часы, окно детей, выключатель Telegram; категория support. Одно сообщение на апелляцию."""
+        if env.producer not in ASSESSMENT_PRODUCERS:
+            log.warning("appeal decision from unexpected producer ignored",
+                        extra={"event_type": env.event_type, "producer": env.producer[:64]})
+            return
+        d = AppealDecided.model_validate(env.payload)
+        await accept(
+            session,
+            env,
+            user_id=d.user_id,
+            template="appeal_decided",
+            params={"appeal_id": str(d.appeal_id), "evaluation_id": str(d.evaluation_id), "decision": d.decision},
+            dedup_key=f"appeal_decided:{d.appeal_id}",
+        )
+
     # ---------------------------------------------------------------- identity-consent
 
     async def on_user_deleted(session: AsyncSession, env: Envelope) -> None:
@@ -454,6 +487,7 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
         "notifications.support": ([TICKET_REPLIED, TICKET_STATUS_CHANGED], on_support),
         "notifications.product": ([RELEASE_NOTE], on_release_note),
         "notifications.catalog": ([MEDIA_REQUEST_DECIDED], on_catalog),
+        "notifications.assessment": ([APPEAL_DECIDED], on_assessment),
         "notifications.user_deleted": ([DELETION_REQUESTED], on_user_deleted),
         "notifications.delivery_cache": (CACHE_EVENTS, on_user_changed),
     }

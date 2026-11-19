@@ -30,6 +30,7 @@ import { loadConfig, type Config } from "../src/config.js";
 import type { App } from "../src/http.js";
 import { signInitData } from "../src/telegramAuth.js";
 import { FakeContent } from "./fakeContent.js";
+import { FakeLessons } from "./fakeLessons.js";
 
 export const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://127.0.0.1:6379/14";
 export const BOT_TOKEN = "7000000001:AAtest-bot-token-for-unit-tests-only-xx";
@@ -47,6 +48,8 @@ const URLS = {
   social: "http://social.test",
   catalog: "http://catalog.test",
   diagnostics: "http://diagnostics.test",
+  lessons: "http://lessons.test",
+  assessment: "http://assessment.test",
 } as const;
 
 export type Service = keyof typeof URLS;
@@ -60,6 +63,8 @@ const DOMAIN_AUD: Record<Service, string> = {
   social: "social",
   catalog: "catalog",
   diagnostics: "diagnostics",
+  lessons: "lessons",
+  assessment: "assessment",
 };
 
 export function testConfig(env: Record<string, string> = {}): Config {
@@ -82,6 +87,8 @@ export function testConfig(env: Record<string, string> = {}): Config {
     SOCIAL_URL: URLS.social,
     CATALOG_URL: URLS.catalog,
     DIAGNOSTICS_URL: URLS.diagnostics,
+    LESSONS_URL: URLS.lessons,
+    ASSESSMENT_URL: URLS.assessment,
     UPSTREAM_RETRIES: "0",
     UPSTREAM_TIMEOUT_MS: "2000",
     LOG_LEVEL: "info",
@@ -234,6 +241,8 @@ export class FakeDomains {
   readonly down = new Set<Service>();
   /** Спринт 3: catalog, diagnostics и траектория learning-plan (test/fakeContent.ts). */
   readonly content = new FakeContent();
+  /** Спринт 4: lessons и assessment (test/fakeLessons.ts). */
+  readonly lessons = new FakeLessons();
   private readonly overrides = new Map<string, Handler>();
   private ticketSeq = 3000;
 
@@ -336,7 +345,18 @@ export class FakeDomains {
     const req: Req = { method, path: url.pathname, query, subject, body, headers, claims };
     if (this.failAll && !this.failAll.except.has(service)) return domainError(this.failAll.status, this.failAll.code, { from: service });
     const ov = this.overrides.get(`${service} ${method} ${url.pathname}`);
-    const res = ov ? await ov(req) : await this.route(service, req);
+    // таймаут BFF (AbortSignal) действует и на подделку: медленный обработчик прерывается как настоящий запрос
+    const work = Promise.resolve(ov ? ov(req) : this.route(service, req));
+    const signal = init?.signal;
+    const res = signal
+      ? await Promise.race([
+          work,
+          new Promise<never>((_, reject) => {
+            if (signal.aborted) reject(signal.reason);
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          }),
+        ])
+      : await work;
     if (!this.decorate || res.status >= 300 || res.status === 204 || !(res.headers.get("content-type") ?? "").includes("json")) return res;
     const parsed: unknown = JSON.parse(await res.text());
     return json(res.status, this.decorate(parsed));
@@ -366,6 +386,10 @@ export class FakeDomains {
         return this.content.catalog(r);
       case "diagnostics":
         return this.content.diagnostics(r);
+      case "lessons":
+        return this.lessons.lessons(r);
+      case "assessment":
+        return this.lessons.assessment(r);
     }
   }
 

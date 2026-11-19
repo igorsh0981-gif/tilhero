@@ -1,5 +1,6 @@
 import type { LessonCard, ReasonCode } from "@tilhero/contracts/bff";
 import { stageShares } from "../../domain/content";
+import { completedMark } from "../../domain/lessons";
 import { useI18n, type MessageKey } from "../../i18n";
 import { useApp, usePlan } from "../../state/app";
 import { useLoad } from "../../state/hooks";
@@ -14,7 +15,7 @@ export function ReasonPills({ codes }: { codes: readonly ReasonCode[] }) {
   return (
     <div className="pills" data-testid="reasons">
       {codes.map((c) => (
-        <Pill key={c} tone={c === "weak_area" || c === "prerequisite_missing" ? "warn" : undefined}>
+        <Pill key={c} tone={c === "weak_area" || c === "prerequisite_missing" ? "warn" : c === "repeat" ? "mute" : undefined}>
           {t(`plan.reason.${c}` as MessageKey)}
         </Pill>
       ))}
@@ -43,7 +44,7 @@ export function Stages({ card }: { card: Pick<LessonCard, "stages" | "duration_m
   );
 }
 
-export function LessonCardView({ card, reasons, n }: { card: LessonCard; reasons?: readonly ReasonCode[]; n?: number }) {
+export function LessonCardView({ card, reasons, n, onOpen }: { card: LessonCard; reasons?: readonly ReasonCode[]; n?: number; onOpen?: () => void }) {
   const { t, l } = useI18n();
   return (
     <Margin note={n != null ? String(n) : undefined} tone="b">
@@ -55,6 +56,12 @@ export function LessonCardView({ card, reasons, n }: { card: LessonCard; reasons
         <p className="sub">{l(card.goal)}</p>
         <Stages card={card} />
         {reasons ? <ReasonPills codes={reasons} /> : null}
+        {onOpen ? (
+          <Btn variant="link" onClick={onOpen} data-testid={`open-${card.lesson_id}`}>
+            {t("ls.next.open")}
+            <Icon name="chevron" size={16} stroke={2} />
+          </Btn>
+        ) : null}
       </article>
     </Margin>
   );
@@ -62,8 +69,8 @@ export function LessonCardView({ card, reasons, n }: { card: LessonCard; reasons
 
 /**
  * «Мой план» (APP-PLAN-02/03, AT-36): the next lesson with its reason, mandatory and optional lessons (goal, level,
- * stages and minutes). Recalculated by learning-plan after a goal change (the plan version) or a new placement test.
- * «Начать урок» — the honest «скоро» of the lessons tab (lessons arrive in sprint 4).
+ * stages and minutes), the lessons passed (sprint 4: «зачтено / повторить»). Recalculated by learning-plan after a goal
+ * change (the plan version), a new placement test or a lesson. «Начать урок» → the lesson card.
  */
 export function PlanScreen() {
   const { bff, nav } = useApp();
@@ -123,7 +130,7 @@ export function PlanScreen() {
                     <p className="sub" data-testid="plan-explanation">{l(d.next.explanation)}</p>
                     <ReasonPills codes={d.next.reason_codes} />
                     <Stages card={d.next} />
-                    <Btn onClick={() => nav.goTab("lessons")} data-testid="plan-start">
+                    <Btn disabled={!d.lessons_available} onClick={() => nav.push({ name: "lessonCard", id: d.next!.lesson_id })} data-testid="plan-start">
                       <Icon name="lessons" size={18} />
                       {t("plan.startLesson")}
                     </Btn>
@@ -138,7 +145,9 @@ export function PlanScreen() {
                   <span className="sub small">{t("plan.count", { n: d.mandatory.length, lessons: tp("plan.lessonsWord", d.mandatory.length) })}</span>
                 </div>
                 {d.mandatory.length ? (
-                  d.mandatory.map((c, i) => <LessonCardView key={c.lesson_id} card={c} reasons={c.reason_codes} n={i + 1} />)
+                  d.mandatory.map((c, i) => (
+                    <LessonCardView key={c.lesson_id} card={c} reasons={c.reason_codes} n={i + 1} onOpen={d.lessons_available ? () => nav.push({ name: "lessonCard", id: c.lesson_id }) : undefined} />
+                  ))
                 ) : (
                   <div className="pad"><p className="sub">{t("plan.empty")}</p></div>
                 )}
@@ -150,8 +159,30 @@ export function PlanScreen() {
                     <h2 className="sec" id="plan-opt">{t("plan.optional")}</h2>
                   </div>
                   {d.optional.map((c) => (
-                    <LessonCardView key={c.lesson_id} card={c} reasons={c.reason_codes} />
+                    <LessonCardView key={c.lesson_id} card={c} reasons={c.reason_codes} onOpen={d.lessons_available ? () => nav.push({ name: "lessonCard", id: c.lesson_id }) : undefined} />
                   ))}
+                </section>
+              ) : null}
+
+              {d.completed.length ? (
+                <section className="pad stack tight" aria-labelledby="plan-done" data-testid="plan-completed">
+                  <h2 className="sec" id="plan-done">{t("ls.completed")}</h2>
+                  <div className="list">
+                    {d.completed.map((c) => {
+                      const mark = completedMark(c);
+                      return (
+                        <div className="row ls-row" key={c.lesson_id}>
+                          <span className="t">
+                            <b>{l(c.title)}</b>
+                            <span>{fmt.date(c.completed_at)}</span>
+                          </span>
+                          <span className={mark === "passed" ? "v ok" : mark === "again" ? "v again" : "v"}>
+                            {t(mark === "passed" ? "ls.passed" : mark === "again" ? "ls.again" : "ls.later")}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </section>
               ) : null}
             </>

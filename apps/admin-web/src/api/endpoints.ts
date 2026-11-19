@@ -1,5 +1,27 @@
 import type {
+  AdminAppeal,
   AdminExperience,
+  AgentId,
+  AgentRow,
+  AgentDetail,
+  AgentVersionPatch,
+  AgentVersionView,
+  AiBudget,
+  AiCall,
+  AiModel,
+  AiProviderStatus,
+  AiUsageSummary,
+  AppealDecision,
+  EvaluationCard,
+  GoldenCase,
+  GoldenCaseInput,
+  Reevaluation,
+  SessionCard,
+  SessionFlag,
+  SessionRow,
+  TestRun,
+  TestRunSummary,
+  Transcript,
   AdminMediaRequest,
   AudioBlob,
   AudioUpload,
@@ -74,6 +96,7 @@ import type {
 } from "@tilhero/contracts/admin";
 import type { Ticket as ClientTicket } from "@tilhero/contracts/bff";
 import type { Band, ContentKind, MediaRequestStatus, ScenarioTestRun, VersionStatus } from "@tilhero/contracts/content";
+import type { SessionKind } from "@tilhero/contracts/ai";
 import { api } from "./client";
 
 export type { SlaPolicies, SlaPolicy, SupportStats };
@@ -319,4 +342,72 @@ export const Diagnostics = {
   version: (testId: string, v: number) => api.get<DiagnosticTestVersion>(`/diagnostics/tests/${enc(testId)}/versions/${v}`),
   publish: (testId: string, v: number, reason: string) => api.post<DiagnosticTestRow>(`/diagnostics/tests/${enc(testId)}/versions/${v}/publish`, { reason }),
   stats: (period: Period) => api.get<DiagnosticStats>("/diagnostics/stats", { query: { period } }),
+};
+
+/* ---------------------------------------------------------------- AI agents, models, budget (ai-gateway, sprint 4) */
+
+/** admin.ts AgentDetail (row + versions) and AgentVersionView (version + names; `updated_at` — the If-Match of PATCH) */
+export type { AgentDetail, AgentVersionView };
+export type AgentCardView = AgentDetail;
+export type BudgetInput = Pick<AiBudget, "monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "alert_percent">;
+
+export const Ai = {
+  agents: (background = false) => api.get<{ items: AgentRow[] }>("/ai/agents", { background }),
+  agent: (id: AgentId) => api.get<AgentCardView>(`/ai/agents/${enc(id)}`),
+  version: (id: AgentId, v: number) => api.get<AgentVersionView>(`/ai/agents/${enc(id)}/versions/${v}`),
+  newDraft: (id: AgentId, from_version: number | null, idempotencyKey: string) =>
+    api.post<AgentVersionView>(`/ai/agents/${enc(id)}/versions`, from_version != null ? { from_version } : {}, { idempotencyKey }),
+  /** If-Match: updated_at of the version that was read (409 VERSION_CONFLICT when someone saved in between) */
+  saveDraft: (id: AgentId, v: number, patch: AgentVersionPatch, ifMatch: string) =>
+    api.patch<AgentVersionView>(`/ai/agents/${enc(id)}/versions/${v}`, patch, { headers: { "If-Match": ifMatch } }),
+  deleteDraft: (id: AgentId, v: number) => api.del<void>(`/ai/agents/${enc(id)}/versions/${v}`),
+  runTests: (id: AgentId, v: number, idempotencyKey: string) => api.post<TestRunSummary>(`/ai/agents/${enc(id)}/versions/${v}/test-runs`, undefined, { idempotencyKey }),
+  /** progress poll (admin.ts: GET …/test-runs/{run_id} → TestRun) — background: it never extends the idle session */
+  testRun: (id: AgentId, v: number, runId: string) => api.get<TestRun>(`/ai/agents/${enc(id)}/versions/${v}/test-runs/${enc(runId)}`, { background: true }),
+  publish: (id: AgentId, v: number, reason: string, idempotencyKey: string) => api.post<AgentRow>(`/ai/agents/${enc(id)}/versions/${v}/publish`, { reason }, { idempotencyKey }),
+  setCanary: (id: AgentId, version: number, percent: number, reason: string) => api.put<AgentRow>(`/ai/agents/${enc(id)}/canary`, { version, percent, reason }),
+  clearCanary: (id: AgentId, reason: string) => api.del<AgentRow>(`/ai/agents/${enc(id)}/canary`, { reason }),
+  rollback: (id: AgentId, reason: string) => api.post<AgentRow>(`/ai/agents/${enc(id)}/rollback`, { reason }, { idempotencyKey: true }),
+  cases: (id: AgentId) => api.get<{ items: GoldenCase[] }>(`/ai/agents/${enc(id)}/golden-cases`),
+  createCase: (id: AgentId, body: GoldenCaseInput, idempotencyKey: string) => api.post<GoldenCase>(`/ai/agents/${enc(id)}/golden-cases`, body, { idempotencyKey }),
+  updateCase: (caseId: string, body: GoldenCaseInput) => api.patch<GoldenCase>(`/ai/golden-cases/${enc(caseId)}`, body),
+  archiveCase: (caseId: string) => api.del<void>(`/ai/golden-cases/${enc(caseId)}`),
+  models: () => api.get<{ items: AiModel[] }>("/ai/models"),
+  putModel: (m: Pick<AiModel, "model_id" | "input_usd_per_mtok" | "output_usd_per_mtok" | "active">, reason: string) =>
+    api.put<AiModel>(`/ai/models/${enc(m.model_id)}`, { input_usd_per_mtok: m.input_usd_per_mtok, output_usd_per_mtok: m.output_usd_per_mtok, active: m.active, reason }),
+  provider: (background = false) => api.get<AiProviderStatus>("/ai/provider", { background }),
+  budget: (background = false) => api.get<AiBudget>("/ai/budget", { background }),
+  /** updatedAt — `updated_at` of the budget that was read: ai-gateway answers 409 BUDGET_CONFLICT {updated_at} when
+   *  someone changed the limits in between (review R2-07) */
+  putBudget: (b: BudgetInput, updatedAt: string, reason: string) => api.put<AiBudget>("/ai/budget", { ...b, updated_at: updatedAt, reason }),
+  /** stop=true — the emergency stop is engaged (every call answers unavailable: ai_disabled); false — AI back on */
+  emergencyStop: (stop: boolean, reason: string) => api.post<AiBudget>("/ai/emergency-stop", { enabled: stop, reason }),
+  usageSummary: (period: AiUsageSummary["period"], background = false) => api.get<AiUsageSummary>("/ai/usage/summary", { query: { period }, background }),
+  usage: (f: { session_id?: string; agent_id?: AgentId; cursor?: string | null }) => api.get<Page<AiCall>>("/ai/usage", { query: { ...f, limit: 50 } }),
+};
+
+/* ---------------------------------------------------------------- dialogue QA (lessons + assessment, sprint 4) */
+
+export interface SessionFilters {
+  from?: string;
+  to?: string;
+  kind?: SessionKind | "";
+  status?: SessionRow["status"] | "";
+  outcome?: NonNullable<SessionRow["outcome"]> | "";
+  flag?: SessionFlag | "";
+  lesson_id?: string;
+  level?: Band | "";
+  cursor?: string | null;
+}
+
+export const Qa = {
+  sessions: (f: SessionFilters) =>
+    api.get<Page<SessionRow>>("/qa/sessions", { query: { from: f.from, to: f.to, kind: f.kind, status: f.status, outcome: f.outcome, flag: f.flag, lesson_id: f.lesson_id, level: f.level, cursor: f.cursor, limit: 50 } }),
+  session: (id: string) => api.get<SessionCard>(`/qa/sessions/${enc(id)}`),
+  transcript: (id: string, reason: string) => api.post<Transcript>(`/qa/sessions/${enc(id)}/transcript`, { reason }),
+  flag: (evaluationId: string, reason: string) => api.post<EvaluationCard>(`/qa/evaluations/${enc(evaluationId)}/flag`, { reason }),
+  reevaluate: (evaluationId: string, body: Reevaluation, idempotencyKey: string) => api.post<EvaluationCard>(`/qa/evaluations/${enc(evaluationId)}/reevaluate`, body, { idempotencyKey }),
+  appeals: (status: AdminAppeal["status"] | "", cursor?: string | null, background = false) => api.get<Page<AdminAppeal>>("/qa/appeals", { query: { status, cursor, limit: 50 }, background }),
+  take: (id: string) => api.post<AdminAppeal>(`/qa/appeals/${enc(id)}/take`),
+  decide: (id: string, body: AppealDecision) => api.post<AdminAppeal>(`/qa/appeals/${enc(id)}/decide`, body),
 };

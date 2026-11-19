@@ -7,6 +7,13 @@
   разрешён флагом media.external_sources; транскрипт — только при allowed_uses ∋ show_transcript (перевод реплик —
   при ∋ translation), фразы — при ∋ dictionary, аудио — при ∋ listen.
   Аудитория — фильтр (детям 6–13 — только audience ∋ kids).
+- Упражнения к медиа (спринт 4, для lessons) — опубликованные упражнения доступного ученику медиа (аудитория и права —
+  как у карточки; лицензия разрешает exercises) **без ключей ответов**, с номерами версий для фиксации в сессии.
+- Версия контента по номеру (спринт 4, для lessons и assessment) — полное тело **с ключами**: только опубликованная
+  или архивная, бывшая опубликованной (черновик, на проверке, одобренная, вытесненная без публикации и
+  приостановленная медиа — 404 VERSION_NOT_FOUND, без раскрытия существования). Тело версии неизменяемо (триггер
+  content_versions_guard) — вызывающие кешируют ответ бессрочно; в ответе нет изменчивых полей (статус, даты).
+  Без номера — текущая опубликованная версия (указатель; меняется — кеш с перепроверкой по ETag).
 """
 
 from __future__ import annotations
@@ -255,6 +262,58 @@ async def media_detail(session: AsyncSession, asset_id: str, audience: str, toda
         "voices": _voices(p["transcript"]),
         "exercises_available": has_exercises,
     }
+
+
+EXERCISE_FIELDS: Final = ("exercise_id", "asset_id", "type", "skill_id", "level", "instruction", "prompt_en",
+                          "options", "line_index", "rubric_id")
+MAX_MEDIA_EXERCISES: Final = 100
+
+
+async def media_exercises(session: AsyncSession, asset_id: str, audience: str, today: date,
+                          external_sources: bool) -> dict[str, Any]:
+    """{asset_id, asset_version, items}: опубликованные упражнения к медиа без `answer` (ключи lessons не нужны —
+    оценивает assessment по версии из /versions). Медиа недоступно ученику (аудитория, права сегодня, источник) →
+    404 MEDIA_NOT_AVAILABLE; лицензия не разрешает упражнения → пустой список (как exercises_available = false)."""
+    row = await _available_media(session, asset_id, audience, today, external_sources)
+    items: list[dict[str, Any]] = []
+    if "exercises" in row.payload["rights"]["allowed_uses"]:
+        for ex in await published_rows(session, "media_exercise"):
+            if ex.payload.get("asset_id") != asset_id:
+                continue
+            item = {f: ex.payload.get(f) for f in EXERCISE_FIELDS}
+            item["version"] = ex.version
+            items.append(item)
+    items.sort(key=lambda i: str(i["exercise_id"]))
+    return {"asset_id": row.key, "asset_version": row.version, "items": items[:MAX_MEDIA_EXERCISES]}
+
+
+RELEASED_STATUSES: Final = ("published", "archived")
+
+
+async def released_version(session: AsyncSession, kind: str, key: str, version: int) -> ContentVersion:
+    """Версия, бывшая опубликованной: published или archived с published_at (archived из approved — вытеснена без
+    публикации — не считается). Иначе 404 VERSION_NOT_FOUND одним кодом для «нет» и «не выпущена»."""
+    row = (await session.execute(select(ContentVersion).where(
+        ContentVersion.kind == kind, ContentVersion.key == key, ContentVersion.version == version,
+        ContentVersion.status.in_(RELEASED_STATUSES), ContentVersion.published_at.is_not(None)))).scalar_one_or_none()
+    if row is None:
+        raise not_found("VERSION_NOT_FOUND", f"Нет опубликованной версии {version} сущности {kind} «{key}»")
+    return row
+
+
+async def current_version(session: AsyncSession, kind: str, key: str) -> ContentVersion:
+    """Текущая опубликованная версия ключа (указатель): lessons фиксирует номера версий при старте сессии. Снят с
+    публикации, приостановлен (медиа), черновик или нет ключа — 404 VERSION_NOT_FOUND."""
+    rows = await published_rows(session, kind, [key])
+    if not rows:
+        raise not_found("VERSION_NOT_FOUND", f"Сущность {kind} «{key}» не опубликована")
+    return rows[0]
+
+
+def released_view(row: ContentVersion) -> dict[str, Any]:
+    """Неизменяемая часть версии: тело с ключами и его хеш (статус и даты меняются — их здесь нет)."""
+    return {"kind": row.kind, "key": row.key, "version": row.version, "payload": row.payload,
+            "payload_hash": row.payload_hash}
 
 
 async def media_audio(session: AsyncSession, asset_id: str, audience: str | None, today: date,

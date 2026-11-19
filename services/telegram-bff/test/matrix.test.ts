@@ -107,6 +107,28 @@ const SAMPLES: Record<string, Sample> = {
   "get /v1/media/{id}/audio": { params: { id: "m-own-coffee" } },
   "get /v1/media/requests": {},
   "post /v1/media/requests": { payload: { kind: "song", title: "Yesterday" }, idem: true },
+  // спринт 4
+  "get /v1/lessons/{lesson_id}": { params: { lesson_id: "l-a1-01" } },
+  "post /v1/lessons/{lesson_id}/sessions": { params: { lesson_id: "l-a1-01" }, idem: true },
+  "post /v1/scenarios/{id}/sessions": { params: { id: "sc-cafe-order" }, idem: true },
+  "post /v1/media/{id}/sessions": { params: { id: "m-own-coffee" }, idem: true },
+  "get /v1/sessions/active": {},
+  "get /v1/sessions": {},
+  "get /v1/sessions/{id}": {},
+  "post /v1/sessions/{id}/pause": {},
+  "post /v1/sessions/{id}/resume": {},
+  "post /v1/sessions/{id}/cancel": {},
+  "get /v1/sessions/{id}/current": {},
+  "post /v1/sessions/{id}/steps/{step_id}": { params: { step_id: "s1" }, payload: { choice_id: "c-order" } },
+  "post /v1/sessions/{id}/steps/{step_id}/hint": { params: { step_id: "s1" } },
+  "post /v1/sessions/{id}/simpler": {},
+  "post /v1/sessions/{id}/roleplay/retry": {},
+  "post /v1/sessions/{id}/finish": {},
+  "get /v1/sessions/{id}/summary": {},
+  "post /v1/sessions/{id}/review": { idem: true },
+  "get /v1/evaluations/{id}": {},
+  "post /v1/evaluations/{id}/appeal": { payload: { reason: "Ответ был верный" }, idem: true },
+  "get /v1/appeals": {},
 };
 
 interface Op {

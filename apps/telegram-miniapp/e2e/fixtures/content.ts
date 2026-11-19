@@ -182,7 +182,7 @@ export class MockContent {
     };
   }
 
-  trajectory(goal: string | null, audience: AudienceSegment): Trajectory {
+  trajectory(goal: string | null, audience: AudienceSegment, completed: Trajectory["completed"] = []): Trajectory {
     const done = this.results.length > 0;
     const card = (id: string, ru: string, uz: string, level: "A0" | "A1" | "A2", kind: "core" | "optional") => ({
       lesson_id: id,
@@ -226,8 +226,8 @@ export class MockContent {
         { ...card("l-a1-05-way", "Как пройти к вокзалу", "Vokzalga qanday borish mumkin", "A1", "core"), reason_codes: ["prerequisite_missing"] },
       ],
       optional,
-      completed: [],
-      lessons_available: false,
+      completed,
+      lessons_available: true,
     };
   }
 
@@ -342,7 +342,7 @@ export class MockContent {
     q: URLSearchParams,
     b: Record<string, unknown>,
     headers: Record<string, string>,
-    ctx: { kid: boolean; goal: string | null; idem: Map<string, unknown> },
+    ctx: { kid: boolean; goal: string | null; idem: Map<string, unknown>; completed?: Trajectory["completed"] },
     res: (status: number, body?: unknown, code?: string, details?: Record<string, unknown>, raw?: { contentType: string; body: Buffer }) => Promise<void>,
   ): Promise<void> | false {
     const key = `${method} ${path}`;
@@ -400,7 +400,7 @@ export class MockContent {
       if (this.sc.catalogDown) return res(503, undefined, "CATALOG_UNAVAILABLE", { service: "catalog" });
       return res(200, this.skillMap());
     }
-    if (key === "GET /v1/plan/trajectory") return res(200, this.trajectory(ctx.goal, audience));
+    if (key === "GET /v1/plan/trajectory") return res(200, this.trajectory(ctx.goal, audience, ctx.completed ?? []));
     if (key === "GET /v1/scenarios") {
       const items = this.scenarios
         .filter((s) => s.audience.includes(audience))

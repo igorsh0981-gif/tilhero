@@ -92,7 +92,7 @@ function fakeServer(o: { diag?: "none" | "completed"; skillsDown?: boolean; next
         return ok({
           pair_id: "ru-en", course_id: "en-core", revision: 1, basis: { diagnostic_result_id: res?.result_id ?? null, goal: "travel", computed_at: new Date().toISOString() },
           next: { lesson_id: "l1", module_id: "m1", title: L("В кафе"), goal: L("Заказать напиток"), level: "A1", kind: "core", duration_min: 20, primary_skill_id: "s", scenario_id: null, stages: [], reason_codes: ["weak_area"], explanation: L("Начнём с вежливых просьб") },
-          mandatory: [], optional: [], completed: [], lessons_available: false,
+          mandatory: [], optional: [], completed: [], lessons_available: true,
         });
       case "GET /v1/skills/map":
         if (o.skillsDown) return err(503, "CATALOG_UNAVAILABLE", { service: "catalog" });
@@ -309,13 +309,13 @@ describe("Home — learning card", () => {
     await userEvent.click(within(card).getByTestId("home-diag-start"));
     expect(navRef!.top).toEqual({ name: "diagnostics" });
   });
-  it("done → the next lesson with «почему», «Начать урок» → the honest «скоро» of the lessons tab, plan and skills links", async () => {
+  it("done → the next lesson with «почему», «Начать урок» → the lesson card (sprint 4), plan and skills links", async () => {
     mount(<Home />, { diag: "completed" });
     expect(await screen.findByTestId("home-next-why")).toHaveTextContent("Начнём с вежливых просьб");
     await userEvent.click(screen.getByTestId("home-plan-link"));
     expect(navRef!.top).toEqual({ name: "plan" });
     await userEvent.click(screen.getByTestId("home-start-lesson"));
-    expect(navRef!.tab).toBe("lessons");
+    expect(navRef!.top).toEqual({ name: "lessonCard", id: "l1" });
   });
 });
 

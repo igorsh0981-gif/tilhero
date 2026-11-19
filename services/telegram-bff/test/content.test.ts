@@ -142,6 +142,25 @@ describe("GET /v1/plan/trajectory (AT-36)", () => {
     expect(call.query.audience).toBe("kids");
   });
 
+  it("спринт 4: пройденные уроки — с отметкой «зачтено» (passed), оценкой и датой, причина repeat; без completed_at — 503", async () => {
+    const base = (await get("/v1/plan/trajectory")).json();
+    const done = { ...base.mandatory[0], reason_codes: undefined, passed: true, evaluation_id: "0b8e1c3a-5d2f-4a6b-9c7d-1e2f3a4b5c6d", completed_at: "2026-11-19T10:00:00Z", internal: "x" };
+    delete done.reason_codes;
+    h.fake.content.trajectoryOverride = () =>
+      json(200, { ...base, next: { ...base.next, reason_codes: ["repeat"] }, completed: [done, { ...done, lesson_id: "l-a1-02", passed: null, evaluation_id: null }], lessons_available: true });
+    const res = await get("/v1/plan/trajectory");
+    expect(res.statusCode).toBe(200);
+    expect(res.json().next.reason_codes).toEqual(["repeat"]); // спринт 4: урок без зачёта — «повторим»
+    expect(res.json().completed).toEqual([
+      { ...done, internal: undefined, reason_codes: undefined },
+      { ...done, lesson_id: "l-a1-02", passed: null, evaluation_id: null, internal: undefined, reason_codes: undefined },
+    ].map((x) => JSON.parse(JSON.stringify(x))));
+    expect(res.json().lessons_available).toBe(true);
+    const { completed_at: _c, ...noDate } = done;
+    h.fake.content.trajectoryOverride = () => json(200, { ...base, completed: [noDate] });
+    expect((await get("/v1/plan/trajectory")).statusCode).toBe(503);
+  });
+
   it("смена цели (PATCH /v1/plan) → траектория с новой целью", async () => {
     await h.app.inject({ method: "PATCH", url: "/v1/plan", headers: bearer(s.access), payload: { goal: "travel" } });
     expect((await get("/v1/plan/trajectory")).json().basis.goal).toBe("travel");

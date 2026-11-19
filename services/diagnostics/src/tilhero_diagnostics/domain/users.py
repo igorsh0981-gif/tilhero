@@ -22,6 +22,7 @@ from tilhero_common.messaging import emit
 from tilhero_diagnostics.models import (
     DeletedUser,
     LearnerProfile,
+    LessonEvaluation,
     Result,
     Session,
     SkillEvidence,
@@ -104,13 +105,15 @@ async def on_profile_event(session: AsyncSession, event_type: str, payload: dict
 async def delete_user_data(session: AsyncSession, user_id: uuid.UUID, request_id: uuid.UUID,
                            causation_id: str | None) -> None:
     """Физическое удаление сессий, ответов (каскад), результатов, состояний и свидетельств навыков, проекции
-    профиля + ACK саге `user.domain.deleted.v1 {domain: diagnostics, mode: deleted}`. Повтор снова подтверждает."""
+    профиля, полученных оценок уроков + ACK саге `user.domain.deleted.v1 {domain: diagnostics, mode: deleted}`.
+    Повтор снова подтверждает."""
     await lock_user(session, user_id)
     await session.execute(delete(SkillEvidence).where(SkillEvidence.user_id == user_id))
     await session.execute(delete(SkillState).where(SkillState.user_id == user_id))
     await session.execute(delete(Result).where(Result.user_id == user_id))
     await session.execute(delete(Session).where(Session.user_id == user_id))
     await session.execute(delete(LearnerProfile).where(LearnerProfile.user_id == user_id))
+    await session.execute(delete(LessonEvaluation).where(LessonEvaluation.user_id == user_id))  # спринт 4
     await session.execute(
         insert(DeletedUser).values(user_id=user_id, request_id=request_id).on_conflict_do_nothing(
             index_elements=["user_id"])

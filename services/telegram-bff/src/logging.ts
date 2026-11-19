@@ -15,6 +15,10 @@ export const EXTRA_REDACT_PATHS = [
   "req.query.init_data",
   'req.headers["x-telegram-init-data"]',
   'res.headers["set-cookie"]',
+  // спринт 4: реплики, ответы и причины апелляций ученика
+  "req.body.reason",
+  "req.body.text",
+  "req.body.answer",
 ];
 
 /** Ключи, значения которых никогда не пишутся в лог (сравнение без учёта регистра). */
@@ -55,6 +59,14 @@ export const SENSITIVE_KEYS = new Set([
   "comment",
   "decision_note",
   "answer",
+  // спринт 4: тексты ученика в уроке и оценке (реплики, ответы, цитаты ошибок, причины апелляций)
+  "your_answer",
+  "correct_answer",
+  "evidence",
+  "correction",
+  "text_en",
+  "learner_turn",
+  "appeal_reason",
 ]);
 
 const CENSOR = "[redacted]";

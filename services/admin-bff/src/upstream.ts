@@ -39,6 +39,9 @@ export const DOMAIN = {
   notifications: "notifications",
   catalog: "catalog",
   diagnostics: "diagnostics",
+  aiGateway: "ai-gateway",
+  lessons: "lessons",
+  assessment: "assessment",
 } as const satisfies Record<keyof DomainUrls, string>;
 export type DomainKey = keyof typeof DOMAIN;
 
@@ -60,8 +63,11 @@ export function upstreamUnavailable(service: string): AppError {
 export interface CallOptions {
   actor?: Actor | undefined;
   body?: unknown;
-  query?: Record<string, string | number | boolean | undefined | null>;
+  /** Массив — повторяющийся параметр (`?session_id=a&session_id=b`, пакетная сводка assessment). */
+  query?: Record<string, string | number | boolean | readonly string[] | undefined | null>;
   idempotencyKey?: string | undefined;
+  /** Дополнительные заголовки (If-Match оптимистической блокировки черновика версии агента). */
+  headers?: Record<string, string> | undefined;
   /** Таймаут именно этого вызова (по умолчанию — UPSTREAM_TIMEOUT_MS). */
   timeoutMs?: number;
   /** Повторы (по умолчанию — UPSTREAM_RETRIES, только для безопасных/идемпотентных запросов). */
@@ -132,7 +138,8 @@ export class DomainClient {
     if (!breaker.allow()) throw this.fail(503, "CIRCUIT_OPEN");
     const url = new URL(this.baseUrl + path);
     for (const [k, v] of Object.entries(ro.query ?? {})) {
-      if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+      if (Array.isArray(v)) for (const x of v as readonly string[]) url.searchParams.append(k, x);
+      else if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
     }
     const canRetry = IDEMPOTENT.has(method) || Boolean(ro.idempotencyKey);
     const attempts = canRetry ? (ro.retries ?? this.o.retries) + 1 : 1;
@@ -149,6 +156,8 @@ export class DomainClient {
       };
       if (ro.body !== undefined) headers["content-type"] = "application/json";
       if (ro.idempotencyKey) headers["idempotency-key"] = ro.idempotencyKey;
+      // служебные заголовки (токен, тип, Idempotency-Key) дополнительными не перекрываются
+      for (const [k, v] of Object.entries(ro.headers ?? {})) if (!(k.toLowerCase() in headers)) headers[k.toLowerCase()] = v;
 
       let resp: Response;
       try {

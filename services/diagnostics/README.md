@@ -5,7 +5,7 @@
 с ограничением частоты, история результатов, карта навыков ученика по паре. Навык `diagnostic_assessor`
 реализован **детерминированными правилами без LLM** (`engine.py`). Контракты: `docs/sprint3/INTERNAL_API.md` §2,
 `packages/contracts/src/bff.ts` (Спринт 3), `admin.ts` (Диагностика), события `diagnostics.completed.v1`,
-`skills.state.changed.v1`.
+`skills.state.changed.v1`; спринт 4 — `docs/sprint4/INTERNAL_API.md` §5 (навыки по оценкам уроков).
 
 ## Запуск и настройки
 `python -m tilhero_common.serve tilhero_diagnostics.main:app`; миграции — `alembic upgrade head` (под
@@ -26,6 +26,10 @@
   published), `sessions`, `answers`, `results` (PK `result_id, revision`), `skill_states`, `skill_evidence`,
   `learner_profiles` (проекция identity-consent: kind, age_band), `deleted_users`, `outbox`/`inbox`.
   `answers`, `results`, `skill_evidence` — append-only (UPDATE запрещён триггером; DELETE — только сага удаления).
+- `0003_lesson_outcomes` (спринт 4) — `skill_states.state_ref` (ref_id свидетельства, установившего текущее
+  состояние: result_id диагностики | evaluation_id оценки урока; null — до спринта 4) и `lesson_evaluations`
+  (полученные оценки assessment: evaluation_id PK, user_id, pair_id, session_id, supersedes, practice_only,
+  outcomes; неизменяема — триггер `lesson_evaluations_immutable`, DELETE — только сага).
 - `0002_seed_tests` — `migrations/seed/*.json` → опубликованные v1 (автор `seed`) + запись аудита в outbox.
   Каждый файл проверяется валидатором `testdef.py` (тот же, что при публикации): невалидный файл — миграция падает.
   Банки: `dx-en-adult.v1.json` (90 заданий), `dx-en-kids.v1.json` (36) — от тестолога.
@@ -70,6 +74,18 @@ options[], answer: index | string[]}]}`. Проверки: поля и типы,
   курса). На ревизию результата и навык — одно свидетельство: есть верные и нет неверных той же или ниже полосы
   (чем наивысший верный) → positive (demonstrated), иначе есть неверные → negative (learning). Понижение
   demonstrated → learning — только при двух отрицательных подряд; `retained` диагностика не ставит.
+- **Навыки по оценкам уроков** (спринт 4, `domain/lesson_outcomes.py`, AT-46/47): `assessment.completed.v1` —
+  по `skill_outcomes`: `learning` → not_started | learning → learning (demonstrated — без изменений);
+  `demonstrated` → not_started | learning → demonstrated; `not_assessed` — ничего; `retained` не трогается;
+  `practice_only` и kind `review` — ничего. На оценённый навык — свидетельство (source `lesson`, ref_id =
+  evaluation_id, время — `created_at` оценки) → история карты навыков; состояние `source = lesson`,
+  `confidence = null`, `state_ref = evaluation_id`. Переоценка (`assessment.reevaluated.v1` или completed с
+  `supersedes`): кроме того же, навык в demonstrated, установленный свидетельством заменённой оценки цепочки
+  (`state_ref` ∈ заменённые), без положительных свидетельств действующих оценок или диагностики после него и не
+  демонстрируемый новой оценкой (learning, not_assessed или отсутствует) → learning. Демонстрация диагностики
+  переоценкой урока не отменяется. Идемпотентно: оценка записывается в `lesson_evaluations`, повторная публикация
+  (новый event_id) — без изменений; оценка, уже заменённая пришедшей раньше переоценкой, записывается без
+  применения. `skills.state.changed.v1` (source `lesson`, evidence_id = evaluation_id) — только при изменениях.
 - **Уточнение**: `POST …/results/{id}/followup {area}` — только если область `needs_followup` в последней
   ревизии, ≤ 24 ч после ревизии 1, одно на область; отдельная сессия той же версии и seed (+`followup_items`
   заданий области). Завершение → ревизия N+1 по всем ответам (основная сессия + завершённые уточнения);
@@ -100,7 +116,7 @@ options[], answer: index | string[]}]}`. Проверки: поля и типы,
 | POST | `/diagnostics/results/{id}/followup` `{area}` | 201 DiagnosticSession (незавершённое — 200); 409 FOLLOWUP_NOT_AVAILABLE {area, reason: not_needed \| window_closed \| already_done \| no_items} |
 | GET | `/diagnostics/results?pair_id=&limit=` | `{items}` — последняя ревизия каждого результата, новые сверху |
 | GET | `/diagnostics/results/{id}?revision=` | DiagnosticResult |
-| GET | `/skills/map?pair_id=` | SkillMap (без снимка курса — только навыки с состоянием, метаданные null) |
+| GET | `/skills/map?pair_id=` | SkillMap (без снимка курса — только навыки с состоянием, метаданные null); спринт 4 — вызывающий ещё **lessons** (навыки ученика для этапа повторения; `sub` = ученик) |
 
 Админка (`/admin/v1/diagnostics`, только admin-bff с actor): `GET /tests`, `GET /tests/{id}/versions/{v}` (с ключами и
 coverage) — `content.read`; `POST /tests/{id}/versions/{v}/publish {reason}` — `content.publish` (прежняя
@@ -114,7 +130,10 @@ coverage) — `content.read`; `POST /tests/{id}/versions/{v}/publish {reason}` �
 - Издаёт: `diagnostics.completed.v1` (каждая ревизия), `skills.state.changed.v1` (есть переходы),
   `admin.audit.recorded.v1` (публикация, сид), `user.domain.deleted.v1 {domain: diagnostics, mode: deleted}`.
 - Потребляет (только от identity-consent): `user.deletion.requested.v1` (сага: сессии, ответы, результаты,
-  состояния, свидетельства, проекция), `user.profile.created.v1` / `user.profile.updated.v1` (проекция возраста).
+  состояния, свидетельства, проекция, полученные оценки уроков), `user.profile.created.v1` /
+  `user.profile.updated.v1` (проекция возраста). Спринт 4 (только от assessment; durable `diagnostics.assessment`):
+  `assessment.completed.v1`, `assessment.reevaluated.v1` → карта навыков по оценкам уроков. Чужой издатель —
+  предупреждение в логе без user_id, событие подтверждается без действия; payload не по контракту — DLQ.
 
 ## Тесты
 `uv run pytest services/diagnostics -q -p no:cacheprovider` (стенд: PostgreSQL, `source .dev/testenv.sh`);

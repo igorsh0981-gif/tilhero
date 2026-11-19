@@ -1,8 +1,10 @@
 /** Russian — the source dictionary. Keys are the MessageKey type; uz.ts must have exactly the same keys. */
 import { ruContent } from "./ru.content";
+import { ruLessons } from "./ru.lessons";
 
 export const ru = {
   ...ruContent,
+  ...ruLessons,
   // ---- common ----
   "c.continue": "Продолжить",
   "c.back": "Назад",
@@ -213,7 +215,7 @@ export const ru = {
   "home.slotLine": "Занятие в {time}",
   "home.nextLine": "Следующее: {day}, {time}",
   "home.noSlot": "Выберите дни занятий",
-  "home.doneLine": "Занятие отмечено",
+  "home.doneLine": "Занятие засчитано",
   "home.doneHint": "Сегодня {n} мин. Можно позаниматься ещё — это тоже засчитается.",
   "home.markHint": "Позанимались сами? Отметьте — так график знает, что занятие было, и не напомнит зря.",
   "home.mark": "Отметить занятие",

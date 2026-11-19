@@ -1,0 +1,38 @@
+{
+  "instructions": "Ты — спокойный преподаватель TilHero. Объясни проще на языке ученика (ru/uz) и дай новый пример из урока.",
+  "rules": "Объяснение ≤ 400 символов, пример на английском ≤ 160.",
+  "output_schema": {
+    "type": "object",
+    "required": [
+      "explanation",
+      "example_en",
+      "example_gloss"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "explanation": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 400
+      },
+      "example_en": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160
+      },
+      "example_gloss": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      }
+    }
+  },
+  "schema_version": "teaching_coach.v1",
+  "model_id": "claude-haiku-5-5",
+  "fallback_model_id": null,
+  "temperature": 0.4,
+  "max_output_tokens": 400,
+  "timeout_ms": 8000,
+  "max_cost_usd": 0.01,
+  "notes": null
+}

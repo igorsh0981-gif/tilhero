@@ -19,6 +19,8 @@ from tilhero_diagnostics.testdef import PAIR_RE
 
 # Вызывающие клиентского API (INTERNAL_API §2.5): только telegram-bff; sub = ученик (lrn сессии BFF)
 client_auth = InternalAuth({"telegram-bff"})
+# Карта навыков (спринт 4, INTERNAL_API §0): ещё lessons — навыки ученика для этапа повторения (sub = ученик)
+skill_map_auth = InternalAuth({"telegram-bff", "lessons"})
 # Admin API: только admin-bff с actor (права — в домене)
 staff_auth = InternalAuth({"admin-bff"})
 
@@ -42,12 +44,21 @@ def catalog_of(request: Request) -> CatalogGateway:
     return cast(CatalogGateway, request.app.state.catalog)
 
 
-def current_user(principal: Principal = Depends(client_auth)) -> uuid.UUID:
-    """user_id — только из внутреннего токена (CONVENTIONS §2, защита от IDOR)."""
+def _subject(principal: Principal) -> uuid.UUID:
     try:
         return uuid.UUID(principal.user_id)
     except ValueError:
         raise unauthorized("USER_CONTEXT_INVALID", "Некорректный контекст пользователя") from None
+
+
+def current_user(principal: Principal = Depends(client_auth)) -> uuid.UUID:
+    """user_id — только из внутреннего токена (CONVENTIONS §2, защита от IDOR)."""
+    return _subject(principal)
+
+
+def skill_map_user(principal: Principal = Depends(skill_map_auth)) -> uuid.UUID:
+    """Ученик карты навыков — только из `sub` токена telegram-bff или lessons."""
+    return _subject(principal)
 
 
 def pair_param(request: Request, pair_id: str | None = Query(default=None, max_length=16)) -> str:

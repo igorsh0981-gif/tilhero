@@ -7,9 +7,12 @@ import asyncio
 import uuid
 from pathlib import Path
 
+import asyncpg
 import httpx
+import pytest
 from conftest import SERVICE_DIR, make_settings
 from dx_testkit import FakeCatalog
+from sqlalchemy.engine import make_url
 
 from tilhero_common.app import Runtime
 from tilhero_common.messaging import InMemoryBus, make_envelope, messaging_metadata
@@ -24,7 +27,7 @@ from tilhero_diagnostics.main import build_app
 from tilhero_diagnostics.models import Base
 
 TABLES = ("tests", "sessions", "answers", "results", "skill_states", "skill_evidence", "learner_profiles",
-          "deleted_users", "outbox", "inbox")
+          "deleted_users", "outbox", "inbox", "lesson_evaluations")
 
 
 async def test_models_match_migrations_and_runtime_role() -> None:
@@ -49,6 +52,22 @@ async def test_models_match_migrations_and_runtime_role() -> None:
                 assert r.status_code == 200, r.text
                 r = await c.post(f"/internal/v1/diagnostics/sessions/{sid}/finish", headers=h)
                 assert r.status_code == 200, r.text
+                # спринт 4: оценка урока под ролью сервиса; полученная оценка неизменяема и для неё (триггер)
+                await bus.publish(make_envelope("assessment.completed.v1", {
+                    "evaluation_id": str(uuid.uuid4()), "user_id": str(user), "pair_id": "ru-en",
+                    "session_id": str(uuid.uuid4()), "kind": "lesson",
+                    "skill_outcomes": [{"skill_id": "en.func.greet", "outcome": "demonstrated"}], "passed": True,
+                    "practice_only": False, "supersedes": None, "created_at": "2026-11-19T10:00:00Z"},
+                    producer="assessment"))
+                conn = await asyncpg.connect(make_url(roles.runtime_url).set(drivername="postgresql")
+                                             .render_as_string(hide_password=False))
+                try:
+                    await conn.execute(f'SET search_path TO "{roles.schema}"')
+                    assert await conn.fetchval("SELECT count(*) FROM lesson_evaluations") == 1
+                    with pytest.raises(asyncpg.PostgresError, match="append-only"):
+                        await conn.execute("UPDATE lesson_evaluations SET practice_only = true")
+                finally:
+                    await conn.close()
                 await bus.publish(make_envelope(
                     "user.deletion.requested.v1",
                     {"user_id": str(user), "request_id": str(uuid.uuid4()), "requested_at": "2026-11-19T10:00:00Z"},

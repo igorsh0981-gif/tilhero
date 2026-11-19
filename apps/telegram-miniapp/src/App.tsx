@@ -44,6 +44,12 @@ import { Practice } from "./screens/practice/Practice";
 import { ScenarioScreen } from "./screens/practice/ScenarioScreen";
 import { MyLanguages } from "./screens/profile/MyLanguages";
 import { SkillMap } from "./screens/skills/SkillMap";
+import { AppealScreen } from "./screens/lessons/AppealScreen";
+import { LessonCardScreen } from "./screens/lessons/LessonCardScreen";
+import { LessonsTab } from "./screens/lessons/LessonsTab";
+import { LessonPlayer } from "./screens/lessons/Player";
+import { LessonSummaryScreen } from "./screens/lessons/Summary";
+import { isOpen, playerMarker } from "./domain/lessons";
 import { Support, TicketScreen } from "./screens/support/Support";
 import { WhatsNewSheet } from "./screens/whatsnew/WhatsNewSheet";
 
@@ -402,9 +408,26 @@ function Frame({ children }: { children: ReactNode }) {
 }
 
 function MainShell() {
-  const { nav, unread } = useApp();
+  const { nav, unread, bff, session } = useApp();
   const { t } = useI18n();
   const top = nav.top;
+  // the page went away with the lesson player open (reload of the Mini App, the webview restored it): continue the
+  // same session from the same step (AT-42) — once per learner, only if it is still unfinished on the server
+  const resumed = useRef<string | null>(null);
+  useEffect(() => {
+    const id = playerMarker.get();
+    const me = session.learner.learner_id;
+    if (!id || resumed.current === me) return;
+    resumed.current = me;
+    bff.activeSession(true).then(
+      (r) => {
+        if (r.session && r.session.session_id === id && isOpen(r.session)) nav.push({ name: "player", sessionId: id });
+        else playerMarker.clear();
+      },
+      () => undefined,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.learner.learner_id]);
   if (top) return <PushedScreen p={top} />;
   const bell = { unread, onClick: () => nav.push({ name: "inbox" }) };
   return (
@@ -424,6 +447,8 @@ function TabScreen({ tab }: { tab: Tab }) {
       return <ProfileScreen />;
     case "progress":
       return <SkillMap />;
+    case "lessons":
+      return <LessonsTab />;
     default:
       return <Soon what={tab} />;
   }
@@ -484,5 +509,13 @@ function PushedScreen({ p }: { p: Pushed }) {
       return <MediaRequests />;
     case "languages":
       return <MyLanguages />;
+    case "lessonCard":
+      return <LessonCardScreen key={p.id} id={p.id} />;
+    case "player":
+      return <LessonPlayer key={p.sessionId} sessionId={p.sessionId} />;
+    case "lessonSummary":
+      return <LessonSummaryScreen key={p.sessionId} sessionId={p.sessionId} initial={p.summary} />;
+    case "appeal":
+      return <AppealScreen evaluationId={p.evaluationId} title={p.title} />;
   }
 }

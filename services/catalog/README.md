@@ -43,17 +43,26 @@ diagnostics); готовность теста диагностики при пе
 ## API для сервисов (`/internal/v1`, без actor)
 | Метод | Путь | Кто | Ответ |
 |---|---|---|---|
-| GET | `/pairs` | telegram-bff, learning-plan, diagnostics | `{items: LanguagePair[]}` (кроме archived) |
-| GET | `/courses/{course_id}/snapshot` | telegram-bff, learning-plan, diagnostics | `CourseSnapshot`; `ETag` = snapshot_version, `If-None-Match` → 304; 404 `COURSE_NOT_FOUND` |
-| GET | `/scenarios?audience=&goal=&level=&topic=&cursor=&limit=` | telegram-bff | `Page<ScenarioCard>` |
-| GET | `/scenarios/{id}?audience=` | telegram-bff | `ScenarioDetail` (без полного графа); 404 `SCENARIO_NOT_FOUND` |
-| GET | `/media?audience=&type=&level=&topic=&cursor=` | telegram-bff | `Page<MediaCard>` |
-| GET | `/media/{id}?audience=` · `/media/{id}/audio` | telegram-bff | `MediaDetail` / байты (`private, max-age=3600`, ETag sha256); 404 `MEDIA_NOT_AVAILABLE`, `AUDIO_NOT_FOUND` |
+| GET | `/pairs` | telegram-bff, learning-plan, diagnostics, lessons | `{items: LanguagePair[]}` (кроме archived) |
+| GET | `/courses/{course_id}/snapshot` | telegram-bff, learning-plan, diagnostics, lessons | `CourseSnapshot`; `ETag` = snapshot_version, `If-None-Match` → 304; 404 `COURSE_NOT_FOUND` |
+| GET | `/scenarios?audience=&goal=&level=&topic=&cursor=&limit=` | telegram-bff, lessons | `Page<ScenarioCard>` |
+| GET | `/scenarios/{id}?audience=` | telegram-bff, lessons | `ScenarioDetail` (без полного графа); 404 `SCENARIO_NOT_FOUND` |
+| GET | `/media?audience=&type=&level=&topic=&cursor=` | telegram-bff, lessons | `Page<MediaCard>` |
+| GET | `/media/{id}?audience=` | telegram-bff, lessons | `MediaDetail`; 404 `MEDIA_NOT_AVAILABLE` |
+| GET | `/media/{id}/audio` | telegram-bff | байты (`private, max-age=3600`, ETag sha256); 404 `MEDIA_NOT_AVAILABLE`, `AUDIO_NOT_FOUND` |
+| GET | `/media/{id}/exercises?audience=` | lessons | `{asset_id, asset_version, items: [{exercise_id, version, asset_id, type, skill_id, level, instruction, prompt_en, options, line_index, rubric_id}]}` — опубликованные упражнения **без `answer`** (≤ 100, по exercise_id); аудитория и права — как у карточки; лицензия без `exercises` → `items: []`; 404 `MEDIA_NOT_AVAILABLE` |
+| GET | `/versions/{kind}/{key}` | lessons, assessment | текущая опубликованная версия (по указателю) той же формы — lessons фиксирует номера версий при старте сессии; не опубликована / снята / приостановлена → 404 `VERSION_NOT_FOUND`; `Cache-Control: private, no-cache`, `ETag` = `"<version>.<payload_hash>"`, `If-None-Match` → 304 (дополнение к §4: без него lessons не узнаёт номер опубликованной версии) |
+| GET | `/versions/{kind}/{key}/{version}` | lessons, assessment | `{kind, key, version, payload, payload_hash}` — полное тело **с ключами**; только published или archived, бывшая опубликованной (draft, in_review, approved, вытесненная без публикации, suspended → 404 `VERSION_NOT_FOUND`; вид → 404 `CONTENT_KIND_UNKNOWN`); `Cache-Control: private, max-age=31536000, immutable`, `ETag` = payload_hash, `If-None-Match` → 304 |
 | POST / GET | `/media/requests` `{kind, title, link?, comment?, ui_locale?}` | telegram-bff (sub = аккаунт) | 201 `MediaRequest` / `{items}`; 403 `KIDS_NOT_ALLOWED`; 410 `USER_DELETED`; 429 `MEDIA_REQUEST_LIMIT` |
 | GET | `/media/requests/{id}` | notifications, telegram-bff (только своя) | без ссылки и комментария для notifications |
 | POST | `/catalog:tick` | n8n `catalog-tick` (Bearer SCHEDULER_TOKEN) | `{suspended, expiring, today}` |
 
-`audience` (kids | teens | adults) **обязателен** для сценариев и медиа: возраст ученика знает только BFF, без параметра —
+Ключи ответов отдаёт только `/versions` (оценщик assessment и lessons — версии, зафиксированные в сессии; тело версии
+неизменяемо триггером, поэтому кеш у вызывающих бессрочный и в ответе нет статуса и дат). Приостановленная по правам
+версия медиа по номеру не отдаётся — показывать её ученику нельзя (сессия, начатая до приостановки, у lessons
+завершается `failed`).
+
+`audience` (kids | teens | adults) **обязателен** для сценариев, медиа и упражнений к медиа: возраст ученика знает только BFF, без параметра —
 422 (отказ закрыт). Защита в глубину: детский профиль по claims внутреннего JWT (`lrn` ≠ `sub` или `age_band` ∈
 {6-9, 10-13}) получает аудиторию kids принудительно, что бы ни пришло в `?audience=` (аудио — и без параметра);
 заявки детскому профилю недоступны ни на создание, ни на чтение (403 `KIDS_NOT_ALLOWED`). Медиа ученику — только опубликованные, права действуют сегодня (Asia/Tashkent,
@@ -76,6 +85,9 @@ valid_from ≤ сегодня ≤ valid_to), территория UZ, источ
 транзакционной advisory-блокировкой графа (`GRAPH_LOCK_CLASS`, порядок: граф → ключ) — проверки ссылок без гонок.
 Смена `course_id` у опубликованной пары — с той же проверкой готовности, что и публикация. Упражнения: `line_index` — реплика-источник (shadowing — обязательно, остальные — по
 желанию, в пределах транскрипта); `order_lines` — options из реплик транскрипта, answer — их правильный порядок.
+Задания «по порядку» (R1-13, `ANSWER_INVALID` на `options`): у `order_words` варианты обязательны (слова для порядка)
+и не стоят в порядке ответа, у `order_lines` — answer не `0, 1, 2, …`; ученику lessons показывает их перемешанными по
+seed сессии.
 
 ## События
 Публикует (outbox): `catalog.version.published.v1` (published | rolled_back | archived), `catalog.media.suspended.v1`,

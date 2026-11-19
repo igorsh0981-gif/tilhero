@@ -21,6 +21,9 @@ log = logging.getLogger("tilhero.learning_plan.api")
 # Вызывающие клиентского API (INTERNAL_API §2): только telegram-bff; sub = ученик (lrn сессии BFF).
 CLIENT_CALLERS = {"telegram-bff"}
 client_auth = InternalAuth(CLIENT_CALLERS)
+# Траектория (спринт 4, INTERNAL_API §0): ещё lessons — план и следующий урок для итогов урока (sub = ученик)
+TRAJECTORY_CALLERS = {"telegram-bff", "lessons"}
+trajectory_auth = InternalAuth(TRAJECTORY_CALLERS)
 no_service = InternalAuth(set())  # внутренний JWT любого сервиса на входе планировщика → 403 CALLER_NOT_ALLOWED
 
 _IDEMPOTENCY_RE = re.compile(r"^[A-Za-z0-9._:\-]{8,128}$")
@@ -35,12 +38,21 @@ def clock_of(request: Request) -> Callable[[], datetime]:
     return cast(Callable[[], datetime], getattr(request.app.state, "clock", None) or (lambda: datetime.now(UTC)))
 
 
-def current_user(principal: Principal = Depends(client_auth)) -> uuid.UUID:
-    """user_id — только из внутреннего токена (CONVENTIONS §2, защита от IDOR)."""
+def _subject(principal: Principal) -> uuid.UUID:
     try:
         return uuid.UUID(principal.user_id)
     except ValueError:
         raise unauthorized("USER_CONTEXT_INVALID", "Некорректный контекст пользователя") from None
+
+
+def current_user(principal: Principal = Depends(client_auth)) -> uuid.UUID:
+    """user_id — только из внутреннего токена (CONVENTIONS §2, защита от IDOR)."""
+    return _subject(principal)
+
+
+def trajectory_user(principal: Principal = Depends(trajectory_auth)) -> uuid.UUID:
+    """Ученик траектории — только из `sub` токена telegram-bff или lessons."""
+    return _subject(principal)
 
 
 def idempotency_key(value: str | None) -> str:

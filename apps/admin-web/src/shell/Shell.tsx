@@ -32,6 +32,10 @@ import { ErrorBoundary } from "../ui/ErrorBoundary";
 // sprint 3 sections are separate chunks (review T2-5: one 545 kB bundle) — loaded on first visit, same origin (CSP)
 const ContentPage = lazy(() => import("../screens/content/ContentPage").then((m) => ({ default: m.ContentPage })));
 const LangsPage = lazy(() => import("../screens/langs/Langs").then((m) => ({ default: m.LangsPage })));
+// sprint 4 sections — one chunk each (their shared model/parts form a common chunk)
+const AgentsPage = lazy(() => import("../screens/ai/Agents").then((m) => ({ default: m.AgentsPage })));
+const QaPage = lazy(() => import("../screens/ai/Qa").then((m) => ({ default: m.QaPage })));
+const CostsPage = lazy(() => import("../screens/ai/Costs").then((m) => ({ default: m.CostsPage })));
 
 export const APP_VERSION = "admin-web 0.2.0";
 
@@ -40,6 +44,8 @@ function crumbOf(page: PageId | "", id: string | null): string | null {
   if (!id) return null;
   if (page === "news") return id.split("/").slice(1).join("/") || null;
   if (page === "content") return id.split("/").slice(1).join("/") || null;
+  if (page === "qa") return id.startsWith("sessions/") ? id.slice(9, 17) : id.startsWith("appeals/") ? id.slice(8, 16) : null;
+  if (page === "agents") return id === "models" ? null : id;
   return id;
 }
 
@@ -354,6 +360,18 @@ export function Shell() {
               ) : page === "langs" ? (
                 <Suspense fallback={<Spinner label={t("common.loading")} />}>
                   <LangsPage />
+                </Suspense>
+              ) : page === "agents" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <AgentsPage routeId={route.id} />
+                </Suspense>
+              ) : page === "qa" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <QaPage routeId={route.id} />
+                </Suspense>
+              ) : page === "costs" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <CostsPage />
                 </Suspense>
               ) : null}
             </ErrorBoundary>

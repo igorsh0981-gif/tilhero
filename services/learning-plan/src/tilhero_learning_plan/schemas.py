@@ -142,7 +142,7 @@ class AdminPlanPage(BaseModel):
 Band = Literal["A0", "A1", "A2", "B1", "B2"]
 ReasonCode = Literal[
     "start_after_diagnostic", "no_diagnostic", "prerequisite_missing", "weak_area", "goal_match", "topic_match",
-    "next_in_course",
+    "next_in_course", "repeat",
 ]
 LessonStageType = Literal["retrieval", "explanation", "roleplay", "assessment", "summary"]
 AudienceSegment = Literal["kids", "teens", "adults"]
@@ -185,6 +185,14 @@ class TrajectoryBasisOut(BaseModel):
     computed_at: datetime
 
 
+class CompletedLessonOut(LessonCardOut):
+    """Спринт 4: пройденный урок по последней завершённой сессии (bff.ts Trajectory.completed)."""
+
+    passed: bool | None
+    evaluation_id: str | None
+    completed_at: datetime
+
+
 class TrajectoryOut(BaseModel):
     pair_id: str
     course_id: str
@@ -193,5 +201,5 @@ class TrajectoryOut(BaseModel):
     next: NextLessonOut | None
     mandatory: list[PlannedLessonOut]
     optional: list[PlannedLessonOut]
-    completed: list[LessonCardOut]
+    completed: list[CompletedLessonOut]
     lessons_available: bool

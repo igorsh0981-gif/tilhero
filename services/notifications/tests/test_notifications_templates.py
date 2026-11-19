@@ -31,10 +31,11 @@ PARAMS: dict[str, dict] = {
     "release_note.published": {"release_note_id": INVITE, "slug": "2026.11"},
     "media_request.decided": {"request_id": INVITE, "request_title": "Moonlight Café", "status": "rejected",
                               "linked_asset_id": None},
+    "appeal_decided": {"appeal_id": INVITE, "evaluation_id": INVITE, "decision": "corrected"},
     "pin.reset_code": {"code": "482913", "ttl_minutes": 10},
     "pin.reset_scheduled": {"effective_at": "2026-11-19T05:30:00.000Z"},
 }
-for base in ("lesson.reminder", "lesson.missed", "lesson.comeback"):
+for base in ("lesson.reminder", "lesson.missed", "lesson.comeback", "appeal_decided"):
     PARAMS[base + ".kid"] = PARAMS[base]
 
 # Детям и о детях — без давления: ни «потери серии», ни «провала» (CONVENTIONS §8). Список — в коде: им же
@@ -52,12 +53,14 @@ STARTAPP = {
     "support.resolved": "ticket_TCK-3081",
     "release_note.published": "route_news",
     "media_request.decided": "route_media_requests",
+    "appeal_decided": "route_lessons",
 }
 
 
 def test_every_template_has_params_fixture() -> None:
     assert set(PARAMS) == set(TEMPLATES)
-    assert KID_TEMPLATES == {"lesson.reminder.kid", "lesson.missed.kid", "lesson.comeback.kid"}
+    assert KID_TEMPLATES == {"lesson.reminder.kid", "lesson.missed.kid", "lesson.comeback.kid",
+                             "appeal_decided.kid"}
 
 
 @pytest.mark.parametrize("name", sorted(TEMPLATES))
