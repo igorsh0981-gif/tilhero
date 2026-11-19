@@ -1,4 +1,5 @@
 import type {
+  AdminExperience,
   AdminLearnerCard,
   AdminLearnerRow,
   AgeBand,
@@ -147,7 +148,7 @@ export const StaffApi = {
   patch: (id: string, body: StaffPatch) => api.patch<Staff | StaffPatchPending>(`/staff/${enc(id)}`, body),
   resetPassword: (id: string, reason: string) => api.post<StaffResetResponse>(`/staff/${enc(id)}/reset-password`, { reason }),
   resetMfa: (id: string, reason: string) => api.post<Staff | { approval: Approval }>(`/staff/${enc(id)}/reset-mfa`, { reason }),
-  roles: () => api.get<{ items: Role[]; permissions?: Permission[] }>("/roles"),
+  roles: () => api.get<{ items: Role[] }>("/roles"),
   putRole: (code: RoleCode, permissions: Permission[], reason: string) => api.put<{ approval: Approval }>(`/roles/${enc(code)}`, { permissions, reason }),
   approvals: (status?: string, cursor?: string | null) => api.get<Page<Approval>>("/approvals", { query: { status, cursor } }),
   approve: (id: string, note: string) => api.post<ApprovalDecision>(`/approvals/${enc(id)}/approve`, { note }),
@@ -174,19 +175,7 @@ export const Audit = {
 
 /* ---------------------------------------------------------------- experience config */
 
-/**
- * GET /admin/v1/experience/admin/current — admin.ts names it ExperienceConfig, but that type (bff.ts) is the Mini App
- * form (`app: "miniapp"`, home sections). The admin form is the experience-config AdminExperienceConfig
- * (payload.py AdminPayload + app/version) — declared here until the contract gets its own type (report: request).
- */
-export interface AdminExperience {
-  app: "admin";
-  version: string;
-  theme: { id: string; version: string; tokens: Record<string, string> };
-  layout: { density: "compact" | "comfortable"; menu: Array<{ id: string; enabled: boolean }> };
-  flags: Record<string, boolean>;
-}
-
+/** GET /admin/v1/experience/admin/current → admin.ts AdminExperience (review T2-6; admin-bff checks it strictly). */
 export const Experience = {
   adminCurrent: () => api.get<AdminExperience>("/experience/admin/current"),
   state: (app: ConfigApp) => api.get<ConfigState>(`/experience/${app}/state`),
@@ -244,7 +233,8 @@ export const Campaigns = {
   estimate: (id: string) => api.post<CampaignEstimate>(`/notifications/campaigns/${enc(id)}/estimate`),
   preview: (id: string, lang: UiLang) => api.post<TemplatePreview>(`/notifications/campaigns/${enc(id)}/preview`, { lang }),
   test: (id: string, lang: UiLang, recipient: number) => api.post<TestSendResult>(`/notifications/campaigns/${enc(id)}/test`, { lang, recipient }),
-  schedule: (id: string, expected_version: number, send_at: string, reason: string, idempotencyKey: string) =>
+  /** send_at: null — «Отправить сейчас» by the server clock (QA D2-03, review T2-11); the answer is already sending. */
+  schedule: (id: string, expected_version: number, send_at: string | null, reason: string, idempotencyKey: string) =>
     api.post<Campaign>(`/notifications/campaigns/${enc(id)}/schedule`, { expected_version, send_at, reason }, { idempotencyKey }),
   unschedule: (id: string, reason: string) => api.post<Campaign>(`/notifications/campaigns/${enc(id)}/unschedule`, { reason }),
   stop: (id: string, reason: string) => api.post<Campaign>(`/notifications/campaigns/${enc(id)}/stop`, { reason }),

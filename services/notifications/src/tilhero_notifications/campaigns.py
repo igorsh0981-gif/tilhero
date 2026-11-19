@@ -13,6 +13,9 @@
    другой рассылке → `skipped_frequency`; удалён → `cancelled`; иначе запись журнала (`product`, kind `campaign`,
    dedup `campaign:<id>:<user>`, детерминированный id) → `created`;
 4) аудитория исчерпана и pending нет → `done` (`finished_at`), аудит `campaign.finished`.
+«Отправить сейчас» (QA D2-03, ревью T2-11): `schedule` с send_at=null (часы сервера) или send_at ≤ now+1 мин
+выполняет шаг 1 в самой команде (ответ уже `sending`), а первую пачку получателей — фоновой задачей `StartNow`
+сразу после коммита (те же шаги Runner, что у :dispatch); дальше — обычный :dispatch.
 `stop` (из scheduled | sending | done; draft → 409 CAMPAIGN_NOT_ACTIVE): `stopped`, pending → cancelled,
 неотправленные записи журнала → `cancelled` (и их получатели); отправленные не отзываются. Плейсхолдер — только
 `{learner_name}`.
@@ -26,6 +29,7 @@ CAMPAIGN_FAILURE_ALERT_ATTEMPTS (6) неудач подряд — аудит `ca
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections import Counter
@@ -470,14 +474,20 @@ async def schedule(
     audience: int,
     actor: Actor,
     now: datetime,
+    start: bool = False,
 ) -> Campaign:
+    """Черновик → scheduled. `start` — «Отправить сейчас» (QA D2-03): запуск в этой же транзакции, как шаг 1
+    `start_due` (`sending`, `started_at`, фиксация оценки аудитории), без ожидания ближайшего :dispatch."""
     row = await load(session, campaign_id, for_update=True)
     require_draft(row, expected_version)
-    row.status = "scheduled"
+    row.status = "sending" if start else "scheduled"
     row.send_at = send_at
     clear_error(row)
     row.scheduled_by = actor.id[:64]
     row.scheduled_at = now
+    if start:
+        row.started_at = now
+        row.audience_count = audience
     row.version += 1
     row.updated_at = now
     await session.flush()
@@ -486,10 +496,13 @@ async def schedule(
         audit.record(
             "campaign.scheduled", audit.CAMPAIGN, str(row.campaign_id), actor=actor,
             before={"status": "draft"},
-            after={"status": "scheduled", "send_at": iso(send_at), "audience_estimate": audience},
+            after={"status": row.status, "send_at": iso(send_at), "audience_estimate": audience, "send_now": start},
             reason=reason, now=now,
         ),
     )
+    if start:
+        log.info("campaign started", extra={"campaign_id": str(campaign_id), "audience": audience,
+                                            "send_now": True})
     return row
 
 
@@ -616,6 +629,27 @@ class Runner:
                     break
         return out
 
+    async def start_now(self, campaign_id: uuid.UUID, now: datetime | None = None) -> Counter[str]:
+        """«Отправить сейчас» (QA D2-03): первые CAMPAIGN_START_NOW_BATCHES пачек получателей уже запущенной рассылки —
+        те же шаги, что у :dispatch (страница аудитории → пачка → завершение, если всё обработано). Параллельный
+        :dispatch безопасен: курсор — сравнение-и-запись, пачка — под FOR UPDATE рассылки, получатели SKIP LOCKED,
+        записи журнала с детерминированным id. Остальное — ближайший :dispatch."""
+        now = now or datetime.now(UTC)
+        batches = _s(self.rt).campaign_start_now_batches
+        out: Counter[str] = Counter()
+        for _ in range(2 * batches + 1):  # на каждую пачку — не больше одной страницы аудитории, плюс завершение
+            if out["created"] >= batches:
+                break
+            step = await self.step(campaign_id, now)
+            out[step] += 1
+            if step in ("done", "idle", "stopped"):
+                return out
+        if out["created"]:
+            # маленькая рассылка обработана целиком — завершить сразу (finish сам проверяет, что pending нет)
+            if await self.finish(campaign_id, now) == "done":
+                out["done"] += 1
+        return out
+
     async def start_due(self, now: datetime) -> int:
         async with self.rt.transaction() as session:
             due = (
@@ -696,7 +730,8 @@ class Runner:
             clear_error(row)
         return "fetched"
 
-    async def failed(self, campaign_id: uuid.UUID, status: str, exc: BaseException, now: datetime) -> None:
+    async def failed(self, campaign_id: uuid.UUID, status: str, exc: BaseException, now: datetime,
+                     *, step: str | None = None) -> None:
         """Неудача шага (ревью P2-7): last_error {code, since, attempts}; на CAMPAIGN_FAILURE_ALERT_ATTEMPTS-й
         неудаче подряд — аудит campaign.failed (один раз на серию). Рассылка остаётся в своём статусе (повтор при
         следующем dispatch; сотрудник видит причину и может остановить)."""
@@ -727,7 +762,8 @@ class Runner:
             attempts = row.error_attempts
         (log.error if alert or code == "SEGMENT_INVALID" else log.warning)(
             "campaign step failed",
-            extra={"campaign_id": str(campaign_id), "step": "start" if status == "scheduled" else "audience",
+            extra={"campaign_id": str(campaign_id),
+                   "step": step or ("start" if status == "scheduled" else "audience"),
                    "error_code": code, "attempts": attempts},
         )
 
@@ -780,6 +816,9 @@ class Runner:
                 for u in users if u in capped and u not in deleted
             ]
             await session.execute(update(CampaignRecipient), updates)
+            if row.error_code is not None:  # удачная пачка завершает серию неудач (например, фоновой пачки)
+                clear_error(row)
+                row.updated_at = now
         if create:
             self.wake()
         return len(users)
@@ -816,6 +855,52 @@ class Runner:
             )
         log.info("campaign finished", extra={"campaign_id": str(campaign_id)})
         return "done"
+
+
+class StartNow:
+    """Фоновые первые пачки «Отправить сейчас» (QA D2-03): задача запускается после коммита команды schedule, ответ
+    от неё не зависит. Неудача выборки аудитории попадает в last_error внутри шагов Runner (как у :dispatch); любая
+    другая — тоже в last_error (best effort) и в лог. Задачи отменяются при остановке сервиса; рассылку доведёт
+    :dispatch."""
+
+    def __init__(self, rt: Runtime, wake: Callable[[], None] | None = None) -> None:
+        self.rt = rt
+        self.wake = wake
+        self.tasks: set[asyncio.Task[None]] = set()
+
+    def spawn(self, campaign_id: uuid.UUID) -> None:
+        if _s(self.rt).campaign_start_now_batches <= 0:
+            return
+        task = asyncio.create_task(self._run(campaign_id), name=f"campaign-start-now:{campaign_id}")
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+
+    async def _run(self, campaign_id: uuid.UUID) -> None:
+        runner = Runner(self.rt, wake=self.wake)
+        try:
+            steps = await runner.start_now(campaign_id)
+            log.info("campaign first batch", extra={"campaign_id": str(campaign_id),
+                                                    **{f"campaign_{k}": v for k, v in steps.items()}})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.error("campaign first batch failed",
+                      extra={"campaign_id": str(campaign_id), "error_type": type(exc).__name__})
+            try:
+                await runner.failed(campaign_id, "sending", exc, datetime.now(UTC), step="start_now")
+            except Exception as again:  # БД недоступна — рассылку продолжит :dispatch
+                log.warning("campaign last_error not recorded", extra={"campaign_id": str(campaign_id),
+                                                                       "error_type": type(again).__name__})
+
+    async def drain(self) -> None:
+        """Дождаться фоновых задач (тесты, плавная остановка)."""
+        while self.tasks:
+            await asyncio.gather(*list(self.tasks), return_exceptions=True)
+
+    async def close(self, _rt: Runtime | None = None) -> None:
+        for task in list(self.tasks):
+            task.cancel()
+        await asyncio.gather(*list(self.tasks), return_exceptions=True)
 
 
 def _notification(campaign_id: uuid.UUID, user_id: uuid.UUID, now: datetime) -> dict[str, Any]:

@@ -155,4 +155,8 @@ export const CAMPAIGN_PROPS = {
 };
 export const CAMPAIGN_CREATE = obj(CAMPAIGN_PROPS, ["title", "texts", "route", "segment"]);
 export const CAMPAIGN_PATCH = obj({ ...CAMPAIGN_PROPS, expected_version: EXPECTED_VERSION }, ["expected_version"], { minProperties: 2 });
-export const CAMPAIGN_SCHEDULE = obj({ expected_version: EXPECTED_VERSION, send_at: DATETIME, reason: REASON }, ["expected_version", "send_at", "reason"]);
+/** send_at: null — «Отправить сейчас» по часам сервера (admin.ts CampaignScheduleInput; QA D2-03, ревью T2-11). */
+export const CAMPAIGN_SCHEDULE = obj(
+  { expected_version: EXPECTED_VERSION, send_at: nullable(DATETIME), reason: REASON },
+  ["expected_version", "send_at", "reason"],
+);

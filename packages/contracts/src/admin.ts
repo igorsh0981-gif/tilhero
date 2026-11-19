@@ -153,7 +153,8 @@ export interface StepUpResult {
   step_up_until: string;
 }
 
-/** POST /admin/v1/auth/logout → 204 (cookie стирается). */
+/** POST /admin/v1/auth/logout → 204 (сессия удалена, cookie стирается); 503 SESSION_NOT_REVOKED {service:
+ * "session-store"} — хранилище сессий недоступно: cookie стёрта, но сессия могла остаться до истечения (ревью T2-10). */
 
 export interface StaffSummary {
   staff_id: string;
@@ -402,7 +403,9 @@ export interface DashboardWhatsNew {
 export interface DashboardCampaigns {
   scheduled: number;
   sending: number;
+  /** рассылок запущено за период (не сообщений) — подпись «Запущено рассылок» (QA D2-01) */
   sent_in_period: number;
+  /** сообщений рассылок доставлено в Telegram за период — подпись «Доставлено сообщений» */
   delivered_in_period: number;
 }
 
@@ -599,7 +602,7 @@ export interface ConfigActivation {
   activated_by: string;
   activated_at: string;
 }
-/** GET /admin/v1/experience/admin/current → ExperienceConfig (тема и раскладка админки — любой вошедший сотрудник)
+/** GET /admin/v1/experience/admin/current → AdminExperience (тема и раскладка админки — любой вошедший сотрудник)
  *  GET /admin/v1/experience/miniapp/current → ExperienceConfig (config.read)
  *  GET /admin/v1/experience/{app}/state → ConfigState
  *  GET /admin/v1/experience/{app}/versions → Page<ConfigVersion>; GET …/versions/{version} → ConfigVersion с payload
@@ -611,6 +614,16 @@ export interface ConfigState {
   app: ConfigApp;
   current: ConfigActivation | null;
   previous_version: string | null;
+}
+
+/** GET /admin/v1/experience/admin/current — тема и раскладка админки (ревью T2-6). tokens — белый список CSS-переменных
+ *  (admin-web применяет только известные); menu — порядок разделов и выключенные. */
+export interface AdminExperience {
+  app: "admin";
+  version: string;
+  theme: { id: string; version: string; tokens: Record<string, string> };
+  layout: { density: "compact" | "comfortable"; menu: Array<{ id: string; enabled: boolean }> };
+  flags: Record<string, boolean>;
 }
 
 // =====================================================================================================================
@@ -875,6 +888,9 @@ export interface Campaign extends CampaignContent {
   started_at: string | null;
   finished_at: string | null;
   stopped_by: string | null;
+  /** имена сотрудников (admin-bff через staff/lookup; ревью T2-6) */
+  scheduled_by_name: string | null;
+  stopped_by_name: string | null;
   stopped_at: string | null;
   stop_reason: string | null;
   stats: CampaignStats;
@@ -902,9 +918,9 @@ export interface CampaignEstimate {
  *  POST  /admin/v1/notifications/campaigns/{id}/preview TemplatePreviewRequest → TemplatePreview
  *  POST  /admin/v1/notifications/campaigns/{id}/test TestSendRequest → TestSendResult
  *  POST  /admin/v1/notifications/campaigns/{id}/schedule CampaignScheduleInput (notif.campaigns.send, step-up,
- *        Idempotency-Key) → Campaign (scheduled); send_at ближе 1 мин (в т. ч. до 5 мин в прошлом) → «как можно
- *        скорее» — так UI передаёт «Отправить сейчас»; раньше now−5 мин → 422 CAMPAIGN_INVALID {send_at: in_past}
- *        (ревью T2-2); позже 30 дней → 422; 409 CAMPAIGN_NOT_DRAFT | CAMPAIGN_VERSION_CONFLICT; аудитория 0 → 422 CAMPAIGN_EMPTY_AUDIENCE
+ *        Idempotency-Key) → Campaign; send_at=null — «Отправить сейчас»: старт сразу, ответ уже в статусе sending
+ *        (первая пачка — в фоне; D2-03); send_at ближе 1 мин (в т. ч. до 5 мин в прошлом) — так же «как можно
+ *        скорее» (совместимость); раньше now−5 мин → 422 CAMPAIGN_INVALID {send_at: in_past} (ревью T2-2); позже 30 дней → 422; 409 CAMPAIGN_NOT_DRAFT | CAMPAIGN_VERSION_CONFLICT; аудитория 0 → 422 CAMPAIGN_EMPTY_AUDIENCE
  *  POST  /admin/v1/notifications/campaigns/{id}/unschedule {reason} (notif.campaigns.send) → Campaign (draft) —
  *        только до начала отправки; 409 CAMPAIGN_ALREADY_SENDING
  *  POST  /admin/v1/notifications/campaigns/{id}/stop CampaignStopInput (notif.campaigns.send, step-up) → Campaign
@@ -916,7 +932,9 @@ export interface CampaignEstimate {
  */
 export interface CampaignScheduleInput {
   expected_version: number;
-  send_at: string;
+  /** null — «Отправить сейчас» по часам сервера: рассылка запускается сразу при этой команде, без ожидания
+   *  ближайшего notifications:dispatch (QA D2-03, ревью T2-11 — часы браузера не участвуют). */
+  send_at: string | null;
   reason: string;
 }
 export interface CampaignStopInput {

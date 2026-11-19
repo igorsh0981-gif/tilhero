@@ -2,7 +2,8 @@
  * Авторизация запросов admin-web (onRequest — до разбора тела, валидации и вызова домена):
  *
  *   public  (шаги входа до сессии) — проверка Origin/Sec-Fetch-Site (только ADMIN_ORIGIN) → лимит по IP;
- *   sessionOnly (logout) — cookie → сессия → срок → User-Agent → CSRF/Origin; без principal и лимитов (ревью T2-1);
+ *   sessionOnly (logout) — Origin → cookie → сессия → срок → User-Agent → CSRF; без principal и лимитов (ревью T2-1);
+ *             Redis недоступен → cookie стирается, 503 SESSION_NOT_REVOKED (ревью T2-10);
  *   session — cookie → сессия в Redis → бездействие 30 мин / абсолют 8 ч (401 SESSION_EXPIRED) → привязка к
  *             User-Agent → CSRF (не-GET: Origin + X-CSRF-Token) → лимиты adm.staff (300/мин), для команд
  *             (не-GET) adm.command (60/мин), для step-up adm.mfa (5/мин) → principal
@@ -112,10 +113,37 @@ async function loadSession(
   return { id, s, now, superseded };
 }
 
-/** Уровень sessionOnly (logout, ревью T2-1): сессия и CSRF — без admin-identity и без лимитов. */
+/**
+ * Выход не подтверждён: хранилище сессий (Redis) недоступно, сессия на сервере, возможно, жива. Cookie в ответе
+ * всё равно стёрта (ревью T2-10) — admin-web предупреждает сотрудника, а не показывает обычный экран входа.
+ */
+export const sessionNotRevoked = () =>
+  new AppError(503, "SESSION_NOT_REVOKED", "Выход не подтверждён сервером: cookie стёрта, но сессия могла остаться активной", {
+    service: "session-store",
+  });
+
+/** Сбой хранилища сессий (ctx.store) — а не ответ домена. */
+export function isSessionStoreFailure(err: unknown): boolean {
+  return err instanceof AppError && err.code === "UPSTREAM_UNAVAILABLE" && err.details.service === "session-store";
+}
+
+/**
+ * Уровень sessionOnly (logout, ревью T2-1): сессия и CSRF — без admin-identity и без лимитов.
+ * Origin проверяется до Redis (чужой источник не стирает cookie). Redis недоступен (ревью T2-10) → cookie всё равно
+ * стирается, ответ 503 SESSION_NOT_REVOKED: X-CSRF-Token без сессии не сверить, но стирание cookie собственного
+ * браузера по запросу с нашего Origin вреда не несёт, а оставлять её после «Выйти» нельзя.
+ */
 export async function authenticateSession(ctx: BffContext, req: FastifyRequest, reply: FastifyReply): Promise<SessionAuth> {
-  const { id, s } = await loadSession(ctx, req, reply);
-  return { sessionId: id, publicSessionId: publicSessionId(id), session: s };
+  if (!SAFE_METHODS.has(req.method)) checkOrigin(ctx, req);
+  try {
+    const { id, s } = await loadSession(ctx, req, reply);
+    return { sessionId: id, publicSessionId: publicSessionId(id), session: s };
+  } catch (err) {
+    if (!isSessionStoreFailure(err)) throw err;
+    void reply.header("set-cookie", clearSessionCookie());
+    ctx.log.warn({ event: "logout_session_not_revoked", stage: "load" }, "logout: session store unavailable, cookie cleared");
+    throw sessionNotRevoked();
+  }
 }
 
 export async function authenticate(

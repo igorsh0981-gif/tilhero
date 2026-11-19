@@ -66,6 +66,7 @@ class PatchResult:
 
 async def list_staff(session: AsyncSession, *, q: str | None, role: str | None, status: str | None,
                      cursor: str | None, limit: int) -> StaffPage:
+    await approvals.expire_overdue(session)  # заглушки истёкших заявок на создание — уже DISABLED в списке
     stmt = select(Staff).order_by(Staff.created_at.desc(), Staff.staff_id.desc()).limit(limit + 1)
     if q:
         pattern = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
@@ -130,6 +131,7 @@ async def create_staff(session: AsyncSession, body: StaffCreate, requester: Staf
 async def patch_staff(session: AsyncSession, staff_id: uuid.UUID, body: StaffPatch, requester: Staff, *,
                       ctx: ResetContext, approval_ttl_hours: int) -> PatchResult:
     await lock_identity(session)
+    await approvals.expire_overdue(session)  # цель — заглушка истёкшей заявки на создание: сначала её исход
     target = await require_staff(session, staff_id, for_update=True)
     role_change = body.role is not None and body.role != target.role
     status_change = body.status is not None and body.status != target.status
@@ -255,6 +257,7 @@ async def _reset(session: AsyncSession, staff_id: uuid.UUID, action: str, reason
     только заявкой staff.privileged_reset (N1): иначе один super_admin/держатель staff.manage сбрасывает пароль
     и MFA другого, входит под ним и согласует собственные заявки. Временный пароль — решающему."""
     await lock_identity(session)
+    await approvals.expire_overdue(session)
     target = await require_staff(session, staff_id, for_update=True)
     temp: str | None
     if target.staff_id == requester.staff_id:

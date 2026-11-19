@@ -87,6 +87,13 @@ TOTP: issuer «TilHero Admin», RFC 6238 (SHA-1, 6 цифр, 30 с, окно ±1
 summary `{staff, role, to_role, from_status}`). Разблокировка входа уже активного сотрудника (`{status: ACTIVE}`) —
 прямой командой, как раньше; непривилегированного включают сразу.
 
+**«Мёртвые» заглушки:** если `staff.create_privileged` отклонена (решением или из-за отключения автора) или истекла,
+заглушка (ACTIVE, роль-заглушка `read_only`, без пароля) переводится в `DISABLED`: аудит `staff.disabled {approval_id,
+approval_status}` с причиной «Заявка на создание сотрудника отклонена | истекла» (при истечении — `actor_type
+system`). Заглушку, которую уже изменили (роль, статус, пароль выдан прямым сбросом), не трогаем. Истечение
+фиксируется лениво — при списке заявок и сотрудников, карточке, решении и командах по сотрудникам — под
+`lock_identity`. Включить отключённую заглушку (read_only) можно прямой командой.
+
 **Учётные данные при применении (ревью P2-1, P2-2):** при применении `staff.create_privileged`, `staff.role_grant`
 и `staff.reactivate_privileged` у цели выпускается новый временный пароль (`must_change_password`, 24 ч), MFA
 сбрасывается, сессии отзываются (аудит `staff.credentials_reset {cause, approval_id}`), счётчики попыток — с нуля.
@@ -104,7 +111,7 @@ summary `{staff, role, to_role, from_status}`). Разблокировка вх�
 audit принимает издателя `admin-identity` — `services/audit` `AUDIT_EVENT_PRODUCERS`):
 `auth.login`, `auth.login_failed` (email — только HMAC), `auth.locked` (вход и step-up), `auth.mfa_enrolled`,
 `auth.mfa_failed`, `auth.password_changed`, `auth.step_up`, `auth.logout` (id сессии — только префикс sha256),
-`staff.created`, `staff.updated`, `staff.password_reset`, `staff.mfa_reset`, `staff.credentials_reset`, `staff.bootstrap`,
+`staff.created`, `staff.updated`, `staff.disabled` (заглушка отклонённого/истёкшего создания), `staff.password_reset`, `staff.mfa_reset`, `staff.credentials_reset`, `staff.bootstrap`,
 `role.permissions_requested`, `approval.requested` (заявка по сотруднику), `approval.approved|rejected|applied|waived`
 (email сотрудника в сводке заявки — только маской). Пароли, коды, секреты MFA, challenge, временные пароли в события,
 outbox и логи не попадают (тест `test_no_secrets_in_logs_or_audit`). В audit пишет только через шину — права

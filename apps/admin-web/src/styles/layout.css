@@ -46,6 +46,34 @@
 .shell.is-collapsed .env-chip span{display:none}
 .shell.is-collapsed .sn-collapse svg{transform:rotate(180deg)}
 
+/* Short windows (QA D2-02): at 1440×900 and 1280×720 all 15 sections and the footer fit with no scrolling — denser
+   items, tighter group labels and head, a smaller «sprint N» tag so labels stay on one line. Shorter still, the menu
+   scrolls inside the panel (shadows at the edges say there is more), the footer stays pinned. */
+.sn-scroll{background:
+  linear-gradient(var(--side) 30%,transparent) center top/100% 36px no-repeat local,
+  linear-gradient(transparent,var(--side) 70%) center bottom/100% 36px no-repeat local,
+  linear-gradient(rgba(0,0,0,.7),transparent) center top/100% 18px no-repeat scroll,
+  linear-gradient(transparent,rgba(0,0,0,.7)) center bottom/100% 18px no-repeat scroll;
+  background-color:var(--side)}
+@media (max-height:960px){
+  .sn-head{min-height:56px;padding:14px 12px 6px 22px}
+  .sn-group-label{padding:10px 10px 4px}
+  .sn-item{min-height:34px;padding:4px 10px;gap:8px;font-size:13.5px}
+  .sn-tag{font-size:10px;padding:1px 6px}
+  .sn-foot{padding:8px 12px}
+}
+@media (max-height:780px){
+  .sn-head{min-height:48px;padding:10px 12px 4px 22px}
+  .sn-scroll{padding:2px 12px 8px}
+  .sn-scroll,.sn-group{gap:1px}
+  .sn-group-label{padding:7px 10px 3px;font-size:10.5px}
+  .sn-item{min-height:30px;padding:3px 10px;border-radius:8px}
+  .sn-foot{padding:6px 12px}
+  .sn-collapse{width:28px;height:28px}
+  .shell.is-collapsed .sn-head{padding:12px 0 4px}
+  .shell.is-collapsed .sn-group{margin-top:4px;padding-top:4px}
+}
+
 /* top: crumb + page title (prototype .top) */
 .topbar{position:sticky;top:0;z-index:var(--z-topbar);min-height:var(--top-h);display:flex;align-items:center;gap:12px;padding:12px 28px 10px;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:saturate(1.3) blur(10px);-webkit-backdrop-filter:saturate(1.3) blur(10px)}
 .tb-burger{display:none!important}

@@ -163,5 +163,5 @@ class CampaignScheduleIn(BaseModel):
     model_config = _IN
 
     expected_version: Annotated[int, Field(ge=1)]
-    send_at: datetime
+    send_at: datetime | None  # null — «Отправить сейчас» по часам сервера (QA D2-03, ревью T2-11); ключ обязателен
     reason: Annotated[str, Field(min_length=3, max_length=300)]

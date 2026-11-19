@@ -53,12 +53,23 @@ test("first sign-in: temporary password → new password → MFA enrolment with 
   expect(bff.account("newbie@tilhero.local")!.staff.mfa_enabled).toBe(true);
 });
 
+test("sign-out the server did not confirm (503 SESSION_NOT_REVOKED, review T2-10): the sign-in screen warns to close the browser", async ({ page }) => {
+  await open(page, { signedInAs: "support@tilhero.local", logoutNotRevoked: true });
+  await expect(page.getByTestId("shell")).toBeVisible();
+  await page.getByTestId("avatar").click();
+  await page.getByTestId("menu-logout").click();
+  await expect(page.getByTestId("login-creds")).toBeVisible();
+  await expect(page.getByTestId("login-notice")).toContainText("Выход не подтверждён сервером");
+  await expect(page.getByTestId("login-notice")).toContainText("закройте браузер");
+});
+
 test("sign-out returns to the sign-in screen and the session is gone", async ({ page }) => {
   const bff = await open(page, { signedInAs: "support@tilhero.local" });
   await expect(page.getByTestId("shell")).toBeVisible();
   await page.getByTestId("avatar").click();
   await page.getByTestId("menu-logout").click();
   await expect(page.getByTestId("login-creds")).toBeVisible();
+  await expect(page.getByTestId("login-notice")).toHaveCount(0);
   expect(bff.session).toBeNull();
   await signIn(page, "support@tilhero.local", PASSWORD);
   await expect(page.getByTestId("shell")).toBeVisible();

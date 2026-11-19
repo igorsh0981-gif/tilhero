@@ -2,10 +2,13 @@
  * Вход, сессия и её жизненный цикл: шаги входа, cookie, ротация id, бездействие/абсолют, отзыв по
  * session_version и статусу, привязка к User-Agent, step-up, смена пароля в сессии, logout.
  */
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Redis } from "ioredis";
 import type { LoginStep, Me } from "@tilhero/contracts/admin";
+import { SessionStore } from "../src/sessions.js";
 import {
   PASSWORD_OK,
+  TEST_REDIS_URL,
   TOTP_OK,
   browser,
   json,
@@ -337,6 +340,71 @@ describe("выход безотказный (ревью T2-1)", () => {
     expect(res.json().code).toBe("CSRF_INVALID");
     expect((await h.app.inject({ method: "POST", url: "/admin/v1/auth/logout", headers: browser(s, { origin: "https://evil.example" }) })).statusCode).toBe(403);
     expect((await h.app.inject({ url: "/admin/v1/me", headers: browser(s) })).statusCode).toBe(200);
+  });
+});
+
+describe("выход при сбое Redis (ревью T2-10)", () => {
+  const CLEARED = /^__Host-tilhero_admin=; Path=\/; Max-Age=0; Secure; HttpOnly; SameSite=Strict$/;
+
+  it("Redis недоступен при чтении сессии → 503 SESSION_NOT_REVOKED, cookie всё равно стёрта; аудит выхода не пишется", async () => {
+    // отдельный клиент Redis этого процесса — его и «роняем»; сервер Redis и общий клиент тестов живы
+    const own = new Redis(TEST_REDIS_URL, { maxRetriesPerRequest: 0 });
+    await h.close();
+    h = await makeHarness({}, { redis: own });
+    try {
+      const { s } = await loginAs(h, "support");
+      own.disconnect();
+      const res = await h.app.inject({ method: "POST", url: "/admin/v1/auth/logout", headers: browser(s) });
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({ code: "SESSION_NOT_REVOKED", details: { service: "session-store" } });
+      expect(String(res.headers["set-cookie"])).toMatch(CLEARED);
+      // ответ честный: сессия на сервере осталась (её дочистит бездействие)
+      expect(await redis().keys(`${h.config.redisKeyPrefix}sess:*`)).toHaveLength(1);
+      expect(h.fake.callsTo("adminIdentity", "POST", "/internal/v1/auth/logout")).toHaveLength(0);
+      expect(h.fake.callsTo("audit", "POST", "/internal/v1/records")).toHaveLength(0);
+      expect(h.logs.text).toContain("logout_session_not_revoked");
+      expect(h.logs.text).not.toContain(s.id);
+      // чужой Origin проверяется до Redis: 403 CSRF_INVALID и cookie не трогается
+      const evil = await h.app.inject({ method: "POST", url: "/admin/v1/auth/logout", headers: browser(s, { origin: "https://evil.example" }) });
+      expect(evil.statusCode).toBe(403);
+      expect(evil.json().code).toBe("CSRF_INVALID");
+      expect(evil.headers["set-cookie"]).toBeUndefined();
+      // прочие маршруты при сбое Redis — прежний 503 UPSTREAM_UNAVAILABLE без стирания cookie
+      const me = await h.app.inject({ url: "/admin/v1/me", headers: browser(s) });
+      expect(me.statusCode).toBe(503);
+      expect(me.json().code).toBe("UPSTREAM_UNAVAILABLE");
+      expect(me.headers["set-cookie"]).toBeUndefined();
+    } finally {
+      await h.close();
+      own.disconnect();
+    }
+  });
+
+  it("сбой Redis при удалении сессии → 503 SESSION_NOT_REVOKED со стёртой cookie; повторный выход после восстановления → 204", async () => {
+    const { s } = await loginAs(h, "support");
+    const del = vi.spyOn(SessionStore.prototype, "delete").mockRejectedValueOnce(new Error("READONLY You can't write against a read only replica"));
+    try {
+      const res = await h.app.inject({ method: "POST", url: "/admin/v1/auth/logout", headers: browser(s) });
+      expect(res.statusCode).toBe(503);
+      expect(res.json().code).toBe("SESSION_NOT_REVOKED");
+      expect(String(res.headers["set-cookie"])).toMatch(CLEARED);
+      expect(h.fake.callsTo("adminIdentity", "POST", "/internal/v1/auth/logout")).toHaveLength(0);
+      expect((await h.app.inject({ url: "/admin/v1/me", headers: browser(s) })).statusCode).toBe(200);
+      const again = await h.app.inject({ method: "POST", url: "/admin/v1/auth/logout", headers: browser(s) });
+      expect(again.statusCode).toBe(204);
+      expect(String(again.headers["set-cookie"])).toMatch(CLEARED);
+      expect((await h.app.inject({ url: "/admin/v1/me", headers: browser(s) })).statusCode).toBe(401);
+    } finally {
+      del.mockRestore();
+    }
+  });
+
+  it("CSRF-токен по-прежнему сверяется, когда Redis доступен: без токена → 403 без стирания cookie", async () => {
+    const { s } = await loginAs(h, "support");
+    const { "x-csrf-token": _drop, ...noToken } = browser(s);
+    const res = await h.app.inject({ method: "POST", url: "/admin/v1/auth/logout", headers: noToken });
+    expect(res.statusCode).toBe(403);
+    expect(res.headers["set-cookie"]).toBeUndefined();
   });
 });
 

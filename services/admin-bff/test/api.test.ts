@@ -13,6 +13,7 @@ import {
   OPERATOR_ID,
   TG_FULL,
   TICKET_ID,
+  adminExperienceRow,
   approvalRow,
   browser,
   campaignBody,
@@ -540,6 +541,66 @@ describe("шаблоны уведомлений и рассылки", () => {
   });
 });
 
+describe("рассылки: ревью T2-6, T2-11, QA D2-03", () => {
+  it("scheduled_by_name / stopped_by_name — через staff/lookup; значение домена не берётся; lookup недоступен → null", async () => {
+    h.fake.addStaff({ role: "communications", staff_id: OPERATOR_ID, display_name: "Дилноза Редактор" });
+    const { s } = await loginAs(h, "communications");
+    h.fake.on("notifications", "GET", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`, () =>
+      json(
+        200,
+        campaignRow({
+          status: "stopped",
+          scheduled_by: OPERATOR_ID,
+          scheduled_at: "2026-11-18T09:00:00Z",
+          stopped_by: OPERATOR_ID.toUpperCase(),
+          stopped_at: "2026-11-18T09:30:00Z",
+          stop_reason: "ошибка",
+          scheduled_by_name: "подделка домена",
+        }),
+      ),
+    );
+    const c = (await get(s, `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`)).json();
+    expect(c.scheduled_by_name).toBe("Дилноза Редактор");
+    expect(c.stopped_by_name).toBe("Дилноза Редактор");
+    // в списке — тоже; у черновика без расписания — null
+    h.fake.on("notifications", "GET", "/admin/v1/notifications/campaigns", () => json(200, { items: [campaignRow()], next_cursor: null }));
+    const row = (await get(s, "/admin/v1/notifications/campaigns")).json().items[0];
+    expect(row).toMatchObject({ scheduled_by_name: null, stopped_by_name: null });
+    // lookup недоступен (новый процесс — без кэша имён): экран открывается, имена null
+    const fresh = await makeHarness();
+    try {
+      fresh.fake.on("adminIdentity", "GET", "/admin/v1/staff/lookup", () => domainError(500, "BOOM"));
+      fresh.fake.on("notifications", "GET", `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`, () =>
+        json(200, campaignRow({ status: "scheduled", scheduled_by: OPERATOR_ID, scheduled_at: "2026-11-18T09:00:00Z", send_at: "2026-11-20T09:00:00Z" })),
+      );
+      const other = await loginAs(fresh, "communications");
+      const res = await fresh.app.inject({ url: `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}`, headers: browser(other.s) });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ scheduled_by: OPERATOR_ID, scheduled_by_name: null, stopped_by_name: null });
+    } finally {
+      await fresh.close();
+    }
+  });
+
+  it("schedule: send_at=null («Отправить сейчас») проходит в домен как null → ответ sending с именем автора; время — ISO или null, иначе 422", async () => {
+    const { staff, s } = await loginAs(h, "communications");
+    await stepUp(h, s);
+    const url = `/admin/v1/notifications/campaigns/${CAMPAIGN_ID}/schedule`;
+    const res = await send(s, "POST", url, { expected_version: 1, send_at: null, reason: "срочно" }, { "idempotency-key": "sched-now-0001" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ status: "sending", scheduled_by: staff.staff_id, scheduled_by_name: staff.display_name });
+    const call = h.fake.callsTo("notifications", "POST", url)[0]!;
+    expect(call.body).toEqual({ expected_version: 1, send_at: null, reason: "срочно" });
+    expect(call.headers["idempotency-key"]).toBe("sched-now-0001");
+    // поле обязательно (null — явный выбор), пустая строка и число — 422 до домена
+    for (const send_at of [undefined, "", 0]) {
+      const body = { expected_version: 1, reason: "срочно", ...(send_at === undefined ? {} : { send_at }) };
+      expect((await send(s, "POST", url, body)).statusCode, String(send_at)).toBe(422);
+    }
+    expect(h.fake.callsTo("notifications", "POST", url)).toHaveLength(1);
+  });
+});
+
 describe("рассылки: ревью P2-7", () => {
   it("last_error {code, since, attempts} передаётся; домен без поля → null", async () => {
     const { s } = await loginAs(h, "communications");
@@ -697,6 +758,31 @@ describe("конфигурация", () => {
     expect((await get(s, "/admin/v1/experience/miniapp/current")).statusCode).toBe(403);
     h.fake.on("experience", "GET", "/internal/v1/experience/admin/current", () => json(200, { app: "miniapp", version: "1.0.0" }));
     expect((await get(s, "/admin/v1/experience/admin/current")).statusCode).toBe(503);
+  });
+
+  it("admin/current — строго по admin.ts AdminExperience (ревью T2-6): лишнее отбрасывается, неполное и опасное → 503", async () => {
+    const { s } = await loginAs(h, "read_only");
+    const res = await get(s, "/admin/v1/experience/admin/current");
+    expect(res.json()).toEqual({
+      app: "admin",
+      version: "1.0.0",
+      theme: { id: "admin_light", version: "1.0.0", tokens: { "--bg": "#f6f3ea", "--nav-w": "232px", "--font-ui": "Onest, system-ui, sans-serif" } },
+      layout: { density: "comfortable", menu: [{ id: "overview", enabled: true }, { id: "users", enabled: true }, { id: "costs", enabled: false }] },
+      flags: { whats_new: true },
+    });
+    const broken: Array<Record<string, unknown>> = [
+      { layout: undefined }, // нет раскладки (форма прошлого кодека: только app/version)
+      { layout: { density: "dense", menu: [] } },
+      { layout: { density: "compact", menu: [{ id: "Overview!", enabled: true }] } },
+      { theme: { id: "admin_light", version: "1.0.0", tokens: { "--bg": "red; background:url(https://evil.example/x)" } } },
+      { theme: { id: "admin_light", version: "1.0.0", tokens: { "--bg": "url(https://evil.example/x)" } } },
+      { theme: { id: "admin_light", version: "1.0.0", tokens: { color: "#fff" } } },
+      { flags: { whats_new: "yes" } },
+    ];
+    for (const p of broken) {
+      h.fake.on("experience", "GET", "/internal/v1/experience/admin/current", () => json(200, { ...adminExperienceRow(), ...p }));
+      expect((await get(s, "/admin/v1/experience/admin/current")).statusCode, JSON.stringify(p)).toBe(503);
+    }
   });
 
   it("activate/rollback — config.publish + step-up; 200 no-op домена сохраняется; неизвестное app → 422", async () => {

@@ -2,9 +2,10 @@
 
 Данными не владеет: authoritative-источники — identity-consent (профиль, вид ученика и опекун, возраст, статус,
 согласие, безопасность, настройки уведомлений), learning-plan (цель, уровень, график, онбординг, занятия) и support
-(обращения). PII — копия username/имени только для поиска (`search_text`); полного Telegram ID нет: только маска
-«••••••789» (CHECK формата). После удаления ученика (user.domain.deleted.v1 от identity-consent) имя, username, маска,
-связь с опекуном, план и настройки стираются, связь с обращениями разрывается.
+(обращения). PII — копия username и имени (поиск по части имени — `search_text`, только имя; username — только точное
+`@username`); полного Telegram ID нет: только маска «••••••789» (CHECK формата). После удаления ученика
+(user.domain.deleted.v1 от identity-consent) имя, username, маска, связь с опекуном, план и настройки стираются, связь
+с обращениями разрывается.
 
 Порядок событий не гарантирован: у каждой группы полей своя «версия» (момент события или `updated_at` снимка, *_at),
 более старое событие не перезаписывает более новое состояние. Модели — зеркало миграций (tests: schema_drift).
@@ -102,7 +103,8 @@ class LearnerSummary(Base):
     display_name: Mapped[str | None] = mapped_column(String(160))
     username: Mapped[str | None] = mapped_column(String(64))
     telegram_id_masked: Mapped[str | None] = mapped_column(String(16))
-    search_text: Mapped[str | None] = mapped_column(Text)  # lower(имя + username) — ILIKE-поиск
+    # lower(отображаемое имя) — ILIKE-поиск по части имени; username сюда не входит (ревью T2-3, миграция 0002 — P2-9)
+    search_text: Mapped[str | None] = mapped_column(Text)
     source_updated_at: Mapped[datetime | None] = mapped_column(TS)  # users.updated_at последнего снимка
     # язык, возраст, согласие родителя: события user.profile.* и снимки (версия profile_at)
     locale: Mapped[str | None] = mapped_column(String(2))

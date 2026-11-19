@@ -194,9 +194,10 @@ async def test_four_eyes_reject_and_create_privileged(env: Env, root: Person, ro
     assert body["approval"]["kind"] == "staff.create_privileged" and body["temporary_password"] is None
     rej = await env.approve(root2.actor, body["approval"]["approval_id"], note="Не нужен", action="reject")
     assert rej.status_code == 200 and rej.json()["status"] == "REJECTED"
-    p = (await env.principal(body["staff"]["staff_id"])).json()
-    assert p["staff"]["role"] == "read_only"
-    assert "approval.rejected" in await env.actions()
+    # заглушка отклонённого создания — «мёртвая» учётка: отключается (подробно — test_aid_p2)
+    p = await env.principal(body["staff"]["staff_id"])
+    assert (p.status_code, p.json()["code"]) == (403, "ACCOUNT_DISABLED")
+    assert {"approval.rejected", "staff.disabled"} <= set(await env.actions())
     # у отклонённой учётки пароля нет: войти нельзя, пока администратор не выдаст его сбросом
     assert (await env.sql("SELECT password_hash FROM staff WHERE staff_id = :i",
                           i=body["staff"]["staff_id"]))[0][0] is None

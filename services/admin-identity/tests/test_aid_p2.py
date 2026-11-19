@@ -1,6 +1,7 @@
 """Регресс ревью спринта 2 (docs/qa/sprint2-review-python.md): P2-1 — автор создания или повышения не владеет
-учётными данными цели после применения заявки (пароль и MFA сбрасываются, пароль — решающему); P2-2 — включение
-отключённого сотрудника с привилегированной ролью — только four-eyes (staff.reactivate_privileged)."""
+учётными данными цели после применения заявки (пароль и MFA сбрасываются, пароль — решающему); заглушка отклонённого
+или истёкшего создания отключается; P2-2 — включение отключённого сотрудника с привилегированной ролью — только
+four-eyes (staff.reactivate_privileged)."""
 
 from __future__ import annotations
 
@@ -8,6 +9,8 @@ import json
 
 from aid_testkit import Env, Person, code_at, new_email
 from sqlalchemy import text
+
+from tilhero_common.testing import assert_event_conforms
 
 
 def _err(r) -> tuple[int, str]:
@@ -218,3 +221,102 @@ async def test_p2_2_other_privileged_roles_and_direct_paths(env: Env, root: Pers
     assert (await env.patch(root.actor, ops.staff_id, {"status": "DISABLED", "reason": "Снова"})).status_code == 200
     r = await env.patch(aud.actor, ops.staff_id, {"status": "ACTIVE", "reason": "Попытка"})
     assert _err(r) == (403, "PERMISSION_DENIED")
+
+
+# ---------------------------------------------------------------- «мёртвые» заглушки (ревью P2-1, замечание)
+
+async def _stub(env: Env, author: Person, prefix: str) -> tuple[str, str]:
+    """Привилегированное создание при двух super_admin → (staff_id заглушки read_only без пароля, approval_id)."""
+    c = await env.create_staff(author.actor, new_email(prefix), "operations", "Заглушка")
+    assert c.status_code == 201 and c.json()["approval"]["status"] == "PENDING", c.text
+    assert c.json()["staff"]["role"] == "read_only" and c.json()["temporary_password"] is None
+    return c.json()["staff"]["staff_id"], c.json()["approval"]["approval_id"]
+
+
+async def _status(env: Env, actor: Person, staff_id: str) -> str:
+    r = await env.c.get(f"/admin/v1/staff/{staff_id}", headers=env.h(actor.actor))
+    assert r.status_code == 200, r.text
+    return r.json()["status"]
+
+
+async def _disabled_records(env: Env, staff_id: str) -> list[dict]:
+    return [e.payload for e in await env.audit()
+            if e.payload["action"] == "staff.disabled" and e.payload["object_id"] == staff_id]
+
+
+async def _expire(env: Env, approval_id: str) -> None:
+    await env.sql("UPDATE approvals SET expires_at = now() - interval '1 second' WHERE approval_id = :i "
+                  "RETURNING approval_id", i=approval_id)
+
+
+async def test_p2_1_placeholder_disabled_when_create_rejected(env: Env, root: Person, root2: Person) -> None:
+    """Заявка staff.create_privileged отклонена → заглушка DISABLED, аудит staff.disabled за решающим; включить
+    обратно (read_only) можно прямой командой. Повторных записей нет."""
+    stub, aid = await _stub(env, root, "rej")
+    rej = await env.approve(root2.actor, aid, note="Не нужен", action="reject")
+    assert rej.status_code == 200 and rej.json()["status"] == "REJECTED"
+    assert await _status(env, root, stub) == "DISABLED"
+    [rec] = await _disabled_records(env, stub)
+    assert (rec["actor_type"], rec["actor_id"], rec["actor_role"]) == ("staff", root2.staff_id, "super_admin")
+    assert rec["object_type"] == "staff" and rec["reason"] == "Заявка на создание сотрудника отклонена"
+    assert rec["before"] == {"status": "ACTIVE", "role": "read_only"}
+    assert rec["after"] == {"status": "DISABLED", "approval_id": aid, "approval_status": "REJECTED"}
+    for e in await env.audit():
+        assert_event_conforms(e)
+    assert _err(await env.principal(stub)) == (403, "ACCOUNT_DISABLED")
+    await env.c.get("/admin/v1/approvals", headers=env.h(root.actor))
+    await env.c.get("/admin/v1/staff", headers=env.h(root.actor))
+    assert len(await _disabled_records(env, stub)) == 1
+    on = await env.patch(root.actor, stub, {"status": "ACTIVE", "reason": "Нужна учётка"})
+    assert on.status_code == 200 and (on.json()["status"], on.json()["role"]) == ("ACTIVE", "read_only")
+
+
+async def test_p2_1_placeholder_disabled_when_create_expired(env: Env, root: Person, root2: Person) -> None:
+    """Истечение фиксируется лениво — при обращении к заявкам, к списку и карточке сотрудника, при решении; заглушка
+    отключается системой (actor_type system) один раз."""
+    via_list, a1 = await _stub(env, root, "exp1")
+    via_staff, a2 = await _stub(env, root, "exp2")
+    via_card, a3 = await _stub(env, root, "exp3")
+    via_decide, a4 = await _stub(env, root, "exp4")
+    await _expire(env, a1)
+    lst = (await env.c.get("/admin/v1/approvals?status=EXPIRED", headers=env.h(root.actor))).json()["items"]
+    assert [x["approval_id"] for x in lst] == [a1]
+    [rec] = await _disabled_records(env, via_list)
+    assert (rec["actor_type"], rec["actor_id"], rec["actor_role"]) == ("system", None, None)
+    assert rec["reason"] == "Заявка на создание сотрудника истекла"
+    assert rec["after"] == {"status": "DISABLED", "approval_id": a1, "approval_status": "EXPIRED"}
+    await _expire(env, a2)
+    staff = (await env.c.get("/admin/v1/staff?limit=100", headers=env.h(root.actor))).json()["items"]
+    assert {s["staff_id"]: s["status"] for s in staff}[via_staff] == "DISABLED"
+    await _expire(env, a3)
+    assert await _status(env, root, via_card) == "DISABLED"
+    await _expire(env, a4)
+    assert _err(await env.approve(root2.actor, a4)) == (409, "APPROVAL_EXPIRED")
+    assert await _status(env, root, via_decide) == "DISABLED"
+    for stub in (via_list, via_staff, via_card, via_decide):
+        assert len(await _disabled_records(env, stub)) == 1, stub
+    for e in await env.audit():
+        assert_event_conforms(e)
+
+
+async def test_p2_1_changed_placeholder_and_disabled_author(env: Env, root: Person, root2: Person) -> None:
+    """Заглушке уже выдали пароль прямым сбросом (обычный read_only) — отклонение её не трогает. Автор-super_admin
+    отключён по four-eyes → его заявка на создание отклонена, заглушка отключена за применившим отключение."""
+    owned, aid = await _stub(env, root, "own")
+    rp = await env.c.post(f"/admin/v1/staff/{owned}/reset-password", json={"reason": "Нужен доступ"},
+                          headers=env.h(root.actor))
+    assert rp.status_code == 200
+    env.leaks.append(rp.json()["temporary_password"])
+    assert (await env.approve(root2.actor, aid, action="reject")).json()["status"] == "REJECTED"
+    assert await _status(env, root, owned) == "ACTIVE" and await _disabled_records(env, owned) == []
+
+    third = await env.onboard(root.actor, new_email("root3"), "super_admin", "Third", approver=root2.actor)
+    stub, stub_aid = await _stub(env, third, "orphan")
+    off = await env.patch(root.actor, third.staff_id, {"status": "DISABLED", "reason": "Уволен"})
+    assert off.status_code == 202 and off.json()["approval"]["kind"] == "staff.privileged_revoke"
+    assert (await env.approve(root2.actor, off.json()["approval"]["approval_id"])).status_code == 200
+    lst = (await env.c.get("/admin/v1/approvals?status=REJECTED", headers=env.h(root.actor))).json()["items"]
+    assert next(x for x in lst if x["approval_id"] == stub_aid)["decision_note"] == "Автор заявки отключён"
+    assert await _status(env, root, stub) == "DISABLED"
+    [rec] = await _disabled_records(env, stub)
+    assert rec["actor_id"] == root2.staff_id and rec["reason"] == "Заявка на создание сотрудника отклонена"

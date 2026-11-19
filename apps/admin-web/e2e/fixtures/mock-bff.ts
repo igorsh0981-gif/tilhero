@@ -55,6 +55,8 @@ export interface Scenario {
   stalled?: boolean;
   /** the notifications clock runs ahead of the browser by this many ms (a valid chosen time is «in the past» there) */
   serverClockAheadMs?: number;
+  /** the session store is down at sign-out: 503 SESSION_NOT_REVOKED (cookie cleared, session maybe alive — review T2-10) */
+  logoutNotRevoked?: boolean;
   /** rewrites every successful JSON body (hostile strings) */
   transform?: (path: string, data: unknown) => unknown;
 }
@@ -469,6 +471,7 @@ export class MockBff {
       case key === "GET /me":
         return json(200, this.me());
       case key === "POST /auth/logout":
+        if (this.sc.logoutNotRevoked) return err(503, "SESSION_NOT_REVOKED", { service: "session-store" });
         this.record("auth.logout", "staff", me.staff_id, null);
         this.session = null;
         return json(204);
@@ -979,7 +982,7 @@ export class MockBff {
         const c = body as unknown as CampaignContent;
         const fields = checkTexts(c.texts, ["learner_name"]);
         if (fields.length) return err(422, "CAMPAIGN_INVALID", { fields });
-        const x: Campaign = { ...c, campaign_id: `e1000000-0000-4000-8000-${String(100 + ++this.seq).padStart(12, "0")}`, status: "draft", version: 1, send_at: null, created_by: me.staff_id, created_by_name: me.display_name, created_at: F.iso(0), updated_at: F.iso(0), scheduled_by: null, scheduled_at: null, started_at: null, finished_at: null, stopped_by: null, stopped_at: null, stop_reason: null, last_error: null, stats: { audience: 0, created: 0, sent: 0, in_app_only: 0, deferred: 0, skipped_frequency: 0, failed: 0 } };
+        const x: Campaign = { ...c, campaign_id: `e1000000-0000-4000-8000-${String(100 + ++this.seq).padStart(12, "0")}`, status: "draft", version: 1, send_at: null, created_by: me.staff_id, created_by_name: me.display_name, created_at: F.iso(0), updated_at: F.iso(0), scheduled_by: null, scheduled_by_name: null, scheduled_at: null, started_at: null, finished_at: null, stopped_by: null, stopped_by_name: null, stopped_at: null, stop_reason: null, last_error: null, stats: { audience: 0, created: 0, sent: 0, in_app_only: 0, deferred: 0, skipped_frequency: 0, failed: 0 } };
         this.campaigns.unshift(x);
         this.record("campaign.created", "campaign", x.campaign_id, null);
         remember(idemKey, x);
@@ -1035,12 +1038,19 @@ export class MockBff {
           if (seen) return json(200, seen);
           if (c.status !== "draft") return err(409, "CAMPAIGN_NOT_DRAFT");
           if (body.expected_version !== c.version) return err(409, "CAMPAIGN_VERSION_CONFLICT", { current_version: c.version });
-          const at = Date.parse(String(body.send_at ?? ""));
           const now = Date.now() + (this.sc.serverClockAheadMs ?? 0);
-          if (Number.isNaN(at)) return err(422, "VALIDATION_ERROR", { in: "body", field: "send_at", errors: [] });
-          if (at > now + 30 * F.DAY) return err(422, "CAMPAIGN_INVALID", { fields: [{ path: "send_at", reason: "too_far" }] });
-          if (at < now - 5 * 60_000) return err(422, "CAMPAIGN_INVALID", { fields: [{ path: "send_at", reason: "in_past" }] });
-          Object.assign(c, { status: "scheduled", version: c.version + 1, send_at: new Date(at - now < 60_000 ? now : at).toISOString(), scheduled_by: me.staff_id, scheduled_at: F.iso(0), stats: { ...c.stats, audience: 1840 } });
+          if (!("send_at" in body)) return err(422, "VALIDATION_ERROR", { in: "body", field: "send_at", errors: [] });
+          const by = { scheduled_by: me.staff_id, scheduled_by_name: me.display_name, scheduled_at: new Date(now).toISOString() };
+          if (body.send_at === null) {
+            // «Отправить сейчас» (QA D2-03, review T2-11): server clock, started at once — the answer is already sending
+            Object.assign(c, { ...by, status: "sending", version: c.version + 1, send_at: new Date(now).toISOString(), started_at: new Date(now).toISOString(), stats: { ...c.stats, audience: 1840 } });
+          } else {
+            const at = Date.parse(String(body.send_at));
+            if (Number.isNaN(at)) return err(422, "VALIDATION_ERROR", { in: "body", field: "send_at", errors: [] });
+            if (at > now + 30 * F.DAY) return err(422, "CAMPAIGN_INVALID", { fields: [{ path: "send_at", reason: "too_far" }] });
+            if (at < now - 5 * 60_000) return err(422, "CAMPAIGN_INVALID", { fields: [{ path: "send_at", reason: "in_past" }] });
+            Object.assign(c, { ...by, status: "scheduled", version: c.version + 1, send_at: new Date(at - now < 60_000 ? now : at).toISOString(), stats: { ...c.stats, audience: 1840 } });
+          }
           this.record("campaign.scheduled", "campaign", c.campaign_id, null, String(body.reason ?? ""));
           remember(idemKey, c);
           return json(200, c);
@@ -1055,7 +1065,7 @@ export class MockBff {
         // stop: emergency, idempotent; scheduled | sending | done (cancels what quiet hours deferred), never a draft
         if (c.status === "draft") return err(409, "CAMPAIGN_NOT_ACTIVE");
         if (c.status !== "stopped") {
-          Object.assign(c, { status: "stopped", version: c.version + 1, stopped_by: me.staff_id, stopped_at: F.iso(0), stop_reason: String(body.reason ?? "") });
+          Object.assign(c, { status: "stopped", version: c.version + 1, stopped_by: me.staff_id, stopped_by_name: me.display_name, stopped_at: F.iso(0), stop_reason: String(body.reason ?? "") });
           this.record("campaign.stopped", "campaign", c.campaign_id, null, c.stop_reason);
         }
         return json(200, c);

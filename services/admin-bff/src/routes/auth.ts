@@ -8,7 +8,7 @@
 import type { LoginStep, Me, MfaEnrollStart, RoleCode, StepUpResult } from "@tilhero/contracts/admin";
 import { AppError } from "@tilhero/ts-common";
 import type { FastifyReply } from "fastify";
-import { authenticate, sessionRevoked, sessionRotated, unauthorized } from "../auth.js";
+import { authenticate, isSessionStoreFailure, sessionNotRevoked, sessionRevoked, sessionRotated, unauthorized } from "../auth.js";
 import { parseDomain } from "../codec.js";
 import { MFA_ENROLL } from "../contract.js";
 import { clearSessionCookie, sessionCookie } from "../cookies.js";
@@ -162,12 +162,20 @@ export function authRoutes(app: App, ctx: BffContext): void {
    * Выход безотказный (ревью T2-1): уровень sessionOnly — без principal и лимитов. Сессия (вместе со связанным
    * ротацией id) удаляется и cookie стирается ДО обращения к admin-identity; аудит auth.logout пишет admin-identity
    * (best effort), при его недоступности — резервная запись в audit (actor — из кэша principal или по сессии).
+   * Redis недоступен (ревью T2-10) — cookie стёрта всё равно, ответ 503 SESSION_NOT_REVOKED (аудит выхода не пишется:
+   * сессия не завершена).
    */
   app.post("/admin/v1/auth/logout", { config: sessionOnly(), schema: { response: NO_CONTENT } }, async (req, reply) => {
     const auth = sessionOf(req);
     const staffId = auth.session.staff_id;
     void reply.header("set-cookie", clearSessionCookie());
-    await ctx.store(() => ctx.sessions.delete(auth.sessionId));
+    try {
+      await ctx.store(() => ctx.sessions.delete(auth.sessionId));
+    } catch (err) {
+      if (!isSessionStoreFailure(err)) throw err;
+      ctx.log.warn({ event: "logout_session_not_revoked", stage: "delete" }, "logout: session store unavailable, cookie cleared");
+      throw sessionNotRevoked();
+    }
     try {
       await idp.call("POST", "/internal/v1/auth/logout", {
         body: { staff_id: staffId, session_id: auth.publicSessionId },

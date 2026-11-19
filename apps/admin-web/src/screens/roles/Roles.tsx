@@ -16,7 +16,18 @@ import { useToast } from "../../ui/toasts";
 import { errText } from "../../ui/errors";
 
 export const ROLE_CODES: readonly RoleCode[] = ["super_admin", "operations", "communications", "support", "methodist", "analyst", "auditor", "read_only"];
-const isPrivileged = (r: string) => (PRIVILEGED_ROLES as readonly string[]).includes(r);
+/**
+ * Privileged role (MFA required, granting it is four-eyes): `Role.privileged` of GET /roles — admin-identity decides it
+ * by the role's permissions too, so a role that gains a step-up right becomes privileged without a new admin-web
+ * (review T2-7). Only until /roles has answered (or when it failed) — the contract's default list. The server decides
+ * either way (202 + approval); this drives the hints.
+ */
+export function privilegedOf(roles: readonly Pick<Role, "code" | "privileged">[] | null): (code: string) => boolean {
+  return (code) => {
+    const r = roles?.find((x) => x.code === code);
+    return r ? r.privileged : (PRIVILEGED_ROLES as readonly string[]).includes(code);
+  };
+}
 
 /** Matrix rows: section access first, then commands (admin.ts Permission catalogue). */
 export const PERM_GROUPS: ReadonlyArray<{ id: "sections" | "actions"; perms: readonly Permission[] }> = [
@@ -105,7 +116,7 @@ export function Roles() {
   const loadRoles = useCallback(() => {
     setRolesErr(null);
     StaffApi.roles()
-      .then((r) => setRoles({ items: r.items, permissions: r.permissions ?? [...PERMISSIONS] }))
+      .then((r) => setRoles({ items: r.items, permissions: [...PERMISSIONS] }))
       .catch(setRolesErr);
   }, []);
   useEffect(loadRoles, [loadRoles]);
@@ -506,6 +517,7 @@ function StaffTab({ roles, pending, onChanged }: { roles: Role[] | null; pending
     const x = roles?.find((y) => y.code === r);
     return x ? l(x.name) : (ROLE_CODES as readonly string[]).includes(r) ? t(`role.${r as RoleCode}`) : r;
   };
+  const isPrivileged = privilegedOf(roles);
   const load = useCallback(async (f: { q?: string; role?: string; status?: string; cursor?: string | null }, append: boolean) => {
     const id = ++req.current;
     setLoading(true);
@@ -755,10 +767,11 @@ function StaffTab({ roles, pending, onChanged }: { roles: Role[] | null; pending
           {cursor && !loading && <Btn size="sm" icon="down" label={t("common.loadMore")} onClick={() => void load({ ...filters, cursor }, true)} />}
         </div>
       </section>
-      {cmd && <StaffConfirm cmd={cmd} roleName={roleName} onClose={() => setCmd(null)} onRun={runCmd} />}
+      {cmd && <StaffConfirm cmd={cmd} roleName={roleName} isPrivileged={isPrivileged} onClose={() => setCmd(null)} onRun={runCmd} />}
       {adding && (
         <AddStaff
           roleName={roleName}
+          isPrivileged={isPrivileged}
           onClose={() => setAdding(false)}
           onCreated={() => {
             reload();
@@ -769,7 +782,19 @@ function StaffTab({ roles, pending, onChanged }: { roles: Role[] | null; pending
   );
 }
 
-function StaffConfirm({ cmd, roleName, onClose, onRun }: { cmd: StaffCmd; roleName: (r: string) => string; onClose: () => void; onRun: (c: StaffCmd, reason: string) => Promise<string | null> }) {
+function StaffConfirm({
+  cmd,
+  roleName,
+  isPrivileged,
+  onClose,
+  onRun,
+}: {
+  cmd: StaffCmd;
+  roleName: (r: string) => string;
+  isPrivileged: (r: string) => boolean;
+  onClose: () => void;
+  onRun: (c: StaffCmd, reason: string) => Promise<string | null>;
+}) {
   const { t } = useI18n();
   const u = cmd.s.display_name;
   const priv = cmd.kind === "role" && (isPrivileged(cmd.to) || isPrivileged(cmd.s.role));
@@ -807,7 +832,7 @@ function StaffConfirm({ cmd, roleName, onClose, onRun }: { cmd: StaffCmd; roleNa
   );
 }
 
-function AddStaff({ roleName, onClose, onCreated }: { roleName: (r: string) => string; onClose: () => void; onCreated: () => void }) {
+function AddStaff({ roleName, isPrivileged, onClose, onCreated }: { roleName: (r: string) => string; isPrivileged: (r: string) => boolean; onClose: () => void; onCreated: () => void }) {
   const i = useI18n();
   const { t } = i;
   const toast = useToast();
