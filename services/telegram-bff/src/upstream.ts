@@ -44,6 +44,8 @@ export const DOMAIN = {
   social: "social",
   catalog: "catalog",
   diagnostics: "diagnostics",
+  lessons: "lessons",
+  assessment: "assessment",
 } as const;
 
 /** Отказ внутренней авторизации домена (любой статус). */
@@ -150,6 +152,9 @@ export interface Domains {
   diagnostics: DomainClient;
   /** catalog без разбора JSON: снимок курса по ETag (304), байты аудио медиатеки. */
   catalogRaw: RawClient;
+  /** Спринт 4: lessons и assessment — всегда с claims `lrn`, `age_band` (sub = аккаунт), поэтому RawClient. */
+  lessons: RawClient;
+  assessment: RawClient;
 }
 
 export interface DomainsOptions {
@@ -157,6 +162,8 @@ export interface DomainsOptions {
   key: InternalKey;
   urls: Record<keyof typeof DOMAIN, string>;
   timeoutMs: number;
+  /** таймаут lessons / assessment (ИИ в ролевой ситуации и «проще») */
+  lessonsTimeoutMs?: number;
   retries: number;
   fetchImpl?: typeof fetch;
   onFailure?: UpstreamLogger;
@@ -194,7 +201,21 @@ export function createDomains(o: DomainsOptions): Domains {
       fetchImpl: o.fetchImpl ?? ((...a) => fetch(...a)),
       ...(o.onFailure ? { onFailure: o.onFailure } : {}),
     }),
+    lessons: raw("lessons"),
+    assessment: raw("assessment"),
   };
+
+  function raw(key: "lessons" | "assessment"): RawClient {
+    return new RawClient({
+      target: DOMAIN[key],
+      baseUrl: o.urls[key],
+      key: o.key,
+      timeoutMs: o.lessonsTimeoutMs ?? o.timeoutMs,
+      retries: o.retries,
+      fetchImpl: o.fetchImpl ?? ((...a) => fetch(...a)),
+      ...(o.onFailure ? { onFailure: o.onFailure } : {}),
+    });
+  }
 }
 
 export interface RawRequest {
@@ -205,6 +226,8 @@ export interface RawRequest {
   claims?: Record<string, string>;
   body?: unknown;
   idempotencyKey?: string;
+  /** таймаут этого вызова (завершение урока ждёт оценку дольше обычного) */
+  timeoutMs?: number;
 }
 
 /** Внутренний JWT v2 в формате ts-common issueInternalToken (EdDSA, kid = iss, aud, iat, exp 60 с, jti) + свои claims.
@@ -291,7 +314,7 @@ export class RawClient {
           method,
           headers,
           body: ro.body !== undefined ? JSON.stringify(ro.body) : null,
-          signal: AbortSignal.timeout(this.o.timeoutMs),
+          signal: AbortSignal.timeout(ro.timeoutMs ?? this.o.timeoutMs),
         });
       } catch {
         if (attempt < attempts) continue;

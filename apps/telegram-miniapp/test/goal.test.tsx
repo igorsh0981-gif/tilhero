@@ -279,25 +279,21 @@ describe("Profile: new rows", () => {
 });
 
 describe("Home: «Начать занятие»", () => {
-  it("the primary action leads to «Уроки — скоро»; «Отметить занятие» stays as the secondary one (same test id)", async () => {
+  it("sprint 4: the only action leads to the lesson (no plan here → the «Уроки» tab); no manual «Отметить занятие»", async () => {
     mount(
       <>
         <Home />
-        <Soon what="lessons" />
+        <Soon what="review" />
       </>,
     );
     const start = await screen.findByTestId("start-lesson");
     expect(start).toHaveTextContent("Начать занятие");
     expect(start).toHaveClass("btn");
-    const mark = screen.getByTestId("mark-activity");
-    expect(mark).toHaveTextContent("Отметить занятие");
-    expect(mark).toHaveClass("btn2");
-    // the order: start first, then mark
-    expect(start.compareDocumentPosition(mark) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId("mark-activity")).toBeNull();
+    expect(screen.getByTestId("today-card")).toHaveTextContent("Занятие засчитается в график, когда вы пройдёте урок.");
     await userEvent.click(start);
-    expect(navRef!.tab).toBe("lessons");
+    await waitFor(() => expect(navRef!.tab).toBe("lessons"));
     expect(navRef!.stack).toEqual([]);
-    expect(screen.getByRole("heading", { name: "Уроки — скоро" })).toBeInTheDocument();
   });
 
   it("UZ: «Mashgʻulotni boshlash»", async () => {

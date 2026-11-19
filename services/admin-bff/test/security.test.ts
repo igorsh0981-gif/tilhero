@@ -1,6 +1,7 @@
 /**
  * Безопасность admin-bff: все сессионные маршруты без cookie → 401, реестр маршрутов = admin.ts, step-up по шапке
- * admin.ts и разделу «Контент и диагностика», fail-closed регистрация, RBAC до вызова домена (матрица 9 ролей),
+ * admin.ts и разделам «Контент и диагностика» и «ИИ, контроль диалогов, затраты», fail-closed регистрация, RBAC до
+ * вызова домена (матрица 10 ролей),
  * actor-токен, CSRF и Origin на каждом
  * небезопасном маршруте, лимиты входа и команд, имперсонация (только dev), заголовки ответов, логи без PII и секретов.
  */
@@ -23,6 +24,7 @@ import {
   browser,
   closeRedis,
   json,
+  login,
   loginAs,
   makeHarness,
   redis,
@@ -47,6 +49,9 @@ export function concrete(url: string): string {
     .replace(":version", "1.0.0")
     .replace(":key", "lesson.reminder")
     .replace(":v", "2")
+    .replace(":agentId", "conversation_partner")
+    .replace(":modelId", "claude-haiku-5-5")
+    .replace(":caseId", "cp-01-correct")
     .replace(/:[A-Za-z]+/g, "5b1f0d0e-1111-4c2b-9a51-0d6c7a1e2f30");
 }
 
@@ -153,6 +158,40 @@ const CONTRACT_ROUTES = [
   "GET /admin/v1/diagnostics/tests/:id/versions/:v",
   "POST /admin/v1/diagnostics/tests/:id/versions/:v/publish",
   "GET /admin/v1/diagnostics/stats",
+  // спринт 4 — агенты и скиллы, модели и затраты (ai-gateway)
+  "GET /admin/v1/ai/agents",
+  "GET /admin/v1/ai/agents/:agentId",
+  "GET /admin/v1/ai/agents/:agentId/versions/:v",
+  "POST /admin/v1/ai/agents/:agentId/versions",
+  "PATCH /admin/v1/ai/agents/:agentId/versions/:v",
+  "DELETE /admin/v1/ai/agents/:agentId/versions/:v",
+  "POST /admin/v1/ai/agents/:agentId/versions/:v/test-runs",
+  "GET /admin/v1/ai/agents/:agentId/versions/:v/test-runs/:runId",
+  "POST /admin/v1/ai/agents/:agentId/versions/:v/publish",
+  "PUT /admin/v1/ai/agents/:agentId/canary",
+  "DELETE /admin/v1/ai/agents/:agentId/canary",
+  "POST /admin/v1/ai/agents/:agentId/rollback",
+  "GET /admin/v1/ai/agents/:agentId/golden-cases",
+  "POST /admin/v1/ai/agents/:agentId/golden-cases",
+  "PATCH /admin/v1/ai/golden-cases/:caseId",
+  "DELETE /admin/v1/ai/golden-cases/:caseId",
+  "GET /admin/v1/ai/models",
+  "PUT /admin/v1/ai/models/:modelId",
+  "GET /admin/v1/ai/provider",
+  "GET /admin/v1/ai/budget",
+  "PUT /admin/v1/ai/budget",
+  "POST /admin/v1/ai/emergency-stop",
+  "GET /admin/v1/ai/usage/summary",
+  "GET /admin/v1/ai/usage",
+  // контроль диалогов (lessons, assessment, ai-gateway)
+  "GET /admin/v1/qa/sessions",
+  "GET /admin/v1/qa/sessions/:id",
+  "POST /admin/v1/qa/sessions/:id/transcript",
+  "POST /admin/v1/qa/evaluations/:id/flag",
+  "POST /admin/v1/qa/evaluations/:id/reevaluate",
+  "GET /admin/v1/qa/appeals",
+  "POST /admin/v1/qa/appeals/:id/take",
+  "POST /admin/v1/qa/appeals/:id/decide",
 ];
 
 describe("реестр маршрутов", () => {
@@ -213,6 +252,18 @@ describe("реестр маршрутов", () => {
         "PUT /admin/v1/language-pairs/:pairId",
         // публикация версии теста диагностики (content.publish)
         "POST /admin/v1/diagnostics/tests/:id/versions/:v/publish",
+        // спринт 4: публикация, канарейка (установка и снятие) и откат версии агента; модели и цены (ai.publish)
+        "POST /admin/v1/ai/agents/:agentId/versions/:v/publish",
+        "PUT /admin/v1/ai/agents/:agentId/canary",
+        "DELETE /admin/v1/ai/agents/:agentId/canary",
+        "POST /admin/v1/ai/agents/:agentId/rollback",
+        "PUT /admin/v1/ai/models/:modelId",
+        // бюджет и аварийная остановка ИИ (costs.manage)
+        "PUT /admin/v1/ai/budget",
+        "POST /admin/v1/ai/emergency-stop",
+        // переоценка и решение по апелляции (qa.review)
+        "POST /admin/v1/qa/evaluations/:id/reevaluate",
+        "POST /admin/v1/qa/appeals/:id/decide",
         // все команды по сотрудникам, ролям, заявкам
         "POST /admin/v1/staff",
         "PATCH /admin/v1/staff/:id",
@@ -228,18 +279,37 @@ describe("реестр маршрутов", () => {
   it("права и роли admin-bff = каталог admin.ts; матрица по умолчанию — PLAN.md", () => {
     expect([...ALL_PERMISSIONS].sort()).toEqual([...PERMISSIONS].sort());
     expect([...ROLE_CODES]).toEqual([
-      "super_admin", "operations", "communications", "support", "methodist", "content_manager", "analyst", "auditor", "read_only",
+      "super_admin", "operations", "communications", "support", "methodist", "content_manager", "qa_analyst", "analyst", "auditor",
+      "read_only",
     ]);
     expect(PRIVILEGED_ROLES).toEqual(["super_admin", "operations", "communications"]);
     expect([...DEFAULT_ROLE_MATRIX.operations].sort()).toEqual(
-      ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read"].sort(),
+      [
+        "dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read",
+        // спринт 4
+        "ai.read", "qa.read", "costs.read", "costs.manage",
+      ].sort(),
     );
-    // спринт 3 (docs/sprint3/PLAN.md «Права и роли»)
+    // спринт 3 (docs/sprint3/PLAN.md «Права и роли») + спринт 4 (docs/sprint4/PLAN.md «Права и роли»)
     expect([...DEFAULT_ROLE_MATRIX.methodist].sort()).toEqual(
-      ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish"].sort(),
+      [
+        "dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish",
+        "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review",
+      ].sort(),
     );
     expect([...DEFAULT_ROLE_MATRIX.content_manager].sort()).toEqual(["content.read", "content.edit", "media.rights", "dashboard.read"].sort());
-    for (const r of ["analyst", "auditor"] as const) expect(DEFAULT_ROLE_MATRIX[r]).toContain("content.read");
+    expect([...DEFAULT_ROLE_MATRIX.qa_analyst].sort()).toEqual(["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts"].sort());
+    for (const r of ["analyst", "auditor"] as const) {
+      expect(DEFAULT_ROLE_MATRIX[r]).toContain("content.read");
+      for (const p of ["ai.read", "qa.read", "costs.read"] as const) expect(DEFAULT_ROLE_MATRIX[r], `${r} ${p}`).toContain(p);
+    }
+    // права со step-up спринта 4: публикация агентов и решения QA — методист; лимиты ИИ — операции; реплики — методист и QA
+    const holders = (p: Permission) => ROLE_CODES.filter((r) => DEFAULT_ROLE_MATRIX[r].includes(p)).sort();
+    expect(holders("ai.publish")).toEqual(["methodist", "super_admin"]);
+    expect(holders("ai.manage")).toEqual(["methodist", "super_admin"]);
+    expect(holders("qa.review")).toEqual(["methodist", "super_admin"]);
+    expect(holders("costs.manage")).toEqual(["operations", "super_admin"]);
+    expect(holders("qa.transcripts")).toEqual(["methodist", "qa_analyst", "super_admin"]);
     expect(DEFAULT_ROLE_MATRIX.super_admin).toEqual(ALL_PERMISSIONS);
     for (const r of ROLE_CODES) expect(DEFAULT_ROLE_MATRIX[r].includes("lang.manage"), r).toBe(r === "super_admin");
     for (const r of ROLE_CODES) expect(DEFAULT_ROLE_MATRIX[r].includes("content.review"), r).toBe(r === "super_admin" || r === "methodist");
@@ -268,7 +338,7 @@ describe("fail-closed регистрация маршрутов", () => {
   });
 });
 
-describe("RBAC до вызова домена: матрица 9 ролей × все маршруты", () => {
+describe("RBAC до вызова домена: матрица 10 ролей × все маршруты", () => {
   beforeEach(async () => {
     h = await makeHarness();
   });
@@ -276,12 +346,18 @@ describe("RBAC до вызова домена: матрица 9 ролей × в
   it("маршрут с правом вне набора роли → 403 PERMISSION_DENIED {permission}, домен не вызывается", async () => {
     const routes = h.app.adminRoutes.filter((r) => r.access === "session" && r.guard !== "authenticated");
     let denied = 0;
+    let logins = 0;
+    // вход — 10/мин с IP: каждый сотрудник матрицы входит со своего адреса
+    const fresh = async (role: RoleCode) => (await login(h, h.fake.addStaff({ role }), `198.51.100.${++logins}`));
     for (const role of ROLE_CODES) {
-      const { s } = await loginAs(h, role);
+      let s = await fresh(role);
+      let commands = 0;
       const own = new Set<string>(DEFAULT_ROLE_MATRIX[role]);
       for (const r of routes) {
         const allowed = r.guard.startsWith("role:") ? r.guard === `role:${role}` : r.guard.split("|").some((p) => own.has(p));
         if (allowed) continue;
+        // лимит команд — 60/мин на сотрудника: новый сотрудник той же роли на каждые 40 команд
+        if (r.method !== "GET" && ++commands % 40 === 0) s = await fresh(role);
         const before = h.fake.calls.length;
         const res = await h.app.inject({ method: r.method as "GET", url: concrete(r.url), headers: browser(s), payload: r.method === "GET" ? undefined : {} });
         expect(res.statusCode, `${role} ${r.method} ${r.url}`).toBe(403);

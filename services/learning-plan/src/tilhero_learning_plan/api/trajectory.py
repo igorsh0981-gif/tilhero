@@ -1,4 +1,5 @@
-"""Траектория уроков (Mini App «Мой план» → telegram-bff → learning-plan), INTERNAL_API §3, bff.ts Trajectory.
+"""Траектория уроков (Mini App «Мой план» → telegram-bff → learning-plan), INTERNAL_API §3, bff.ts Trajectory;
+спринт 4 — ещё lessons (следующий урок в итогах урока).
 
 Ученик — только из внутреннего токена (`sub` = активный ученик `lrn`), никогда из запроса (IDOR).
 """
@@ -11,7 +12,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, Request
 
 from tilhero_common.app import Runtime, get_runtime
-from tilhero_learning_plan.api.common import clock_of, current_user, settings_of
+from tilhero_learning_plan.api.common import clock_of, settings_of, trajectory_user
 from tilhero_learning_plan.domain import trajectory
 from tilhero_learning_plan.schemas import TrajectoryOut
 
@@ -38,11 +39,11 @@ async def get_trajectory(
         description="сегмент активного ученика (как `audience=` у catalog): BFF знает возраст из профиля; "
                     "без параметра — проекция профиля identity-consent; детский сегмент не понижается",
     ),
-    user_id: uuid.UUID = Depends(current_user),
+    user_id: uuid.UUID = Depends(trajectory_user),
     rt: Runtime = Depends(get_runtime),
 ) -> TrajectoryOut:
     """→ Trajectory. Входы изменились (диагностика, освоенные навыки, цель/темы плана, сегмент, опубликованный
-    курс) — новая ревизия + `learning.trajectory.updated.v1`; иначе — последняя ревизия без изменений."""
+    курс, пройденные уроки) — новая ревизия + `learning.trajectory.updated.v1`; иначе — последняя ревизия."""
     settings = settings_of(request)
     body = await trajectory.get_trajectory(
         rt, user_id=user_id, pair_id=pair_id or settings.default_pair, audience_hint=audience,

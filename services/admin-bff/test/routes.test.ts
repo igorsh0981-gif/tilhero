@@ -22,6 +22,13 @@ import {
   PAYLOAD_HASH,
   REQUEST_ID,
   LEARNER_ID,
+  APPEAL_ID,
+  EVALUATION_ID,
+  EVALUATION_ID_2,
+  RUN_ID,
+  SESSION_ID,
+  GOLDEN_INPUT,
+  REEVALUATION_BODY,
   NOTE_ID,
   RECORD_ID,
   TICKET_ID,
@@ -63,6 +70,8 @@ function probe(req: FastifyRequest, reply: FastifyReply, payload: unknown): void
 }
 
 const STAFF_ID = "7d0c2f43-58b5-4d0e-9f7e-2a8c7c1b9e11";
+const AG = "/admin/v1/ai/agents/conversation_partner";
+
 const IK = (k: string) => ({ "idempotency-key": `matrix-${k}-0001` });
 
 interface Case {
@@ -476,6 +485,143 @@ const CASES: Record<string, Case> = {
     domain: ["diagnostics", "POST", "/admin/v1/diagnostics/tests/dx-en-kids/versions/2/publish"],
   },
   "GET /admin/v1/diagnostics/stats": { url: "/admin/v1/diagnostics/stats?period=7d", status: 200, domain: ["diagnostics", "GET", "/admin/v1/diagnostics/stats"] },
+  // ---------- агенты и скиллы (ai-gateway)
+  "GET /admin/v1/ai/agents": { url: "/admin/v1/ai/agents", status: 200, domain: ["aiGateway", "GET", "/admin/v1/ai/agents"] },
+  "GET /admin/v1/ai/agents/:agentId": { url: `${AG}`, status: 200, domain: ["aiGateway", "GET", AG] },
+  "GET /admin/v1/ai/agents/:agentId/versions/:v": { url: `${AG}/versions/1`, status: 200, domain: ["aiGateway", "GET", `${AG}/versions/1`] },
+  "POST /admin/v1/ai/agents/:agentId/versions": {
+    url: `${AG}/versions`,
+    payload: { from_version: 1 },
+    headers: IK("agver"),
+    status: 201,
+    domain: ["aiGateway", "POST", `${AG}/versions`],
+  },
+  "PATCH /admin/v1/ai/agents/:agentId/versions/:v": {
+    url: `${AG}/versions/2`,
+    payload: { instructions: "Отвечай коротко.", temperature: 0.2, fallback_model_id: null },
+    headers: { "if-match": "2026-11-19T08:00:00Z" },
+    status: 200,
+    domain: ["aiGateway", "PATCH", `${AG}/versions/2`],
+  },
+  "DELETE /admin/v1/ai/agents/:agentId/versions/:v": { url: `${AG}/versions/2`, status: 204, domain: ["aiGateway", "DELETE", `${AG}/versions/2`] },
+  "POST /admin/v1/ai/agents/:agentId/versions/:v/test-runs": {
+    url: `${AG}/versions/2/test-runs`,
+    status: 202,
+    domain: ["aiGateway", "POST", `${AG}/versions/2/test-runs`],
+  },
+  "GET /admin/v1/ai/agents/:agentId/versions/:v/test-runs/:runId": {
+    url: `${AG}/versions/2/test-runs/${RUN_ID}`,
+    status: 200,
+    domain: ["aiGateway", "GET", `${AG}/versions/2/test-runs/${RUN_ID}`],
+  },
+  "POST /admin/v1/ai/agents/:agentId/versions/:v/publish": {
+    url: `${AG}/versions/2/publish`,
+    payload: { reason: "тесты зелёные" },
+    headers: IK("agpub"),
+    status: 200,
+    domain: ["aiGateway", "POST", `${AG}/versions/2/publish`],
+  },
+  "PUT /admin/v1/ai/agents/:agentId/canary": {
+    url: `${AG}/canary`,
+    payload: { version: 2, percent: 10, reason: "проверка на 10%" },
+    status: 200,
+    domain: ["aiGateway", "PUT", `${AG}/canary`],
+  },
+  "DELETE /admin/v1/ai/agents/:agentId/canary": {
+    url: `${AG}/canary`,
+    payload: { reason: "достаточно данных" },
+    status: 200,
+    domain: ["aiGateway", "DELETE", `${AG}/canary`],
+  },
+  "POST /admin/v1/ai/agents/:agentId/rollback": {
+    url: `${AG}/rollback`,
+    payload: { reason: "рост отказов" },
+    status: 200,
+    domain: ["aiGateway", "POST", `${AG}/rollback`],
+  },
+  "GET /admin/v1/ai/agents/:agentId/golden-cases": { url: `${AG}/golden-cases`, status: 200, domain: ["aiGateway", "GET", `${AG}/golden-cases`] },
+  "POST /admin/v1/ai/agents/:agentId/golden-cases": {
+    url: `${AG}/golden-cases`,
+    payload: GOLDEN_INPUT,
+    headers: IK("golden"),
+    status: 201,
+    domain: ["aiGateway", "POST", `${AG}/golden-cases`],
+  },
+  "PATCH /admin/v1/ai/golden-cases/:caseId": {
+    url: "/admin/v1/ai/golden-cases/cp-01-correct",
+    payload: { mandatory: false },
+    status: 200,
+    domain: ["aiGateway", "PATCH", "/admin/v1/ai/golden-cases/cp-01-correct"],
+  },
+  "DELETE /admin/v1/ai/golden-cases/:caseId": {
+    url: "/admin/v1/ai/golden-cases/cp-01-correct",
+    status: 204,
+    domain: ["aiGateway", "DELETE", "/admin/v1/ai/golden-cases/cp-01-correct"],
+  },
+  // ---------- модели, провайдер, бюджет, затраты (ai-gateway)
+  "GET /admin/v1/ai/models": { url: "/admin/v1/ai/models", status: 200, domain: ["aiGateway", "GET", "/admin/v1/ai/models"] },
+  "PUT /admin/v1/ai/models/:modelId": {
+    url: "/admin/v1/ai/models/claude-haiku-5-5",
+    payload: { input_usd_per_mtok: 0.1, output_usd_per_mtok: 0.5, active: true, reason: "прайс 19.11" },
+    status: 200,
+    domain: ["aiGateway", "PUT", "/admin/v1/ai/models/claude-haiku-5-5"],
+  },
+  "GET /admin/v1/ai/provider": { url: "/admin/v1/ai/provider", status: 200, domain: ["aiGateway", "GET", "/admin/v1/ai/provider"] },
+  "GET /admin/v1/ai/budget": { url: "/admin/v1/ai/budget", status: 200, domain: ["aiGateway", "GET", "/admin/v1/ai/budget"] },
+  "PUT /admin/v1/ai/budget": {
+    url: "/admin/v1/ai/budget",
+    payload: { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 80, reason: "решение владельца" },
+    status: 200,
+    domain: ["aiGateway", "PUT", "/admin/v1/ai/budget"],
+  },
+  "POST /admin/v1/ai/emergency-stop": {
+    url: "/admin/v1/ai/emergency-stop",
+    payload: { enabled: true, reason: "аномальный расход" },
+    headers: IK("estop"),
+    status: 200,
+    domain: ["aiGateway", "POST", "/admin/v1/ai/emergency-stop"],
+  },
+  "GET /admin/v1/ai/usage/summary": { url: "/admin/v1/ai/usage/summary?period=week", status: 200, domain: ["aiGateway", "GET", "/admin/v1/ai/usage/summary"] },
+  "GET /admin/v1/ai/usage": {
+    url: `/admin/v1/ai/usage?session_id=${SESSION_ID}&limit=20`,
+    status: 200,
+    domain: ["aiGateway", "GET", "/admin/v1/ai/usage"],
+  },
+  // ---------- контроль диалогов (lessons, assessment)
+  "GET /admin/v1/qa/sessions": {
+    url: "/admin/v1/qa/sessions?from=2026-11-01&to=2026-11-19T23:59:59Z&kind=lesson&status=completed&outcome=success&flag=ai_used&lesson_id=l-a1-05-cafe&level=A1&limit=50",
+    status: 200,
+    domain: ["lessons", "GET", "/admin/v1/lesson-sessions"],
+  },
+  "GET /admin/v1/qa/sessions/:id": { url: `/admin/v1/qa/sessions/${SESSION_ID}`, status: 200, domain: ["lessons", "GET", `/admin/v1/lesson-sessions/${SESSION_ID}`] },
+  "POST /admin/v1/qa/sessions/:id/transcript": {
+    url: `/admin/v1/qa/sessions/${SESSION_ID}/transcript`,
+    payload: { reason: "разбор апелляции ученика" },
+    status: 200,
+    domain: ["lessons", "POST", `/admin/v1/lesson-sessions/${SESSION_ID}/transcript`],
+  },
+  "POST /admin/v1/qa/evaluations/:id/flag": {
+    url: `/admin/v1/qa/evaluations/${EVALUATION_ID}/flag`,
+    payload: { reason: "спорная оценка грамматики" },
+    status: 200,
+    domain: ["assessment", "POST", `/admin/v1/evaluations/${EVALUATION_ID}/flag`],
+  },
+  "POST /admin/v1/qa/evaluations/:id/reevaluate": {
+    url: `/admin/v1/qa/evaluations/${EVALUATION_ID}/reevaluate`,
+    payload: REEVALUATION_BODY,
+    headers: IK("reeval"),
+    status: 201,
+    domain: ["assessment", "POST", `/admin/v1/evaluations/${EVALUATION_ID}/reevaluate`],
+  },
+  "GET /admin/v1/qa/appeals": { url: "/admin/v1/qa/appeals?status=new&limit=20", status: 200, domain: ["assessment", "GET", "/admin/v1/appeals"] },
+  "POST /admin/v1/qa/appeals/:id/take": { url: `/admin/v1/qa/appeals/${APPEAL_ID}/take`, status: 200, domain: ["assessment", "POST", `/admin/v1/appeals/${APPEAL_ID}/take`] },
+  "POST /admin/v1/qa/appeals/:id/decide": {
+    url: `/admin/v1/qa/appeals/${APPEAL_ID}/decide`,
+    payload: { decision: "corrected", note: "Оценка исправлена: ответ верный", new_evaluation_id: EVALUATION_ID_2 },
+    headers: IK("decideap"),
+    status: 200,
+    domain: ["assessment", "POST", `/admin/v1/appeals/${APPEAL_ID}/decide`],
+  },
 };
 
 let h: Harness;
@@ -510,14 +656,20 @@ describe("матрица маршрутов", () => {
   });
 
   it("happy path: статус, вызов домена с actor, ответ строго по контракту admin.ts", async () => {
-    const { staff, s } = await loginAs(h, "super_admin");
+    let { staff, s } = await loginAs(h, "super_admin");
     await stepUp(h, s);
     // logout завершает сессию — последним
     const keys = Object.keys(CASES).sort((a, b) => Number(a.includes("/logout")) - Number(b.includes("/logout")));
+    let commands = 0;
     for (const key of keys) {
       if (key === "POST /admin/v1/auth/step-up") continue; // уже выполнен
       const c = CASES[key]!;
       const method = key.split(" ")[0]! as "GET";
+      // лимит команд — 60/мин на сотрудника: новый сотрудник на каждые 40 команд
+      if (method !== "GET" && ++commands % 40 === 0) {
+        ({ staff, s } = await loginAs(h, "super_admin"));
+        await stepUp(h, s);
+      }
       const before = h.fake.calls.length;
       const res = await h.app.inject({
         method,
@@ -540,8 +692,11 @@ describe("матрица маршрутов", () => {
   });
 
   it("4xx домена → клиенту с кодом и details; 5xx и сеть → 503 UPSTREAM_UNAVAILABLE {service} на каждом проксирующем маршруте", async () => {
+    // дашборд и карточка сессии «Контроля диалогов» собираются из независимых блоков (ошибка блока → 200, проверки — в
+    // api.test.ts и ai.test.ts)
     const proxied = Object.entries(CASES).filter(
-      ([k, c]) => c.domain && c.domain[0] !== "adminIdentity" && k !== "GET /admin/v1/dashboard" && !k.includes("/auth/"),
+      ([k, c]) =>
+        c.domain && c.domain[0] !== "adminIdentity" && k !== "GET /admin/v1/dashboard" && k !== "GET /admin/v1/qa/sessions/:id" && !k.includes("/auth/"),
     );
     expect(proxied.length).toBeGreaterThan(70);
     // лимит команд — 60/мин на сотрудника: новый сотрудник на каждые 40 команд

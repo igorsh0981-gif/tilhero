@@ -19,6 +19,9 @@ const PROD = {
   EXPERIENCE_URL: "http://experience-config.railway.internal:8106",
   CATALOG_URL: "http://catalog.railway.internal:8110",
   DIAGNOSTICS_URL: "http://diagnostics.railway.internal:8111",
+  LESSONS_URL: "http://lessons.railway.internal:8112",
+  ASSESSMENT_URL: "http://assessment.railway.internal:8113",
+  AI_GATEWAY_URL: "http://ai-gateway.railway.internal:8114",
 };
 
 function problems(env: Record<string, string>): string[] {
@@ -53,6 +56,9 @@ describe("config", () => {
       notifications: "http://127.0.0.1:8104",
       catalog: "http://127.0.0.1:8110",
       diagnostics: "http://127.0.0.1:8111",
+      lessons: "http://127.0.0.1:8112",
+      assessment: "http://127.0.0.1:8113",
+      aiGateway: "http://127.0.0.1:8114",
     });
   });
 
@@ -60,7 +66,7 @@ describe("config", () => {
     expect(Object.values(DOMAIN_URL_VARS).sort()).toEqual(
       [
         "ADMIN_IDENTITY_URL", "AUDIT_URL", "EXPERIENCE_URL", "IDENTITY_URL", "NOTIFICATIONS_URL", "SUPPORT_URL", "USER_ADMIN_URL",
-        "CATALOG_URL", "DIAGNOSTICS_URL",
+        "CATALOG_URL", "DIAGNOSTICS_URL", "LESSONS_URL", "ASSESSMENT_URL", "AI_GATEWAY_URL",
       ].sort(),
     );
     for (const v of Object.values(DOMAIN_URL_VARS)) expect(DEV_DEFAULTS[v]).toMatch(/^http:\/\/127\.0\.0\.1:81\d\d$/);
@@ -82,6 +88,22 @@ describe("config", () => {
     }
     expect(loadConfig(PROD).urls).toMatchObject({ catalog: PROD.CATALOG_URL, diagnostics: PROD.DIAGNOSTICS_URL });
     expect(problems({ ...PROD, DIAGNOSTICS_URL: "diagnostics:8111" })).toEqual([expect.stringMatching(/^DIAGNOSTICS_URL=/)]);
+  });
+
+  it("спринт 4: AI_GATEWAY_URL, LESSONS_URL и ASSESSMENT_URL обязательны в stage/prod (порты 8112–8114 в dev)", () => {
+    for (const env of ["stage", "prod"]) {
+      const { AI_GATEWAY_URL: _a, LESSONS_URL: _l, ASSESSMENT_URL: _s, ...rest } = PROD;
+      const p = problems({ ...rest, ENV: env });
+      expect(p, env).toEqual([
+        expect.stringMatching(/^AI_GATEWAY_URL не задана/),
+        expect.stringMatching(/^LESSONS_URL не задана/),
+        expect.stringMatching(/^ASSESSMENT_URL не задана/),
+      ]);
+    }
+    expect(loadConfig(PROD).urls).toMatchObject({ aiGateway: PROD.AI_GATEWAY_URL, lessons: PROD.LESSONS_URL, assessment: PROD.ASSESSMENT_URL });
+    expect(problems({ ...PROD, AI_GATEWAY_URL: "ai-gateway:8114" })).toEqual([expect.stringMatching(/^AI_GATEWAY_URL=/)]);
+    const dev = loadConfig({});
+    expect(dev.urls).toMatchObject({ lessons: "http://127.0.0.1:8112", assessment: "http://127.0.0.1:8113", aiGateway: "http://127.0.0.1:8114" });
   });
 
   it("prod: полный набор — ок, без dev-деривации и без имперсонации; NODE_ENV=production тоже защищённое", () => {

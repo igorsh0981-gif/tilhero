@@ -1,5 +1,14 @@
 import type {
-  ActivityRequest,
+  Appeal,
+  EvaluationView,
+  LessonCardDetail,
+  LessonHistoryItem,
+  LessonSession,
+  LessonStep,
+  LessonSummary,
+  SimplerExplanation,
+  StepAnswer,
+  StepResult,
   AnswerRequest,
   AnswerResult,
   DiagnosticArea,
@@ -52,6 +61,8 @@ import type {
   WhatsNew,
   WhatsNewNote,
 } from "@tilhero/contracts/bff";
+import type { SessionKind } from "@tilhero/contracts/ai";
+import type { Localized } from "@tilhero/contracts/content";
 import type { ApiClient } from "./client";
 
 export interface ScenarioFilters {
@@ -126,7 +137,6 @@ export function createBff(client: ApiClient) {
       client.request<LearningPlan>("PATCH", "/v1/plan", { body: patch, headers: version != null ? { "If-Match": String(version) } : undefined }),
     completeOnboarding: () => client.request<LearningPlan>("POST", "/v1/plan/onboarding/complete"),
     today: () => get<TodayPlan>("/v1/plan/today"),
-    recordActivity: (body: ActivityRequest, key: string) => client.request<TodayPlan>("POST", "/v1/plan/activity", { body, idempotencyKey: key }),
     goals: () => get<{ items: DirectoryItem[] }>("/v1/directory/goals"),
     topics: () => get<{ items: DirectoryItem[] }>("/v1/directory/topics"),
 
@@ -181,6 +191,32 @@ export function createBff(client: ApiClient) {
     mediaAudio: (id: string) => client.blob(`/v1/media/${enc(id)}/audio`),
     mediaRequests: () => get<{ items: MediaRequest[] }>("/v1/media/requests"),
     createMediaRequest: (body: MediaRequestCreate, key: string) => client.request<MediaRequest>("POST", "/v1/media/requests", { body, idempotencyKey: key }),
+
+    // ---- sprint 4: lessons, practice sessions, summary, evaluation, appeals ----
+    lessonCard: (id: string) => get<LessonCardDetail>(`/v1/lessons/${enc(id)}`),
+    /** one key per «Начать» tap; a retry after a lost answer reuses it (the same session) */
+    startLesson: (id: string, key: string) => client.request<LessonSession>("POST", `/v1/lessons/${enc(id)}/sessions`, { idempotencyKey: key }),
+    startScenario: (id: string, key: string) => client.request<LessonSession>("POST", `/v1/scenarios/${enc(id)}/sessions`, { idempotencyKey: key }),
+    startMedia: (id: string, key: string) => client.request<LessonSession>("POST", `/v1/media/${enc(id)}/sessions`, { idempotencyKey: key }),
+    activeSession: (quiet = false) => get<{ session: LessonSession | null }>("/v1/sessions/active", undefined, quiet),
+    lessonSession: (id: string) => get<LessonSession>(`/v1/sessions/${enc(id)}`),
+    pauseSession: (id: string) => client.request<LessonSession>("POST", `/v1/sessions/${enc(id)}/pause`),
+    resumeSession: (id: string) => client.request<LessonSession>("POST", `/v1/sessions/${enc(id)}/resume`),
+    cancelSession: (id: string) => client.request<LessonSession>("POST", `/v1/sessions/${enc(id)}/cancel`),
+    currentStep: (id: string) => get<LessonStep>(`/v1/sessions/${enc(id)}/current`),
+    /** the same answer to the same step is answered the same way (idempotent by step) — safe to re-send */
+    answerStep: (id: string, stepId: string, body: StepAnswer) => client.request<StepResult>("POST", `/v1/sessions/${enc(id)}/steps/${enc(stepId)}`, { body }),
+    stepHint: (id: string, stepId: string) => client.request<{ hint: Localized }>("POST", `/v1/sessions/${enc(id)}/steps/${enc(stepId)}/hint`),
+    /** locale — the learner's language of the explanation (the AI answers in it) */
+    simpler: (id: string, locale: UiLang) => client.request<SimplerExplanation>("POST", `/v1/sessions/${enc(id)}/simpler`, { query: { locale } }),
+    retryRoleplay: (id: string) => client.request<LessonStep>("POST", `/v1/sessions/${enc(id)}/roleplay/retry`),
+    finishSession: (id: string) => client.request<LessonSummary>("POST", `/v1/sessions/${enc(id)}/finish`),
+    sessionSummary: (id: string) => get<LessonSummary>(`/v1/sessions/${enc(id)}/summary`),
+    startReview: (id: string, key: string) => client.request<LessonSession>("POST", `/v1/sessions/${enc(id)}/review`, { idempotencyKey: key }),
+    sessions: (kind: SessionKind | null, cursor: string | null) => get<Page<LessonHistoryItem>>("/v1/sessions", { kind, cursor, limit: 20 }),
+    evaluation: (id: string) => get<EvaluationView>(`/v1/evaluations/${enc(id)}`),
+    appeal: (id: string, reason: string, key: string) => client.request<Appeal>("POST", `/v1/evaluations/${enc(id)}/appeal`, { body: { reason }, idempotencyKey: key }),
+    appeals: () => get<{ items: Appeal[] }>("/v1/appeals"),
 
     // ---- deletion ----
     requestDeletion: (body: DeletionRequest) => client.request<DeletionResponse>("POST", "/v1/profile/delete-request", { body }),

@@ -214,6 +214,8 @@ describe("overview", () => {
       campaigns: { available: true, data: { scheduled: 0, sending: 0, sent_in_period: 0, delivered_in_period: 0 } },
       content: { available: false, data: null, service: "catalog" },
       diagnostics: { available: false, data: null, service: "diagnostics" },
+      lessons: { available: false, data: null, service: "lessons" },
+      ai: { available: false, data: null, service: "ai-gateway" },
     };
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);
     ui(<Overview />, ["dashboard.read"]);
@@ -233,6 +235,8 @@ describe("overview", () => {
       campaigns: { available: true, data: { scheduled: 1, sending: 0, sent_in_period: 2, delivered_in_period: 5 } },
       content: { available: false, data: null, service: "catalog" },
       diagnostics: { available: false, data: null, service: "diagnostics" },
+      lessons: { available: false, data: null, service: "lessons" },
+      ai: { available: false, data: null, service: "ai-gateway" },
     };
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);
     ui(<Overview />, ["dashboard.read"]);
@@ -244,6 +248,47 @@ describe("overview", () => {
     ui(<Overview />, ["dashboard.read"], "en");
     expect(await screen.findByTestId("dc-sent")).toHaveTextContent(/^Campaigns started, today\s*2$/);
     expect(screen.getByTestId("dc-delivered")).toHaveTextContent(/^Messages delivered, today\s*5$/);
+  });
+});
+
+describe("overview · sprint 4 blocks", () => {
+  const base: Dashboard = {
+    period: "today",
+    generated_at: "2026-11-19T10:00:00Z",
+    learners: { available: false, data: null, service: "user-admin" },
+    support: { available: false, data: null, service: "support" },
+    whats_new: { available: false, data: null, service: "experience-config" },
+    campaigns: { available: false, data: null, service: "notifications" },
+    content: { available: false, data: null, service: "catalog" },
+    diagnostics: { available: false, data: null, service: "diagnostics" },
+    lessons: { available: true, data: { period: "today", started: 64, completed: 51, completion_pct: 79.7, median_minutes: 18, by_kind: { lesson: 40, scenario: 14, media: 8, review: 2 }, ai_degraded_pct: 6.3, appeals_open: 2, human_review_open: 1 } },
+    ai: {
+      available: true,
+      data: {
+        period: "month", spent_usd: 18.4, monthly_cap_usd: 20, cap_used_pct: 92, calls: 2400, unavailable: 110, unavailable_pct: 4.6, p95_latency_ms: 2380,
+        by_agent: [], by_model: [], by_day: [], avg_cost_per_lesson_usd: 0.0118, ai_enabled: false, alert_percent: 80,
+      },
+    },
+  };
+  it("lessons and ai blocks with their own «no data»; attention: budget threshold, AI off, appeals, manual reviews", async () => {
+    handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: base } : undefined);
+    ui(<Overview />, ["dashboard.read"]);
+    expect(await screen.findByTestId("dls-completion")).toHaveTextContent("79,7");
+    expect(screen.getByTestId("dai-off")).toHaveTextContent("ИИ выключен");
+    expect(screen.getByTestId("dai-pct")).toHaveTextContent("порог предупреждения");
+    const att = screen.getByTestId("attention");
+    expect(att).toHaveTextContent("Расход ИИ достиг порога предупреждения 80 %");
+    expect(att).toHaveTextContent("ИИ выключен (аварийная остановка)");
+    // without qa.read / costs.read the counts are shown without links
+    expect(screen.queryByTestId("att-appeals")).toBeNull();
+    expect(screen.getByTestId("att-appeals-n")).toHaveTextContent("2");
+    expect(screen.getByTestId("att-human-review-n")).toHaveTextContent("1");
+    expect(screen.queryByTestId("dls-appeals-link")).toBeNull();
+    cleanup();
+    handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: { ...base, lessons: { available: false, data: null, service: "lessons" } } } : undefined);
+    ui(<Overview />, ["dashboard.read", "qa.read"]);
+    expect(await screen.findByTestId("block-lessons-off")).toHaveTextContent("lessons");
+    expect(screen.getByTestId("block-ai")).toHaveAttribute("data-available", "true");
   });
 });
 

@@ -8,17 +8,20 @@ import { loadVoices, pickEnglishVoice, speakLines, stopSpeaking, type EnVariant 
 import { Icon } from "../../ui/Icon";
 import { Btn, ErrorLine, Pill, Skeleton } from "../../ui/kit";
 import { Bar } from "../../ui/shell";
+import { useStartSession } from "../lessons/startSession";
 import { MEDIA_ICON } from "./Practice";
 
 /**
  * A media item (APP-MEDIA-01, AT-29): source and attribution (plain text, never a link), listening — the audio file from
  * the BFF or, without a file, device speech synthesis line by line (marked «синтез речи»), the transcript with the
- * translation on tap (only when the licence allows it), phrases; exercises arrive with the lessons.
+ * translation on tap (only when the licence allows it), phrases; «Упражнения» (AT-48) — a media session (comprehension,
+ * gaps, order of lines, phrase meaning) with a check and a summary; no published exercises — no button.
  */
 export function MediaScreen({ id }: { id: string }) {
   const { bff, nav } = useApp();
   const { t } = useI18n();
   const item = useLoad(() => bff.mediaItem(id), [id]);
+  const { start, sheet } = useStartSession();
   const d = item.data;
   return (
     <>
@@ -36,6 +39,17 @@ export function MediaScreen({ id }: { id: string }) {
           <MediaBody d={d} />
         ) : null}
       </main>
+      {d?.exercises_available ? (
+        <div className="foot" data-testid="md-exercises">
+          <ErrorLine text={start.error} />
+          <Btn busy={start.busy} onClick={() => void start.run({ kind: "media", id: d.asset_id })} data-testid="md-exercises-start">
+            <Icon name="lessons" size={18} />
+            {t("md.exercisesStart")}
+          </Btn>
+          <p className="sub small center">{t("md.exercisesNote")}</p>
+        </div>
+      ) : null}
+      {sheet}
     </>
   );
 }
@@ -107,10 +121,6 @@ function MediaBody({ d }: { d: MediaDetail }) {
         </section>
       ) : null}
 
-      <div className="card pen hrow" data-testid="md-exercises">
-        <Icon name="lessons" size={20} />
-        <span className="sub ink grow">{t("md.exercises")}</span>
-      </div>
     </div>
   );
 }

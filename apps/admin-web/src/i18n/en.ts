@@ -1,9 +1,11 @@
 import type { MessageKey } from "./ru";
 import { enContent } from "./en.content";
+import { enAi } from "./en.ai";
 
 /** EN dictionary — the same keys as ru.ts (test). Plurals: "one|other" with {n}. */
 export const en: Record<MessageKey, string> = {
   ...enContent,
+  ...enAi,
   /* account */
   "account.changePwd": "Change password",
   "account.idle": "Sign-out after {n} min of inactivity",
@@ -834,11 +836,11 @@ export const en: Record<MessageKey, string> = {
   "role.analyst": "Analyst",
   "role.auditor": "Auditor",
   "role.communications": "Communications",
-  "role.desc.analyst": "overview and learners, read only",
-  "role.desc.auditor": "overview and the audit log",
+  "role.desc.analyst": "overview and learners; AI agents, dialogue QA and costs — read only",
+  "role.desc.auditor": "overview and the audit log; AI agents, dialogue QA and costs — read",
   "role.desc.communications": "“What’s new”, notification templates, campaigns",
-  "role.desc.methodist": "course, lessons, scenarios, rubrics: editing, review, publication; learners without reveal",
-  "role.desc.operations": "configuration, support, learners, audit",
+  "role.desc.methodist": "course, lessons, scenarios, rubrics; AI agents: versions, tests, publication; re-evaluation and appeals",
+  "role.desc.operations": "configuration, support, learners, audit; AI costs and the emergency stop",
   "role.desc.read_only": "overview only",
   "role.desc.super_admin": "all permissions, MFA required",
   "role.desc.support": "learners and tickets, replies",
@@ -916,12 +918,8 @@ export const en: Record<MessageKey, string> = {
   "sla.state": "State",
   "sla.t": "SLA by category and priority",
   /* soon */
-  "soon.agents.1": "Agent roles, skills and versions, golden tests",
-  "soon.agents.2": "Canary rollout and rollback without a build",
   "soon.content.1": "Lessons and dialogue scenarios: versions, methodist review, publication and rollback",
   "soon.content.2": "RU/UZ localisation and assessment rubrics",
-  "soon.costs.1": "Daily model and voice budgets",
-  "soon.costs.2": "Kill switches and alert thresholds",
   "soon.events.1": "Seasonal events: quests, rewards, audience",
   "soon.events.2": "Home banner and a “What’s new” note about the event",
   "soon.game.1": "XP, streaks, daily quests, leagues and the shop",
@@ -930,8 +928,6 @@ export const en: Record<MessageKey, string> = {
   "soon.heroes.2": "Availability for child profiles and at sign-up",
   "soon.langs.1": "Language pairs and explanation languages as catalogue records",
   "soon.langs.2": "Path of a new pair: methodist review, pilot, publication",
-  "soon.qa.1": "Queue of disputed assessments and re-evaluation that keeps the original",
-  "soon.qa.2": "Anonymised utterances — by a separate permission and with a reason",
   "soon.tag": "sprint {n}",
   "soon.text": "This section arrives in sprint {n}. There is no data yet — nothing is made up.",
   "soon.title": "{page} — coming soon",

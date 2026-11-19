@@ -6,6 +6,7 @@
   "required": [
     "evaluation_id",
     "supersedes",
+    "session_id",
     "user_id",
     "pair_id",
     "skill_outcomes",
@@ -18,6 +19,10 @@
       "format": "uuid"
     },
     "supersedes": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "session_id": {
       "type": "string",
       "format": "uuid"
     },

@@ -1,5 +1,5 @@
 import type { DiagnosticItem } from "@tilhero/contracts/bff";
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useEffect, useId, useRef, useState, type DragEvent } from "react";
 import { MAX_LISTENS, orderAnswer, orderPick, orderStart, orderUnpick, splitGap, type OrderState } from "../../domain/diagnostics";
 import { useI18n } from "../../i18n";
 import { haptic, speak, stopSpeaking } from "../../tg";
@@ -138,8 +138,11 @@ function Listen({ text, voice, kid, blocked }: { text: string; voice: SpeechSynt
 }
 
 /* ---------- word order: tap a word to add it, tap it in the answer to return it; drag and drop works too ---------- */
-function OrderWords({ options, onChange }: { options: string[]; onChange: (a: Answer) => void }) {
+/** Words (or, with `lines`, dialogue lines of a media exercise) in order — taps or drag and drop. Reused by the lesson
+ *  player (order_words, order_lines). */
+export function OrderWords({ options, onChange, lines, hint }: { options: string[]; onChange: (a: string[] | null) => void; lines?: boolean; hint?: string }) {
   const { t } = useI18n();
+  const uid = useId();
   const [st, setSt] = useState<OrderState>(() => orderStart(options.length));
   const [over, setOver] = useState(false);
   const drag = useRef<number | null>(null);
@@ -173,12 +176,12 @@ function OrderWords({ options, onChange }: { options: string[]; onChange: (a: An
   };
   return (
     <div className="stack tight">
-      <p className="sub small">{t("dx.order.hint")}</p>
-      <p className="lb" id="ow-line-l">{t("dx.order.line")}</p>
+      <p className="sub small">{hint ?? t("dx.order.hint")}</p>
+      <p className="lb" id={`${uid}-line`}>{t("dx.order.line")}</p>
       <div
-        className={cx("ow-line", over && "over")}
+        className={cx("ow-line", over && "over", lines && "lines")}
         role="group"
-        aria-labelledby="ow-line-l"
+        aria-labelledby={`${uid}-line`}
         lang="en"
         data-testid="ow-line"
         onDragOver={(e) => {
@@ -207,14 +210,14 @@ function OrderWords({ options, onChange }: { options: string[]; onChange: (a: An
         ))}
       </div>
       <div className="hrow between">
-        <p className="lb" id="ow-bank-l">{t("dx.order.bank")}</p>
+        <p className="lb" id={`${uid}-bank`}>{t("dx.order.bank")}</p>
         {st.line.length ? (
           <Btn variant="link" onClick={() => update(orderStart(options.length))} data-testid="ow-reset">
             {t("dx.order.reset")}
           </Btn>
         ) : null}
       </div>
-      <div className="ow-bank" role="group" aria-labelledby="ow-bank-l" lang="en" data-testid="ow-bank" onDragOver={(e) => e.preventDefault()} onDrop={dropOnBank}>
+      <div className={cx("ow-bank", lines && "lines")} role="group" aria-labelledby={`${uid}-bank`} lang="en" data-testid="ow-bank" onDragOver={(e) => e.preventDefault()} onDrop={dropOnBank}>
         {st.bank.map((tk) => (
           <button
             key={tk}

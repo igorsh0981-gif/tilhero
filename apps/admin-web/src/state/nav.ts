@@ -33,7 +33,7 @@ export interface NavItem {
   /** visible when the staff member has ANY of these permissions (Me.permissions) */
   perms: readonly Permission[];
   /** section of a later sprint: honest «soon» screen with the sprint number */
-  soon?: 4 | 6;
+  soon?: 6;
 }
 
 /** Default order and grouping (prototype NAV). */
@@ -42,9 +42,10 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: "users", group: "product", icon: "users", perms: ["users.read"] },
   // sprint 3: course, lessons, scenarios, rubrics, media and rights, learners' requests, review, diagnostics
   { id: "content", group: "product", icon: "book", perms: ["content.read"] },
-  { id: "agents", group: "ai", icon: "cpu", perms: ["dashboard.read"], soon: 4 },
-  { id: "qa", group: "ai", icon: "clipboardCheck", perms: ["dashboard.read"], soon: 4 },
-  { id: "costs", group: "ai", icon: "gauge", perms: ["dashboard.read"], soon: 4 },
+  // sprint 4: agents and skills (ai.read), dialogue QA (qa.read), AI costs and limits (costs.read)
+  { id: "agents", group: "ai", icon: "cpu", perms: ["ai.read"] },
+  { id: "qa", group: "ai", icon: "clipboardCheck", perms: ["qa.read"] },
+  { id: "costs", group: "ai", icon: "gauge", perms: ["costs.read"] },
   { id: "heroes", group: "game", icon: "hero", perms: ["dashboard.read"], soon: 6 },
   { id: "game", group: "game", icon: "trophy", perms: ["dashboard.read"], soon: 6 },
   { id: "events", group: "game", icon: "calendar", perms: ["dashboard.read"], soon: 6 },

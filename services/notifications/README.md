@@ -68,6 +68,7 @@ admin.ts, `*_name` сотрудников — `null` (заполняет admin-b
 | `notifications.support` | `support.ticket.replied.v1`, `support.ticket.status.changed.v1` (→ RESOLVED) | `support.reply` / `support.resolved` (`support` — всегда включена), кнопка `ticket_<number>`; текст ответа в уведомление не кладётся |
 | `notifications.product` | `experience.release_note.published.v1` | сохраняется в `broadcasts`; запись центра (`release_note.published`, `product`, `in_app_only`) создаётся ученику при чтении центра — см. «Что нового» |
 | `notifications.catalog` | `catalog.media_request.decided.v1` (спринт 3, только от `catalog`: от другого издателя — WARNING без `user_id`, без записи) | `media_request.decided` → ученику, `support` (всегда включена), ключ `media_request.decided:<request>:<status>` (повтор того же решения — без дубля, изменённое решение — новое сообщение); дальше — общая политика (выключатель, тихие часы, правила детей 6–13, хотя заявки бывают только у аккаунтов 14+). Название заявки в журнал (лог) не пишется |
+| `notifications.assessment` | `assessment.appeal.decided.v1` (спринт 4, только от `assessment`: от другого издателя — WARNING без `user_id`, без записи) | `appeal_decided` → ученику (ребёнку 6–13 — `appeal_decided.kid` опекуну), `support` (всегда включена), ключ `appeal_decided:<appeal_id>` — **одно уведомление на апелляцию** (повтор события и повторная публикация — без дубля); параметры — только `appeal_id`, `evaluation_id`, `decision`; текст решения сотрудника не принимается; дальше — общая политика (выключатель, тихие часы, окно детей) |
 | `notifications.user_deleted` | `user.deletion.requested.v1` (только от `identity-consent`, ревью P-7: от другого издателя — предупреждение в логе с типом события и издателем, без `user_id`; подтверждение шине без удаления и без ACK) | `deleted_users` + удаление журнала/центра ученика, записей других учеников с его именем (`subject_user_id`), `missed_state`, `inbox_state`, проекции семьи, кэшей → `user.domain.deleted.v1 {domain: notifications, mode: deleted}`; запоздавшие события для удалённого — без записи |
 | `notifications.delivery_cache` | `user.status.changed.v1`, `consent.revoked.v1`, `user.notification_settings.changed.v1`, `user.profile.updated.v1` | сброс кэша адресации и имени |
 
@@ -113,6 +114,7 @@ scheduled | unscheduled | stopped | finished | failed | test_sent` (object_type 
 | `support.reply`, `support.resolved` | support | `ticket_<number>` |
 | `release_note.published` | product | `route_news` |
 | `media_request.decided` (спринт 3) | support | `route_media_requests` |
+| `appeal_decided`, `appeal_decided.kid` (спринт 4) | support | `route_lessons` |
 | `pin.reset_code` (только синхронный HTTP, не в центре) | service | — |
 
 Детские тексты — родителю, с именем ребёнка, мягкие: без «потери серии», «провала», давления (тест
@@ -124,6 +126,14 @@ scheduled | unscheduled | stopped | finished | failed | test_sent` (object_type 
 licensed — «материал лицензирован и добавлен», rejected — «заявка отклонена», duplicate — «такая заявка уже есть»).
 Комментарий сотрудника (`decision_note`) в уведомление не кладётся — его нет в событии, ученик читает его на экране
 заявок в Mini App (как текст ответа поддержки). Детского варианта нет.
+
+`appeal_decided` (спринт 4, AT-47): решение по апелляции на оценку урока, два варианта — upheld «Мы проверили вашу
+оценку урока: оценка верна.» / corrected «Мы проверили вашу оценку урока: оценка исправлена, посмотрите обновлённый
+результат.» (UZ: «Dars bahongizni tekshirdik: baho toʻgʻri.» / «…: baho tuzatildi, yangilangan natijani koʻring.»),
+кнопка «Открыть уроки» / «Darslarni ochish» → `route_lessons`. Плейсхолдер `{appeal_result}` («оценка верна» /
+«оценка исправлена» на языке ученика). Текст решения сотрудника (`decision_note`) не включается — его нет в событии,
+ученик читает его в Mini App на экране оценки. Детский вариант `appeal_decided.kid` — родителю, с именем ребёнка
+(`{learner_name}`), мягко. Название шаблона — как в INTERNAL_API спринта 4 (`appeal_decided`, через «_»).
 
 ## Версии шаблонов (спринт 2)
 Код (`templates.py`) — тексты по умолчанию; у редактируемого `TemplateSpec` — `description`, `placeholder_names`,

@@ -5,7 +5,7 @@
 Что делает:
 1. Генерирует секреты: Ed25519-ключ внутреннего JWT на каждый сервис (+ общий список открытых ключей),
    SCHEDULER_TOKEN (n8n), SESSION_JWT_SECRET (BFF), INVITE_TOKEN_KEY (social), TELEGRAM_WEBHOOK_SECRET (бот),
-   пароли ролей БД <svc> и <svc>_owner.
+   USER_REF_SECRET (lessons: псевдоним ученика в «Контроле диалогов»), пароли ролей БД <svc> и <svc>_owner.
 2. Пишет в --out (каталог .dev/ в .gitignore — файлы НЕ коммитить):
    - <service>.env — переменные сервиса для вставки в Railway (Variables → Raw Editor);
    - db-passwords.sql — пароли ролей; выполнить ПОСЛЕ infra/db/bootstrap.sql под владельцем БД;
@@ -83,12 +83,12 @@ SERVICES: tuple[Service, ...] = (
                    "notifications", "catalog", "diagnostics", "ai-gateway", "lessons", "assessment")),
     Service("admin-web", 8080, "apps/admin-web/Dockerfile", public=True, health="/healthz"),
     Service("n8n", 5678, "infra/n8n/Dockerfile", health="/healthz",
-            calls=("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons")),
+            calls=("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment")),
 )
 JWT_ISSUERS = ("identity-consent", "learning-plan", "support", "notifications", "audit", "experience-config",
                "telegram-bot-gateway", "social", "telegram-bff", "admin-bff", "admin-identity", "user-admin",
                "catalog", "diagnostics", "lessons", "assessment", "ai-gateway")
-SCHEDULED = ("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons")
+SCHEDULED = ("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment")
 # имя переменной адреса в коде вызывающего (BFF и Python-сервисы называют identity по-разному)
 URL_VAR = {
     ("telegram-bff", "identity-consent"): "IDENTITY_URL",
@@ -144,6 +144,8 @@ class Secrets:
     mfa_key: str  # ADMIN_MFA_ENC_KEY (admin-identity): шифрует секреты TOTP сотрудников, base64 32 байта
     admin_password: str  # ADMIN_BOOTSTRAP_PASSWORD: временный пароль первого super_admin (смена при первом входе)
     internal_hmac: str  # INTERNAL_JWT_SECRET — обязателен Python-сервисам в stage/prod (>= 32), отличен от session_jwt
+    # USER_REF_SECRET (lessons): user_ref = HMAC-SHA256(user_id, секрет)[:8] — без секрета псевдоним не обратить
+    user_ref: str
 
     @classmethod
     def new(cls) -> Secrets:
@@ -151,7 +153,7 @@ class Secrets:
         return cls(seeds={n: os.urandom(32) for n in JWT_ISSUERS},
                    passwords={r: secrets.token_hex(24) for r in roles},
                    scheduler=token(), session_jwt=token(48), invite_key=token(), webhook=secrets.token_hex(32),
-                   n8n_key=token(), internal_hmac=token(48),
+                   n8n_key=token(), internal_hmac=token(48), user_ref=token(),
                    mfa_key=base64.b64encode(secrets.token_bytes(32)).decode(), admin_password=admin_password())
 
     def public_keys(self) -> str:
@@ -196,6 +198,8 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
         lines.append(f"SCHEDULER_TOKEN={sec.scheduler}")
     if svc.name == "social":
         lines += [f"INVITE_TOKEN_KEY={sec.invite_key}", f"TELEGRAM_APP_LINK={app_link}"]
+    if svc.name == "lessons":  # обязателен в stage/prod; смена секрета меняет все user_ref (старые ссылки QA)
+        lines.append(f"USER_REF_SECRET={sec.user_ref}")
     if svc.name == "telegram-bff":
         lines += [f"SESSION_JWT_SECRET={sec.session_jwt}", f"TELEGRAM_APP_LINK={app_link}",
                   "MINIAPP_ORIGIN=https://${{telegram-miniapp.RAILWAY_PUBLIC_DOMAIN}}",
@@ -206,8 +210,9 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
         lines += [f"ADMIN_MFA_ENC_KEY={sec.mfa_key}"]
         if admin_email:  # первый super_admin; после первого входа переменные удалить
             lines += [f"ADMIN_BOOTSTRAP_EMAIL={admin_email}", f"ADMIN_BOOTSTRAP_PASSWORD={sec.admin_password}"]
-    if svc.name == "ai-gateway":  # ключ провайдера вводит владелец в Railway; пусто — ИИ выключен (урок без ИИ)
-        lines += ["AI_PROVIDER=anthropic", "ANTHROPIC_API_KEY="]
+    if svc.name == "ai-gateway":  # ключ провайдера — общая переменная проекта (вводит владелец, как BOT_TOKEN);
+        # не задана — ссылка пустая, ИИ выключен (урок без ИИ). Ссылка только у ai-gateway.
+        lines += ["AI_PROVIDER=anthropic", "ANTHROPIC_API_KEY=${{shared.ANTHROPIC_API_KEY}}"]
     if svc.name == "notifications":
         lines.append("ADMIN_TEST_CHAT_IDS=")  # Telegram chat id тестовых чатов через запятую (тестовая отправка)
     if svc.name == "telegram-bot-gateway":

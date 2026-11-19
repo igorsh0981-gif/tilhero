@@ -1,4 +1,4 @@
-"""Модели learning-plan — зеркало миграций 0001–0003 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
+"""Модели learning-plan — зеркало миграций 0001–0005 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
 
 user_id везде — ученик (learner) из `sub` внутреннего токена; PII сервис не хранит.
 """
@@ -86,9 +86,11 @@ class Plan(Base):
 
 
 class Activity(Base):
-    """Учёт занятий (спринт 1 — практика из Mini App; со спринта 4 — события уроков и повторений).
+    """Учёт занятий (спринт 1 — практика из Mini App; со спринта 4 — события уроков и практики lessons).
 
-    local_date — дата занятия в часовом поясе плана на момент записи. Повтор с тем же Idempotency-Key — та же запись.
+    local_date — дата занятия в часовом поясе плана на момент записи (у события урока — его local_date). Повтор с тем
+    же Idempotency-Key — та же запись. session_id — сессия lessons (спринт 4): одно занятие на сессию; ключ таких
+    записей `lesson/<session_id>` — с «/», которого нет в ключах клиента, поэтому ручной ключ его не займёт.
     """
 
     __tablename__ = "activities"
@@ -97,6 +99,7 @@ class Activity(Base):
         CheckConstraint("kind IN ('lesson','review','practice','diagnostic')", name="ck_activities_kind"),
         CheckConstraint("minutes BETWEEN 0 AND 240", name="ck_activities_minutes"),
         Index("ix_activities_user_date", "user_id", "local_date"),
+        Index("uq_activities_session", "session_id", unique=True, postgresql_where=text("session_id IS NOT NULL")),
     )
 
     activity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
@@ -106,6 +109,7 @@ class Activity(Base):
     minutes: Mapped[int] = mapped_column(SmallInteger(), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
 
 class SlotMark(Base):
@@ -218,6 +222,52 @@ class LearnerAudience(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     audience: Mapped[str] = mapped_column(String(8), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+# ---------------------------------------------------------------- спринт 4: пройденные уроки (INTERNAL_API §5)
+
+
+class CompletedLesson(Base):
+    """Завершённая сессия урока (lesson.session.completed.v1, kind lesson, status completed): строка на сессию,
+    актуальна последняя сессия урока (по completed_at). passed/evaluation_id — исход оценки: из события сессии, затем
+    актуальная оценка сессии из проекции `lesson_evaluations` (оценка, полученная позже, и переоценка)."""
+
+    __tablename__ = "completed_lessons"
+    __table_args__ = (
+        Index("ix_completed_lessons_user_lesson", "user_id", "pair_id", "lesson_id", "completed_at"),
+        Index("ix_completed_lessons_user_evaluation", "user_id", "evaluation_id"),
+    )
+
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    pair_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    lesson_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    passed: Mapped[bool | None] = mapped_column(Boolean())
+    evaluation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    completed_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
+
+
+class LessonEvaluation(Base):
+    """Проекция оценок уроков (R1-05): `assessment.completed.v1` (kind lesson — session_id из события) и
+    `assessment.reevaluated.v1` (session_id — по заменённой оценке; пришла раньше неё — null, заполняется, когда
+    придёт звено цепочки). Актуальная оценка сессии — последняя по created_at; она же — в completed_lessons.
+    События приходят в любом порядке: оценка раньше lesson.session.completed.v1 применяется при его записи."""
+
+    __tablename__ = "lesson_evaluations"
+    __table_args__ = (
+        Index("ix_lesson_evaluations_user_session", "user_id", "session_id", "created_at"),
+        Index("ix_lesson_evaluations_user_supersedes", "user_id", "supersedes"),
+    )
+
+    evaluation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    supersedes: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    passed: Mapped[bool | None] = mapped_column(Boolean())
+    created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
 
 
 class DeletedUser(Base):

@@ -8,6 +8,7 @@ import "./styles/layout.css";
 import "./styles/tables.css";
 import "./styles/screens.css";
 import "./styles/content.css";
+import "./styles/ai.css";
 import { App } from "./App";
 import { I18nProvider, normLang, type Lang } from "./i18n";
 import { prefs } from "./lib/storage";

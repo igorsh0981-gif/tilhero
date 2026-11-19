@@ -12,19 +12,21 @@ const ALL: Permission[] = [
   "config.edit", "config.publish", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage",
   "notif.campaigns.send", "staff.manage", "roles.manage",
   "content.read", "content.edit", "content.review", "content.publish", "media.rights", "lang.manage",
+  "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "costs.read", "costs.manage",
 ];
 const MATRIX: Record<RoleCode, Permission[]> = {
   super_admin: ALL,
-  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read"],
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage"],
   communications: ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"],
   support: ["dashboard.read", "users.read", "support.read", "support.reply"],
-  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish"],
+  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish", "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review"],
   content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights"],
-  analyst: ["dashboard.read", "users.read", "content.read"],
-  auditor: ["dashboard.read", "audit.read", "content.read"],
+  qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts"],
+  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read"],
   read_only: ["dashboard.read"],
 };
-const SOON = ["agents", "qa", "costs", "heroes", "game", "events"];
+const SOON = ["heroes", "game", "events"];
 const ids = (role: RoleCode, menu?: Array<{ id: string; enabled: boolean }>) => visibleNav(new Set(MATRIX[role]), menu).flatMap((g) => g.items.map((i) => i.id));
 const live = (role: RoleCode) => ids(role).filter((x) => !SOON.includes(x));
 
@@ -41,12 +43,14 @@ describe("menu: 15 sections of the experience-config seed, filtered by role (UX 
     expect(visibleNav(new Set(ALL)).map((g) => g.group)).toEqual(["product", "ai", "game", "comms", "manage"]);
   });
   it("live sections per role", () => {
-    expect(live("operations")).toEqual(["overview", "users", "content", "support", "config", "langs", "audit"]);
+    expect(live("operations")).toEqual(["overview", "users", "content", "agents", "qa", "costs", "support", "config", "langs", "audit"]);
     expect(live("communications")).toEqual(["overview", "news"]);
     expect(live("support")).toEqual(["overview", "users", "support"]);
-    expect(live("methodist")).toEqual(["overview", "users", "content", "langs"]);
+    expect(live("methodist")).toEqual(["overview", "users", "content", "agents", "qa", "langs"]);
     expect(live("content_manager")).toEqual(["overview", "content", "langs"]);
-    expect(live("auditor")).toEqual(["overview", "content", "langs", "audit"]);
+    expect(live("qa_analyst")).toEqual(["overview", "content", "agents", "qa", "langs"]);
+    expect(live("analyst")).toEqual(["overview", "users", "content", "agents", "qa", "costs", "langs"]);
+    expect(live("auditor")).toEqual(["overview", "content", "agents", "qa", "costs", "langs", "audit"]);
     expect(live("read_only")).toEqual(["overview"]);
   });
   it("«news» opens with any communications right; roles with staff.manage OR roles.manage", () => {
@@ -58,7 +62,14 @@ describe("menu: 15 sections of the experience-config seed, filtered by role (UX 
   });
   it("«soon» sections carry the sprint number of the plan", () => {
     const soon = Object.fromEntries(NAV_ITEMS.filter((i) => i.soon).map((i) => [i.id, i.soon]));
-    expect(soon).toEqual({ agents: 4, qa: 4, costs: 4, heroes: 6, game: 6, events: 6 });
+    expect(soon).toEqual({ heroes: 6, game: 6, events: 6 });
+  });
+  it("sprint 4: «agents» — ai.read, «qa» — qa.read, «costs» — costs.read (not dashboard.read any more)", () => {
+    expect(pageAllowed("agents", new Set<Permission>(["ai.read"]))).toBe(true);
+    expect(pageAllowed("qa", new Set<Permission>(["qa.read"]))).toBe(true);
+    expect(pageAllowed("costs", new Set<Permission>(["costs.read"]))).toBe(true);
+    for (const p of ["agents", "qa", "costs"]) expect(pageAllowed(p, new Set<Permission>(["dashboard.read", "ai.manage", "qa.transcripts", "costs.manage"]))).toBe(false);
+    expect(live("qa_analyst")).not.toContain("costs");
   });
   it("sprint 3: «content» opens with content.read; «langs» with content.read or lang.manage", () => {
     expect(pageAllowed("content", new Set<Permission>(["content.read"]))).toBe(true);

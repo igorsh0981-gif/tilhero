@@ -21,9 +21,11 @@ from tilhero_common.messaging import emit
 from tilhero_learning_plan.domain import schedule as sch
 from tilhero_learning_plan.models import (
     Activity,
+    CompletedLesson,
     DeletedUser,
     LearnerAudience,
     LearnerDiagnostic,
+    LessonEvaluation,
     Plan,
     SkillStateProjection,
     SlotMark,
@@ -373,8 +375,8 @@ async def record_activity(session: AsyncSession, user_id: uuid.UUID, body: Activ
 
 async def delete_user_data(session: AsyncSession, user_id: uuid.UUID, request_id: uuid.UUID,
                            causation_id: str | None, producer: str) -> None:
-    """Физическое удаление плана, занятий, отметок, траекторий и проекций (TG-FR-006) + ACK саге. Повтор снова
-    подтверждает удаление.
+    """Физическое удаление плана, занятий, отметок, траекторий, проекций, пройденных уроков и их оценок
+    (TG-FR-006) + ACK саге. Повтор снова подтверждает удаление.
 
     План удаляется первым: DELETE ждёт tick, который держит план FOR KEY SHARE, — после этого удаление отметок
     видит и отметку, которую tick успел записать (READ COMMITTED), сирот не остаётся."""
@@ -387,6 +389,9 @@ async def delete_user_data(session: AsyncSession, user_id: uuid.UUID, request_id
     await session.execute(delete(LearnerDiagnostic).where(LearnerDiagnostic.user_id == user_id))
     await session.execute(delete(SkillStateProjection).where(SkillStateProjection.user_id == user_id))
     await session.execute(delete(LearnerAudience).where(LearnerAudience.user_id == user_id))
+    # спринт 4: пройденные уроки и проекция их оценок (занятия из событий уроков — в activities, удалены выше)
+    await session.execute(delete(CompletedLesson).where(CompletedLesson.user_id == user_id))
+    await session.execute(delete(LessonEvaluation).where(LessonEvaluation.user_id == user_id))
     await session.execute(
         insert(DeletedUser).values(user_id=user_id, request_id=request_id).on_conflict_do_nothing(
             index_elements=["user_id"])

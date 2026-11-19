@@ -32,7 +32,7 @@
 
 ## 3. Секреты и ключи
 - Ротация ключа внутреннего JWT сервиса: новый запуск `setup.py` в пустой каталог и замена `INTERNAL_JWT_PRIVATE_KEY` у сервиса и `INTERNAL_JWT_PUBLIC_KEYS` у всех (сначала открытые ключи, потом закрытый).
-- `SCHEDULER_TOKEN` — одинаковый у n8n, learning-plan, notifications, social, catalog (не короче 32 символов).
+- `SCHEDULER_TOKEN` — одинаковый у n8n, learning-plan, notifications, social, catalog, lessons, assessment (не короче 32 символов; у lessons и assessment обязателен — от tick зависит стирание текстов учеников через 90 дней).
 - `TELEGRAM_APP_LINK` — одинаковый у social, telegram-bff, telegram-bot-gateway.
 
 ## 4. Выкладка спринта 3 поверх спринта 2 (контент и диагностика)
@@ -46,3 +46,23 @@
 - Сага удаления: identity-consent ждёт подтверждения и от catalog, diagnostics — запросы на удаление, пришедшие до их запуска, догоняются из NATS (хранение 7 дней).
 - Детские профили старше 7 дней не попадут в проекцию профилей diagnostics и learning-plan; детский сегмент для них держится на параметре `audience` и claims от telegram-bff (BFF всегда вычисляет kids для детского профиля).
 
+
+## 5. Выкладка спринта 4 поверх спринта 3 (урок 20 минут и независимая оценка)
+Новые сервисы `ai-gateway` (8114), `assessment` (8113), `lessons` (8112) — без публичных доменов. Генератор дозаполнения теперь в git — `infra/railway/extend.py` (секретов в нём нет; `setup.py` для работающего prod не годится — он генерирует **все** секреты заново):
+```
+uv run python infra/railway/extend.py --env-from .dev/railway-prod/learning-plan.env \
+  --public-keys .dev/railway-prod-s3/public-keys.json --out .dev/railway-prod-s4 --only lessons,assessment,ai-gateway
+```
+Выход в `.dev/railway-prod-s4/` (вне git): `<svc>.env` трёх сервисов, `bootstrap.sql` (bootstrap + пароли новых ролей), `db-passwords.sql`, `public-keys.json`, `updates.json` (что выставить существующим сервисам).
+1. **База:** разовый `db-bootstrap` (образ `postgres:18-alpine`, `BOOTSTRAP_SQL` = `bootstrap.sql` из `railway-prod-s4`) — добавит схемы и роли `lessons`, `assessment`, `ai_gateway` и `_owner` с паролями. После `BOOTSTRAP_OK` в логе — удалить сервис.
+2. **Ключ провайдера ИИ:** общая переменная проекта `ANTHROPIC_API_KEY` (Project Settings → Shared Variables; вводит владелец, в чат и файлы не попадает). Ссылка `${{shared.ANTHROPIC_API_KEY}}` есть только у ai-gateway. Без ключа уроки идут без ИИ (выбор реплик, оценка по правилам).
+3. **Открытые ключи:** `INTERNAL_JWT_PUBLIC_KEYS` из `updates.json` — **всем** существующим сервисам, дождаться перезапуска до старта новых издателей.
+4. **Потребители и вызываемые (до новых сервисов):** **audit** — обязательно раньше новых издателей: запись аудита от неизвестного издателя подтверждается и теряется (R3-02); **catalog** (версии с ключами, упражнения медиа — без него не стартует ни одно занятие), **learning-plan** (миграции 0004, 0005), **diagnostics** (0003), **notifications** (шаблон `appeal_decided`).
+5. **Новые сервисы:** `ai-gateway` → `assessment` → `lessons` (Dockerfile `services/<svc>/Dockerfile`, Pre-Deploy `alembic upgrade head`, healthcheck `/health/ready`, регион europe-west4, restart ON_FAILURE). ai-gateway: миграции загружают 17 агентов, золотые кейсы и версии; `AI_PROVIDER=anthropic` (fake в prod запрещён). assessment и lessons: `SCHEDULER_TOKEN` обязателен в prod; lessons — `USER_REF_SECRET`. Проверка: `/health/ready` каждого, в админке «Агенты» → провайдер «ключ задан».
+6. **identity-consent** (новые домены саги удаления) — **после** шага 5: запросы на удаление, созданные раньше, новых доменов не ждут.
+7. **admin-identity** (миграция 0004: права ai.*, qa.*, costs.*, роль qa_analyst; сессии отзываются только у ролей, ставших привилегированными) → **admin-bff** (`AI_GATEWAY_URL`, `LESSONS_URL`, `ASSESSMENT_URL` — без них в prod не стартует) → **admin-web**.
+8. **telegram-bff** (`LESSONS_URL`, `ASSESSMENT_URL`; `LESSONS_TIMEOUT_MS=25000`, `LESSONS_FINISH_TIMEOUT_MS=45000` — значения по умолчанию) → **telegram-miniapp**.
+9. **n8n:** `LESSONS_URL`, `ASSESSMENT_URL` → перезапуск: entrypoint импортирует и включает `lessons-tick` (каждые 15 мин) и `assessment-tick` (03:35 UTC). Ручной прогон обоих.
+10. **Включение ИИ после проверки инструкций на реальной модели:** версии агентов v1/v2 опубликованы миграциями без прогона на anthropic. Сразу после выкладки в админке «Агенты» — запустить золотые тесты `teaching_coach`, `conversation_partner`, `independent_evaluator` (≈ $0,3–0,5 из месячного потолка; аварийная остановка их не блокирует). Если обязательный кейс провален — «Затраты» → аварийная остановка до исправления версии.
+11. **Проверка:** Mini App — урок целиком (без ИИ и с ИИ), «Объясни проще», разговор с персонажем, итоги, «повторить» в плане, карта навыков, апелляция → решение → уведомление в Telegram; админка — «Агенты», «Контроль диалогов» (реплики с причиной → запись `qa.transcript_viewed` в аудите), «Затраты», обзор с блоками «Уроки» и «ИИ».
+- Порог бюджета: потолок $20 в месяц, $0,05 на ученика в день, $0,03 на урок — правятся в «Затратах» (step-up). Лимит в Anthropic Console владелец ставит отдельно.

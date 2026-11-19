@@ -27,6 +27,7 @@ import type {
 import type { Ticket as ClientTicket } from "@tilhero/contracts/bff";
 import * as F from "./data";
 import { ContentStore } from "./content-bff";
+import { AiStore, type AiScenario } from "./ai-bff";
 import * as CD from "./content-data";
 
 export interface Scenario {
@@ -44,7 +45,9 @@ export interface Scenario {
   /** replace the permissions of a role */
   matrix?: Partial<Record<RoleCode, Permission[]>>;
   /** dashboard blocks whose source is down (available=false) */
-  dashOff?: Array<"learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics">;
+  dashOff?: Array<"learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai">;
+  /** sprint 4: AI spend, emergency stop, provider key, domains down in the session card */
+  ai?: AiScenario;
   /** the audit log cannot be written: reveal → 503 AUDIT_UNAVAILABLE */
   auditDown?: boolean;
   /** no ADMIN_TEST_CHAT_IDS in notifications */
@@ -146,6 +149,7 @@ export class MockBff {
   templates = F.templates();
   campaigns: Campaign[] = F.campaigns();
   content = new ContentStore();
+  ai: AiStore;
   session: Session | null = null;
   versions: Record<ConfigApp, ConfigVersion[]>;
   activations: Record<ConfigApp, ConfigActivation[]>;
@@ -161,6 +165,7 @@ export class MockBff {
   constructor(sc: Scenario = {}) {
     this.sc = sc;
     this.tickets = F.tickets(this.learners);
+    this.ai = new AiStore(sc.ai ?? {});
     if (sc.singleSuperAdmin) this.accounts = this.accounts.filter((a) => a.staff.staff_id !== F.ID.admin2);
     if (sc.stalled) {
       const c = this.campaigns.find((x) => x.campaign_id === "e1000000-0000-4000-8000-000000000002")!;
@@ -209,6 +214,11 @@ export class MockBff {
   /** server-side revocation: the next request answers 401 SESSION_REVOKED */
   revoke(): void {
     this.revoked = true;
+  }
+
+  /** the 5-minute step-up window is over: the next privileged command asks for a fresh code again */
+  expireStepUp(): void {
+    if (this.session) this.session.stepUpUntil = 0;
   }
 
   switchTo(email: string): void {
@@ -323,7 +333,7 @@ export class MockBff {
 
   private dashboard(period: Dashboard["period"]): Dashboard {
     const off = new Set(this.sc.dashOff ?? []);
-    const blk = <T,>(k: "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics", svc: string, data: T) => (off.has(k) ? { available: false, data: null, service: svc } : { available: true, data });
+    const blk = <T,>(k: "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai", svc: string, data: T) => (off.has(k) ? { available: false, data: null, service: svc } : { available: true, data });
     const ls = this.learners;
     const accounts = ls.filter((x) => x.kind === "account").length;
     const kids = ls.filter((x) => x.kind === "child").length;
@@ -368,6 +378,8 @@ export class MockBff {
         const { dxStats } = CD;
         return dxStats(period);
       })()),
+      lessons: blk("lessons", "lessons", this.ai.lessonStats(period)),
+      ai: blk("ai", "ai-gateway", this.ai.summary("month")),
     };
   }
 
@@ -1080,6 +1092,17 @@ export class MockBff {
       }
 
       default: {
+        const ctx = {
+          me,
+          perms,
+          stepUpOk,
+          nameOf: (id: string | null | undefined) => this.nameOf(id),
+          record: (a: string, t: string, id: string, after: Record<string, unknown> | null, reason?: string | null) => this.record(a, t, id, after, reason ?? null),
+          json: (st: number, data?: unknown, extra?: Record<string, string>) => json(st, data, extra),
+          err: (st: number, code: string, details?: Record<string, unknown>) => err(st, code, details),
+          binary: (st: number, buf: Buffer, ct: string) => route.fulfill({ status: st, contentType: ct, body: buf, headers: { "Cache-Control": "private, max-age=3600" } }),
+        };
+        if (await this.ai.handle(method, path, body, q, idemKey, headers, ctx)) return;
         const done = await this.content.handle(method, path, body, q, idemKey, {
           me,
           perms,

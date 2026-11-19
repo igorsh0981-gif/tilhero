@@ -8,7 +8,8 @@
 - текст ответа оператора в уведомление не кладём — только номер обращения;
 - кнопка «Открыть» (startapp): напоминание и пропуск → route_home; приглашение принято / новый участник
   семьи / отклонено → route_family; неотвеченное приглашение → invite_<invite_id>; поддержка → ticket_<number>;
-  «Что нового» → route_news; решение по заявке на песню/фильм (спринт 3) → route_media_requests;
+  «Что нового» → route_news; решение по заявке на песню/фильм (спринт 3) → route_media_requests; решение по
+  апелляции на оценку урока (спринт 4) → route_lessons;
 - параметры проверяются строгой моделью при приёме (неизвестное поле/формат → failed params_invalid).
 
 Спринт 2 (INTERNAL_API §3 «Шаблоны»): код — источник текстов по умолчанию; сотрудник создаёт версию поверх.
@@ -393,6 +394,67 @@ def _media_request_decided(lang: Lang, p: MediaRequestParams, ctx: Context) -> R
     return Rendered("Soʻrovingiz boʻyicha qaror", body, REQUESTS_BUTTON[lang], "route_media_requests")
 
 
+# ---------------------------------------------------------------- appeal_decided (assessment, спринт 4)
+
+AppealDecision = Literal["upheld", "corrected"]
+
+
+class AppealParams(Params):
+    """Решение по апелляции ученика на оценку урока (AT-47): оценка верна (upheld) или исправлена (corrected).
+    Текст решения сотрудника (decision_note) в уведомление не кладётся — его нет в событии; ученик читает его в
+    Mini App на экране оценки, как ответ поддержки."""
+
+    appeal_id: uuid.UUID
+    evaluation_id: uuid.UUID
+    decision: AppealDecision
+
+
+APPEAL_RESULTS: dict[str, dict[str, str]] = {
+    "upheld": {"ru": "оценка верна", "uz": "baho toʻgʻri"},
+    "corrected": {"ru": "оценка исправлена", "uz": "baho tuzatildi"},
+}
+LESSONS_BUTTON = {"ru": "Открыть уроки", "uz": "Darslarni ochish"}
+LESSONS_ROUTE = "route_lessons"
+
+
+def _appeal_values(lang: Lang, p: AppealParams, ctx: Context) -> dict[str, str]:
+    return {"appeal_result": APPEAL_RESULTS[p.decision][lang]}
+
+
+def _appeal_kid_values(lang: Lang, p: AppealParams, ctx: Context) -> dict[str, str]:
+    return {"learner_name": ctx.learner_name or KID_NAME[lang], **_appeal_values(lang, p, ctx)}
+
+
+def _appeal_decided(lang: Lang, p: AppealParams, ctx: Context) -> Rendered:
+    result = APPEAL_RESULTS[p.decision][lang]
+    if lang == "ru":
+        body = f"Мы проверили вашу оценку урока: {result}."
+        if p.decision == "corrected":
+            body = f"Мы проверили вашу оценку урока: {result}, посмотрите обновлённый результат."
+        return Rendered("Оценка урока проверена", body, LESSONS_BUTTON[lang], LESSONS_ROUTE)
+    body = f"Dars bahongizni tekshirdik: {result}."
+    if p.decision == "corrected":
+        body = f"Dars bahongizni tekshirdik: {result}, yangilangan natijani koʻring."
+    return Rendered("Dars bahosi tekshirildi", body, LESSONS_BUTTON[lang], LESSONS_ROUTE)
+
+
+def _appeal_decided_kid(lang: Lang, p: AppealParams, ctx: Context) -> Rendered:
+    """Родителю, с именем ребёнка, мягко (CONVENTIONS §8): без «провала» и давления."""
+    name = ctx.learner_name
+    result = APPEAL_RESULTS[p.decision][lang]
+    if lang == "ru":
+        title = f"{name}: оценка урока проверена" if name else "Оценка урока ребёнка проверена"
+        body = f"Мы проверили оценку урока: {result}."
+        if p.decision == "corrected":
+            body = f"Мы проверили оценку урока: {result}, посмотрите обновлённый результат вместе."
+        return Rendered(title, body, LESSONS_BUTTON[lang], LESSONS_ROUTE)
+    title = f"{name}: dars bahosi tekshirildi" if name else "Farzandingizning dars bahosi tekshirildi"
+    body = f"Dars bahosini tekshirdik: {result}."
+    if p.decision == "corrected":
+        body = f"Dars bahosini tekshirdik: {result}, yangilangan natijani birga koʻring."
+    return Rendered(title, body, LESSONS_BUTTON[lang], LESSONS_ROUTE)
+
+
 # ---------------------------------------------------------------- pin.reset_code (transactional, не в центре)
 
 
@@ -479,6 +541,10 @@ PLACEHOLDER_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "decision": (
         "Решение по заявке на языке ученика, например «подобран авторский аналог»",
         "Decision in the learner's language, e.g. “authored alternative found”",
+    ),
+    "appeal_result": (
+        "Итог проверки оценки урока на языке ученика: «оценка верна» или «оценка исправлена»",
+        "Result of the lesson grade review in the learner's language: “grade is correct” or “grade corrected”",
     ),
 }
 KID_NAME = {"ru": "Ваш ребёнок", "uz": "Farzandingiz"}
@@ -797,6 +863,20 @@ TEMPLATES: dict[str, TemplateSpec] = {
             placeholder_names=("request_title", "decision"), placeholders=_media_request_values,
             sample={"request_id": _SAMPLE_ID, "request_title": "Moonlight Café", "status": "authored_alternative",
                     "linked_asset_id": "m-own-coffee-order"},
+        ),
+        TemplateSpec(
+            "appeal_decided", "support", AppealParams, _appeal_decided, kid_variant="appeal_decided.kid",
+            description=("Решение по апелляции на оценку урока: оценка верна или исправлена (без текста решения)",
+                         "Decision on a lesson grade appeal: upheld or corrected (without the staff note)"),
+            placeholder_names=("appeal_result",), placeholders=_appeal_values,
+            sample={"appeal_id": _SAMPLE_ID, "evaluation_id": _SAMPLE_ID, "decision": "corrected"},
+        ),
+        TemplateSpec(
+            "appeal_decided.kid", "support", AppealParams, _appeal_decided_kid,
+            description=("Решение по апелляции на оценку урока ребёнка — родителю, мягко",
+                         "Decision on a child's lesson grade appeal — gentle, to the parent"),
+            placeholder_names=("learner_name", "appeal_result"), placeholders=_appeal_kid_values,
+            sample={"appeal_id": _SAMPLE_ID, "evaluation_id": _SAMPLE_ID, "decision": "upheld"},
         ),
         TemplateSpec(
             "release_note.published", "product", ReleaseNoteParams, _release_note,

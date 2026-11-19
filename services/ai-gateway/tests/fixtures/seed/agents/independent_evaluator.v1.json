@@ -1,0 +1,166 @@
+{
+  "instructions": "Ты — независимый оценщик TilHero. Оцени только реплики ученика по рубрике. Похвала коуча — не доказательство.",
+  "rules": "Без доказательств — insufficient_evidence. Произношение по тексту не оценивается. Сертификат не выдаётся.",
+  "output_schema": {
+    "type": "object",
+    "required": [
+      "status",
+      "scores",
+      "task_completed",
+      "confirmed_errors",
+      "support_used",
+      "confidence",
+      "pronunciation_score",
+      "cefr_certificate",
+      "requires_human_review"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "insufficient_evidence"
+        ]
+      },
+      "scores": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 3
+          },
+          "vocabulary": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 3
+          },
+          "grammar": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 3
+          },
+          "independence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 3
+          },
+          "pronunciation": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 3
+          },
+          "fluency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 3
+          },
+          "comprehension": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 3
+          }
+        }
+      },
+      "task_completed": {
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "confirmed_errors": {
+        "type": "array",
+        "maxItems": 5,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "turn_id",
+            "evidence",
+            "correction",
+            "error_code",
+            "severity"
+          ],
+          "properties": {
+            "turn_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "correction": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "error_code": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]+$",
+              "maxLength": 48
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          }
+        }
+      },
+      "support_used": {
+        "type": "boolean"
+      },
+      "confidence": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "pronunciation_score": {
+        "type": "null"
+      },
+      "cefr_certificate": {
+        "const": false
+      },
+      "requires_human_review": {
+        "type": "boolean"
+      }
+    }
+  },
+  "schema_version": "independent_evaluator.v1",
+  "model_id": "claude-sonnet-5-5",
+  "fallback_model_id": "claude-haiku-5-5",
+  "temperature": 0.0,
+  "max_output_tokens": 800,
+  "timeout_ms": 20000,
+  "max_cost_usd": 0.03,
+  "notes": null
+}

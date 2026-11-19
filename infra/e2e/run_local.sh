@@ -11,6 +11,8 @@
 #   infra/e2e/run_local.sh admin     — сброс учёток admin-identity + up + только infra/e2e/scenario_admin.py
 #   infra/e2e/run_local.sh content   — сброс учёток admin-identity + up + только infra/e2e/scenario_content.py
 #                                      (спринт 3: контент, диагностика, план, практика — Mini App и админка)
+#   infra/e2e/run_local.sh lessons   — сброс учёток admin-identity + up + только infra/e2e/scenario_lessons.py
+#                                      (спринт 4: урок, практика, оценка, апелляции, агенты ИИ, затраты; ИИ — fake)
 #   infra/e2e/run_local.sh ui [TGID] — дополнительно Mini App (vite :5173) с VITE_DEV_INIT_DATA для Telegram ID TGID
 #   infra/e2e/run_local.sh status    — состояние процессов и /health/ready
 #   infra/e2e/run_local.sh restart [name] — перезапустить один сервис (после правки кода) или всё
@@ -142,9 +144,9 @@ svc_env() {
     diagnostics)
       env="$env CATALOG_URL=http://127.0.0.1:8110" ;;
     ai-gateway)  # стенд — детерминированный fake-провайдер; ключ провайдера не нужен
-      env="$env AI_PROVIDER=${E2E_AI_PROVIDER:-fake}" ;;
-    assessment)
-      env="$env CATALOG_URL=http://127.0.0.1:8110 AI_GATEWAY_URL=http://127.0.0.1:8114" ;;
+      env="$env AI_PROVIDER=${E2E_AI_PROVIDER:-fake} AI_ALLOW_FAKE_TEST_PUBLISH=true" ;;
+    assessment)  # SCHEDULER_TOKEN — вход n8n assessment-tick (стирание текста апелляций по сроку, R3-04)
+      env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 AI_GATEWAY_URL=http://127.0.0.1:8114" ;;
     lessons)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 AI_GATEWAY_URL=http://127.0.0.1:8114"
       env="$env ASSESSMENT_URL=http://127.0.0.1:8113 LEARNING_PLAN_URL=http://127.0.0.1:8102 DIAGNOSTICS_URL=http://127.0.0.1:8111" ;;
@@ -381,12 +383,17 @@ case "${1:-up}" in
     if [ -f infra/e2e/scenario_content.py ]; then
       echo; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_content.py || rc=1
     fi
+    # сценарий спринта 4 — тоже со свежей bootstrap-учёткой
+    if [ -f infra/e2e/scenario_lessons.py ]; then
+      echo; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_lessons.py || rc=1
+    fi
     exit $rc ;;
   content) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_content.py "$@" ;;
+  lessons) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_lessons.py "$@" ;;  # уборка — в шаге L00
   admin) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_admin.py "$@" ;;  # уборка — в шаге A00
   stop|down) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi ;;
   restart) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi; up ;;
   status) status ;;
-  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|content [аргументы]|ui [tg_id]|status|stop [name]|restart [name]"
+  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|content [аргументы]|lessons [аргументы]|ui [tg_id]|status|stop [name]|restart [name]"
      exit 2 ;;
 esac

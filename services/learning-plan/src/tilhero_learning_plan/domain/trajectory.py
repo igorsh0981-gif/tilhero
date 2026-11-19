@@ -1,5 +1,9 @@
 """Траектория уроков ученика (INTERNAL_API §3): снимок курса с кешем по ETag, проекции входов (диагностика, карта
-навыков, сегмент аудитории), ревизии и событие `learning.trajectory.updated.v1`.
+навыков, сегмент аудитории, со спринта 4 — пройденные уроки), ревизии и событие `learning.trajectory.updated.v1`.
+
+Спринт 4: `completed` — пройденные уроки по последней завершённой сессии урока (карточка урока из снимка + passed,
+evaluation_id, completed_at; новые первыми; урок, которого больше нет в курсе, не показывается); пройденные с зачётом
+не планируются, без зачёта — «повторить»; `lessons_available` — флаг `LESSONS_AVAILABLE` (по умолчанию true).
 
 Пересчёт — при чтении (`GET /internal/v1/plan/trajectory`): входы (basis) сравниваются с последней ревизией;
 совпали — отдаётся она, изменились (новая диагностика, навык освоен, цель или темы, аудитория, новый снимок курса,
@@ -43,6 +47,7 @@ from tilhero_learning_plan.domain.curriculum import (
     explain,
     plan_trajectory,
 )
+from tilhero_learning_plan.domain.lessons import LessonResult, latest_results, results_hash
 from tilhero_learning_plan.domain.plans import lock_user, user_deleted
 from tilhero_learning_plan.domain.snapshot import CourseSnapshot
 from tilhero_learning_plan.models import (
@@ -234,7 +239,8 @@ def _diagnostic(row: LearnerDiagnostic | None) -> Diagnostic | None:
     )
 
 
-async def load_learner(session: AsyncSession, user_id: uuid.UUID, pair_id: str, audience_hint: str | None) -> Learner:
+async def load_learner(session: AsyncSession, user_id: uuid.UUID, pair_id: str, audience_hint: str | None,
+                       results: list[LessonResult] | None = None) -> Learner:
     plan = await session.get(Plan, user_id)
     diag = await session.get(LearnerDiagnostic, (user_id, pair_id))
     skills = (
@@ -250,6 +256,7 @@ async def load_learner(session: AsyncSession, user_id: uuid.UUID, pair_id: str, 
         topics=tuple(plan.topics) if plan is not None else (),
         diagnostic=_diagnostic(diag),
         skills={skill_id: state for skill_id, state in skills},
+        lessons={r.lesson_id: r.passed for r in results or []},
     )
 
 
@@ -259,7 +266,7 @@ def mastered_hash(learner: Learner) -> str:
     return hashlib.sha256("\n".join(mastered).encode()).hexdigest()[:24]
 
 
-def make_basis(learner: Learner, snapshot_version: str) -> dict[str, Any]:
+def make_basis(learner: Learner, snapshot_version: str, results: list[LessonResult] | None = None) -> dict[str, Any]:
     d = learner.diagnostic
     return {
         "algorithm": ALGORITHM,
@@ -270,6 +277,8 @@ def make_basis(learner: Learner, snapshot_version: str) -> dict[str, Any]:
         "diagnostic_revision": d.revision if d is not None else None,
         "course_snapshot_version": snapshot_version,
         "skills_hash": mastered_hash(learner),
+        # спринт 4: пройденные уроки (новая сессия урока, переоценка) — новая ревизия
+        "completed_hash": results_hash(results or []),
     }
 
 
@@ -280,21 +289,40 @@ def _entry(p: Planned) -> dict[str, Any]:
     return {**p.lesson.card(), "reason_codes": list(p.reason_codes)}
 
 
-def items_of(plan: TrajectoryPlan, learner: Learner) -> dict[str, Any]:
+def completed_of(snapshot: CourseSnapshot, results: list[LessonResult]) -> list[dict[str, Any]]:
+    """Trajectory.completed (bff.ts): LessonCard & {passed, evaluation_id, completed_at} по последней сессии урока,
+    новые первыми. Карточка — из снимка курса (любой аудитории: пройденное не прячется); урока в курсе больше нет —
+    не показывается (карточку собрать не из чего)."""
+    by_id = {lesson.lesson_id: lesson for lesson in snapshot.lessons}
+    out: list[dict[str, Any]] = []
+    for r in results:
+        lesson = by_id.get(r.lesson_id)
+        if lesson is None:
+            continue
+        out.append({**lesson.card(), "passed": r.passed,
+                    "evaluation_id": str(r.evaluation_id) if r.evaluation_id is not None else None,
+                    "completed_at": iso(r.completed_at)})
+    return out
+
+
+def items_of(plan: TrajectoryPlan, learner: Learner,
+             completed: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     nxt = plan.next
     return {
         "next": (
             {**_entry(nxt), "explanation": explain(nxt.reason_codes, goal=learner.goal,
-                                                    kids=learner.audience == "kids")}
+                                                    kids=learner.audience == "kids", repeat=nxt.repeat)}
             if nxt is not None else None
         ),
         "mandatory": [_entry(p) for p in plan.mandatory],
         "optional": [_entry(p) for p in plan.optional],
+        "completed": completed or [],
     }
 
 
-def render(row: Trajectory) -> dict[str, Any]:
-    """Trajectory (bff.ts). Пройденные уроки и сами уроки — спринт 4."""
+def render(row: Trajectory, *, lessons_available: bool = True) -> dict[str, Any]:
+    """Trajectory (bff.ts). `completed` — из ревизии (самодостаточна; ревизии спринта 3 — пустой список);
+    `lessons_available` — текущий флаг уроков (не часть ревизии)."""
     items = row.items
     return {
         "pair_id": row.pair_id,
@@ -308,8 +336,8 @@ def render(row: Trajectory) -> dict[str, Any]:
         "next": items.get("next"),
         "mandatory": items.get("mandatory", []),
         "optional": items.get("optional", []),
-        "completed": [],
-        "lessons_available": False,
+        "completed": items.get("completed", []),
+        "lessons_available": lessons_available,
     }
 
 
@@ -368,11 +396,12 @@ async def get_trajectory(rt: Runtime, *, user_id: uuid.UUID, pair_id: str, audie
         await lock_user(session, user_id)
         if await session.get(DeletedUser, user_id) is not None:
             raise user_deleted()
-        learner = await load_learner(session, user_id, pair_id, audience_hint)
+        results = await latest_results(session, user_id, pair_id)
+        learner = await load_learner(session, user_id, pair_id, audience_hint, results)
         latest = await latest_revision(session, user_id, pair_id)
-        basis = make_basis(learner, snapshot.snapshot_version)
+        basis = make_basis(learner, snapshot.snapshot_version, results)
         if latest is not None and latest.basis == basis and latest.course_id == course_id:
-            return render(latest)
+            return render(latest, lessons_available=settings.lessons_available)
 
         plan = plan_trajectory(snapshot, learner, optional_max=settings.optional_lessons_max)
         nxt = plan.next
@@ -383,7 +412,7 @@ async def get_trajectory(rt: Runtime, *, user_id: uuid.UUID, pair_id: str, audie
             course_id=course_id,
             basis=basis,
             next_lesson_id=nxt.lesson.lesson_id if nxt is not None else None,
-            items=items_of(plan, learner),
+            items=items_of(plan, learner, completed_of(snapshot, results)),
             computed_at=now,
         )
         session.add(revision)
@@ -399,7 +428,7 @@ async def get_trajectory(rt: Runtime, *, user_id: uuid.UUID, pair_id: str, audie
         log.info("trajectory revision computed",
                  extra={"pair_id": pair_id, "revision": revision.revision,
                         "mandatory": len(plan.mandatory), "optional": len(plan.optional)})
-        return render(revision)
+        return render(revision, lessons_available=settings.lessons_available)
 
 
 # ---------------------------------------------------------------- проекции (потребители событий)

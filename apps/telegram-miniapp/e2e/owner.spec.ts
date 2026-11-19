@@ -245,25 +245,18 @@ test.describe("3 · тема", () => {
 /* ------------------------------------------------------------------ 4. «Начать занятие» */
 
 test.describe("4 · «Начать занятие»", () => {
-  test("главная: «Начать занятие» — главная кнопка, ведёт на «Уроки — скоро»; «Отметить занятие» — ниже и работает", async ({ page }) => {
+  test("главная: «Начать занятие» — главная кнопка, ведёт к карточке следующего урока; ручной отметки больше нет (спринт 4)", async ({ page }) => {
     const bff = await open(page, { onboarded: true, seen: ALL_SEEN });
     const start = page.getByTestId("start-lesson");
-    const mark = page.getByTestId("mark-activity");
     await expect(start).toHaveText("Начать занятие");
     await expect(start).toHaveClass(/(^|\s)btn(\s|$)/);
-    await expect(mark).toHaveClass(/btn2/);
-    const [s, m] = [(await start.boundingBox())!, (await mark.boundingBox())!];
-    expect(m.y).toBeGreaterThan(s.y + s.height - 1);
+    await expect(page.getByTestId("mark-activity")).toHaveCount(0);
+    await expect(page.getByTestId("today-card")).toContainText("Занятие засчитается в график, когда вы пройдёте урок.");
     await shot(page, "22_home_start");
     await start.click();
-    await expect(page.getByTestId("soon-lessons")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Уроки — скоро" })).toBeVisible();
-    await expect(page.getByTestId("tab-lessons")).toHaveAttribute("aria-current", "page");
-    await shot(page, "23_lessons_soon");
-    await page.getByTestId("tab-home").click();
-    await mark.click();
-    await expect(page.getByTestId("toast")).toHaveText("Занятие отмечено: +20 мин");
-    expect(bff.last("POST", "/v1/plan/activity")?.body).toEqual({ kind: "practice", minutes: 20 });
+    await expect(page.getByTestId("lesson-card")).toContainText("В кафе: заказ напитков");
+    await shot(page, "23_lesson_card");
+    expect(bff.calls("POST", "/v1/plan/activity")).toHaveLength(0);
   });
 });
 

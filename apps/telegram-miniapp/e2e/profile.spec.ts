@@ -75,14 +75,13 @@ test("notification center: unread, read on open, the link leads to its screen", 
   await expect(page.getByTestId("bell")).toHaveAccessibleName("Уведомления");
 });
 
-test("mark a session on Home: Idempotency-Key, today is done", async ({ page }) => {
+test("sprint 4: Home has no manual «Отметить занятие» — the day card leads to the lesson, sessions come from lessons", async ({ page }) => {
   const bff = await open(page, { onboarded: true, seen: ALL_SEEN });
-  await page.getByTestId("mark-activity").click();
-  await expect(page.getByTestId("toast")).toHaveText("Занятие отмечено: +20 мин");
-  const r = bff.last("POST", "/v1/plan/activity")!;
-  expect(r.body).toEqual({ kind: "practice", minutes: 20 });
-  expect(r.headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
-  await expect(page.getByTestId("today-title")).toHaveText("Сегодня занятие уже есть");
+  await expect(page.getByTestId("today-card")).toBeVisible();
+  await expect(page.getByTestId("mark-activity")).toHaveCount(0);
+  await page.getByTestId("start-lesson").click();
+  await expect(page.getByTestId("lesson-card")).toBeVisible();
+  expect(bff.calls("POST", "/v1/plan/activity")).toHaveLength(0);
 });
 
 test("support: a request by category, then it is in the list", async ({ page }) => {

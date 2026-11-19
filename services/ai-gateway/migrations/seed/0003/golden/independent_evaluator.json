@@ -1,0 +1,219 @@
+[
+  {
+    "case_id": "ie-19-kids-refused",
+    "title": "Ребёнок (kids): свободный текст в оценщик не отправляется — отказ шлюза",
+    "input": {
+      "audience": "kids",
+      "context": {
+        "rubric": {
+          "rubric_id": "r-roleplay",
+          "version": 1,
+          "criteria": [
+            {
+              "code": "task",
+              "weight": 0.4,
+              "bands": [
+                {
+                  "score": 0,
+                  "descriptor_en": "Цель разговора не достигнута."
+                },
+                {
+                  "score": 1,
+                  "descriptor_en": "Цель достигнута частично или с большой помощью собеседника."
+                },
+                {
+                  "score": 2,
+                  "descriptor_en": "Цель достигнута, одна-две детали упущены."
+                },
+                {
+                  "score": 3,
+                  "descriptor_en": "Цель достигнута полностью, все детали согласованы."
+                }
+              ]
+            },
+            {
+              "code": "comprehension",
+              "weight": 0.25,
+              "bands": [
+                {
+                  "score": 0,
+                  "descriptor_en": "Реплики собеседника не поняты."
+                },
+                {
+                  "score": 1,
+                  "descriptor_en": "Поняты отдельные слова, ответы часто не к месту."
+                },
+                {
+                  "score": 2,
+                  "descriptor_en": "Главное понятно, иногда приходится переспрашивать."
+                },
+                {
+                  "score": 3,
+                  "descriptor_en": "Всё понятно, ответы точно по смыслу."
+                }
+              ]
+            },
+            {
+              "code": "fluency",
+              "weight": 0.15,
+              "bands": [
+                {
+                  "score": 0,
+                  "descriptor_en": "Ответа нет или паузы очень долгие."
+                },
+                {
+                  "score": 1,
+                  "descriptor_en": "Отдельные слова с длинными паузами."
+                },
+                {
+                  "score": 2,
+                  "descriptor_en": "Короткие фразы с паузами, но разговор идёт."
+                },
+                {
+                  "score": 3,
+                  "descriptor_en": "Реплики связные, паузы естественные."
+                }
+              ]
+            },
+            {
+              "code": "independence",
+              "weight": 0.2,
+              "bands": [
+                {
+                  "score": 0,
+                  "descriptor_en": "Без подсказок ответить пока не получилось."
+                },
+                {
+                  "score": 1,
+                  "descriptor_en": "Понадобились частые подсказки или образец."
+                },
+                {
+                  "score": 2,
+                  "descriptor_en": "Одна-две подсказки, остальное — самостоятельно."
+                },
+                {
+                  "score": 3,
+                  "descriptor_en": "Всё сделано самостоятельно, без подсказок."
+                }
+              ]
+            }
+          ],
+          "pass_rule": {
+            "min_weighted": 1.5,
+            "min_per_criterion": 1
+          }
+        },
+        "task": {
+          "goal_en": "Вы приехали в отель вечером. Назовите бронь (или попросите номер без брони), решите, что делать, если номер ещё не готов, и узнайте про завтрак и Wi-Fi.",
+          "completion_criteria_en": "Ученик назвал бронь и продиктовал фамилию по буквам, отреагировал на неготовый номер, понял время завтрака и номер комнаты.",
+          "outcome": "success"
+        },
+        "turns": [
+          {
+            "turn_id": "T1",
+            "speaker": "character",
+            "text": "Good evening! Welcome. Do you have a reservation?"
+          },
+          {
+            "turn_id": "T2",
+            "speaker": "learner",
+            "text": "Yes, I do. The booking is under Karimova."
+          },
+          {
+            "turn_id": "T3",
+            "speaker": "character",
+            "text": "Could you spell your last name, please?"
+          },
+          {
+            "turn_id": "T4",
+            "speaker": "learner",
+            "text": "Sure. K-A-R-I-M-O-V-A."
+          },
+          {
+            "turn_id": "T5",
+            "speaker": "character",
+            "text": "Thank you. A double room for three nights... Oh, I'm sorry, your room isn't ready yet."
+          },
+          {
+            "turn_id": "T6",
+            "speaker": "learner",
+            "text": "That's OK. How long do I need to wait?"
+          },
+          {
+            "turn_id": "T7",
+            "speaker": "character",
+            "text": "About twenty minutes. You can wait in the lobby. Would you like some tea?"
+          },
+          {
+            "turn_id": "T8",
+            "speaker": "learner",
+            "text": "Yes, please. Thank you."
+          },
+          {
+            "turn_id": "T9",
+            "speaker": "character",
+            "text": "Can I see your passport, please?"
+          },
+          {
+            "turn_id": "T10",
+            "speaker": "learner",
+            "text": "Sure, here it is."
+          },
+          {
+            "turn_id": "T11",
+            "speaker": "character",
+            "text": "Thank you. Breakfast is from seven to ten, on the second floor."
+          },
+          {
+            "turn_id": "T12",
+            "speaker": "learner",
+            "text": "Great. What's the Wi-Fi password?"
+          },
+          {
+            "turn_id": "T13",
+            "speaker": "character",
+            "text": "It's on this card, with your key. You're in room five-one-two, on the fifth floor."
+          },
+          {
+            "turn_id": "T14",
+            "speaker": "learner",
+            "text": "Room five-one-two, fifth floor. Thank you!"
+          },
+          {
+            "turn_id": "T15",
+            "speaker": "character",
+            "text": "You're welcome. Enjoy your stay!"
+          }
+        ],
+        "hint_usage": {
+          "count": 0,
+          "turn_ids": []
+        },
+        "cefr_target": "A2"
+      }
+    },
+    "checks": [
+      {
+        "kind": "field_equals",
+        "path": "status",
+        "value": "refused"
+      },
+      {
+        "kind": "field_equals",
+        "path": "reason",
+        "value": "kids_not_allowed"
+      },
+      {
+        "kind": "field_equals",
+        "path": "output",
+        "value": null
+      },
+      {
+        "kind": "field_equals",
+        "path": "cost_usd",
+        "value": 0
+      }
+    ],
+    "mandatory": true
+  }
+]

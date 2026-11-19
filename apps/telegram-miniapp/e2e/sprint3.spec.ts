@@ -207,10 +207,9 @@ test.describe("план и карта навыков", () => {
     await expect(page.getByTestId("plan-basis")).toContainText("Цель: Работа");
     await expect(page.getByTestId("plan-optional")).toContainText("Разговор о погоде");
     expect(bff.calls("GET", "/v1/plan/trajectory").length).toBeGreaterThanOrEqual(3);
-    // «Начать урок» — the honest «скоро» with the plan beside it
+    // sprint 4: «Начать урок» → the lesson card
     await page.getByTestId("plan-start").click();
-    await expect(page.getByTestId("soon-lessons")).toBeVisible();
-    await expect(page.getByTestId("soon-plan")).toContainText("Следующий по плану: В кафе: заказ напитков");
+    await expect(page.getByTestId("lesson-card")).toContainText("В кафе: заказ напитков");
   });
 
   test("карта навыков: состояния словами и значками, история; каталог недоступен — честное сообщение", async ({ page }) => {
@@ -254,7 +253,7 @@ test.describe("практика", () => {
     await page.getByTestId("sc-translate").click();
     await expect(page.getByTestId("sc-gloss")).toHaveText("Привет! Что вам принести?");
     await expect(page.getByTestId("scenario")).toContainText("Чем может закончиться");
-    await expect(page.getByTestId("sc-play")).toBeDisabled();
+    await expect(page.getByTestId("sc-play")).toBeEnabled();
     // back: the practice keeps its tab
     await page.getByTestId("bar-back").click();
     await expect(page.getByTestId("sc-list")).toBeVisible();

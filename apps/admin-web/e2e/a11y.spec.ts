@@ -2,6 +2,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { expectNoHScroll, openAs } from "./helpers";
 import { LEARNER } from "./fixtures/data";
+import { SID } from "./fixtures/ai-data";
 
 async function unnamedControls(page: Page): Promise<string[]> {
   return page.evaluate(() => {
@@ -49,6 +50,14 @@ const SCREENS: Array<[string, string]> = [
   ["#/content/review/scenario/sc-hotel-checkin", "review-screen"],
   ["#/content/diagnostics", "dx"],
   ["#/langs", "langs"],
+  // sprint 4
+  ["#/agents", "ag-registry"],
+  ["#/agents/models", "ag-models"],
+  ["#/agents/independent_evaluator", "ag-version"],
+  ["#/qa", "qa-journal"],
+  [`#/qa/sessions/${SID.s1}`, "qa-card"],
+  [`#/qa/appeals`, "qa-appeals"],
+  ["#/costs", "cs-usage"],
 ];
 
 for (const [hash, id] of SCREENS) {
@@ -116,4 +125,25 @@ test("sprint 3: the scenario graph is keyboard operable; the EN interface of con
       .filter((s) => /[Ѐ-ӿ]/.test(s)),
   );
   expect(chrome).toEqual([]);
+});
+
+test("sprint 4: EN chrome of agents, dialogue QA and costs has no Russian; the stop switch is a named switch", async ({ page }) => {
+  await openAs(page, "admin@tilhero.local", "#/agents/independent_evaluator");
+  await page.getByTestId("lang-en").click();
+  await expect(page.getByTestId("agc-tab-version")).toHaveText(/Version/);
+  const chrome = async () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("[role=tab], .acts button, label, th, .h2, .h3, .panel-t, .kv > span:first-child, .pill"))
+        .filter((e) => !e.closest('[lang="ru"]')) // learner-facing content (titles of lessons and agents) is data, marked lang=ru
+        .map((e) => e.innerText.trim())
+        .filter((x) => /[Ѐ-ӿ]/.test(x)),
+    );
+  expect(await chrome()).toEqual([]);
+  await page.evaluate((id) => (window.location.hash = `#/qa/sessions/${id}`), SID.s2);
+  await expect(page.getByTestId("qa-card")).toBeVisible();
+  expect(await chrome()).toEqual([]);
+  await page.evaluate(() => (window.location.hash = "#/costs"));
+  await expect(page.getByTestId("cs-stop-btn")).toHaveAttribute("role", "switch");
+  await expect(page.getByTestId("cs-stop-btn")).toHaveAccessibleName(/switch the AI off/i);
+  expect(await chrome()).toEqual([]);
 });

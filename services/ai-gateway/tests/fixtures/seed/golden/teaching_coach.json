@@ -1,0 +1,147 @@
+[
+  {
+    "case_id": "tc-simpler-ru",
+    "title": "Проще на русском",
+    "mandatory": true,
+    "input": {
+      "audience": "adults",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-01-greetings",
+          "title_en": "Greetings",
+          "goal_en": "Greet people and introduce yourself",
+          "level": "A1",
+          "key_words": [
+            "hello",
+            "name",
+            "nice"
+          ],
+          "examples_en": [
+            "Hello, my name is Anna.",
+            "Nice to meet you!",
+            "Hi, I'm Tom."
+          ]
+        },
+        "request": "simpler_example",
+        "explain_locale": "ru",
+        "already_shown": [
+          "Hello, my name is Anna."
+        ]
+      }
+    },
+    "checks": [
+      {
+        "kind": "field_equals",
+        "path": "status",
+        "value": "ok"
+      },
+      {
+        "kind": "schema_valid"
+      },
+      {
+        "kind": "max_length",
+        "path": "output.explanation",
+        "n": 400
+      },
+      {
+        "kind": "max_length",
+        "path": "output.example_en",
+        "n": 160
+      },
+      {
+        "kind": "text_not_contains",
+        "path": "output.explanation",
+        "values": [
+          "http",
+          "сертификат"
+        ]
+      }
+    ]
+  },
+  {
+    "case_id": "tc-simpler-uz",
+    "title": "Проще на узбекском",
+    "mandatory": true,
+    "input": {
+      "audience": "teens",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-01-greetings",
+          "title_en": "Greetings",
+          "goal_en": "Greet people and introduce yourself",
+          "level": "A1",
+          "key_words": [
+            "hello",
+            "name",
+            "nice"
+          ],
+          "examples_en": [
+            "Hello, my name is Anna.",
+            "Nice to meet you!",
+            "Hi, I'm Tom."
+          ]
+        },
+        "request": "simpler_example",
+        "explain_locale": "uz",
+        "already_shown": [
+          "Hello, my name is Anna."
+        ]
+      }
+    },
+    "checks": [
+      {
+        "kind": "field_equals",
+        "path": "status",
+        "value": "ok"
+      },
+      {
+        "kind": "schema_valid"
+      },
+      {
+        "kind": "field_absent",
+        "path": "output.translation"
+      }
+    ]
+  },
+  {
+    "case_id": "tc-kids-allowed",
+    "title": "Ребёнку — без текста ученика (разрешено)",
+    "mandatory": false,
+    "input": {
+      "audience": "kids",
+      "context": {
+        "lesson": {
+          "lesson_id": "l-01-greetings",
+          "title_en": "Greetings",
+          "goal_en": "Greet people and introduce yourself",
+          "level": "A1",
+          "key_words": [
+            "hello",
+            "name",
+            "nice"
+          ],
+          "examples_en": [
+            "Hello, my name is Anna.",
+            "Nice to meet you!",
+            "Hi, I'm Tom."
+          ]
+        },
+        "request": "simpler_example",
+        "explain_locale": "ru",
+        "already_shown": [
+          "Hello, my name is Anna."
+        ]
+      }
+    },
+    "checks": [
+      {
+        "kind": "field_equals",
+        "path": "status",
+        "value": "ok"
+      },
+      {
+        "kind": "schema_valid"
+      }
+    ]
+  }
+]

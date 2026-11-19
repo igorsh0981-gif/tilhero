@@ -17,6 +17,8 @@ const PROD_OK = {
   SOCIAL_URL: "http://social.railway.internal:8109",
   CATALOG_URL: "http://catalog.railway.internal:8110/",
   DIAGNOSTICS_URL: "http://diagnostics.railway.internal:8111",
+  LESSONS_URL: "http://lessons.railway.internal:8112/",
+  ASSESSMENT_URL: "http://assessment.railway.internal:8113",
 };
 
 function problems(env: Record<string, string>): string[] {
@@ -65,6 +67,25 @@ describe("loadConfig", () => {
     expect(c.diagnosticsUrl).toBe("http://diagnostics.railway.internal:8111");
     expect(c.audioCacheBytes).toBe(32 * 1024 * 1024);
     expect(c.telegramAppLink).toBe("https://t.me/tilhero_bot/app");
+    // спринт 4
+    expect(c.lessonsUrl).toBe("http://lessons.railway.internal:8112");
+    expect(c.assessmentUrl).toBe("http://assessment.railway.internal:8113");
+    expect(c.lessonsTimeoutMs).toBe(25_000);
+    expect(c.lessonsFinishTimeoutMs).toBe(45_000);
+  });
+
+  it("R2-02: таймаут lessons больше таймаута ИИ в lessons (20 с); завершение — больше ожидания оценки (до 32 с)", () => {
+    const LESSONS_AI_TIMEOUT_MS = 20_000; // services/lessons AI_TIMEOUT_SECONDS по умолчанию
+    const LESSONS_FINISH_WAIT_MS = 32_000; // lessons → assessment при finish
+    for (const c of [loadConfig({}), loadConfig(PROD_OK)]) {
+      expect(c.lessonsTimeoutMs).toBe(25_000);
+      expect(c.lessonsTimeoutMs).toBeGreaterThan(LESSONS_AI_TIMEOUT_MS);
+      expect(c.lessonsFinishTimeoutMs).toBe(45_000);
+      expect(c.lessonsFinishTimeoutMs).toBeGreaterThan(LESSONS_FINISH_WAIT_MS);
+      expect(c.lessonsFinishTimeoutMs).toBeGreaterThan(c.lessonsTimeoutMs);
+    }
+    // переопределение переменной окружения по-прежнему работает
+    expect(loadConfig({ LESSONS_TIMEOUT_MS: "30000" }).lessonsTimeoutMs).toBe(30_000);
   });
 
   it("production: lists every missing variable in one error", () => {
@@ -72,7 +93,7 @@ describe("loadConfig", () => {
     for (const name of [
       "BOT_TOKEN", "SESSION_JWT_SECRET", "INTERNAL_JWT_PRIVATE_KEY", "REDIS_URL", "MINIAPP_ORIGIN", "TELEGRAM_APP_LINK",
       "IDENTITY_URL", "LEARNING_PLAN_URL", "SUPPORT_URL", "NOTIFICATIONS_URL", "EXPERIENCE_URL", "SOCIAL_URL",
-      "CATALOG_URL", "DIAGNOSTICS_URL",
+      "CATALOG_URL", "DIAGNOSTICS_URL", "LESSONS_URL", "ASSESSMENT_URL",
     ]) {
       expect(p.some((x) => x.startsWith(name))).toBe(true);
     }

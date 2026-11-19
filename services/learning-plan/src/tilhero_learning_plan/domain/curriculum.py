@@ -17,11 +17,17 @@
 4. Дополнительные — optional-уроки с совпадением цели или тем ученика (≤ N): сначала с большим числом совпадений,
    затем по порядку курса; уроки с освоенным навыком и уже вошедшие в план — нет.
 5. Следующий — первый обязательный (нет обязательных — первый дополнительный).
+6. Пройденные уроки (спринт 4, по последней завершённой сессии урока): пройденный с зачётом (`passed = true`) в
+   обязательные и дополнительные не входит, его основной навык закрывает предпосылки; пройденный без зачёта
+   (`passed = false`, а также `null` — оценка без вердикта) остаётся на своём месте с пометкой «повторить»
+   (детям — только мягкое объяснение, без кода-заменителя).
 
 Причины (`ReasonCode`, bff.ts): основная — `start_after_diagnostic` | `no_diagnostic` (первый урок от старта),
 `prerequisite_missing` (вставленный), `next_in_course` (остальные); уточняющие — `weak_area` (область основного
-навыка ниже предварительного уровня по диагностике), `goal_match`, `topic_match`. Объяснение — Localized RU/UZ из
-кодов; детям — мягкие формулировки без сравнения.
+навыка ниже предварительного уровня по диагностике; спринт 4 — ещё и урок «повторить»: кода `repeat` в контракте
+нет, ближайший существующий — `weak_area`, запрос на код — в отчёте спринта), `goal_match`, `topic_match`.
+Объяснение — Localized RU/UZ из кодов (у урока «повторить» — своя фраза первой); детям — мягкие формулировки без
+сравнения и давления.
 """
 
 from __future__ import annotations
@@ -35,16 +41,20 @@ from tilhero_learning_plan.domain.snapshot import BANDS, CourseSnapshot, SnapLes
 
 ReasonCode = Literal[
     "start_after_diagnostic", "no_diagnostic", "prerequisite_missing", "weak_area", "goal_match", "topic_match",
-    "next_in_course",
+    "next_in_course", "repeat",
 ]
 REASON_CODES: tuple[ReasonCode, ...] = (
     "start_after_diagnostic", "no_diagnostic", "prerequisite_missing", "weak_area", "goal_match", "topic_match",
-    "next_in_course",
+    "next_in_course", "repeat",
 )
 MASTERED = frozenset({"demonstrated", "retained"})
 DIAGNOSTIC_AREAS = frozenset({"vocabulary", "grammar", "reading", "listening", "speaking", "writing"})
 # Версия правил: смена алгоритма = другие входы (basis) → новая ревизия при следующем чтении
-ALGORITHM = "cp-2"  # cp-2: предпосылка закрыта уровнем ≤ полосы (как в diagnostics, ревью спринта 3)
+# cp-2: предпосылка закрыта уровнем ≤ полосы (как в diagnostics, ревью спринта 3);
+# cp-3: пройденные уроки (спринт 4) — с зачётом не планируются, без зачёта — «повторить»
+ALGORITHM = "cp-3"
+# Урок «повторить» (пройден без зачёта) — отдельный код; bff.ts ReasonCode дополнен "repeat" в спринте 4
+REPEAT_CODE: ReasonCode = "repeat"
 _RANK: dict[str, int] = {b: i for i, b in enumerate(BANDS)}
 
 
@@ -87,15 +97,26 @@ class Learner:
     topics: tuple[str, ...] = ()
     diagnostic: Diagnostic | None = None
     skills: Mapping[str, str] = field(default_factory=dict)  # skill_id → состояние карты навыков
+    # спринт 4: lesson_id → passed последней завершённой сессии урока (True | False | None — без вердикта)
+    lessons: Mapping[str, bool | None] = field(default_factory=dict)
 
     def mastered(self, skill_id: str) -> bool:
         return self.skills.get(skill_id) in MASTERED
+
+    def passed(self, lesson_id: str) -> bool:
+        """Урок пройден с зачётом — в план больше не ставится."""
+        return self.lessons.get(lesson_id) is True
+
+    def repeat(self, lesson_id: str) -> bool:
+        """Урок завершён без зачёта (или без вердикта) — остаётся в плане с пометкой «повторить»."""
+        return lesson_id in self.lessons and self.lessons[lesson_id] is not True
 
 
 @dataclass(frozen=True)
 class Planned:
     lesson: SnapLesson
     reason_codes: tuple[ReasonCode, ...]
+    repeat: bool = False  # завершён без зачёта — «повторить» (объяснение начинается с этого)
 
 
 @dataclass(frozen=True)
@@ -144,6 +165,9 @@ class _Planner:
         self.mandatory: list[Planned] = []
         self.in_plan: set[str] = set()
         self.taught: set[str] = set()  # основные навыки уроков, уже стоящих в плане
+        # основные навыки уроков, пройденных с зачётом (спринт 4): предпосылка закрыта, урок-«учитель» не нужен
+        self.passed_skills: set[str] = {lesson.primary_skill_id for lesson in snapshot.lessons
+                                        if learner.passed(lesson.lesson_id)}
 
     def prerequisites(self, lesson: SnapLesson) -> list[str]:
         primary = self.skills.get(lesson.primary_skill_id)
@@ -172,18 +196,27 @@ class _Planner:
         return gap is not None and gap > 0
 
     def satisfied(self, skill_id: str) -> bool:
-        return self.learner.mastered(skill_id) or skill_id in self.taught or self.covered_by_level(skill_id)
+        return (self.learner.mastered(skill_id) or skill_id in self.taught or skill_id in self.passed_skills
+                or self.covered_by_level(skill_id))
+
+    def done(self, lesson: SnapLesson) -> bool:
+        """В план не ставится: основной навык освоен или урок пройден с зачётом."""
+        return self.learner.mastered(lesson.primary_skill_id) or self.learner.passed(lesson.lesson_id)
 
     def teacher(self, skill_id: str) -> SnapLesson | None:
         """Урок, дающий навык: core раньше optional, затем по порядку курса."""
-        candidates = [lesson for lesson in self.eligible if lesson.primary_skill_id == skill_id]
+        candidates = [lesson for lesson in self.eligible
+                      if lesson.primary_skill_id == skill_id and not self.learner.passed(lesson.lesson_id)]
         candidates.sort(key=lambda lesson: (lesson.kind != "core", self.index[lesson.lesson_id]))
         return candidates[0] if candidates else None
 
     def modifiers(self, lesson: SnapLesson) -> list[ReasonCode]:
         out: list[ReasonCode] = []
         primary = self.skills.get(lesson.primary_skill_id)
-        if primary is not None and primary.area in self.weak:
+        # «повторить» (спринт 4, bff.ts) — мягкая пометка без давления, в том числе детям (CONVENTIONS §8)
+        if self.learner.repeat(lesson.lesson_id):
+            out.append(REPEAT_CODE)
+        if primary is not None and primary.area in self.weak and "weak_area" not in out:
             out.append("weak_area")
         if self.learner.goal is not None and self.learner.goal in lesson.goals:
             out.append("goal_match")
@@ -192,7 +225,7 @@ class _Planner:
         return out
 
     def append(self, lesson: SnapLesson, code: ReasonCode) -> None:
-        self.mandatory.append(Planned(lesson, (code, *self.modifiers(lesson))))
+        self.mandatory.append(Planned(lesson, (code, *self.modifiers(lesson)), self.learner.repeat(lesson.lesson_id)))
         self.in_plan.add(lesson.lesson_id)
         self.taught.add(lesson.primary_skill_id)
 
@@ -220,17 +253,17 @@ class _Planner:
         # не стартовые; первый с закрытыми предпосылками, иначе первый из остальных (недостающие предпосылки
         # вставит add); все ниже уровня — первый не освоенный урок высшего уровня курса
         open_ = [i for i, lesson in enumerate(self.core)
-                 if not self.learner.mastered(lesson.primary_skill_id)
-                 and not self.below_level(lesson.primary_skill_id)]
+                 if not self.done(lesson) and not self.below_level(lesson.primary_skill_id)]
         for i in open_:
-            if all(self.learner.mastered(p) or self.covered_by_level(p) for p in self.prerequisites(self.core[i])):
+            if all(self.learner.mastered(p) or p in self.passed_skills or self.covered_by_level(p)
+                   for p in self.prerequisites(self.core[i])):
                 return i
         if open_:
             return open_[0]
         levels = [_RANK[lesson.level] for lesson in self.core if lesson.level in _RANK]
         top = max(levels, default=-1)
         for i, lesson in enumerate(self.core):
-            if _RANK.get(lesson.level) == top and not self.learner.mastered(lesson.primary_skill_id):
+            if _RANK.get(lesson.level) == top and not self.done(lesson):
                 return i
         return len(self.core)
 
@@ -238,7 +271,7 @@ class _Planner:
         first: ReasonCode = "start_after_diagnostic" if self.learner.diagnostic is not None else "no_diagnostic"
         started = False
         for lesson in self.core[self.start_index():]:
-            if lesson.lesson_id in self.in_plan or self.learner.mastered(lesson.primary_skill_id):
+            if lesson.lesson_id in self.in_plan or self.done(lesson):
                 continue
             self.add(lesson, "next_in_course" if started else first, frozenset())
             started = True
@@ -248,13 +281,14 @@ class _Planner:
         for lesson in self.eligible:
             if lesson.kind != "optional" or lesson.lesson_id in self.in_plan:
                 continue
-            if self.learner.mastered(lesson.primary_skill_id):
+            if self.done(lesson):
                 continue
             mods = self.modifiers(lesson)
             matches = [m for m in mods if m in ("goal_match", "topic_match")]
             if not matches:
                 continue
-            ranked.append((-len(matches), self.index[lesson.lesson_id], Planned(lesson, tuple(mods))))
+            ranked.append((-len(matches), self.index[lesson.lesson_id],
+                           Planned(lesson, tuple(mods), self.learner.repeat(lesson.lesson_id))))
         ranked.sort(key=lambda item: (item[0], item[1]))
         return [planned for _, _, planned in ranked[:limit]]
 
@@ -296,6 +330,10 @@ _TEXTS: dict[str, dict[str, str]] = {
         "ru": "Следующий шаг по программе курса.",
         "uz": "Kurs dasturi boʻyicha navbatdagi qadam.",
     },
+    "repeat": {
+        "ru": "Повторим этот урок — в прошлый раз зачёт не получен.",
+        "uz": "Bu darsni takrorlaymiz — oʻtgan safar sinovdan oʻtilmadi.",
+    },
 }
 # Детям 6–13 — без давления и сравнения (CONVENTIONS §8)
 _KID_TEXTS: dict[str, dict[str, str]] = {
@@ -311,6 +349,8 @@ _KID_TEXTS: dict[str, dict[str, str]] = {
     },
     "topic_match": {"ru": "В уроке — выбранные темы.", "uz": "Darsda tanlangan mavzular bor."},
     "next_in_course": {"ru": "Следующий шаг по курсу.", "uz": "Kurs boʻyicha navbatdagi qadam."},
+    "repeat": {"ru": "Пройдём этот урок ещё раз — так дальше будет легче.",
+               "uz": "Bu darsni yana bir bor oʻtamiz — keyin osonroq boʻladi."},
 }
 
 
@@ -323,13 +363,16 @@ def _goal_sentence(goal: str | None, lang: str, kids: bool) -> str:
     return f"«{label['uz']}» maqsadiga mos keladi." if kids else f"«{label['uz']}» maqsadingizga mos keladi."
 
 
-def explain(codes: Sequence[str], *, goal: str | None, kids: bool) -> dict[str, str]:
-    """Объяснение «почему этот урок» на RU/UZ из кодов причин (в порядке кодов, без повторов)."""
+def explain(codes: Sequence[str], *, goal: str | None, kids: bool, repeat: bool = False) -> dict[str, str]:
+    """Объяснение «почему этот урок» на RU/UZ из кодов причин (в порядке кодов, без повторов). Урок «повторить» —
+    своя фраза первой; сам код `repeat` второй раз фразу не добавляет."""
     texts = _KID_TEXTS if kids else _TEXTS
     out: dict[str, str] = {}
     for lang in ("ru", "uz"):
-        sentences: list[str] = []
+        sentences: list[str] = [texts["repeat"][lang]] if repeat else []
         for code in _dedup(codes):
+            if repeat and code == REPEAT_CODE:
+                continue
             if code == "goal_match":
                 sentences.append(_goal_sentence(goal, lang, kids))
             elif code in texts:

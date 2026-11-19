@@ -24,6 +24,7 @@ import type {
   WhatsNew,
 } from "@tilhero/contracts/bff";
 import { MockContent, type ContentScenario } from "./content";
+import { MockLessons, type LessonsScenario } from "./lessons";
 import * as F from "./data";
 
 /**
@@ -67,6 +68,13 @@ export interface Scenario {
   content?: ContentScenario;
   /** start in a child profile 6–9 of the (adult) account, onboarded */
   child?: boolean;
+  /** sprint 4: lessons, practice sessions, summary, appeals */
+  lessons?: LessonsScenario;
+  /** "METHOD /path": the mock handles the call, then the response is lost on the way (network drop) — once */
+  dropResponseOnce?: string[];
+  /** "METHOD /path" → [status, code]: the mock handles the call (the domain saved it), then answers this error — the BFF
+   *  did not wait for the domain (503 UPSTREAM_UNAVAILABLE, 504 of the edge) — once */
+  lateResponseOnce?: Record<string, [number, string]>;
 }
 
 export interface Recorded {
@@ -117,6 +125,9 @@ export class MockBff {
   /** the new code of a pending reset (review T-8): it does not work until security.pin_reset_effective_at */
   pendingPin: string | null;
   readonly content: MockContent;
+  readonly lessons: MockLessons;
+  private dropOnce: Set<string>;
+  private lateOnce: Record<string, [number, string]>;
   private access = 0;
   private failOnce: Record<string, number | [number, string]>;
   private conflictOnce: boolean;
@@ -145,6 +156,8 @@ export class MockBff {
     this.failOnce = { ...(sc.failOnce ?? {}) };
     this.conflictOnce = !!sc.conflictOnce;
     this.content = new MockContent(sc.content ?? {});
+    this.dropOnce = new Set(sc.dropResponseOnce ?? []);
+    this.lateOnce = { ...(sc.lateResponseOnce ?? {}) };
     if (sc.child) {
       const id = "7a1c2b3a-2222-4a2b-9c3d-000000000777";
       this.learners.push({ learner_id: id, kind: "child", display_name: "Мадина", age_band: "6-9", is_active: true, onboarding_completed: true });
@@ -153,6 +166,7 @@ export class MockBff {
       this.seen[id] = new Set([F.WELCOME.id, F.UPDATE_1.id, F.UPDATE_2.id]);
       this.active = id;
     }
+    this.lessons = new MockLessons(sc.lessons ?? {}, { self: this.active });
   }
 
   async install(page: Page): Promise<void> {
@@ -594,8 +608,28 @@ export class MockBff {
       return this.ok(route, t);
     }
 
+    // ---- sprint 4 ----
+    const s4 = this.lessons.handle(method, path, url.searchParams, b, headers, { owner: this.active, kids: this.learner().kind === "child" });
+    if (s4) {
+      // dynamic keys: "POST /v1/sessions/*/steps/*" drops the first answer to any step after handling it
+      const pattern = key.replace(/[0-9a-f-]{36}/g, "*").replace(/\/s\d+(?=$|\/)/, "/*");
+      if (this.dropOnce.has(key) || this.dropOnce.has(pattern)) {
+        this.dropOnce.delete(key);
+        this.dropOnce.delete(pattern);
+        return route.abort("failed");
+      }
+      const late = this.lateOnce[key] ?? this.lateOnce[pattern];
+      if (late) {
+        delete this.lateOnce[key];
+        delete this.lateOnce[pattern];
+        return this.err(route, late[0], late[1], late[1] === "UPSTREAM_UNAVAILABLE" ? { service: "lessons" } : {});
+      }
+      if (s4.code) return this.err(route, s4.status, s4.code, s4.details ?? {});
+      return this.ok(route, s4.body, s4.status);
+    }
+
     // ---- sprint 3 ----
-    const s3 = this.content.handle(method, path, url.searchParams, b, headers, { kid: this.learner().kind === "child", goal: this.plan().goal, idem: this.idem }, (status, out, code, details, raw) => {
+    const s3 = this.content.handle(method, path, url.searchParams, b, headers, { kid: this.learner().kind === "child", goal: this.plan().goal, idem: this.idem, completed: this.lessons.completed(this.active) }, (status, out, code, details, raw) => {
       if (raw) return route.fulfill({ status, contentType: raw.contentType, body: raw.body, headers: { etag: '"e2e-audio"', "cache-control": "private, max-age=3600" } });
       if (code) return this.err(route, status, code, details ?? {});
       return this.ok(route, out, status);

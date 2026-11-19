@@ -2,7 +2,7 @@ import { useI18n } from "../../i18n";
 import { navItem, type PageId } from "../../state/nav";
 import { Empty } from "../../ui/kit";
 
-export type SoonPage = Extract<PageId, "content" | "agents" | "qa" | "costs" | "heroes" | "game" | "events" | "langs">;
+export type SoonPage = Extract<PageId, "heroes" | "game" | "events">;
 
 /** Section of a later sprint: listed in the menu, an honest empty screen with the sprint number — no invented data. */
 export function Soon({ page, sprint }: { page: PageId; sprint: number }) {

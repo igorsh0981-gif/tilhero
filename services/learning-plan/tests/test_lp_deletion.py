@@ -24,7 +24,7 @@ def requested(user: uuid.UUID, request_id: uuid.UUID, attempt: int | None = None
 
 
 TABLES = ("plans", "activities", "slot_marks", "trajectories", "learner_diagnostics", "skill_states",
-          "learner_audience")
+          "learner_audience", "completed_lessons", "lesson_evaluations")
 EMPTY = dict.fromkeys(TABLES, 0)
 
 
@@ -44,6 +44,17 @@ async def seed(env, user: uuid.UUID) -> None:
     await env.profile(user)
     await env.diagnostic(user)
     await env.skills(user, {"s.greet": "demonstrated"})
+    # спринт 4: пройденный урок из события lessons и его оценка из события assessment
+    sid, eid = uuid.uuid4(), uuid.uuid4()
+    await env.publish("lesson.session.completed.v1", {
+        "session_id": str(sid), "user_id": str(user), "kind": "lesson", "pair_id": "ru-en",
+        "lesson_id": "l-be", "scenario_id": None, "asset_id": None, "status": "completed", "outcome": "success",
+        "minutes": 15, "local_date": "2026-11-16", "evaluation_id": str(eid), "passed": True,
+        "practice_only": False, "finished_at": "2026-11-16T05:30:00Z"}, producer="lessons")
+    await env.publish("assessment.completed.v1", {
+        "evaluation_id": str(eid), "user_id": str(user), "pair_id": "ru-en", "session_id": str(sid), "kind": "lesson",
+        "skill_outcomes": [], "passed": True, "practice_only": False, "supersedes": None,
+        "created_at": "2026-11-16T05:30:00Z"}, producer="assessment")
     await env.trajectory(user)
     assert all(v > 0 for v in (await rows(env, user)).values())
 

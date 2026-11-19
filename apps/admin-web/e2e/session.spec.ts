@@ -14,6 +14,9 @@ test("every non-GET carries X-CSRF-Token = Me.csrf_token; GETs never do", async 
 
 test("401 SESSION_REVOKED → back to the sign-in screen with a notice", async ({ page }) => {
   const bff = await openAs(page, "admin@tilhero.local", "#/overview");
+  // the overview's own first requests are done: the revocation hits the click
+  await expect(page.getByTestId("block-ai")).toBeVisible();
+  await page.waitForLoadState("networkidle");
   bff.revoke();
   await page.locator('[data-nav="audit"]').click();
   await expect(page.getByTestId("login-creds")).toBeVisible();

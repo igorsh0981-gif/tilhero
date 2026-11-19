@@ -263,3 +263,147 @@ export const PAIR_BODY = obj(
 );
 /** Идентификатор теста диагностики (dx-en-adult). */
 export const TEST_ID = CONTENT_KEY;
+
+// ---------------------------------------------------------------- ИИ, контроль диалогов, затраты (спринт 4, admin.ts, ai.ts)
+
+/** 17 агентов LinguaFlow (ai.ts AgentId) — порядок как в контракте. */
+export const AGENT_IDS = [
+  "learning_orchestrator", "diagnostic_assessor", "curriculum_planner", "teaching_coach", "conversation_partner",
+  "independent_evaluator", "error_analyst", "spaced_repetition_coach", "pronunciation_coach", "evening_review_coach",
+  "safety_quality_gate", "cooperative_lesson_coach", "gameplay_director", "duel_host", "referral_integrity_reviewer",
+  "media_lesson_designer", "language_pathway_advisor",
+] as const;
+export const AUDIENCE_SEGMENTS = ["kids", "teens", "adults"] as const;
+export const RUBRIC_CRITERIA = ["task", "vocabulary", "grammar", "independence", "pronunciation", "fluency", "comprehension"] as const;
+export const SESSION_KINDS = ["lesson", "scenario", "media", "review"] as const;
+export const SESSION_STATUSES = ["ready", "in_progress", "paused", "completed", "failed", "cancelled"] as const;
+export const SESSION_OUTCOMES = ["success", "alt_success", "fail"] as const;
+export const SESSION_FLAGS = ["ai_used", "ai_unavailable", "hints", "human_review", "appealed", "flagged", "failed"] as const;
+export const APPEAL_STATUSES = ["new", "in_review", "upheld", "corrected"] as const;
+export const SKILL_OUTCOMES = ["demonstrated", "learning", "not_assessed"] as const;
+export const ERROR_SEVERITIES = ["low", "medium", "high"] as const;
+export const USAGE_PERIODS = ["day", "week", "month"] as const;
+
+export const AGENT_ID = enumOf(AGENT_IDS);
+/** Модель маршрутизации: claude-haiku-5-5, claude-sonnet-5-5, fake. */
+export const MODEL_ID_PATTERN = "^[a-z0-9][a-z0-9._-]{1,63}$";
+export const MODEL_ID = str(2, 64, { pattern: MODEL_ID_PATTERN });
+/** Идентификатор золотого теста: UUID или код сида (cp-01-correct). */
+export const CASE_ID = str(1, 64, { pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$" });
+/** Навык (skill_id каталога): как ключ контента. */
+export const SKILL_ID = CONTENT_KEY;
+/** Причина просмотра реплик, переоценки (≥ 10, admin.ts). */
+export const QA_REASON = str(10, 500);
+/** If-Match черновика версии агента (updated_at версии) — передаётся в ai-gateway как есть. */
+export const IF_MATCH_RE = /^"?[0-9A-Za-z:.+_-]{1,62}"?$/;
+/**
+ * Лимит тела маршрутов версий агента: инструкции ≤ 20 000 и правила ≤ 10 000 символов (до 30 000 вместе; кириллица в
+ * UTF-8 — 2 байта, плюс экранирование JSON и JSON Schema вывода) — 128 КБ; остальные маршруты ИИ — 64 КБ.
+ */
+export const AGENT_VERSION_BODY_LIMIT = 128 * 1024;
+
+/** POST …/versions {from_version?} — черновик из опубликованной (по умолчанию) или указанной версии. */
+export const AGENT_VERSION_CREATE = obj({ from_version: integer(1, 2_147_483_647) });
+/** AgentVersionPatch (admin.ts): хотя бы одно поле; JSON Schema вывода — объект как есть (проверяет ai-gateway). */
+export const AGENT_VERSION_PATCH = obj(
+  {
+    instructions: str(0, 20_000),
+    rules: str(0, 10_000),
+    output_schema: { type: "object" },
+    schema_version: str(1, 64, { pattern: "^[a-z][a-z0-9_.-]{0,63}$" }),
+    model_id: MODEL_ID,
+    fallback_model_id: nullable(MODEL_ID),
+    temperature: { type: "number", minimum: 0, maximum: 1 },
+    max_output_tokens: integer(1, 2000),
+    timeout_ms: integer(2000, 30_000),
+    max_cost_usd: { type: "number", minimum: 0, maximum: 10 },
+    notes: nullable(str(0, 2000)),
+  },
+  [],
+  { minProperties: 1 },
+);
+export const AGENT_CANARY_SET = obj(
+  { version: integer(1, 2_147_483_647), percent: integer(1, 50), reason: REASON },
+  ["version", "percent", "reason"],
+);
+export const REASON_ONLY = obj({ reason: REASON }, ["reason"]);
+
+const PATH_S = str(1, 200, { pattern: "^[A-Za-z0-9_$.\\[\\]-]+$" });
+const SCALAR: Schema = { anyOf: [str(0, 1000), { type: "number" }, { type: "boolean" }, { type: "null" }] };
+/** GoldenCheck (ai.ts) — по виду проверки ровно её поля. */
+export const GOLDEN_CHECK: Schema = {
+  oneOf: [
+    obj({ kind: { const: "schema_valid" } }, ["kind"]),
+    obj({ kind: { const: "field_equals" }, path: PATH_S, value: SCALAR }, ["kind", "path", "value"]),
+    obj({ kind: { const: "field_in" }, path: PATH_S, values: arrayOf(SCALAR, 1, 50) }, ["kind", "path", "values"]),
+    obj({ kind: { const: "field_absent" }, path: PATH_S }, ["kind", "path"]),
+    obj({ kind: { const: "text_not_contains" }, path: PATH_S, values: arrayOf(str(1, 200), 1, 50) }, ["kind", "path", "values"]),
+    obj({ kind: { const: "max_length" }, path: PATH_S, n: integer(1, 100_000) }, ["kind", "path", "n"]),
+  ],
+};
+const GOLDEN_PROPS = {
+  title: str(1, 200),
+  /** вход агента: аудитория (проверка отказа детям) и контекст — JSON-объект как есть (проверяет ai-gateway) */
+  input: obj({ audience: enumOf(AUDIENCE_SEGMENTS), context: { type: "object" } }, ["audience", "context"]),
+  checks: arrayOf(GOLDEN_CHECK, 1, 50),
+  mandatory: { type: "boolean" },
+};
+export const GOLDEN_CASE_CREATE = obj(GOLDEN_PROPS, ["title", "input", "checks", "mandatory"]);
+export const GOLDEN_CASE_PATCH = obj(GOLDEN_PROPS, [], { minProperties: 1 });
+
+const USD = (max: number): Schema => ({ type: "number", minimum: 0, maximum: max });
+export const MODEL_UPDATE = obj(
+  { input_usd_per_mtok: USD(1000), output_usd_per_mtok: USD(1000), active: { type: "boolean" }, reason: REASON },
+  ["input_usd_per_mtok", "output_usd_per_mtok", "active", "reason"],
+);
+/**
+ * PUT budget: поля AiBudget & {reason}; ai_enabled — необязательно (аварийная остановка — своя команда), updated_at —
+ * необязательно (защита ai-gateway от гонки правок → 409 BUDGET_CONFLICT {updated_at}).
+ */
+export const BUDGET_UPDATE = obj(
+  {
+    ai_enabled: { type: "boolean" },
+    updated_at: DATETIME,
+    monthly_cap_usd: USD(100_000),
+    learner_daily_cap_usd: USD(1000),
+    lesson_cap_usd: USD(1000),
+    alert_percent: integer(1, 100),
+    reason: REASON,
+  },
+  ["monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "alert_percent", "reason"],
+);
+export const EMERGENCY_STOP = obj({ enabled: { type: "boolean" }, reason: REASON }, ["enabled", "reason"]);
+
+/** Страница журнала сессий: ≤ 50 строк (затраты строки — отдельный вызов ai-gateway, не больше 50 параллельно). */
+export const QA_LIMIT_Q = str(1, 2, { pattern: "^(?:[1-9]|[1-4][0-9]|50)$" });
+export const TRANSCRIPT_REQUEST = obj({ reason: QA_REASON }, ["reason"]);
+export const FLAG_REQUEST = obj({ reason: str(3, 500) }, ["reason"]);
+const SCORE = { anyOf: [integer(0, 3), { type: "null" }] };
+export const CONFIRMED_ERROR = obj(
+  {
+    turn_id: str(1, 64, { pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$" }),
+    evidence: str(1, 120),
+    correction: str(1, 200),
+    error_code: str(1, 64, { pattern: "^[a-z][a-z0-9_]{0,63}$" }),
+    severity: enumOf(ERROR_SEVERITIES),
+  },
+  ["turn_id", "evidence", "correction", "error_code", "severity"],
+);
+export const REEVALUATION = obj(
+  {
+    scores: {
+      type: "object",
+      additionalProperties: false,
+      properties: Object.fromEntries(RUBRIC_CRITERIA.map((c) => [c, SCORE])),
+    },
+    skill_outcomes: arrayOf(obj({ skill_id: SKILL_ID, outcome: enumOf(SKILL_OUTCOMES) }, ["skill_id", "outcome"]), 0, 100),
+    confirmed_errors: arrayOf(CONFIRMED_ERROR, 0, 5),
+    reason: QA_REASON,
+    appeal_id: nullable(UUID),
+  },
+  ["scores", "skill_outcomes", "confirmed_errors", "reason"],
+);
+export const APPEAL_DECISION = obj(
+  { decision: enumOf(["upheld", "corrected"]), note: str(10, 500), new_evaluation_id: nullable(UUID) },
+  ["decision", "note"],
+);

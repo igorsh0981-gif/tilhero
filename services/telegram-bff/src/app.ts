@@ -17,6 +17,7 @@ import { schemaErrors, type App } from "./http.js";
 import { EXTRA_REDACT_PATHS, scrub, type LogSink } from "./logging.js";
 import { createLimiter } from "./rateLimit.js";
 import { familyRoutes } from "./routes/family.js";
+import { lessonsRoutes } from "./routes/lessons.js";
 import { contentRoutes } from "./routes/content.js";
 import { diagnosticsRoutes } from "./routes/diagnostics.js";
 import { notificationsRoutes } from "./routes/notifications.js";
@@ -172,6 +173,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
           { name: "skills" },
           { name: "scenarios" },
           { name: "media" },
+          { name: "lessons" },
+          { name: "assessment" },
         ],
       },
       hideUntagged: true,
@@ -190,8 +193,11 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
       social: config.socialUrl,
       catalog: config.catalogUrl,
       diagnostics: config.diagnosticsUrl,
+      lessons: config.lessonsUrl,
+      assessment: config.assessmentUrl,
     },
     timeoutMs: config.upstreamTimeoutMs,
+    lessonsTimeoutMs: config.lessonsTimeoutMs,
     retries: config.upstreamRetries,
     ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
     onFailure: (info) =>
@@ -247,6 +253,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   supportRoutes(app, ctx);
   diagnosticsRoutes(app, ctx);
   contentRoutes(app, ctx);
+  lessonsRoutes(app, ctx);
 
   if (!config.isSecure) {
     app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());

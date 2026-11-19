@@ -3,6 +3,10 @@
  * Единственный источник типов для ai-gateway, lessons, assessment и админки (admin.ts импортирует отсюда).
  * Скиллы — LinguaFlow 1.2 `skills/*.md`; контракт агента — `docs/04_Архитектура_и_агенты.md` §4.
  * Правило: ИИ необязателен — при status unavailable/refused вызывающий продолжает без ИИ.
+ * Поля контекста с суффиксом `_en` (title_en, task_en, role_en, description_en, goal_en, completion_criteria_en,
+ * descriptor_en) — описательные: английский текст, если он есть в контенте (реплики, примеры), иначе русская
+ * локализация из catalog (заголовки, задачи, роли, описания переходов, цели, критерии, дескрипторы рубрик).
+ * Модель отвечает по правилам версии независимо от языка описаний.
  */
 import type { AudienceSegment, Band, Localized } from "./content.js";
 
@@ -57,13 +61,18 @@ export interface AgentInvokeRequest<C = AgentContext> {
   audience: AudienceSegment;
   locale: "ru" | "uz";
   context: C;
+  /** сколько вызывающий готов ждать с момента отправки, мс (1000..60000; нет — без дедлайна): шлюз не начинает
+   *  попытку, если осталось < 1,5 с (→ unavailable: timeout), таймаут попытки = min(timeout_ms версии, остаток − 0,5 с);
+   *  дубль request_id ждёт результат первого вызова не дольше дедлайна (и не дольше 25 с), иначе 409 */
+  deadline_ms?: number;
 }
 
 export type AgentUnavailableReason =
   | "ai_disabled" // аварийная остановка или нет ключа провайдера
-  | "budget_exceeded" // месячный потолок, лимит ученика за день или урока
+  | "budget_exceeded" // месячный потолок, лимит ученика за день или урока (и резервная модель не помещается)
+  | "cost_limit" // max_cost_usd версии на вызов: следующая попытка (и резервная модель) не помещается
   | "provider_error"
-  | "timeout"
+  | "timeout" // таймаут провайдера или дедлайн вызывающего
   | "invalid_output"; // после повтора с ограничениями и резервной модели
 export type AgentRefusedReason = "kids_not_allowed" | "agent_not_active";
 
@@ -77,7 +86,8 @@ export interface AgentInvokeResult<O = AgentOutput> {
   schema_version: string | null;
   model_id: string | null;
   canary: boolean;
-  cost_usd: number; // 0 при unavailable/refused
+  /** фактически оплаченная сумма (при unavailable после реальных попыток провайдера — не 0; refused — 0) */
+  cost_usd: number;
   latency_ms: number;
   /** коды правил безопасности, сработавших и исправленных повтором: link_removed, too_long, … */
   warnings: string[];
@@ -188,12 +198,20 @@ export interface AgentVersion {
   notes: string | null;
   author_id: string;
   created_at: string;
+  /** If-Match для PATCH черновика (иначе 428 IF_MATCH_REQUIRED / 409 VERSION_CONFLICT) */
+  updated_at: string;
+  /** версия сейчас на канарейке (заморожена) */
+  canary: boolean;
   published_by: string | null;
   published_at: string | null;
   /** последний прогон золотых тестов этой версии */
   last_test_run: TestRunSummary | null;
 }
 
+/** Пути (dot-path, массивы — индекс) считаются от корня AgentInvokeResult: `status`, `reason`, `output.intent`,
+ *  `output.confirmed_errors.0.evidence`. Прогон на провайдере fake проверяет только `schema_valid` и пути вне
+ *  `output.*` (статус, отказ детям); проверки содержимого `output.*` помечаются skipped. Публикация в stage/prod —
+ *  только по прогону на настоящем провайдере (anthropic); на dev-стенде допускается fake (флаг ai-gateway). */
 export type GoldenCheck =
   | { kind: "schema_valid" }
   | { kind: "field_equals"; path: string; value: string | number | boolean | null }
@@ -229,7 +247,9 @@ export interface TestRunSummary {
   finished_at: string | null;
 }
 export interface TestRun extends TestRunSummary {
-  results: Array<{ case_id: string; title: string; mandatory: boolean; passed: boolean; failures: string[]; latency_ms: number; cost_usd: number }>;
+  results: Array<{ case_id: string; title: string; mandatory: boolean; passed: boolean; failures: string[];
+                   /** проверки, не выполненные на этом провайдере (fake: содержимое output.*) */ skipped: string[];
+                   latency_ms: number; cost_usd: number }>;
 }
 
 export interface AgentRollout {
@@ -262,4 +282,5 @@ export interface AiProviderStatus {
   provider: "anthropic" | "fake";
   key_configured: boolean; // ключ задан в переменной ai-gateway (сам ключ не показывается никогда)
   last_error: { code: string; at: string } | null;
+  ai_enabled: boolean; // false — аварийная остановка; для ролей без costs.read (баннер «ИИ выключен»)
 }

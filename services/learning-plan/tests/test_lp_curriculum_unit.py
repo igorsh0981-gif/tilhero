@@ -250,3 +250,41 @@ def test_explanation_combines_codes_and_names_goal() -> None:
     assert explain([], goal=None, kids=True)["ru"] == "Следующий шаг по курсу."
     kid = explain(["no_diagnostic"], goal=None, kids=True)
     assert kid == {"ru": "Начнём с самого начала — шаг за шагом.", "uz": "Eng boshidan, qadamma-qadam boshlaymiz."}
+
+
+# ---------------------------------------------------------------- спринт 4: пройденные уроки
+
+
+def test_passed_lessons_skipped_failed_repeat() -> None:
+    learner = Learner(audience="adults", goal="travel", topics=("food",),
+                      lessons={"l-greet": True, "l-be": False, "l-numbers": None, "l-cafe": True})
+    plan = plan_trajectory(SNAP, learner)
+    assert ids(plan.mandatory) == ADULT_CORE[1:]
+    assert plan.next is not None and plan.next.lesson.lesson_id == "l-be" and plan.next.repeat is True
+    assert plan.next.reason_codes == ("no_diagnostic", "repeat")
+    assert codes(plan)["l-numbers"] == ("next_in_course", "repeat")
+    assert [p.repeat for p in plan.mandatory[:3]] == [True, True, False]
+    assert "l-cafe" not in ids(plan.optional)  # пройденный дополнительный урок не предлагается снова
+
+
+def test_passed_teacher_lesson_not_inserted_and_kids_no_substitute_code() -> None:
+    learner = Learner(audience="adults", diagnostic=diag("l-routine", level="A0", grammar="A0"),
+                      lessons={"l-present": True})
+    assert ids(plan_trajectory(SNAP, learner).mandatory)[0] == "l-routine"
+    kids = plan_trajectory(SNAP, Learner(audience="kids", lessons={"l-greet": False}))
+    # спринт 4: код repeat (bff.ts) — мягкий, ставится и детям
+    assert kids.next is not None and kids.next.repeat and kids.next.reason_codes == ("no_diagnostic", "repeat")
+
+
+@pytest.mark.parametrize("kids", [False, True])
+def test_repeat_explanation(kids: bool) -> None:
+    text = explain(["next_in_course", "repeat"], goal=None, kids=kids, repeat=True)
+    assert CYRILLIC.search(text["ru"]) and not CYRILLIC.search(text["uz"])
+    assert "'" not in text["uz"] and "’" not in text["uz"]
+    if kids:
+        assert text["ru"] == "Пройдём этот урок ещё раз — так дальше будет легче. Следующий шаг по курсу."
+        assert not KID_FORBIDDEN.search(text["ru"] + " " + text["uz"]), text
+    else:
+        # код repeat второй раз фразу не добавляет
+        assert text["ru"] == ("Повторим этот урок — в прошлый раз зачёт не получен. "
+                              "Следующий шаг по программе курса.")

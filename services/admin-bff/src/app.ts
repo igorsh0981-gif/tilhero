@@ -13,6 +13,7 @@ import { PrincipalCache, StaffNames, makeStoreGuard, type BffContext } from "./c
 import { schemaErrors, type App } from "./http.js";
 import { EXTRA_REDACT_PATHS, scrub, type LogSink } from "./logging.js";
 import { createLimiter } from "./rateLimit.js";
+import { aiRoutes } from "./routes/ai.js";
 import { auditRoutes } from "./routes/audit.js";
 import { authRoutes } from "./routes/auth.js";
 import { contentRoutes } from "./routes/content.js";
@@ -22,6 +23,7 @@ import { experienceRoutes } from "./routes/experience.js";
 import { languageRoutes } from "./routes/languages.js";
 import { learnerRoutes } from "./routes/learners.js";
 import { notificationRoutes } from "./routes/notifications.js";
+import { qaRoutes } from "./routes/qa.js";
 import { releaseNoteRoutes } from "./routes/releaseNotes.js";
 import { staffRoutes } from "./routes/staff.js";
 import { supportRoutes } from "./routes/support.js";
@@ -252,6 +254,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   contentRoutes(app, ctx);
   languageRoutes(app, ctx);
   diagnosticsRoutes(app, ctx);
+  aiRoutes(app, ctx);
+  qaRoutes(app, ctx);
 
   app.addHook("onClose", async () => {
     redis.off("error", onRedisError);

@@ -665,7 +665,9 @@ export interface SkillMap {
 // ---------- План уроков (APP-PLAN-02/03) ----------
 export type ReasonCode =
   | "start_after_diagnostic" | "no_diagnostic" | "prerequisite_missing" | "weak_area" | "goal_match" | "topic_match"
-  | "next_in_course";
+  | "next_in_course"
+  /** спринт 4: урок пройден без зачёта — мягкая пометка «повторить» (и детям — без давления) */
+  | "repeat";
 
 export interface LessonCard {
   lesson_id: string;
@@ -882,7 +884,8 @@ export type LessonStep =
 
 /** POST /v1/sessions/{id}/steps/{step_id} StepAnswer → StepResult. Повтор того же ответа → тот же результат.
  *  roleplay: choice_id ИЛИ text (только при free_text_allowed). item: answer (индекс | слова/реплики по порядку |
- *  строка для пропуска) или dont_know. explanation/notice/listen/roleplay_end: {} — «Дальше». */
+ *  строка для пропуска) или dont_know. open_answer: text (≤ max_length). explanation/notice/listen/roleplay_end: {} —
+ *  «Дальше». Детский профиль: text → 403 KIDS_NOT_ALLOWED (BFF, до домена). */
 export interface StepAnswer {
   answer?: number | string[] | string | null;
   dont_know?: boolean;
@@ -899,7 +902,8 @@ export interface StepResult {
 }
 
 /** POST /v1/sessions/{id}/steps/{step_id}/hint → {hint: Localized} (отмечается; в проверке без подсказок — 409).
- *  POST /v1/sessions/{id}/simpler → SimplerExplanation (позиция урока не меняется).
+ *  POST /v1/sessions/{id}/simpler?locale=ru|uz → SimplerExplanation (позиция урока не меняется; locale по умолчанию —
+ *  Accept-Language).
  *  POST /v1/sessions/{id}/roleplay/retry → LessonStep (один раз после исхода fail, с точки восстановления). */
 export interface SimplerExplanation {
   explanation: Localized | null; // ИИ на языке ученика или null (следующий пример урока)
@@ -921,7 +925,8 @@ export interface LessonSummary {
   skills: Array<{ skill_id: string; title: Localized; from: SkillState; to: SkillState }>;
   key_words: Array<{ en: string; gloss: Localized }>;
   next_lesson: LessonCard | null;
-  /** есть задания с ошибкой — можно повторить (без влияния на освоение): POST /v1/sessions/{id}/review */
+  /** есть задания с ошибкой — можно повторить (без влияния на освоение): POST /v1/sessions/{id}/review
+   *  (Idempotency-Key) → LessonSession (201, kind review); 409 NOTHING_TO_REVIEW */
   can_review: boolean;
 }
 
@@ -946,13 +951,15 @@ export interface EvaluationView {
 }
 
 // ---------- Апелляции (UC-ADM-03) ----------
-/** POST /v1/evaluations/{id}/appeal {reason} (Idempotency-Key) → Appeal (201). 409 APPEAL_EXISTS,
+/** GET /v1/evaluations/{id} → EvaluationView (BFF → assessment с sub = lrn). «Оценка появится позже»
+ *  (LessonSummary.evaluation = null, id оценки ещё нет) — опрос GET /v1/sessions/{id}/summary.
+ *  POST /v1/evaluations/{id}/appeal {reason} (Idempotency-Key) → Appeal (201). 409 APPEAL_EXISTS,
  *  409 APPEAL_WINDOW_CLOSED (> 14 дней). GET /v1/appeals → {items: Appeal[]}. */
 export interface Appeal {
   appeal_id: string;
   evaluation_id: string;
   status: "new" | "in_review" | "upheld" | "corrected";
-  reason: string; // ≤ 500
+  reason: string | null; // ≤ 500; null — стёрт по сроку хранения (90 дней после решения)
   decision_note: string | null; // ≤ 500
   new_evaluation_id: string | null;
   created_at: string;

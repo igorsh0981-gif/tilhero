@@ -1239,6 +1239,14 @@ export interface AgentRow extends Agent {
  *  POST /admin/v1/ai/agents/{agent_id}/rollback {reason} (ai.publish, step-up) → AgentRow (409 NO_PREVIOUS_VERSION)
  *  GET|POST /admin/v1/ai/agents/{agent_id}/golden-cases (ai.read | ai.manage) → {items: GoldenCase[]} | GoldenCase;
  *  PATCH|DELETE /admin/v1/ai/golden-cases/{case_id} (ai.manage) — удаление = архив */
+/** GET /admin/v1/ai/agents/{agent_id} → AgentDetail; GET|POST|PATCH версии → AgentVersionView */
+export interface AgentDetail extends AgentRow {
+  versions: AgentVersionRow[];
+}
+export interface AgentVersionView extends AgentVersion {
+  author_name: string | null;
+  published_by_name: string | null;
+}
 export interface AgentVersionRow {
   version: number;
   status: AgentVersion["status"];
@@ -1259,8 +1267,10 @@ export type GoldenCaseInput = Pick<GoldenCase, "title" | "input" | "checks" | "m
 /** GET /admin/v1/ai/models (ai.read) → {items: AiModel[]}; PUT /admin/v1/ai/models/{model_id} {input_usd_per_mtok,
  *  output_usd_per_mtok, active, reason} (ai.publish, step-up) → AiModel.
  *  GET /admin/v1/ai/provider (ai.read) → AiProviderStatus.
- *  GET /admin/v1/ai/budget (costs.read) → AiBudget; PUT /admin/v1/ai/budget AiBudget-поля & {reason} (costs.manage,
- *  step-up) → AiBudget; POST /admin/v1/ai/emergency-stop {enabled: boolean, reason} (costs.manage, step-up) → AiBudget.
+ *  GET /admin/v1/ai/budget (costs.read) → AiBudget; PUT /admin/v1/ai/budget AiBudget-поля & {reason, updated_at
+ *  (прочитанного бюджета; иначе 409 BUDGET_CONFLICT {updated_at} — лимиты изменил другой сотрудник)} (costs.manage,
+ *  step-up) → AiBudget; POST /admin/v1/ai/emergency-stop {enabled: boolean, reason} (costs.manage, step-up) → AiBudget:
+ *  enabled=true — аварийная остановка включена (ИИ выключен, AiBudget.ai_enabled=false), false — снята.
  *  GET /admin/v1/ai/usage/summary?period=day|week|month (costs.read) → AiUsageSummary.
  *  GET /admin/v1/ai/usage?session_id=|agent_id=&cursor= (costs.read | qa.read для session_id) → Page<AiCall>. */
 export interface AiUsageSummary {
@@ -1278,6 +1288,7 @@ export interface AiUsageSummary {
   by_day: Array<{ date: string; spent_usd: number; calls: number }>;
   avg_cost_per_lesson_usd: number | null;
   ai_enabled: boolean;
+  alert_percent: number; // порог предупреждения из AiBudget (1–100) — обзору не нужен отдельный GET /ai/budget
 }
 export interface AiCall {
   call_id: string;
@@ -1312,7 +1323,8 @@ export interface SessionRow {
   audience: "kids" | "teens" | "adults";
   ai_mode: "full" | "choices";
   models: string[];
-  cost_usd: number;
+  /** null — ai-gateway недоступен (стоимость неизвестна, не 0) */
+  cost_usd: number | null;
   p95_latency_ms: number | null;
   flags: SessionFlag[];
   started_at: string | null;
@@ -1330,8 +1342,8 @@ export interface SessionRow {
  *  Постановка задачи (ADM-QA-04) — формирует admin-web из SessionCard (без запроса). */
 export interface SessionCard {
   session: SessionRow & {
-    user_ref: string; // обезличенный: первые 8 символов sha256(user_id) — не user_id
-    content_versions: Record<string, number>; // lesson, scenario, rubric, media_asset…
+    user_ref: string; // псевдоним: 8 hex HMAC-SHA256(user_id, секрет lessons) — не user_id и не обратим без секрета
+    content_versions: Record<string, number>; // lesson, scenario, rubric, media_asset; media_exercise:<id>, retrieval:<lesson_id>
     status_history: Array<{ from: string | null; to: string; reason: string; at: string }>;
     steps: Array<{ step_id: string; stage: string; type: string; result: "correct" | "incorrect" | "skipped" | null; hinted: boolean; answered_at: string | null }>;
     turns_meta: Array<{ turn_id: string; speaker: "learner" | "character"; mode: "choice" | "text"; intent: string | null; ai_call_id: string | null; redacted: boolean }>;
@@ -1379,7 +1391,8 @@ export interface AdminAppeal {
   evaluation_id: string;
   session_id: string;
   status: "new" | "in_review" | "upheld" | "corrected";
-  reason: string; // текст ученика — показывается сотрудникам с qa.read (без PII ученика)
+  reason: string | null; // текст ученика — сотрудникам с qa.read (без PII); null — стёрт по сроку хранения
+  reason_redacted: boolean; // текст стёрт через 90 дней после решения (показывать «удалён по сроку хранения»)
   decision_note: string | null;
   taken_by_name: string | null;
   decided_by_name: string | null;

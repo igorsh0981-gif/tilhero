@@ -3,18 +3,21 @@ import { useI18n, type MessageKey } from "../../i18n";
 import { useApp } from "../../state/app";
 import { useLoad } from "../../state/hooks";
 import { Icon } from "../../ui/Icon";
-import { Btn, cx, Skeleton } from "../../ui/kit";
+import { Btn, cx, ErrorLine, Skeleton } from "../../ui/kit";
 import { Bar } from "../../ui/shell";
+import { useStartSession } from "../lessons/startSession";
 
 const OUTCOME_MARK = { success: "✓", alt_success: "☆", fail: "↺" } as const;
 
 /** A scenario card (AT-37): task, characters, the first line with its translation on tap, the learner's replies,
- *  outcomes and completion criteria. Playing it — in the lessons (sprint 4). */
+ *  outcomes and completion criteria; «Разыграть» (AT-48) — a scenario session: the roleplay chat → the summary with the
+ *  evaluation by the scenario's rubric. A child plays it with ready replies only. */
 export function ScenarioScreen({ id }: { id: string }) {
   const { bff, nav } = useApp();
   const { t, l } = useI18n();
   const sc = useLoad(() => bff.scenario(id), [id]);
   const [gloss, setGloss] = useState(false);
+  const { start, sheet } = useStartSession();
   const d = sc.data;
   return (
     <>
@@ -90,13 +93,20 @@ export function ScenarioScreen({ id }: { id: string }) {
               </div>
             </section>
 
-            <Btn disabled data-testid="sc-play">
-              <Icon name="chat" size={18} />
-              {t("sc.play")}
-            </Btn>
           </div>
         ) : null}
       </main>
+      {d ? (
+        <div className="foot">
+          <ErrorLine text={start.error} />
+          <Btn busy={start.busy} onClick={() => void start.run({ kind: "scenario", id: d.scenario_id })} data-testid="sc-play">
+            <Icon name="chat" size={18} />
+            {t("sc.play")}
+          </Btn>
+          <p className="sub small center">{t("sc.playNote")}</p>
+        </div>
+      ) : null}
+      {sheet}
     </>
   );
 }

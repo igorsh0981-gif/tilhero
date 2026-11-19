@@ -21,6 +21,7 @@ import { AUDIENCES as CT_AUDIENCES, CONTROL_TYPES, EXERCISE_TYPES, KINDS, LICENS
 import { CONTENT_TABS } from "../src/screens/content/ContentPage";
 import { DECISIONS, REQUEST_STATUSES } from "../src/screens/content/RequestsTab";
 import { MISSING_KEYS, PAIR_STATUSES } from "../src/screens/langs/Langs";
+import * as AI from "../src/screens/ai/model";
 
 const placeholders = (s: string) => [...new Set([...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort();
 const CYR = /[Ѐ-ӿ]/;
@@ -156,6 +157,41 @@ describe("i18n dictionaries", () => {
         "RIGHTS_REQUIRED", "EXTERNAL_SOURCE_DISABLED", "TRANSCRIPT_INVALID", "MEDIA_TOO_LONG", "MEDIA_TOO_SHORT", "EMBED_INVALID", "AUDIENCE_EMPTY",
         "KIDS_CONTENT", "COUNT_OUT_OF_RANGE", "DUPLICATE_ID", "VALUE_REQUIRED", "ANSWER_INVALID", "LEVEL_RANGE", "SCHEMA_INVALID", "KEY_CHANGED",
       ].map((c) => `ci.${c}`),
+      // sprint 4: agents, dialogue QA, costs, overview blocks
+      ...["lessons", "ai"].flatMap((b) => [`dash.b.${b}`, `dash.empty.${b}`, `dash.svc.${b}`]),
+      ...AI.IMPLEMENTATIONS.map((x) => `aimpl.${x}`),
+      ...["active", "planned"].map((x) => `avail.${x}`),
+      ...AI.VERSION_STATUSES.flatMap((x) => [`avs.${x}`]),
+      ...["published", "archived"].map((x) => `ag.ro.${x}`),
+      ...["all", "llm", "rules", "code", "planned"].map((x) => `ag.f.${x}`),
+      ...["not_draft", "unsaved", "no_run", "running", "stale", "failed"].map((x) => `ag.gate.${x}`),
+      ...AI.RUN_STATUSES.map((x) => `trs.${x}`),
+      ...AI.CHECK_KINDS.flatMap((x) => [`gck.${x}`, `gck.h.${x}`]),
+      ...["string", "number", "boolean", "null"].map((x) => `gcf.vt.${x}`),
+      ...["path.required", "path.format", "value.format", "values.required", "n.range", "title.required", "title.too_long", "ctx.required", "ctx.json_parse", "ctx.not_object"].map((x) => `gcf.${x}`),
+      ...["required", "too_long", "range", "format", "same_model", "json_parse", "not_object", "type_not_object", "properties_not_object", "required_not_array", "required_unknown"].map((x) => `agf.${x}`),
+      ...["instructions", "rules", "schemaText", "schema_version", "model_id", "fallback_model_id", "temperature", "max_output_tokens", "timeout_ms", "max_cost_usd", "notes"].map((x) => `agf.l.${x}`),
+      ...AI.SESSION_KINDS.map((x) => `sk.${x}`),
+      ...AI.SESSION_STATUSES.map((x) => `sst.${x}`),
+      ...AI.SESSION_FLAGS.map((x) => `sflag.${x}`),
+      ...AI.EVAL_STATUSES.map((x) => `evs.${x}`),
+      ...AI.SKILL_OUTCOMES.map((x) => `skout.${x}`),
+      ...AI.APPEAL_STATUSES.map((x) => `aps.${x}`),
+      ...AI.SEVERITIES.map((x) => `sev.${x}`),
+      ...AI.CALL_STATUSES.map((x) => `callst.${x}`),
+      ...AI.CALL_REASONS.map((x) => `aireason.${x}`),
+      ...AI.HISTORY_REASONS.map((x) => `shr.${x}`),
+      ...AI.AI_MODES.map((x) => `aimode.${x}`),
+      ...AI.USAGE_PERIODS.map((x) => `usp.${x}`),
+      ...AI.CRITERIA.map((x) => `rc.${x}`),
+      ...["correct", "incorrect", "skipped"].map((x) => `stres.${x}`),
+      ...["learner", "character"].map((x) => `spk.${x}`),
+      ...["choice", "text"].map((x) => `tmode.${x}`),
+      ...["0", "1", "2", "3"].map((x) => `rv2.band.${x}`),
+      ...["upheld", "corrected"].flatMap((x) => [`ap.d.${x}`, `ap.d.${x}.h`]),
+      ...["bug", "method"].map((x) => `qt.kind.${x}`),
+      ...["range", "gt_daily", "gt_monthly"].map((x) => `csf.${x}`),
+      ...["monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "alert_percent"].flatMap((x) => [`csf.l.${x}`, `csf.h.${x}`]),
     ];
     expect(want.filter((k) => !has(k))).toEqual([]);
     void OBJECT_TYPES;
@@ -177,6 +213,9 @@ describe("i18n dictionaries", () => {
       "VERSION_IMMUTABLE", "DRAFT_EXISTS", "SELF_REVIEW", "CONTENT_IN_USE", "CONTENT_NOT_PUBLISHED", "ROLLBACK_TARGET_INVALID", "AUDIO_INVALID",
       "PAYLOAD_TOO_LARGE", "MEDIA_REQUEST_DECIDED", "LINKED_ASSET_REQUIRED", "LINKED_ASSET_NOT_PUBLISHED", "LINKED_ASSET_NOT_ALLOWED", "PAIR_NOT_READY",
       "PAIR_INVALID", "UNKNOWN_LANGUAGE",
+      // sprint 4 (ai-gateway, lessons, assessment via admin-bff)
+      "TESTS_REQUIRED", "TESTS_FAILED", "NO_PREVIOUS_VERSION", "EVALUATION_SUPERSEDED", "SELF_REEVALUATION", "VERSION_IN_CANARY", "NO_PUBLISHED_VERSION",
+      "NO_CANARY", "MODEL_INACTIVE", "MODEL_IN_USE", "TEST_RUN_IN_PROGRESS", "NO_GOLDEN_CASES", "VERSION_INVALID", "BUDGET_CONFLICT", "IF_MATCH_REQUIRED",
     ];
     expect(codes.filter((c) => !has(`err.${c}`))).toEqual([]);
   });

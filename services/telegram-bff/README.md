@@ -108,6 +108,21 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 | GET | `/v1/media/{id}` | catalog, `?audience=` | `MediaDetail`; без `show_transcript` — `transcript: null` и в BFF; 404 `MEDIA_NOT_AVAILABLE` |
 | GET | `/v1/media/{id}/audio` | catalog (байты), `?audience=` | прокси: `Content-Type` из ответа (только audio/mpeg\|ogg\|mp4), ≤ 3 МБ (больше — 503 без чтения в память), `ETag`, `Cache-Control: private, max-age=3600`, `If-None-Match` клиента → 304; кеш байтов `AUDIO_CACHE_MB`, но каждый запрос перепроверяется в catalog (`If-None-Match` → 304) — права и аудитория проверяются всегда |
 | GET / POST | `/v1/media/requests` | catalog (**аккаунт**, claims `lrn`, `age_band`) | детский профиль → 403 `KIDS_NOT_ALLOWED` до вызова catalog; POST: `Idempotency-Key` обязателен, 201, `ui_locale` — язык аккаунта; > 5 в сутки → 429 `MEDIA_REQUEST_LIMIT {retry_after}` + `Retry-After`; ссылка только `https://`, BFF её не открывает |
+| GET | `/v1/lessons/{lesson_id}` | lessons `/lessons/{id}/card` (**аккаунт**, claims `lrn`, `age_band`; query `audience`, `locale`) | `LessonCardDetail` (награды не отдаются); ребёнку `roleplay_mode` — `choices`; 404 `LESSON_NOT_AVAILABLE` |
+| POST | `/v1/lessons/{lesson_id}/sessions`, `/v1/scenarios/{id}/sessions`, `/v1/media/{id}/sessions` | lessons (то же) | `Idempotency-Key` обязателен → 201 `LessonSession`; 409 `SESSION_ACTIVE {session_id, kind, title}` / `PAIR_NOT_AVAILABLE`; 404 `LESSON_NOT_AVAILABLE` / `SCENARIO_NOT_FOUND` / `NO_EXERCISES` |
+| GET | `/v1/sessions/active`, `/v1/sessions?kind=&cursor=&limit=`, `/v1/sessions/{id}` | lessons | `{session}` / `Page<LessonHistoryItem>` (элемент не по контракту отбрасывается) / `LessonSession`; ребёнку `ai_mode` — `choices`; чужая — 404 `SESSION_NOT_FOUND` |
+| POST | `/v1/sessions/{id}/pause`, `/resume`, `/cancel` | lessons | `LessonSession`; 409 `SESSION_STATE {status}` |
+| GET | `/v1/sessions/{id}/current` | lessons | `LessonStep` — проверка по дискриминатору `type`, явная сборка полей (ключей нет); шаг проверки без подсказок запоминается в Redis (3 сут.) |
+| POST | `/v1/sessions/{id}/steps/{step_id}` | lessons | `StepAnswer` → `StepResult`; ребёнок + `text` → 403 `KIDS_NOT_ALLOWED` до вызова lessons; больше одного вида ответа → 422 `ANSWER_INVALID {field}`; на проверке без подсказок `feedback = null` всегда; 409 `STEP_NOT_CURRENT {current_step_id}` / `FREE_TEXT_NOT_ALLOWED` / `AI_BUSY` (тот же ответ ещё обрабатывается — Mini App повторяет его через 2 с, до 3 раз) |
+| POST | `/v1/sessions/{id}/steps/{step_id}/hint` | lessons | `{hint}`; шаг проверки без подсказок → 409 `HINTS_NOT_ALLOWED` до вызова lessons |
+| POST | `/v1/sessions/{id}/simpler?locale=ru\|uz` | lessons | `SimplerExplanation`; язык — `?locale=`, иначе `Accept-Language`; 409 `SIMPLER_NOT_AVAILABLE` / `AI_BUSY` |
+| POST | `/v1/sessions/{id}/roleplay/retry` | lessons | `LessonStep`; 409 `RETRY_NOT_AVAILABLE` |
+| POST | `/v1/sessions/{id}/finish` | lessons (таймаут `LESSONS_FINISH_TIMEOUT_MS`) | `LessonSummary`: верный ответ — только у неверных заданий, ключевые ошибки — ≤ 3 по severity; `evaluation: null` — «оценка появится позже»; 409 `STEP_NOT_CURRENT` (не с шага done) |
+| GET | `/v1/sessions/{id}/summary` | lessons | `LessonSummary` (то же) |
+| POST | `/v1/sessions/{id}/review` | lessons | `Idempotency-Key` обязателен → 201 `LessonSession` (kind review); 409 `NOTHING_TO_REVIEW` / `SESSION_ACTIVE` |
+| GET | `/v1/evaluations/{id}` | assessment (**sub = ученик `lrn`**, claims `lrn`, `age_band`) | `EvaluationView` актуальной записи цепочки (то же правило ключей); 404 `EVALUATION_NOT_FOUND` |
+| POST | `/v1/evaluations/{id}/appeal` | assessment | `{reason ≤ 500}`, `Idempotency-Key` обязателен → 201 `Appeal`; 409 `APPEAL_EXISTS` / `APPEAL_WINDOW_CLOSED` / `APPEAL_NOT_ALLOWED`; причина не логируется |
+| GET | `/v1/appeals` | assessment (`?limit=50`) | `{items: Appeal[]}` (элемент не по контракту отбрасывается); `reason: null` — текст стёрт по сроку хранения (90 дней после решения) |
 
 Сегмент ученика `audience` (kids / teens / adults) — по возрасту активного ученика, как для «Что нового»: детский профиль
 (`lrn ≠ sub`) — всегда kids без запроса к identity; возраст аккаунта не выбран — kids (самый строгий набор). Кеш
@@ -132,6 +147,8 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 | `TELEGRAM_APP_LINK` | `https://t.me/tilhero_dev_bot/app` | прямая ссылка Mini App `https://t.me/<bot>/<app>` (без query) — для ссылки согласия родителя `?startapp=gc_<token>`; в stage/prod обязательна |
 | `IDENTITY_URL`, `LEARNING_PLAN_URL`, `SUPPORT_URL`, `NOTIFICATIONS_URL`, `EXPERIENCE_URL`, `SOCIAL_URL` | `http://127.0.0.1:8101 / 8102 / 8103 / 8104 / 8106 / 8109` | адреса доменов (Railway: `http://<svc>.railway.internal:<port>`) |
 | `CATALOG_URL`, `DIAGNOSTICS_URL` | `http://127.0.0.1:8110 / 8111` | спринт 3; в stage/prod обязательны |
+| `LESSONS_URL`, `ASSESSMENT_URL` | `http://127.0.0.1:8112 / 8113` | спринт 4; в stage/prod обязательны |
+| `LESSONS_TIMEOUT_MS` / `LESSONS_FINISH_TIMEOUT_MS` | `25000` / `45000` | таймаут вызовов lessons и assessment / завершения урока: lessons ждёт оценку assessment до 32 с плюс вспомогательные вызовы, поэтому `LESSONS_FINISH_TIMEOUT_MS` — с запасом, **больше 32 000**. Шаг ролевой ситуации и «проще» ждут ИИ до 20 с (`AI_TIMEOUT_SECONDS` lessons), поэтому `LESSONS_TIMEOUT_MS` должен быть **больше 20 000**: иначе BFF отвечает 503, хотя lessons ответ уже сохранил (ревью R2-02). Ответ на шаг (POST) BFF не повторяет — повтор того же ответа делает Mini App («Отправить ещё раз»), домен идемпотентен по шагу |
 | `COURSE_SNAPSHOT_REVALIDATE_SECONDS` / `PAIRS_CACHE_SECONDS` | `60` / `60` | перепроверка снимка курса по ETag / кеш языковых пар |
 | `AUDIO_CACHE_MB` / `AUDIENCE_CACHE_SECONDS` | `32` / `30` | кеш байтов аудио медиатеки (LRU, 0 — выключен) / кеш сегмента ученика |
 | `UPSTREAM_TIMEOUT_MS` / `UPSTREAM_RETRIES` | `3000` / `1` | таймаут и повторы (GET и команды с `Idempotency-Key`) |
@@ -152,6 +169,10 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 - Ответы с токенами и данными — `Cache-Control: no-store`; `X-Content-Type-Options: nosniff`; CORS — только `MINIAPP_ORIGIN` (разрешены `idempotency-key`, `if-match`, `if-none-match`, `x-timezone`), без credentials.
 - Спринт 3: в логах не бывает текста заявок (`comment`, `decision_note`, `link`) и ответов диагностики (`answer`);
   проверка ответа домена пишет только сервис, имя проверки, путь и правило схемы — без значений.
+- Спринт 4: тексты ученика (реплики, открытые ответы, причины апелляций — `text`, `answer`, `reason`, `evidence`,
+  `correction`, `your_answer`, `correct_answer`, `text_en`) в логи не попадают (redact-пути и вычистка ключей); ключей
+  ответов в ответах Mini App нет: задание собирается явно без `answer`, правильность на проверке без подсказок не
+  отдаётся никогда, верный ответ в итогах — только у заданий с ошибкой.
 - Сбой Redis → `503` (fail-closed).
 
 ## Отклонения от контракта и обходы
@@ -175,6 +196,14 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 - `POST /v1/diagnostics/sessions` и `…/followup` всегда отвечают 201 (повтор с тем же ключом домен отдаёт 200 — клиенту
   статус не важен, тело то же).
 - `GET /v1/diagnostics/results/{id}?revision=` домена в контракте BFF нет — Mini App показывает историю из списка.
+- **Спринт 4, субъект токена:** lessons — `sub` = аккаунт + claims `lrn`, `age_band` (INTERNAL_API §0, README lessons);
+  assessment — `sub` = активный ученик (`lrn`, README assessment), claims те же. В вызовы lessons BFF добавляет query
+  `audience` (подсказка) и `locale` (`?locale=` маршрута «проще» или `Accept-Language`, иначе ru).
+- **`GET /v1/evaluations/{id}`** в комментариях `bff.ts` не перечислен (есть `EvaluationView` и `superseded_by`) — маршрут
+  нужен Mini App для актуальной оценки после апелляции; запрос к контракту — добавить строку маршрута.
+- **`POST /v1/sessions/{id}/review`**: `Idempotency-Key` в `bff.ts` не указан — BFF требует его (создающая команда, как
+  старт сессий); **`POST /v1/sessions/{id}/simpler?locale=`** — необязательный параметр сверх контракта.
+- Открытый ответ (`open_answer`) Mini App отправляет полем `text` (≤ 300; README lessons), в `bff.ts` это не написано.
 
 ## Локальная разработка
 

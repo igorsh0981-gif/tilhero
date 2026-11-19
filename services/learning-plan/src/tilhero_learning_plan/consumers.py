@@ -5,7 +5,12 @@
   `diagnostics.completed.v1` и `skills.state.changed.v1` (diagnostics) — последний результат диагностики и карта
   навыков; `catalog.version.published.v1` (catalog; kind course|module|lesson|skill) — снимок курса помечается
   устаревшим; `user.profile.created/updated.v1` (identity-consent) — сегмент аудитории kids|teens|adults для подбора
-  уроков (детям 6–13 — только детские), возраст не хранится.
+  уроков (детям 6–13 — только детские), возраст не хранится;
+- спринт 4 (INTERNAL_API §5, AT-46/47): `lesson.session.completed.v1` (lessons) — занятие дня по реальному уроку или
+  практике (идемпотентно по session_id) и пройденный урок (траектория — при следующем чтении);
+  `assessment.completed.v1` (assessment, kind lesson) — оценка сессии, в т. ч. полученная после завершения
+  (R1-05; сопоставление по session_id, порядок событий любой); `assessment.reevaluated.v1` (assessment) — новый исход
+  пройденного урока после переоценки (сессия — по заменённой оценке: session_id в событии нет).
 
 Издатель проверяется (защита в глубину, как у саги, ревью P-7): событие чужого издателя — предупреждение в логе
 (тип события и издатель, без user_id) и подтверждение шине без действия. Невалидный payload — исключение → DLQ.
@@ -16,13 +21,14 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tilhero_common.messaging import Envelope
+from tilhero_learning_plan.domain import lessons as ls
 from tilhero_learning_plan.domain import trajectory as tr
 from tilhero_learning_plan.domain.plans import delete_user_data
 
@@ -32,6 +38,9 @@ SKILLS_CHANGED = "skills.state.changed.v1"
 VERSION_PUBLISHED = "catalog.version.published.v1"
 PROFILE_CREATED = "user.profile.created.v1"
 PROFILE_UPDATED = "user.profile.updated.v1"
+SESSION_COMPLETED = "lesson.session.completed.v1"
+REEVALUATED = "assessment.reevaluated.v1"
+ASSESSMENT_COMPLETED = "assessment.completed.v1"
 PRODUCER = "learning-plan"
 # Сагу удаления ведёт только identity-consent: запрос от другого издателя не исполняется (защита в глубину, P-7)
 DELETION_PRODUCERS = frozenset({"identity-consent"})
@@ -41,6 +50,9 @@ PRODUCERS = {
     VERSION_PUBLISHED: frozenset({"catalog"}),
     PROFILE_CREATED: frozenset({"identity-consent"}),
     PROFILE_UPDATED: frozenset({"identity-consent"}),
+    SESSION_COMPLETED: frozenset({"lessons"}),
+    REEVALUATED: frozenset({"assessment"}),
+    ASSESSMENT_COMPLETED: frozenset({"assessment"}),
 }
 MAX_PAIR_LEN = 64
 
@@ -106,6 +118,46 @@ class ProfileCreated(_Payload):
 class ProfileUpdated(_Payload):
     user_id: uuid.UUID
     age_band: str | None = None
+
+
+class SessionCompletedIn(_Payload):
+    """lesson.session.completed.v1 (схема — packages/contracts/events)."""
+
+    session_id: uuid.UUID
+    user_id: uuid.UUID
+    kind: Literal["lesson", "scenario", "media", "review"]
+    pair_id: Annotated[str, Field(min_length=1, max_length=200)]
+    lesson_id: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+    status: Literal["completed", "cancelled", "failed"]
+    minutes: Annotated[int, Field(ge=0, le=600)]
+    local_date: date | None = None
+    evaluation_id: uuid.UUID | None = None
+    passed: bool | None = None
+    practice_only: bool
+    finished_at: AwareDatetime
+
+
+class ReevaluatedIn(_Payload):
+    """assessment.reevaluated.v1: нужны только ученик, заменённая и новая оценка, вердикт и время записи.
+    session_id в схеме v1 нет — если издатель его добавит, используется напрямую (иначе — по заменённой оценке)."""
+
+    evaluation_id: uuid.UUID
+    supersedes: uuid.UUID
+    user_id: uuid.UUID
+    passed: bool | None = None
+    created_at: AwareDatetime
+    session_id: uuid.UUID | None = None
+
+
+class AssessmentCompletedIn(_Payload):
+    """assessment.completed.v1: ученик, сессия, вид, оценка, вердикт и время записи (исходы навыков — diagnostics)."""
+
+    evaluation_id: uuid.UUID
+    user_id: uuid.UUID
+    session_id: uuid.UUID
+    kind: Literal["lesson", "scenario", "media", "review"]
+    passed: bool | None = None
+    created_at: AwareDatetime
 
 
 def _foreign(env: Envelope) -> bool:
@@ -195,9 +247,57 @@ async def on_profile(session: AsyncSession, env: Envelope) -> None:
     await tr.project_audience(session, user_id=user_id, audience=audience, at=at)
 
 
+def lessons_handler(default_tz: str) -> Handler:
+    """Обработчик событий уроков с зоной плана по умолчанию (настройка сервиса DEFAULT_TIMEZONE)."""
+
+    async def on_lessons(session: AsyncSession, env: Envelope) -> None:
+        """lesson.session.completed.v1 → занятие (+ пройденный урок); cancelled / failed — без действия.
+        assessment.completed.v1 (kind lesson) → оценка сессии; assessment.reevaluated.v1 → новый исход пройденного
+        урока с заменённой оценкой. Порядок событий любой (оценка может прийти раньше события сессии)."""
+        if _foreign(env):
+            return
+        if env.event_type == ASSESSMENT_COMPLETED:
+            a = AssessmentCompletedIn.model_validate(env.payload)
+            if a.kind != "lesson":
+                return  # пройденные уроки — только kind lesson; практика на траекторию не влияет
+            updated = await ls.apply_evaluation(session, user_id=a.user_id, session_id=a.session_id,
+                                                evaluation_id=a.evaluation_id, passed=a.passed,
+                                                created_at=a.created_at)
+            log.info("lesson evaluation recorded", extra={"updated": updated})
+            return
+        if env.event_type == REEVALUATED:
+            r = ReevaluatedIn.model_validate(env.payload)
+            updated = await ls.apply_reevaluation(session, user_id=r.user_id, supersedes=r.supersedes,
+                                                  evaluation_id=r.evaluation_id, passed=r.passed,
+                                                  created_at=r.created_at, session_id=r.session_id)
+            log.info("lesson result reevaluated", extra={"updated": updated})
+            return
+        c = SessionCompletedIn.model_validate(env.payload)
+        if c.status != "completed":
+            return  # отменённая или прерванная сессия — не занятие и не пройденный урок
+        if not _pair_ok(c.pair_id, env):
+            return
+        recorded = await ls.record_session(session, ls.SessionCompleted(
+            session_id=c.session_id, user_id=c.user_id, kind=c.kind, pair_id=c.pair_id, lesson_id=c.lesson_id,
+            minutes=c.minutes, local_date=c.local_date, passed=c.passed, evaluation_id=c.evaluation_id,
+            finished_at=c.finished_at,
+        ), default_tz=default_tz, producer=PRODUCER)
+        log.info("lesson session recorded", extra={"kind": c.kind, "activity": recorded.activity,
+                                                   "lesson": recorded.lesson})
+
+    return on_lessons
+
+
 CONSUMERS: dict[str, tuple[list[str], Handler]] = {
     "learning-plan.user_deletion": ([DELETION_REQUESTED], on_deletion_requested),
     "learning-plan.diagnostics": ([DIAGNOSTICS_COMPLETED, SKILLS_CHANGED], on_diagnostics),
     "learning-plan.catalog": ([VERSION_PUBLISHED], on_catalog),
     "learning-plan.profiles": ([PROFILE_CREATED, PROFILE_UPDATED], on_profile),
 }
+LESSONS_DURABLE = "learning-plan.lessons"
+LESSONS_EVENTS = [SESSION_COMPLETED, ASSESSMENT_COMPLETED, REEVALUATED]
+
+
+def consumers(default_tz: str) -> dict[str, tuple[list[str], Handler]]:
+    """Все потребители сервиса (спринт 4: события уроков — с зоной по умолчанию из настроек)."""
+    return {**CONSUMERS, LESSONS_DURABLE: (LESSONS_EVENTS, lessons_handler(default_tz))}

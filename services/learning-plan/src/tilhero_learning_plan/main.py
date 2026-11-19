@@ -1,5 +1,6 @@
 """learning-plan: цель, уровень, языки, график занятий и длительность, учёт занятий, plan:tick → напоминания
-и пропуски (INTERNAL_API §2); спринт 3 — траектория уроков (INTERNAL_API спринта 3 §3)."""
+и пропуски (INTERNAL_API §2); спринт 3 — траектория уроков (INTERNAL_API спринта 3 §3); спринт 4 — занятия и
+пройденные уроки по событиям lessons (INTERNAL_API спринта 4 §5)."""
 
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from tilhero_learning_plan.api.client import directory_router, plan_router
 from tilhero_learning_plan.api.client import router as client_router
 from tilhero_learning_plan.api.scheduler import router as scheduler_router
 from tilhero_learning_plan.api.trajectory import router as trajectory_router
-from tilhero_learning_plan.consumers import CONSUMERS
+from tilhero_learning_plan.consumers import consumers
 from tilhero_learning_plan.domain.trajectory import CATALOG
 from tilhero_learning_plan.settings import Settings, get_settings
 
@@ -29,7 +30,7 @@ def build_app(
         # Снимок курса: GET — повтор при сбое сети/5xx (1 раз), дальше — кеш или 503 (траектория не ждёт долго)
         runtime.register_client(CATALOG, settings.catalog_url, timeout=settings.catalog_timeout_seconds, retries=1,
                                 transport=catalog_transport)
-        for durable, (event_types, handler) in CONSUMERS.items():
+        for durable, (event_types, handler) in consumers(settings.default_timezone).items():
             runtime.add_consumer(durable, event_types, handler)
 
     return create_app(settings, routers=[client_router, plan_router, directory_router, scheduler_router,

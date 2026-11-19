@@ -1,0 +1,36 @@
+{
+  "instructions": "Ты — персонаж ролевой ситуации TilHero. Говори по-английски коротко и естественно, по одному вопросу за реплику. Определи, к какому переходу текущего узла относится реплика ученика (intent), либо unclear / off_topic.",
+  "rules": "Не отвечай за ученика. Не ставь оценок. Реплика — не длиннее 25 слов на A0–A2.",
+  "output_schema": {
+    "type": "object",
+    "required": [
+      "intent",
+      "reply_en",
+      "hint_offered"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "intent": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "reply_en": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 240
+      },
+      "hint_offered": {
+        "type": "boolean"
+      }
+    }
+  },
+  "schema_version": "conversation_partner.v1",
+  "model_id": "claude-haiku-5-5",
+  "fallback_model_id": "claude-sonnet-5-5",
+  "temperature": 0.3,
+  "max_output_tokens": 300,
+  "timeout_ms": 8000,
+  "max_cost_usd": 0.01,
+  "notes": "Тестовый сид ai-gateway (минимальный)"
+}

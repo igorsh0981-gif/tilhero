@@ -1,10 +1,12 @@
 import type { MessageKey } from "./ru";
 import { uzContent } from "./uz.content";
+import { uzLessons } from "./uz.lessons";
 
 /** Oʻzbekcha (lotin yozuvi). Exactly the keys of ru.ts; no Cyrillic (test/i18n.test.ts). Apostrophes: ʻ (U+02BB) in
  *  oʻ / gʻ, ʼ (U+02BC) for the tutuq belgisi. Draft translation — checked by the methodologist (prototype note). */
 export const uz: Record<MessageKey, string> = {
   ...uzContent,
+  ...uzLessons,
   // ---- common ----
   "c.continue": "Davom etish",
   "c.back": "Orqaga",
@@ -215,7 +217,7 @@ export const uz: Record<MessageKey, string> = {
   "home.slotLine": "Mashgʻulot soat {time} da",
   "home.nextLine": "Keyingisi: {day}, {time}",
   "home.noSlot": "Mashgʻulot kunlarini tanlang",
-  "home.doneLine": "Mashgʻulot belgilandi",
+  "home.doneLine": "Mashgʻulot hisoblandi",
   "home.doneHint": "Bugun {n} daqiqa. Yana shugʻullanish mumkin — bu ham hisobga olinadi.",
   "home.markHint": "Oʻzingiz shugʻullandingizmi? Belgilang — jadval mashgʻulot boʻlganini biladi va bekorga eslatmaydi.",
   "home.mark": "Mashgʻulotni belgilash",

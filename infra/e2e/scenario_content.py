@@ -85,9 +85,11 @@ KINDS = {"course", "skill", "module", "lesson", "rubric", "scenario", "media_ass
 # admin.ts Permission (спринт 3) и PLAN спринта 3 «Права и роли»
 S3_PERMS = {"content.read", "content.edit", "content.review", "content.publish", "media.rights", "lang.manage"}
 ALL_PERMS = s2.ALL_PERMS | S3_PERMS
-METHODIST_PERMS = {"dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish"}
+# + права спринта 4 (admin-identity 0004): methodist — агенты и контроль диалогов, analyst — только чтение
+METHODIST_PERMS = {"dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish",
+                   "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review"}
 CM_PERMS = {"dashboard.read", "content.read", "content.edit", "media.rights"}
-ANALYST_PERMS = {"dashboard.read", "users.read", "content.read"}
+ANALYST_PERMS = {"dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read"}
 
 # bff.ts DiagnosticItem — ровно эти поля (ключа ответа, полосы и тегов нет)
 ITEM_KEYS = {"item_id", "area", "type", "instruction", "prompt_en", "passage_en", "audio_text_en", "options", "position"}
@@ -430,7 +432,7 @@ def s_staff(c: s2.Ctx) -> None:
                          "scenario_content в `run_local.sh test`")
     me = s2.login(c, root, expect_next=["password_change", "mfa_enroll", "done"])
     check(me["staff"]["role"] == "super_admin", me["staff"])
-    check(set(me["permissions"]) == ALL_PERMS, f"права super_admin (23): {sorted(set(me['permissions']) ^ ALL_PERMS)}")
+    check(set(me["permissions"]) == ALL_PERMS, f"права super_admin: {sorted(set(me['permissions']) ^ ALL_PERMS)}")
     # права и роли спринта 3 в матрице (admin-identity 0003): methodist и content_manager — привилегированные
     roles = {x["code"]: x for x in expect(root.browser.get("/admin/v1/roles"), 200)["items"]}
     check(set(roles.get("methodist", {}).get("permissions", [])) == METHODIST_PERMS
@@ -1247,7 +1249,8 @@ def s_trajectory(c: s2.Ctx) -> None:
         return t
 
     t = wait_for(ready, 40, interval=1.0, what="план по результату диагностики (diagnostics.completed.v1 → learning-plan)")
-    check(t["pair_id"] == PAIR and t["course_id"] == COURSE and t["lessons_available"] is False and t["completed"] == [],
+    # спринт 4: уроки проходятся (lessons) — lessons_available true; в спринте 3 было false
+    check(t["pair_id"] == PAIR and t["course_id"] == COURSE and t["lessons_available"] is True and t["completed"] == [],
           f"траектория: {str(t)[:300]}")
     nx = t["next"]
     check(nx and "start_after_diagnostic" in nx["reason_codes"] and nx["explanation"]["ru"].strip()

@@ -27,7 +27,7 @@ async def test_without_diagnostic_happy_path_and_event(env, user) -> None:
     body = await env.trajectory(user)
     assert body["pair_id"] == "ru-en" and body["course_id"] == "en-core" and body["revision"] == 1
     assert body["basis"] == {"diagnostic_result_id": None, "goal": None, "computed_at": "2026-11-16T08:00:00Z"}
-    assert body["completed"] == [] and body["lessons_available"] is False
+    assert body["completed"] == [] and body["lessons_available"] is True
     nxt = body["next"]
     assert set(nxt) == CARD_KEYS | {"reason_codes", "explanation"}
     assert nxt["lesson_id"] == "l-greet" and nxt["reason_codes"] == ["no_diagnostic"]

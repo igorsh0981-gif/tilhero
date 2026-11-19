@@ -79,6 +79,15 @@ export const ALL_PERMISSIONS = [
   "content.publish",
   "media.rights",
   "lang.manage",
+  // спринт 4 — ИИ-агенты, контроль диалогов, затраты
+  "ai.read",
+  "ai.manage",
+  "ai.publish",
+  "qa.read",
+  "qa.transcripts",
+  "qa.review",
+  "costs.read",
+  "costs.manage",
 ] as const satisfies readonly Permission[];
 
 /** Компиляция падает, если в admin.ts появилось право, которого нет в ALL_PERMISSIONS (права вне списка отбрасываются). */
@@ -93,6 +102,7 @@ export const ROLE_CODES = [
   "support",
   "methodist",
   "content_manager",
+  "qa_analyst",
   "analyst",
   "auditor",
   "read_only",
@@ -103,10 +113,12 @@ const _allRolesListed: [MissingRoles] extends [never] ? true : MissingRoles = tr
 void _allRolesListed;
 
 /**
- * Матрица по умолчанию (docs/sprint2/PLAN.md §«Роли и права» + docs/sprint3/PLAN.md §«Права и роли») — только для
+ * Матрица по умолчанию (docs/sprint2/PLAN.md §«Роли и права» + §«Права и роли» PLAN спринтов 3 и 4) — только для
  * имперсонации в dev: эффективные права = свои ∩ права выбранной роли (сужение, не расширение). Источник истины
- * матрицы — admin-identity (сид 0001 + 0003). methodist (content.publish) и content_manager (media.rights) —
- * привилегированные по составу прав (MFA, four-eyes), хотя PRIVILEGED_ROLES admin.ts их не перечисляет.
+ * матрицы — admin-identity (сид 0001 + 0003 + 0004). methodist (content.publish, ai.publish, qa.review) и
+ * content_manager (media.rights) — привилегированные по составу прав (MFA, four-eyes), хотя PRIVILEGED_ROLES admin.ts
+ * их не перечисляет; operations (costs.manage) привилегирован и по коду роли; qa_analyst (чтение и реплики с
+ * причиной, без прав со step-up) — нет. Признак `Role.privileged` вычисляет admin-identity.
  */
 export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[]>> = {
   super_admin: ALL_PERMISSIONS,
@@ -119,6 +131,10 @@ export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[
     "config.publish",
     "audit.read",
     "content.read",
+    "ai.read",
+    "qa.read",
+    "costs.read",
+    "costs.manage",
   ],
   communications: [
     "dashboard.read",
@@ -129,10 +145,24 @@ export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[
     "notif.campaigns.send",
   ],
   support: ["dashboard.read", "users.read", "support.read", "support.reply"],
-  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish"],
+  methodist: [
+    "dashboard.read",
+    "users.read",
+    "content.read",
+    "content.edit",
+    "content.review",
+    "content.publish",
+    "ai.read",
+    "ai.manage",
+    "ai.publish",
+    "qa.read",
+    "qa.transcripts",
+    "qa.review",
+  ],
   content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights"],
-  analyst: ["dashboard.read", "users.read", "content.read"],
-  auditor: ["dashboard.read", "audit.read", "content.read"],
+  qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts"],
+  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read"],
   read_only: ["dashboard.read"],
 };
 

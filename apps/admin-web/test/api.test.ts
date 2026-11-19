@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AdminApi } from "../src/api/client";
+import { Ai } from "../src/api/endpoints";
 import { ApiError } from "../src/api/errors";
 import { translate } from "../src/i18n";
 import { errText } from "../src/ui/errors";
@@ -68,6 +69,38 @@ describe("admin-bff client", () => {
       throw new TypeError("Failed to fetch");
     }) as unknown as typeof fetch);
     await expect(api.get("/me")).rejects.toMatchObject({ code: "NETWORK", status: 0 });
+  });
+});
+
+describe("AI budget (review R2-07)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+  it("PUT /ai/budget carries the updated_at of the budget that was read; 409 BUDGET_CONFLICT keeps its code and details", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const answers = [
+      { status: 200, body: { ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 90, updated_at: "2026-11-19T10:00:01Z" } },
+      { status: 409, body: errBody("BUDGET_CONFLICT", { updated_at: "2026-11-19T10:05:00Z" }) },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      const r = answers.shift()!;
+      return new Response(JSON.stringify(r.body), { status: r.status, headers: { "Content-Type": "application/json" } });
+    }));
+    const b = { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 90 };
+    await Ai.putBudget(b, "2026-11-19T10:00:00Z", "Порог 90 %");
+    expect(calls[0]!.url).toBe("/admin/v1/ai/budget");
+    expect(calls[0]!.init.method).toBe("PUT");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ ...b, updated_at: "2026-11-19T10:00:00Z", reason: "Порог 90 %" });
+    const e = await Ai.putBudget(b, "2026-11-19T10:00:01Z", "Ещё раз").catch((x: ApiError) => x);
+    expect(e).toMatchObject({ status: 409, code: "BUDGET_CONFLICT" });
+    expect((e as ApiError).details.updated_at).toBe("2026-11-19T10:05:00Z");
+  });
+  it("the conflict text: another staff member changed the limits — check and save again (RU / EN)", () => {
+    expect(translate("ru", "csf.conflict")).toBe("Лимиты изменил другой сотрудник — проверьте и сохраните ещё раз");
+    expect(translate("en", "csf.conflict")).toBe("Another staff member changed the limits — check them and save again");
+    const ru = { t: (k: Parameters<typeof translate>[1], v?: Record<string, string | number>) => translate("ru", k, v) };
+    expect(errText(ru, new ApiError(409, errBody("BUDGET_CONFLICT", { updated_at: "x" })))).toBe("Лимиты изменил другой сотрудник — проверьте и сохраните ещё раз");
   });
 });
 

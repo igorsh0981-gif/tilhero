@@ -19,7 +19,7 @@
 | D. Учебный контур | `services/learning-plan`, `services/diagnostics`, `services/notifications`, `services/catalog`, `services/identity-consent`, `services/audit` | план — пройденные уроки и активность по реальным занятиям; карта навыков — по оценкам; уведомление о решении по апелляции; внутреннее API версий контента для lessons/assessment; сага удаления; аудит новых производителей |
 | E. Mini App + telegram-bff | `services/telegram-bff`, `apps/telegram-miniapp` | карточка урока, плеер урока (5 этапов), ролевой чат, проверка, итоги, пауза и продолжение, «Разыграть» сценарий и упражнения к медиа из «Практики», вкладка «Уроки» (план и история), апелляция |
 | F. Админка | `services/admin-identity`, `services/admin-bff`, `apps/admin-web` | «Агенты и скиллы», «Контроль диалогов», «Затраты и лимиты», блоки обзора; права и роль QA-аналитика |
-| G. Инструкции агентов (сид) | `services/ai-gateway/migrations/seed/` | инструкции RU для `teaching_coach`, `conversation_partner`, `independent_evaluator` по скиллам LinguaFlow, JSON-схемы вывода, золотые тесты (≥ 10 на агента: верно/ошибки/подсказки/инъекция/RU и UZ/дети/вне темы/недостаточно данных) |
+| G. Инструкции агентов (сид) | `services/ai-gateway/migrations/seed/` | инструкции (на английском — для модели; описательные поля контекста — RU из catalog) для `teaching_coach`, `conversation_partner`, `independent_evaluator` по скиллам LinguaFlow, JSON-схемы вывода, золотые тесты (≥ 10 на агента: верно/ошибки/подсказки/инъекция/RU и UZ/дети/вне темы/недостаточно данных) |
 | H. Интеграция | `infra/*`, CI, Railway, docs | ключи, CI, Railway setup, n8n `lessons-tick`, сквозной e2e, ревью, QA, деплой |
 
 ## Права и роли (дополнение к спринтам 2–3)
