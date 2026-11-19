@@ -18,7 +18,8 @@ export function ScenarioScreen({ id }: { id: string }) {
   const d = sc.data;
   return (
     <>
-      <Bar title={d ? l(d.title) : t("pr.tab.scenarios")} onBack={nav.back} />
+      {/* в шапке — раздел, название сценария — h1 ниже (без повтора) */}
+      <Bar title={t("pr.tab.scenarios")} onBack={nav.back} plainTitle />
       <main className="scroll" data-testid="scenario">
         {sc.loading && !d ? (
           <div className="pad"><Skeleton lines={4} /></div>

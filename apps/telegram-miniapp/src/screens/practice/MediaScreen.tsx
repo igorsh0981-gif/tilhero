@@ -17,12 +17,13 @@ import { MEDIA_ICON } from "./Practice";
  */
 export function MediaScreen({ id }: { id: string }) {
   const { bff, nav } = useApp();
-  const { t, l } = useI18n();
+  const { t } = useI18n();
   const item = useLoad(() => bff.mediaItem(id), [id]);
   const d = item.data;
   return (
     <>
-      <Bar title={d ? l(d.title) : t("pr.tab.media")} onBack={nav.back} />
+      {/* в шапке — раздел, название материала — h1 ниже (без повтора) */}
+      <Bar title={t("pr.tab.media")} onBack={nav.back} plainTitle />
       <main className="scroll" data-testid="media-item">
         {item.loading && !d ? (
           <div className="pad"><Skeleton lines={4} /></div>

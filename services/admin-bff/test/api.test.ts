@@ -156,9 +156,12 @@ describe("ученики: реестр и карточка", () => {
     const res = await get(s, `/admin/v1/learners/${LEARNER_ID}`);
     expect(res.statusCode).toBe(404);
     expect(res.json().code).toBe("LEARNER_NOT_FOUND");
-    const before = h.fake.calls.length;
+    const before = h.fake.callsTo("userAdmin").length;
     expect((await get(s, "/admin/v1/learners/not-a-uuid")).statusCode).toBe(422);
-    expect(h.fake.calls.length).toBe(before);
+    // считаем только вызовы user-admin: фоновые вызовы других доменов (сессия, аудит) идут асинхронно и
+    // в CI могли попасть между замерами (нестабильный тест)
+    expect(h.fake.callsTo("userAdmin").length).toBe(before);
+    expect(h.fake.calls.some((c) => c.path.includes("not-a-uuid"))).toBe(false);
   });
 
   it("user-admin недоступен → 503 UPSTREAM_UNAVAILABLE {service: user-admin}", async () => {
