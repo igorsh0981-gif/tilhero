@@ -31,12 +31,12 @@
  * по сотрудникам, ролям и заявкам four-eyes. Спринт 3: публикация, снятие и откат версии контента; подтверждение прав
  * медиа; решение по заявке ученика на песню/фильм; правка языков и языковых пар; публикация версии теста диагностики.
  * Спринт 4: публикация, канарейка и откат версии агента; правка моделей и цен; бюджет и аварийная остановка ИИ;
- * переоценка; решение по апелляции.
+ * переоценка; решение по апелляции. Спринт 5: ручная правка карточки памяти ученика.
  */
 
 import type {
-  ContentKind, Language, LanguagePair, LocaleCheck, MediaRequestStatus, ScenarioTestRun, VersionStatus,
-  Localized as ContentLocalized, Band,
+  ContentKind, GlossaryEntry, GlossaryRef, GlossaryReviewStatus, GlossarySource, Language, LanguagePair, LocaleCheck,
+  MediaRequestStatus, PartOfSpeech, ScenarioTestRun, VersionStatus, Localized as ContentLocalized, Band,
 } from "./content.js";
 import type {
   Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiModel, AiProviderStatus, ConfirmedError, GoldenCase,
@@ -101,7 +101,11 @@ export type Permission =
   | "qa.transcripts" // текст реплик и ответов ученика — с причиной, каждое открытие в аудите
   | "qa.review" // переоценка и решение по апелляции (step-up)
   | "costs.read" // затраты ИИ
-  | "costs.manage"; // лимиты ИИ и аварийная остановка (step-up)
+  | "costs.manage" // лимиты ИИ и аварийная остановка (step-up)
+  // спринт 5 — память, словарь курса
+  | "memory.read" // очередь и история карточек ученика, проверки удержания, аналитика забывания
+  | "memory.manage" // ручная правка карточки: перенос срока, сброс, заморозка (step-up, по одной, с причиной)
+  | "glossary.manage"; // словарь курса и модерация переводов ИИ
 
 export const PERMISSIONS: readonly Permission[] = [
   "dashboard.read", "users.read", "users.sensitive.read", "support.read", "support.reply", "support.manage",
@@ -109,6 +113,7 @@ export const PERMISSIONS: readonly Permission[] = [
   "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send", "staff.manage", "roles.manage",
   "content.read", "content.edit", "content.review", "content.publish", "media.rights", "lang.manage",
   "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "costs.read", "costs.manage",
+  "memory.read", "memory.manage", "glossary.manage",
 ];
 
 export type RoleCode =
@@ -458,6 +463,8 @@ export interface Dashboard {
   /** спринт 4 */
   lessons: DashboardBlock<LessonStats>;
   ai: DashboardBlock<AiUsageSummary>;
+  /** спринт 5 */
+  memory: DashboardBlock<MemoryStats>;
 }
 
 // =====================================================================================================================
@@ -1289,6 +1296,8 @@ export interface AiUsageSummary {
   avg_cost_per_lesson_usd: number | null;
   ai_enabled: boolean;
   alert_percent: number; // порог предупреждения из AiBudget (1–100) — обзору не нужен отдельный GET /ai/budget
+  /** спринт 5: оценка произношения (агент pronunciation_coach) — входит в spent_usd */
+  speech: { calls: number; audio_minutes: number; spent_usd: number; speech_available: boolean };
 }
 export interface AiCall {
   call_id: string;
@@ -1421,3 +1430,192 @@ export interface LessonStats {
 
 export type { Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiModel, AiProviderStatus, GoldenCase, TestRun, TestRunSummary };
 
+// =====================================================================================================================
+// =====================================================================================================================
+// Память, словарь курса, чтение (спринт 5) — memory и catalog через admin-bff.
+// Права: memory.read — очередь, история планирования, проверки, аналитика (без текста ученика: цитаты ошибок не
+// показываются); memory.manage — ручная правка одной карточки (step-up, причина ≥ 10, аудит memory.card_adjusted);
+// glossary.manage — словарь курса и модерация переводов ИИ (аудит glossary.*). Тексты для чтения — общий API контента
+// (ContentKind "reading", права content.*). Аналитика — только агрегаты: группы меньше 5 учеников скрыты.
+// =====================================================================================================================
+
+// ---------- Словарь курса (catalog) ----------
+/** GET /admin/v1/glossary?pair_id=&q=&source=&review_status=&cursor= (content.read) → Page<GlossaryRow>.
+ *  Очередь переводов ИИ — review_status=pending (сортировка по числу мест в контенте).
+ *  GET /admin/v1/glossary/{entry_id} (content.read) → GlossaryDetail.
+ *  POST /admin/v1/glossary GlossaryCreate (glossary.manage) → GlossaryDetail (201); 409 FORM_TAKEN {entry_id}.
+ *  PATCH /admin/v1/glossary/{entry_id} GlossaryPatch (glossary.manage; If-Match: updated_at → 428 IF_MATCH_REQUIRED /
+ *    409 VERSION_CONFLICT) → GlossaryDetail. Статья course — только override (null — снять).
+ *  POST /admin/v1/glossary/{entry_id}/review GlossaryReview (glossary.manage) → GlossaryDetail; 409 NOT_PENDING.
+ *  DELETE /admin/v1/glossary/{entry_id} {reason} (glossary.manage; только methodist) → 204 (архив). */
+export interface GlossaryRow {
+  entry_id: string;
+  pair_id: string;
+  lemma: string;
+  forms: string[];
+  part_of_speech: PartOfSpeech | null;
+  gloss: ContentLocalized;
+  source: GlossarySource;
+  review_status: GlossaryReviewStatus;
+  confidence: number | null;
+  refs_count: number;
+  overridden: boolean;
+  updated_at: string;
+  updated_by_name: string | null;
+}
+export interface GlossaryDetail extends GlossaryEntry {
+  updated_by_name: string | null;
+  /** названия мест в контенте для ref (null — снято с публикации) */
+  refs_titles: Array<GlossaryRef & { title: ContentLocalized | null }>;
+  history: Array<{ at: string; by_name: string | null; action: "created" | "updated" | "reviewed" | "archived" | "overridden";
+                   before: Partial<GlossaryEntry> | null; after: Partial<GlossaryEntry> | null; reason: string | null }>;
+  /** статьи course: перевод в другом месте контента отличается от действующего — подсказка методисту */
+  conflicts: Array<{ ref: GlossaryRef; gloss: ContentLocalized }>;
+}
+export interface GlossaryCreate {
+  pair_id: string;
+  lemma: string; // ≤ 60
+  forms: string[]; // 1..8
+  part_of_speech: PartOfSpeech | null;
+  gloss: ContentLocalized; // ≤ 80
+  example_en: string | null; // ≤ 200
+  reason: string | null;
+}
+export interface GlossaryPatch {
+  lemma?: string;
+  forms?: string[];
+  part_of_speech?: PartOfSpeech | null;
+  gloss?: ContentLocalized;
+  example_en?: string | null;
+  /** только для source course: перевод и пример поверх контента; null — снять */
+  override?: { gloss: ContentLocalized; example_en: string | null } | null;
+  reason?: string | null;
+}
+export interface GlossaryReview {
+  decision: "approve" | "correct" | "reject";
+  gloss?: ContentLocalized; // для correct — обязателен
+  note?: string | null; // ≤ 300
+}
+
+// ---------- Память ученика (memory) ----------
+export type AdminCardStatus = "new" | "learning" | "review" | "known" | "frozen" | "archived";
+
+/** GET /admin/v1/memory/learners/{user_id} (memory.read) → LearnerMemorySummary.
+ *  Ученик — по user_id из карточки ученика (Ученики → карточка → «Память»). */
+export interface LearnerMemorySummary {
+  user_id: string;
+  pair_id: string | null;
+  cards_by_status: Record<AdminCardStatus, number>;
+  due_now: number;
+  overdue_7d: number; // просрочено больше 7 дней
+  reviews_30d: number;
+  last_review_at: string | null;
+  checks: RetentionCheckRow[]; // последние 20
+}
+export interface RetentionCheckRow {
+  check_id: string;
+  skill_id: string;
+  skill_title: ContentLocalized | null;
+  stage: "d7" | "d30";
+  status: "scheduled" | "in_session" | "passed" | "failed" | "cancelled";
+  due_at: string;
+  checked_at: string | null;
+  result: { correct: number; total: number } | null;
+  consecutive_failures: number;
+}
+
+/** GET /admin/v1/memory/learners/{user_id}/cards?status=&kind=&cursor= (memory.read) → Page<AdminCardRow> */
+export interface AdminCardRow {
+  card_id: string;
+  kind: "word" | "phrase" | "error";
+  text_en: string;
+  gloss: ContentLocalized;
+  status: AdminCardStatus;
+  stability: number | null; // дни
+  difficulty: number | null; // 1..10
+  retrievability: number | null; // 0..1 на сейчас
+  reps: number;
+  lapses: number;
+  due_at: string | null;
+  last_review_at: string | null;
+  error_code: string | null;
+}
+
+/** GET /admin/v1/memory/cards/{card_id} (memory.read) → AdminCardDetail. Цитата ошибки ученика не показывается. */
+export interface AdminCardDetail extends AdminCardRow {
+  user_id: string;
+  example_en: string | null;
+  sources: Array<{ kind: string; key: string | null; version: number | null; at: string }>;
+  log: Page<ReviewLogRow>; // первая страница; дальше GET /admin/v1/memory/cards/{card_id}/log?cursor=
+}
+export interface FsrsSnapshot {
+  state: "new" | "learning" | "review";
+  stability: number | null;
+  difficulty: number | null;
+  due_at: string | null;
+  status: AdminCardStatus;
+}
+/** Строка истории планирования (неизменяема) */
+export interface ReviewLogRow {
+  log_id: string;
+  at: string;
+  task_type: string; // meaning_choice, typed, …, manual
+  answer_mode: "choice" | "typed" | "assemble" | "listen" | "manual";
+  grade: "again" | "hard" | "good" | null;
+  hinted: boolean;
+  revealed: boolean;
+  elapsed_days: number | null;
+  before: FsrsSnapshot;
+  after: FsrsSnapshot;
+  algorithm: string; // fsrs-5
+  params_version: string; // fsrs5-default-1
+  actor: "learner" | "system" | "staff";
+  actor_name: string | null; // staff
+  reason: string | null;
+}
+
+/** POST /admin/v1/memory/cards/{card_id}/actions CardAction (memory.manage, step-up) → AdminCardDetail.
+ *  409 CARD_STATE {status} (например, unfreeze не замороженной); 422 DUE_AT_RANGE (1..365 дней от сейчас). */
+export type CardAction =
+  | { action: "reschedule"; due_at: string; reason: string }
+  | { action: "reset"; reason: string }
+  | { action: "freeze"; reason: string }
+  | { action: "unfreeze"; reason: string };
+
+// ---------- Аналитика забывания (ADM-MEM-02) ----------
+/** GET /admin/v1/memory/analytics?pair_id=&period=30d|90d (memory.read | dashboard.read) → ForgettingAnalytics */
+export interface ForgettingAnalytics {
+  period: "30d" | "90d";
+  pair_id: string;
+  generated_at: string;
+  checks: {
+    d7: CheckRate;
+    d30: CheckRate;
+  };
+  by_skill: Array<{ skill_id: string; title: ContentLocalized | null; d7: CheckRate; d30: CheckRate }>;
+  by_lesson: Array<{ lesson_id: string; title: ContentLocalized | null; cards: number; again_pct: number | null;
+                     hidden: boolean }>;
+  repeated_errors: Array<{ error_code: string; label: ContentLocalized; learners_with_repeats: number; cards: number;
+                           hidden: boolean }>;
+  forgotten_words: Array<{ text_en: string; answers: number; again_pct: number }>; // ≤ 20, при ≥ 20 ответах
+}
+export interface CheckRate {
+  scheduled: number;
+  passed: number;
+  failed: number;
+  pass_pct: number | null; // 0–100
+  /** меньше 5 учеников — значения скрыты (null) */
+  hidden: boolean;
+}
+
+// ---------- Обзор (спринт 5) ----------
+/** GET /admin/v1/memory/stats?period= (dashboard.read) → MemoryStats */
+export interface MemoryStats {
+  period: Period;
+  review_sessions: number;
+  learners_reviewing: number;
+  median_minutes: number | null;
+  d30_pass_pct: number | null; // 0–100
+  avg_due_per_learner: number | null;
+  ai_glosses_pending: number; // очередь переводов ИИ (из catalog)
+}

@@ -21,7 +21,8 @@
         "rubric",
         "scenario",
         "media_asset",
-        "media_exercise"
+        "media_exercise",
+        "reading"
       ]
     },
     "key": {

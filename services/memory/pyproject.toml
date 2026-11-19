@@ -1,0 +1,16 @@
+[project]
+name = "tilhero-memory"
+version = "0.1.0"
+description = "TilHero memory: личный словарь и журнал ошибок, интервальные повторения FSRS-5, «Повторение дня», проверки удержания 7/30 дней, перевод по тапу, произношение"
+requires-python = ">=3.12"
+dependencies = ["tilhero-common"]
+
+[tool.uv.sources]
+tilhero-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tilhero_memory"]

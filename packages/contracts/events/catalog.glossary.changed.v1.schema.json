@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "catalog.glossary.changed.v1.schema.json",
+  "title": "catalog.glossary.changed.v1",
+  "type": "object",
+  "required": [
+    "pair_id",
+    "entry_id",
+    "forms",
+    "change",
+    "occurred_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "pair_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "entry_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "forms": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "maxItems": 8
+    },
+    "change": {
+      "type": "string",
+      "enum": [
+        "created",
+        "updated",
+        "reviewed",
+        "archived"
+      ]
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

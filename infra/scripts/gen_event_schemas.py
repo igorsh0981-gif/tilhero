@@ -64,7 +64,7 @@ CATALOG = {
     # ------------------------------------------------------------ learning-plan
     # ------------------------------------------------------------ catalog (спринт 3)
     "catalog.version.published.v1": ({"kind": enum("course", "skill", "module", "lesson", "rubric", "scenario",
-                                                   "media_asset", "media_exercise"),
+                                                   "media_asset", "media_exercise", "reading"),
                                       "key": STR, "version": INT, "previous_version": INT,
                                       "action": enum("published", "rolled_back", "archived"), "course_id": STR,
                                       "published_by": UUID, "published_at": TS},
@@ -106,12 +106,12 @@ CATALOG = {
                                  "occurred_at": TS},
                                 ["user_id", "pair_id", "changes", "occurred_at"]),
     # ------------------------------------------------------------ lessons (спринт 4)
-    "lesson.session.started.v1": ({"session_id": UUID, "user_id": UUID, "kind": enum("lesson", "scenario", "media", "review"),
+    "lesson.session.started.v1": ({"session_id": UUID, "user_id": UUID, "kind": enum("lesson", "scenario", "media", "review", "reading"),
                                    "pair_id": STR, "lesson_id": STR, "scenario_id": STR, "asset_id": STR,
                                    "ai_mode": enum("full", "choices"), "started_at": TS},
                                   ["session_id", "user_id", "kind", "pair_id", "ai_mode", "started_at"]),
     "lesson.session.completed.v1": ({"session_id": UUID, "user_id": UUID,
-                                     "kind": enum("lesson", "scenario", "media", "review"), "pair_id": STR,
+                                     "kind": enum("lesson", "scenario", "media", "review", "reading"), "pair_id": STR,
                                      "lesson_id": STR, "scenario_id": STR, "asset_id": STR,
                                      "status": enum("completed", "cancelled", "failed"),
                                      "outcome": {"type": ["string", "null"], "enum": ["success", "alt_success", "fail", None]},
@@ -122,7 +122,7 @@ CATALOG = {
                                      "finished_at"]),
     # ------------------------------------------------------------ assessment (спринт 4)
     "assessment.completed.v1": ({"evaluation_id": UUID, "user_id": UUID, "pair_id": STR, "session_id": UUID,
-                                 "kind": enum("lesson", "scenario", "media", "review"),
+                                 "kind": enum("lesson", "scenario", "media", "review", "reading"),
                                  "skill_outcomes": arr({"type": "object", "additionalProperties": False,
                                                         "required": ["skill_id", "outcome"],
                                                         "properties": {"skill_id": STR,
@@ -144,6 +144,29 @@ CATALOG = {
     "assessment.appeal.decided.v1": ({"appeal_id": UUID, "evaluation_id": UUID, "user_id": UUID,
                                       "decision": enum("upheld", "corrected"), "decided_at": TS},
                                      ["appeal_id", "evaluation_id", "user_id", "decision", "decided_at"]),
+    # ------------------------------------------------------------ memory (спринт 5)
+    # «Повторение дня» завершено (или истекло с ответами) — learning-plan засчитывает занятие review
+    "memory.review.completed.v1": ({"session_id": UUID, "user_id": UUID, "pair_id": STR,
+                                    "status": enum("completed", "expired"),
+                                    "minutes": {"type": "integer", "minimum": 0, "maximum": 60},
+                                    "reviewed": INT, "correct": INT, "finished_at": TS},
+                                   ["session_id", "user_id", "pair_id", "status", "minutes", "reviewed", "correct",
+                                    "finished_at"]),
+    # вечер (19:00 по поясу плана): к сроку ≥ 5 карточек, повторения сегодня не было — notifications reviews_due
+    "memory.reviews.due.v1": ({"user_id": UUID, "local_date": DATE,
+                               "due_count": {"type": "integer", "minimum": 1, "maximum": 2000}, "timezone": STR},
+                              ["user_id", "local_date", "due_count", "timezone"]),
+    # проверка удержания навыка через 7/30 дней — diagnostics: d30 passed → retained, 2 провала подряд → learning
+    "memory.retention.checked.v1": ({"check_id": UUID, "user_id": UUID, "pair_id": STR, "skill_id": STR,
+                                     "stage": enum("d7", "d30"), "passed": BOOL,
+                                     "consecutive_failures": {"type": "integer", "minimum": 0, "maximum": 2},
+                                     "evidence_id": UUID, "checked_at": TS},
+                                    ["check_id", "user_id", "pair_id", "skill_id", "stage", "passed",
+                                     "consecutive_failures", "checked_at"]),
+    # ------------------------------------------------------------ catalog: словарь курса (спринт 5)
+    "catalog.glossary.changed.v1": ({"pair_id": STR, "entry_id": UUID, "forms": arr(STR, 8),
+                                     "change": enum("created", "updated", "reviewed", "archived"), "occurred_at": TS},
+                                    ["pair_id", "entry_id", "forms", "change", "occurred_at"]),
     # ------------------------------------------------------------ learning-plan: траектория (спринт 3)
     "learning.trajectory.updated.v1": ({"user_id": UUID, "pair_id": STR, "revision": {"type": "integer", "minimum": 1},
                                         "next_lesson_id": STR, "reason_codes": arr(STR, 10), "computed_at": TS},

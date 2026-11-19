@@ -64,7 +64,7 @@ SERVICES: tuple[Service, ...] = (
     Service("social", 8109, "services/social/Dockerfile", "social", calls=("identity-consent",)),
     Service("telegram-bff", 8001, "services/telegram-bff/Dockerfile", public=True,
             calls=("identity-consent", "learning-plan", "support", "notifications", "experience-config", "social",
-                   "catalog", "diagnostics", "lessons", "assessment", "tts")),
+                   "catalog", "diagnostics", "lessons", "assessment", "tts", "memory")),
     Service("telegram-miniapp", 8080, "apps/telegram-miniapp/Dockerfile", public=True, health="/healthz"),
     # спринт 3 — учебный контур: контент и диагностика
     Service("catalog", 8110, "services/catalog/Dockerfile", "catalog"),
@@ -76,24 +76,28 @@ SERVICES: tuple[Service, ...] = (
     Service("ai-gateway", 8114, "services/ai-gateway/Dockerfile", "ai_gateway"),
     # релиз 4.1 — серверная озвучка (Piper → MP3): синтез устройства в Telegram на Android отсутствует, на iOS тихий
     Service("tts", 8115, "services/tts/Dockerfile"),
+    # спринт 5 — память и повторения (FSRS), перевод по тапу, проверки удержания, произношение (через ai-gateway)
+    Service("memory", 8116, "services/memory/Dockerfile", "memory",
+            calls=("catalog", "assessment", "ai-gateway", "identity-consent")),
     # спринт 2 — админка: admin-bff без публичного домена, admin-web проксирует /admin/v1/* на него (один origin)
     Service("admin-identity", 8120, "services/admin-identity/Dockerfile", "admin_identity"),
     Service("user-admin", 8121, "services/user-admin/Dockerfile", "user_admin",
             calls=("identity-consent", "learning-plan")),
     Service("admin-bff", 8002, "services/admin-bff/Dockerfile", health="/health/ready",
             calls=("admin-identity", "user-admin", "identity-consent", "support", "audit", "experience-config",
-                   "notifications", "catalog", "diagnostics", "ai-gateway", "lessons", "assessment")),
+                   "notifications", "catalog", "diagnostics", "ai-gateway", "lessons", "assessment", "memory")),
     Service("admin-web", 8080, "apps/admin-web/Dockerfile", public=True, health="/healthz"),
     Service("n8n", 5678, "infra/n8n/Dockerfile", health="/healthz",
-            calls=("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment")),
+            calls=("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment",
+                   "memory")),
 )
 JWT_ISSUERS = ("identity-consent", "learning-plan", "support", "notifications", "audit", "experience-config",
                "telegram-bot-gateway", "social", "telegram-bff", "admin-bff", "admin-identity", "user-admin",
-               "catalog", "diagnostics", "lessons", "assessment", "ai-gateway")
+               "catalog", "diagnostics", "lessons", "assessment", "ai-gateway", "memory")
 # только проверяют внутренний JWT (сами никого не вызывают): закрытый ключ нужен ServiceSettings в stage/prod, но их
 # открытый ключ никому не раздаётся
 VERIFY_ONLY = ("tts",)
-SCHEDULED = ("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment")
+SCHEDULED = ("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment", "memory")
 # имя переменной адреса в коде вызывающего (BFF и Python-сервисы называют identity по-разному)
 URL_VAR = {
     ("telegram-bff", "identity-consent"): "IDENTITY_URL",
@@ -217,7 +221,11 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
             lines += [f"ADMIN_BOOTSTRAP_EMAIL={admin_email}", f"ADMIN_BOOTSTRAP_PASSWORD={sec.admin_password}"]
     if svc.name == "ai-gateway":  # ключ провайдера — общая переменная проекта (вводит владелец, как BOT_TOKEN);
         # не задана — ссылка пустая, ИИ выключен (урок без ИИ). Ссылка только у ai-gateway.
-        lines += ["AI_PROVIDER=anthropic", "ANTHROPIC_API_KEY=${{shared.ANTHROPIC_API_KEY}}"]
+        lines += ["AI_PROVIDER=anthropic", "ANTHROPIC_API_KEY=${{shared.ANTHROPIC_API_KEY}}",
+                  # спринт 5: оценка произношения — ключ и регион Azure Speech (общие переменные, вводит владелец);
+                  # не заданы — функция скрыта (speech_available=false)
+                  "SPEECH_PROVIDER=azure", "AZURE_SPEECH_KEY=${{shared.AZURE_SPEECH_KEY}}",
+                  "AZURE_SPEECH_REGION=${{shared.AZURE_SPEECH_REGION}}"]
     if svc.name == "notifications":
         lines.append("ADMIN_TEST_CHAT_IDS=")  # Telegram chat id тестовых чатов через запятую (тестовая отправка)
     if svc.name == "telegram-bot-gateway":

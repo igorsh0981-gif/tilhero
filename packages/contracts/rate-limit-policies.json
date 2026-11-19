@@ -69,6 +69,39 @@
       "description": "Озвучка фраз контента (POST /v1/speech) — на пользователя за 10 минут (новая, релиз 4.1)"
     },
     {
+      "policy": "tg.memory.translate",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 60,
+      "window_s": 600,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Перевод слова по тапу (POST /v1/memory/translate) — на ученика за 10 минут (спринт 5)"
+    },
+    {
+      "policy": "tg.memory.pronunciation",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 20,
+      "window_s": 600,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Оценка произношения (POST /v1/memory/pronunciation) — на ученика за 10 минут (спринт 5)"
+    },
+    {
+      "policy": "tg.memory.answer",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 300,
+      "window_s": 600,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Ответы «Повторения дня» (POST /v1/memory/review-sessions/*/tasks/*) — на ученика за 10 минут (спринт 5)"
+    },
+    {
       "policy": "adm.login_ip",
       "service": "admin-bff",
       "subject": "ip",

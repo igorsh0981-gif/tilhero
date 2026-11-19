@@ -47,7 +47,11 @@ export interface Agent {
   implemented_in: string | null;
 }
 
-export type SessionKind = "lesson" | "scenario" | "media" | "review";
+/** Вид сессии lessons (спринт 5: + reading — текст для чтения в практике). */
+export type SessionKind = "lesson" | "scenario" | "media" | "review" | "reading";
+/** Вид сессии вызова агента: занятие lessons или memory (перевод по тапу, произношение; session_id — дневной
+ *  уникальный идентификатор memory: uuid5(«memory-gloss», user_id:local_date)). */
+export type AiSessionKind = SessionKind | "memory";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Вызов агента: POST /internal/v1/agents/{agent_id}/invoke (вызывающие lessons, assessment)
@@ -56,7 +60,7 @@ export type SessionKind = "lesson" | "scenario" | "media" | "review";
 export interface AgentInvokeRequest<C = AgentContext> {
   request_id: string; // UUID; повтор с тем же request_id ≤ 24 ч → сохранённый результат
   session_id: string;
-  session_kind: SessionKind;
+  session_kind: AiSessionKind;
   user_id: string; // активный ученик (lrn)
   audience: AudienceSegment;
   locale: "ru" | "uz";
@@ -69,6 +73,7 @@ export interface AgentInvokeRequest<C = AgentContext> {
 
 export type AgentUnavailableReason =
   | "ai_disabled" // аварийная остановка или нет ключа провайдера
+  | "not_configured" // речь: нет AZURE_SPEECH_KEY / AZURE_SPEECH_REGION (спринт 5)
   | "budget_exceeded" // месячный потолок, лимит ученика за день или урока (и резервная модель не помещается)
   | "cost_limit" // max_cost_usd версии на вызов: следующая попытка (и резервная модель) не помещается
   | "provider_error"
@@ -127,10 +132,29 @@ export interface TeachingCoachContext {
   explain_locale: "ru" | "uz";
   already_shown: string[]; // примеры, уже показанные ученику
 }
+/** teaching_coach v2 (спринт 5): перевод слова или выражения из опубликованного контента, которого нет в словаре курса.
+ *  Вызывающий — memory (перевод по тапу). Текста ученика во входе нет — детям разрешено. Ответ кешируется в словаре
+ *  курса (source ai, review_status pending) для всех учеников и проверяется методистом. */
+export interface TeachingCoachGlossContext {
+  request: "gloss_word";
+  word: string; // ≤ 60, как в тексте
+  sentence_en: string; // ≤ 300 — предложение, где встретилось слово (значение по контексту)
+  level: Band;
+  content_kind: "lesson" | "media_asset" | "reading" | "scenario";
+}
 export interface TeachingCoachOutput {
   explanation: string; // на explain_locale, ≤ 400
   example_en: string; // ≤ 160
   example_gloss: string; // на explain_locale, ≤ 200
+}
+export interface TeachingCoachGlossOutput {
+  lemma: string; // ≤ 60, словарная форма («went» → «go»; выражение — как есть)
+  part_of_speech: "noun" | "verb" | "adjective" | "adverb" | "pronoun" | "preposition" | "conjunction"
+    | "interjection" | "determiner" | "phrase" | "other";
+  /** значение в этом предложении; ru — кириллица, uz — латиница (oʻ, gʻ — U+02BB); без английских слов и ссылок */
+  gloss: { ru: string; uz: string }; // ≤ 80 каждый
+  forms: string[]; // ≤ 6 — словоформы лексемы (go, goes, went, gone, going)
+  confidence: number; // 0..1; < 0.5 — ученику не выдаётся
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -172,8 +196,53 @@ export interface IndependentEvaluatorOutput {
   requires_human_review: boolean;
 }
 
-export type AgentContext = ConversationPartnerContext | TeachingCoachContext | IndependentEvaluatorContext;
-export type AgentOutput = ConversationPartnerOutput | TeachingCoachOutput | IndependentEvaluatorOutput;
+export type AgentContext =
+  | ConversationPartnerContext | TeachingCoachContext | TeachingCoachGlossContext | IndependentEvaluatorContext;
+export type AgentOutput =
+  | ConversationPartnerOutput | TeachingCoachOutput | TeachingCoachGlossOutput | IndependentEvaluatorOutput;
+
+// ---------------------------------------------------------------------------------------------------------------------
+// pronunciation_coach (спринт 5) — оценка произношения по акустике (Azure Speech Pronunciation Assessment) + советы
+// правилами. POST /internal/v1/speech/pronunciation (вызывающий memory): тело audio/wav (PCM 16 бит, моно, 16 кГц,
+// 0,5..15 с), заголовок X-Speech-Meta = base64url(JSON SpeechAssessMeta). Аудио не хранится нигде.
+// ---------------------------------------------------------------------------------------------------------------------
+
+export interface SpeechAssessMeta {
+  request_id: string; // UUID; повтор ≤ 24 ч → сохранённый результат
+  user_id: string; // lrn
+  audience: AudienceSegment;
+  locale: "ru" | "uz"; // язык советов
+  reference_text: string; // 1..200, английский эталон (только из контента или карточки — подставляет memory)
+  language: "en-US";
+}
+
+export type PronunciationErrorType = "none" | "omission" | "insertion" | "mispronunciation";
+
+export interface PronunciationResult {
+  status: "ok" | "insufficient_evidence" | "unavailable";
+  /** unavailable: ai_disabled | not_configured | budget_exceeded | provider_error | timeout;
+   *  insufficient_evidence: not_recognized | low_confidence | incomplete */
+  reason: string | null;
+  reference_text: string;
+  /** 0..100 (HundredMark); null при insufficient_evidence/unavailable */
+  scores: { accuracy: number; fluency: number; completeness: number; pron: number } | null;
+  words: Array<{ word: string; accuracy: number | null; error_type: PronunciationErrorType }>; // ≤ 40
+  /** разборчивость, не «акцент»: clear ≥ 80, mostly_clear 60..79, needs_practice < 60 */
+  intelligibility: "clear" | "mostly_clear" | "needs_practice" | null;
+  /** ≤ 2 совета на locale; только для слов mispronunciation (accuracy < 60) и omission */
+  tips: Array<{ word: string; text: string }>;
+  confidence: number | null; // NBest[0].Confidence
+  audio_ms: number;
+  provider: "azure_speech" | "fake_speech" | null;
+  cost_usd: number;
+  latency_ms: number;
+}
+
+/** GET /internal/v1/status (вызывающие lessons, assessment, memory) */
+export interface AiStatus {
+  ai_available: boolean; // нет аварийной остановки и провайдер LLM готов (лимиты не учитываются)
+  speech_available: boolean; // нет аварийной остановки, ключ и регион Azure заданы, месячный потолок не превышен
+}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Версии, золотые тесты, модели, бюджет (формы admin API ai-gateway; admin.ts — маршруты и имена)
@@ -261,10 +330,12 @@ export interface AgentRollout {
 }
 
 export interface AiModel {
-  model_id: string; // claude-haiku-5-5
-  provider: "anthropic" | "fake";
-  input_usd_per_mtok: number;
-  output_usd_per_mtok: number;
+  model_id: string; // claude-haiku-5-5; azure-speech-pa (спринт 5)
+  provider: "anthropic" | "fake" | "azure_speech" | "fake_speech";
+  input_usd_per_mtok: number; // речь — 0
+  output_usd_per_mtok: number; // речь — 0
+  /** речь: цена часа аудио (azure-speech-pa по умолчанию 1.32); LLM — null */
+  audio_usd_per_hour: number | null;
   active: boolean;
   updated_at: string;
 }
@@ -283,4 +354,11 @@ export interface AiProviderStatus {
   key_configured: boolean; // ключ задан в переменной ai-gateway (сам ключ не показывается никогда)
   last_error: { code: string; at: string } | null;
   ai_enabled: boolean; // false — аварийная остановка; для ролей без costs.read (баннер «ИИ выключен»)
+  /** оценка произношения (спринт 5): ключ и регион Azure — общие переменные проекта, вводит владелец */
+  speech: {
+    provider: "azure_speech" | "fake_speech";
+    key_configured: boolean;
+    region: string | null; // westeurope
+    last_error: { code: string; at: string } | null;
+  };
 }
