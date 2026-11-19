@@ -11,7 +11,7 @@ import { TemplatesTab } from "../src/screens/news/Templates";
 import { RevealTelegramId } from "../src/screens/learners/Learners";
 import { Overview } from "../src/screens/overview/Overview";
 import { emptyNote } from "../src/screens/news/catalog";
-import { approvalLabel, issuesPassword } from "../src/screens/roles/Roles";
+import { approvalLabel, issuesPassword, privilegedOf } from "../src/screens/roles/Roles";
 import { translate } from "../src/i18n";
 import { ErrorBoundary } from "../src/ui/ErrorBoundary";
 import { tgHandle } from "../src/lib/tg";
@@ -220,6 +220,27 @@ describe("overview", () => {
     expect(screen.getByTestId("block-campaigns-empty")).toBeInTheDocument();
     expect(screen.getByTestId("dw-views")).toHaveTextContent("812");
   });
+
+  it("campaigns: started campaigns and delivered messages are labelled with their units (QA D2-01), RU and EN", async () => {
+    const d: Dashboard = {
+      period: "today",
+      generated_at: "2026-11-18T10:00:00Z",
+      learners: { available: false, data: null, service: "user-admin" },
+      support: { available: false, data: null, service: "support" },
+      whats_new: { available: false, data: null, service: "experience-config" },
+      campaigns: { available: true, data: { scheduled: 1, sending: 0, sent_in_period: 2, delivered_in_period: 5 } },
+    };
+    handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);
+    ui(<Overview />, ["dashboard.read"]);
+    expect(await screen.findByTestId("dc-sent")).toHaveTextContent(/^Запущено рассылок, сегодня\s*2$/);
+    expect(screen.getByTestId("dc-delivered")).toHaveTextContent(/^Доставлено сообщений, сегодня\s*5$/);
+    expect(screen.getByTestId("kpis")).toHaveTextContent("Доставлено сообщений рассылок, сегодня");
+    expect(screen.getByTestId("kpis")).toHaveTextContent("запущено рассылок 2");
+    cleanup();
+    ui(<Overview />, ["dashboard.read"], "en");
+    expect(await screen.findByTestId("dc-sent")).toHaveTextContent(/^Campaigns started, today\s*2$/);
+    expect(screen.getByTestId("dc-delivered")).toHaveTextContent(/^Messages delivered, today\s*5$/);
+  });
 });
 
 describe("error boundary (review T2-9)", () => {
@@ -268,6 +289,20 @@ describe("staff four-eyes and usernames", () => {
     const staff = { staff_id: "x", email: "former@tilhero.local", display_name: "Бахром" };
     expect(approvalLabel(ap({ staff, role: "communications", to_role: null, from_status: "DISABLED" }), (r) => r, tr)).toBe("Бахром: Доступ отозван → Активен · communications");
     expect(approvalLabel(ap({ staff, role: "communications", to_role: "operations", from_status: "DISABLED" }), (r) => r, tr)).toBe("Бахром: Доступ отозван → Активен · communications → operations");
+  });
+  it("privileged role — Role.privileged of GET /roles, not the static list (review T2-7)", () => {
+    const roles = [
+      { code: "support" as const, privileged: true }, // a step-up right was added to support → privileged by the server
+      { code: "communications" as const, privileged: false },
+    ];
+    const priv = privilegedOf(roles);
+    expect(priv("support")).toBe(true);
+    expect(priv("communications")).toBe(false);
+    // a role /roles did not list, or /roles not loaded yet — the contract's default list
+    expect(priv("super_admin")).toBe(true);
+    expect(priv("analyst")).toBe(false);
+    expect(privilegedOf(null)("operations")).toBe(true);
+    expect(privilegedOf(null)("support")).toBe(false);
   });
   it("username: shown as received with one «@» (the mask too)", () => {
     expect(tgHandle("ig•••81")).toBe("@ig•••81");

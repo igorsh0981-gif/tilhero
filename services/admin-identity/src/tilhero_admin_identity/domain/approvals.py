@@ -14,6 +14,9 @@
   аннулируются (новый временный пароль, сброс MFA и сессий, P2-1): пароль — решающему, при waived — автору.
 - Заявку автора, который уже не ACTIVE, согласовать нельзя; при отключении сотрудника его PENDING-заявки → REJECTED.
 - Не больше одной PENDING-заявки на объект (частичный UNIQUE по target).
+- staff.create_privileged отклонена или истекла: учётка-заглушка (роль-заглушка, ACTIVE, без пароля) — «мёртвая»,
+  переводится в DISABLED с аудитом staff.disabled (ревью P2-1, замечание без оценки). Истечение фиксируется лениво —
+  при обращении к заявкам и сотрудникам (список, карточка, команды) — под lock_identity (порядок как у команд).
 """
 
 from __future__ import annotations
@@ -43,6 +46,7 @@ from tilhero_admin_identity.domain.store import (
     get_role,
     get_staff,
     is_privileged,
+    lock_identity,
     now,
     role_permissions,
     summaries,
@@ -61,6 +65,11 @@ ROLE_GRANT = "staff.role_grant"
 CREDENTIAL_KINDS = frozenset({CREATE_PRIVILEGED, ROLE_GRANT, REACTIVATE})
 # Заявки, после применения которых сбрасываются счётчики попыток входа/MFA цели
 UNLOCK_KINDS = CREDENTIAL_KINDS | {RESET}
+# Причина отключения учётки-заглушки (аудит staff.disabled), по исходу заявки staff.create_privileged
+PLACEHOLDER_DISABLED_REASON = {
+    "REJECTED": "Заявка на создание сотрудника отклонена",
+    "EXPIRED": "Заявка на создание сотрудника истекла",
+}
 
 
 def audit_summary(summary: dict[str, Any]) -> dict[str, Any]:
@@ -87,9 +96,44 @@ async def approval_out(session: AsyncSession, a: Approval) -> ApprovalOut:
 
 
 async def expire_overdue(session: AsyncSession) -> None:
-    await session.execute(
-        update(Approval).where(Approval.status == "PENDING", Approval.expires_at <= now()).values(status="EXPIRED")
-    )
+    """PENDING с истёкшим сроком → EXPIRED; у истёкших staff.create_privileged отключаются заглушки. Блокировка
+    lock_identity берётся, только если есть что помечать (повторный захват в той же транзакции безопасен)."""
+    due = (Approval.status == "PENDING", Approval.expires_at <= now())
+    if (await session.execute(select(Approval.approval_id).where(*due).limit(1))).first() is None:
+        return
+    await lock_identity(session)  # порядок как у команд: lock_identity → заявки → сотрудники
+    expired = (await session.execute(
+        update(Approval).where(*due).values(status="EXPIRED").returning(Approval.approval_id, Approval.kind)
+        .execution_options(synchronize_session=False)
+    )).all()
+    for approval_id, kind in expired:
+        if kind != CREATE_PRIVILEGED:
+            continue
+        a = await session.get(Approval, approval_id, populate_existing=True)
+        if a is not None:
+            await disable_placeholder(session, a, None)
+
+
+async def disable_placeholder(session: AsyncSession, a: Approval, by: Staff | None) -> None:
+    """Заявка staff.create_privileged отклонена или истекла → учётка-заглушка в DISABLED (аудит staff.disabled,
+    причина — исход заявки; при истечении — системное действие). Заглушку уже изменили (роль, статус, выдан пароль
+    прямым сбросом) — это обычный сотрудник, не трогаем."""
+    if a.kind != CREATE_PRIVILEGED or a.status not in PLACEHOLDER_DISABLED_REASON:
+        return
+    p = a.payload
+    target = await get_staff(session, uuid.UUID(p["staff_id"]), for_update=True)
+    if (target is None or target.status != "ACTIVE" or target.role != p["placeholder_role"]
+            or target.password_hash is not None):
+        return
+    target.status = "DISABLED"
+    bump_session(target)
+    await audit.record(session, "staff.disabled", actor_id=by.staff_id if by else None,
+                       actor_role=by.role if by else None, object_type="staff", object_id=target.staff_id,
+                       before={"status": "ACTIVE", "role": target.role},
+                       after={"status": "DISABLED", "approval_id": str(a.approval_id),
+                              "approval_status": a.status},
+                       reason=PLACEHOLDER_DISABLED_REASON[a.status])
+    await session.flush()
 
 
 async def pending_for(session: AsyncSession, target: str) -> Approval | None:
@@ -190,6 +234,7 @@ async def reject_pending_of(session: AsyncSession, author: Staff, by: Staff, *, 
         await audit.record(session, "approval.rejected", actor_id=by.staff_id, actor_role=by.role,
                            object_type="approval", object_id=a.approval_id,
                            after={"kind": a.kind, "summary": audit_summary(a.summary), "cause": cause})
+        await disable_placeholder(session, a, by)
     await session.flush()
 
 
@@ -300,6 +345,7 @@ async def decide(session: AsyncSession, approval_id: uuid.UUID, decider: Staff, 
     if a.status == "PENDING" and a.expires_at <= now():
         a.status = "EXPIRED"
         await session.flush()
+        await disable_placeholder(session, a, None)
         return None, conflict("APPROVAL_EXPIRED", "Срок заявки истёк"), None
     if a.status == "EXPIRED":
         raise conflict("APPROVAL_EXPIRED", "Срок заявки истёк")
@@ -320,6 +366,7 @@ async def decide(session: AsyncSession, approval_id: uuid.UUID, decider: Staff, 
     if not approve:
         a.status = "REJECTED"
         await audit.record(session, "approval.rejected", after=brief, **common)
+        await disable_placeholder(session, a, decider)
         await session.flush()
         return a, None, None
     a.status = "APPROVED"

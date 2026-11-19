@@ -458,8 +458,8 @@ function CampaignDetail({ id, onSaved, onChanged }: { id: string | null; onSaved
         </p>
       )}
       {s && c?.status !== "draft" && c?.stop_reason && (
-        <p className="small bad-ink">
-          {t("cmp.stoppedBy", { by: c.stopped_by ?? "—", at: fmt.dateTime(c.stopped_at), r: c.stop_reason })}
+        <p className="small bad-ink" data-testid="cmp-stopped-by">
+          {t("cmp.stoppedBy", { by: c.stopped_by_name ?? c.stopped_by ?? "—", at: fmt.dateTime(c.stopped_at), r: c.stop_reason })}
         </p>
       )}
 
@@ -556,6 +556,11 @@ function CampaignProgress({ c }: { c: Campaign }) {
           {c.finished_at ? ` · ${t("cmp.finished", { t: fmt.dateTime(c.finished_at) })}` : ""}
         </span>
       </div>
+      {c.scheduled_by && (
+        <div className="xs muted" data-testid="cmp-scheduled-by">
+          {t("cmp.scheduledBy", { by: c.scheduled_by_name ?? c.scheduled_by, at: fmt.dateTime(c.scheduled_at) })}
+        </div>
+      )}
       <div className="kv">
         <span>{t("cmp.s.audience")}</span>
         <span className="num b" data-testid="cmp-s-audience">
@@ -581,8 +586,9 @@ function CampaignProgress({ c }: { c: Campaign }) {
 
 /**
  * schedule (step-up, Idempotency-Key, send_at) / unschedule / emergency stop (step-up).
- * Schedule asks for an explicit choice (review T2-2): «Send now» passes send_at = now (the domain treats it as «as soon
- * as possible»), «At a chosen time» must be at least 2 min ahead and within 30 days — otherwise the field shows the
+ * Schedule asks for an explicit choice (review T2-2): «Send now» passes send_at = null — the server starts the campaign
+ * by its own clock right on this command and answers with status sending (QA D2-03, review T2-11: the browser clock
+ * takes no part); «At a chosen time» must be at least 2 min ahead and within 30 days — otherwise the field shows the
  * error and the confirm button stays inactive. A 422 CAMPAIGN_INVALID {send_at} from the domain lands at the same field.
  */
 function CampaignCommand({ cmd, est, onClose, onDone }: { cmd: NonNullable<Cmd>; est: CampaignEstimate | null; onClose: () => void; onDone: (c: Campaign) => void }) {
@@ -667,7 +673,7 @@ function CampaignCommand({ cmd, est, onClose, onDone }: { cmd: NonNullable<Cmd>;
       }
       onClose={onClose}
       onConfirm={async (reason) => {
-        let sendAt = new Date().toISOString();
+        let sendAt: string | null = null;
         if (k === "schedule") {
           if (when === null) return t("cmp.whenPick");
           if (when === "at") {
@@ -683,7 +689,7 @@ function CampaignCommand({ cmd, est, onClose, onDone }: { cmd: NonNullable<Cmd>;
               : k === "stop"
                 ? await Campaigns.stop(cmd.c.campaign_id, reason)
                 : await Campaigns.unschedule(cmd.c.campaign_id, reason);
-          toast(t(`cmp.done.${k}`, { x: x.title }), k === "stop" ? "info" : "ok", `campaign.${k === "schedule" ? "scheduled" : k === "stop" ? "stopped" : "unscheduled"}`);
+          toast(t(k === "schedule" && x.status === "sending" ? "cmp.done.sendNow" : `cmp.done.${k}`, { x: x.title }), k === "stop" ? "info" : "ok", `campaign.${k === "schedule" ? "scheduled" : k === "stop" ? "stopped" : "unscheduled"}`);
           onDone(x);
           return null;
         } catch (e) {
@@ -698,7 +704,7 @@ function CampaignCommand({ cmd, est, onClose, onDone }: { cmd: NonNullable<Cmd>;
                 setSrvAt(problem);
                 return t("cmp.errAtSee");
               }
-              return problem === "in_past" ? t("cmp.errNowStale") : atText(problem);
+              return atText(problem);
             }
           }
           return errText(i, e);

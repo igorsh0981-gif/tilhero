@@ -71,6 +71,7 @@ class FakeIdentity:
     audience: list[dict[str, Any]] = field(default_factory=list)
     audience_queries: list[dict[str, str]] = field(default_factory=list)
     audience_fail: list[Any] = field(default_factory=list)  # статус или (статус, код, details)
+    audience_page_fail: list[Any] = field(default_factory=list)  # то же, только для страниц (не /count)
 
     def _audience(self, request: httpx.Request) -> httpx.Response:
         """Контракт identity-consent (координатор, 18.11): вызывающий — только notifications, без sub; age по
@@ -81,8 +82,9 @@ class FakeIdentity:
         claims = jwt.decode(request.headers["x-internal-token"], options={"verify_signature": False})
         assert claims["iss"] == "notifications" and claims["aud"] == "identity-consent" and "sub" not in claims
         assert "actor" not in claims
-        if self.audience_fail:
-            item = self.audience_fail.pop(0)
+        page_fail = self.audience_page_fail if not request.url.path.endswith("/count") else []
+        if self.audience_fail or page_fail:
+            item = (self.audience_fail or page_fail).pop(0)
             if isinstance(item, tuple):
                 return api_error(*item)
             return api_error(item, "UPSTREAM")
@@ -159,6 +161,7 @@ class NotifEnv:
     gateway: FakeGateway
     dispatcher: Dispatcher
     accept: Any = None  # app.state.accept — общий приём записи журнала
+    start_now: Any = None  # app.state.campaign_start_now — фоновые первые пачки «Отправить сейчас» (D2-03)
     _tg: Any = field(default_factory=lambda: itertools.count(918273645))
 
     # ---------------------------------------------------------------- пользователи (identity-consent)

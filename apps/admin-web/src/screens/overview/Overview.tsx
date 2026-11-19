@@ -292,8 +292,9 @@ function CampaignsBody({ x, period }: { x: DashboardCampaigns; period: string })
     <>
       <Row k={t("dc.scheduled")} v={fmt.num(x.scheduled)} />
       <Row k={t("dc.sending")} v={fmt.num(x.sending)} />
-      <Row k={t("dc.sent", { p: period })} v={fmt.num(x.sent_in_period)} />
-      <Row k={t("dc.delivered", { p: period })} v={fmt.num(x.delivered_in_period)} />
+      {/* units differ (QA D2-01): campaigns started vs. campaign messages delivered — admin.ts DashboardCampaigns */}
+      <Row k={t("dc.sent", { p: period })} v={fmt.num(x.sent_in_period)} testId="dc-sent" />
+      <Row k={t("dc.delivered", { p: period })} v={fmt.num(x.delivered_in_period)} testId="dc-delivered" />
       {can("notif.campaigns.manage") && (
         <div className="acts">
           <Btn size="sm" icon="megaphone" label={t("dc.open")} onClick={() => navigate("news", "campaigns")} />

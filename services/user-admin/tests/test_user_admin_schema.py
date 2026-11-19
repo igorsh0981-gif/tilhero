@@ -4,6 +4,7 @@ CHECK схемы не пускает полный Telegram ID и PII удалё�
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import uuid
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from tilhero_common.testing import (
     schema_drift,
     unique_schema,
 )
+from tilhero_user_admin.domain.projection import search_text
 from tilhero_user_admin.main import build_app
 from tilhero_user_admin.models import Base
 from tilhero_user_admin.settings import Settings
@@ -88,6 +90,62 @@ async def test_schema_checks(env, bad_sql: str) -> None:
         await conn.execute(ok, uuid.uuid4(), "•" * 6 + "789")
     finally:
         await conn.close()
+
+
+async def test_migration_0002_recomputes_search_text_without_username() -> None:
+    """Ревью P2-9: строки, записанные до 35c3fd1 (search_text = lower(имя + username)), после 0002 ищутся только по
+    имени — как пишет код (`projection.search_text`); пачки по user_id (> 1000 строк); удалённые не трогаются."""
+    schema = unique_schema("ua_m2")
+    await create_schema(schema)
+    try:
+        settings = Settings(env="test", internal_jwt_secret="t" * 40, reconcile_enabled=False,
+                            database_url=TEST_ADMIN_URL, db_schema=schema)
+        cfg = Config(str(Path(SERVICE_DIR) / "alembic.ini"))
+        cfg.set_main_option("script_location", str(Path(SERVICE_DIR) / "migrations"))
+        cfg.attributes["settings"] = settings
+        await asyncio.to_thread(command.upgrade, cfg, "0001")
+        named, nameless, child, deleted = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        conn = await asyncpg.connect(TEST_ADMIN_URL)
+        try:
+            await conn.execute(f'SET search_path = "{schema}"')
+            insert = ("INSERT INTO admin_learner_summary (user_id, created_at, kind, status, display_name, username, "
+                      "search_text) VALUES ($1, now(), $2, $3, $4, $5, $6)")
+            await conn.execute(insert, named, "account", "ACTIVE", "  Игорь Ш. ", "igor_81", "игорь ш. igor_81")
+            await conn.execute(insert, nameless, "account", "ACTIVE", None, "secret_user", "secret_user")
+            await conn.execute(insert, child, "child", "ACTIVE", "Малика", None, "малика")
+            await conn.execute(insert, deleted, "account", "DELETED", None, None, None)
+            await conn.execute(
+                "INSERT INTO admin_learner_summary (user_id, created_at, display_name, username, search_text) "
+                "SELECT gen_random_uuid(), now(), 'Ученик ' || g, 'learner_' || g, 'ученик ' || g || ' learner_' || g "
+                "FROM generate_series(1, 2500) AS g")
+            await asyncio.to_thread(command.upgrade, cfg, "head")
+            rows = await conn.fetch("SELECT user_id, display_name, username, search_text FROM admin_learner_summary")
+        finally:
+            await conn.close()
+        by_id = {r["user_id"]: r for r in rows}
+        assert len(rows) == 2504
+        assert by_id[named]["search_text"] == "игорь ш." and by_id[named]["username"] == "igor_81"
+        assert by_id[nameless]["search_text"] is None and by_id[nameless]["username"] == "secret_user"
+        assert by_id[child]["search_text"] == "малика" and by_id[deleted]["search_text"] is None
+        for r in rows:
+            assert r["search_text"] == search_text(r["display_name"])  # как пишет код сервиса
+            if r["username"]:
+                assert r["username"] not in (r["search_text"] or "")
+        await asyncio.to_thread(command.downgrade, cfg, "0001")  # откат данных не возвращает
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+    finally:
+        await drop_schema(schema)
+
+
+def test_migration_0002_search_text_matches_code() -> None:
+    """Функция миграции (без зависимости от кода сервиса) = projection.search_text."""
+    spec = importlib.util.spec_from_file_location(
+        "ua_m0002", Path(SERVICE_DIR) / "migrations" / "versions" / "0002_search_text_without_username.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for value in (None, "", "   ", " Алишер ", "ANNA", "Ölçü İ", "Шахзода ", "a\tb"):
+        assert module.search_text(value) == search_text(value), value
 
 
 async def test_migration_downgrade_and_upgrade_again() -> None:

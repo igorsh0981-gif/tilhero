@@ -98,6 +98,7 @@ async def get_staff(staff_id: uuid.UUID, principal: Principal = Depends(bff_only
     actor = require_actor(principal)
     async with rt.transaction() as session:
         await authorize(session, actor, STAFF_MANAGE)
+        await approvals_domain.expire_overdue(session)
         return staff_out(await require_staff(session, staff_id))
 
 

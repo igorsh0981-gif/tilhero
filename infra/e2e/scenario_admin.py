@@ -1046,15 +1046,14 @@ def s_campaigns(c: Ctx) -> None:
         msg = wait_for(lambda: s1.tg_sent(TEST_CHAT_IDS[1], seq, contains=m1), 15, what="тест рассылки")[0]
         check("[ТЕСТ]" in msg["payload"]["text"], msg["payload"]["text"])
         check(not s1.tg_sent(la.tg_id, seq), "тест рассылки ушёл ученику")
-        # расписание (step-up) «как можно скорее» → notifications:dispatch → доставка
+        # «Отправить сейчас» (send_at=null, step-up) → старт сразу, первая пачка в фоне, остальное — dispatch (D2-03)
         ensure_step_up(cmst)
-        sched = {"expected_version": c1["version"], "send_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                 "reason": "e2e: запуск рассылки"}
+        sched = {"expected_version": c1["version"], "send_at": None, "reason": "e2e: запуск рассылки"}
         expect(cm.post(f"/admin/v1/notifications/campaigns/{cid1}/schedule", {**sched, "expected_version": 99},
                        headers=idem()), 409, "CAMPAIGN_VERSION_CONFLICT")
         s = expect(cm.post(f"/admin/v1/notifications/campaigns/{cid1}/schedule", sched, headers=idem()), 200)
         scheduled.append(cid1)
-        check(s["status"] == "scheduled" and s["scheduled_by"] == cmst.staff_id, s)
+        check(s["status"] == "sending" and s["started_at"] and s["scheduled_by"] == cmst.staff_id, s)
         done = _run_campaign(cm, cid1)
         check(done["status"] == "done" and done["stats"]["created"] >= 2 and done["finished_at"], done)
         msgs = wait_for(lambda: s1.tg_sent(la.tg_id, seq, contains=m1), 30, what="рассылка у ученика LA в Telegram")
@@ -1139,12 +1138,14 @@ def s_campaigns(c: Ctx) -> None:
         check(_recipient(cid1, lq.account_id) == "cancelled", f"получатель LQ: {_recipient(cid1, lq.account_id)}")
         check(m1 not in json.dumps(lq.inbox(), ensure_ascii=False), "отменённая рассылка в центре уведомлений LQ")
         c.data["campaign_stopped_done"] = cid1
-        # третья: расписание → экстренная остановка до dispatch → никому не ушло
+        # третья: расписание на будущее → экстренная остановка до старта → никому не ушло
         c3 = expect(cm.post("/admin/v1/notifications/campaigns", _campaign(c, m3), headers=idem()), 201)
         cid3 = c3["campaign_id"]
         ensure_step_up(cmst)
+        later3 = (datetime.now(UTC) + timedelta(hours=2)).replace(microsecond=0)
         expect(cm.post(f"/admin/v1/notifications/campaigns/{cid3}/schedule",
-                       {**sched, "expected_version": c3["version"]}, headers=idem()), 200)
+                       {**sched, "expected_version": c3["version"],
+                        "send_at": later3.isoformat().replace("+00:00", "Z")}, headers=idem()), 200)
         scheduled.append(cid3)
         sp = expect(cm.post(f"/admin/v1/notifications/campaigns/{cid3}/stop", {"reason": "e2e: экстренная остановка"}),
                     200)

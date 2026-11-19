@@ -55,6 +55,7 @@ Read-модель `admin_learner_summary` — поля `AdminLearnerRow` из `a
 **Рассылки.**
 - `campaigns` (поля `Campaign` из `admin.ts`, `segment` и `texts` JSONB, `version` — оптимистическая блокировка) и `campaign_recipients` (campaign_id, user_id, notification_id null, status pending|created|skipped_frequency|cancelled, PK (campaign_id, user_id)).
 - Staff API — пути `admin.ts` §«Рассылки»; права `notif.campaigns.manage` / `notif.campaigns.send`; аудит `campaign.*`. Оценка охвата — identity-consent `/internal/v1/audience/count` + оценка лимита частоты по `campaign_recipients` за 7 дней.
+- «Отправить сейчас» (`send_at: null`, после спринта 2 — QA D2-03): старт в самой команде schedule (статус `sending`, аудитория зафиксирована), первая пачка получателей — фоновой задачей сразу после коммита (`CAMPAIGN_START_NOW_BATCHES`, по умолчанию 1), дальше — `notifications:dispatch`.
 - Исполнение — `notifications:dispatch` (n8n, 5 мин, уже есть) дополнительно:
   1) `scheduled` с `send_at ≤ now` → `sending` (`started_at`, фиксация `stats.audience`);
   2) выборка аудитории пачками по 500 из identity-consent с сохранением курсора в `campaigns.cursor` (повтор безопасен) → `campaign_recipients`;

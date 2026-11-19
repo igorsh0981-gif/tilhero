@@ -39,7 +39,7 @@ admin.ts, `*_name` сотрудников — `null` (заполняет admin-b
 | PATCH | `…/campaigns/{id}` | то же | `Partial<CampaignContent> & {expected_version}` → `Campaign`; 409 `CAMPAIGN_NOT_DRAFT` \| `CAMPAIGN_VERSION_CONFLICT {current_version}` |
 | POST | `…/campaigns/{id}/estimate` | то же | `CampaignEstimate` (identity-consent `/audience/count`; `frequency_capped` — пересечение до 10 страниц аудитории с получателями других рассылок за 7 дней, дальше пропорционально); 503 `UPSTREAM_UNAVAILABLE` |
 | POST | `…/campaigns/{id}/preview`, `…/test` | то же | как у шаблонов; плейсхолдер — только `{learner_name}` |
-| POST | `…/campaigns/{id}/schedule` | `notif.campaigns.send` | `{expected_version, send_at, reason}` (+ `Idempotency-Key`, Redis) → scheduled; от now−5 мин до now+1 мин — «как можно скорее» (так UI передаёт «Отправить сейчас»); раньше now−5 мин — 422 `CAMPAIGN_INVALID send_at in_past` (ревью T2-2); дальше 30 дней — 422 `too_far`; аудитория 0 — 422 `CAMPAIGN_EMPTY_AUDIENCE` |
+| POST | `…/campaigns/{id}/schedule` | `notif.campaigns.send` | `{expected_version, send_at: string \| null, reason}` (+ `Idempotency-Key`, Redis) → scheduled; `send_at=null` — «Отправить сейчас» по часам сервера (QA D2-03, ревью T2-11), так же — send_at от now−5 мин до now+1 мин: запуск в самой команде (ответ уже `sending`, `started_at`, аудитория зафиксирована), первая пачка получателей — в фоне сразу после коммита, дальше — `:dispatch`; повтор с тем же ключом — сохранённый ответ без второго запуска; раньше now−5 мин — 422 `CAMPAIGN_INVALID send_at in_past` (ревью T2-2); дальше 30 дней — 422 `too_far`; аудитория 0 — 422 `CAMPAIGN_EMPTY_AUDIENCE` |
 | POST | `…/campaigns/{id}/unschedule` | то же | `{reason}` → draft; черновик — 200 без изменений; `sending/done/stopped` — 409 `CAMPAIGN_ALREADY_SENDING` |
 | POST | `…/campaigns/{id}/stop` | то же | `{reason}` → stopped из `scheduled\|sending\|done` (у `done` отменяются отложенные тихими часами): pending → cancelled, неотправленные записи → `cancelled`; повтор — 200 без изменений; `draft` — 409 `CAMPAIGN_NOT_ACTIVE` (ревью P2-7) |
 
@@ -151,9 +151,16 @@ id) → `created`; 4) аудитория исчерпана → `done` + ауд�
 segment_mismatch`. Статистика: `created`/`skipped_frequency` — по получателям, `sent`/`in_app_only`/`failed` — по
 журналу, `deferred` — `scheduled` с причиной `quiet_hours`.
 
+«Отправить сейчас» (QA D2-03): шаг 1 выполняет сама команда `schedule`, а фоновая задача (`campaigns.StartNow`)
+сразу после коммита — первые `CAMPAIGN_START_NOW_BATCHES` (1) пачки шагами 2–3 и, если всё обработано, шаг 4; она
+будит обработчик журнала сервиса, поэтому первые сообщения уходят без ожидания `:dispatch`. Параллельный `:dispatch`
+безопасен (те же блокировки). Ошибка фоновой пачки не влияет на ответ: код — в `last_error`; задачи отменяются при
+остановке сервиса, остаток доводит `:dispatch`. `CAMPAIGN_START_NOW_BATCHES=0` — только запуск.
+
 Ревью P2-7: неудача шага запуска или выборки аудитории (`SEGMENT_INVALID`, `INVALID_CURSOR`, `UPSTREAM_UNAVAILABLE`,
 `AUDIENCE_RESPONSE_INVALID` …) → `Campaign.last_error {code, since, attempts}` (рассылка остаётся в своём статусе,
-повтор при следующем `:dispatch`); первый успешный шаг, `schedule` и `unschedule` сбрасывают. На
+повтор при следующем `:dispatch`); первый успешный шаг (страница аудитории, пачка получателей), `schedule` и
+`unschedule` сбрасывают. На
 `CAMPAIGN_FAILURE_ALERT_ATTEMPTS` (6) неудач подряд — аудит `campaign.failed` (один раз на серию) и ERROR в логе.
 Ревью P2-8: лимит частоты считает только получателей другой рассылки, чья запись журнала `sent | in_app_only |
 scheduled` (дошла или в пути); `skipped`, `failed`, `cancelled` в лимит не идут.
@@ -197,7 +204,8 @@ pending|created|skipped_frequency|cancelled`, `notification_id`, `processed_at`;
 Спринт 2: `ADMIN_TEST_CHAT_IDS` (chat id через запятую; пусто — тест недоступен), `TEST_SENDS_PER_MINUTE` (10),
 `TEMPLATE_CACHE_TTL_SECONDS` (30, ≤ 30), `CAMPAIGN_MIN_INTERVAL_DAYS` (7), `CAMPAIGN_AUDIENCE_PAGE` (500),
 `CAMPAIGN_RECIPIENT_BATCH` (200), `CAMPAIGN_MAX_BATCHES_PER_CALL` (50), `CAMPAIGN_MAX_SCHEDULE_DAYS` (30),
-`CAMPAIGN_ASAP_SECONDS` (60), `CAMPAIGN_PAST_TOLERANCE_SECONDS` (300), `CAMPAIGN_FAILURE_ALERT_ATTEMPTS` (6).
+`CAMPAIGN_ASAP_SECONDS` (60), `CAMPAIGN_PAST_TOLERANCE_SECONDS` (300), `CAMPAIGN_FAILURE_ALERT_ATTEMPTS` (6),
+`CAMPAIGN_START_NOW_BATCHES` (1).
 
 ## Runbook
 - Тесты: `infra/dev/stack.sh up`, `source .dev/testenv.sh`, `uv run pytest services/notifications -q`

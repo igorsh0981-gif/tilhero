@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from tilhero_common.app import Runtime, create_app
 from tilhero_notifications.api import campaigns, client, internal, staff
+from tilhero_notifications.campaigns import StartNow
 from tilhero_notifications.consumers import build_handlers
 from tilhero_notifications.dispatcher import Dispatcher
 from tilhero_notifications.settings import Settings, get_settings
@@ -26,6 +27,7 @@ def build_app(
     runtime = runtime or Runtime(settings)
     templates = ActiveTemplates(runtime)
     dispatcher = Dispatcher(runtime, templates)
+    start_now = StartNow(runtime, wake=dispatcher.wake)  # «Отправить сейчас»: первая пачка рассылки в фоне (D2-03)
     accept, consumers = build_handlers(runtime, dispatcher)
 
     def configure(rt: Runtime) -> None:
@@ -42,6 +44,7 @@ def build_app(
                 r.spawn(dispatcher.run_forever(), "notifications-dispatcher")
 
         rt.on_startup(start_dispatcher)
+        rt.on_shutdown(start_now.close)
 
     app = create_app(
         settings,
@@ -51,6 +54,7 @@ def build_app(
         title="TilHero notification-service",
     )
     app.state.dispatcher = dispatcher
+    app.state.campaign_start_now = start_now
     app.state.templates = templates
     app.state.accept = accept
     return app

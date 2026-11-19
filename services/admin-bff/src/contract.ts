@@ -3,6 +3,7 @@
  * admin-bff (лишние поля доменов отбрасываются). `C.obj<T>` сверяет набор ключей с типом контракта при `tsc`.
  */
 import type {
+  AdminExperience,
   AdminLearnerCard,
   AdminLearnerPlan,
   AdminLearnerRow,
@@ -571,8 +572,32 @@ export const CONFIG_STATE: Codec<ConfigState> = C.obj<ConfigState>({
   previous_version: C.nullable(VERSION_STR),
 });
 /**
- * Действующая конфигурация (experience-config `/internal/v1/experience/{app}/current`): объект проверен белым
- * списком на стороне experience-config (MiniAppExperienceConfig | AdminExperienceConfig), без секретов —
+ * Тема и раскладка админки — admin.ts `AdminExperience` (ревью T2-6; experience-config AdminExperienceConfig).
+ * Значения токенов белым списком проверяет experience-config, admin-web применяет только известные имена; здесь —
+ * форма, имена CSS-переменных и отсутствие конструкций, которыми из значения можно выйти за пределы свойства.
+ */
+const CSS_UNSAFE_RE = /[;{}<>\\\u0000-\u001f\u007f]|\/\*|url\s*\(|expression\s*\(|javascript\s*:|@import/i;
+const CSS_TOKEN_VALUE: Codec<string> = C.custom({ type: "string" }, (v, p) =>
+  typeof v === "string" && v.trim().length > 0 && v.length <= 200 && !CSS_UNSAFE_RE.test(v) ? v : bad(p),
+);
+export const ADMIN_EXPERIENCE: Codec<AdminExperience> = C.obj<AdminExperience>({
+  app: C.oneOf(["admin"] as const),
+  version: VERSION_STR,
+  theme: C.obj<AdminExperience["theme"]>({
+    id: C.id(/^[a-z][a-z0-9_]{0,31}$/, 32),
+    version: VERSION_STR,
+    tokens: C.dict(/^--[a-z][a-z0-9-]{0,62}$/, CSS_TOKEN_VALUE, 60),
+  }),
+  layout: C.obj<AdminExperience["layout"]>({
+    density: C.oneOf(["compact", "comfortable"] as const),
+    menu: C.arr(C.obj<AdminExperience["layout"]["menu"][number]>({ id: C.id(/^[a-z][a-z0-9_]{0,31}$/, 32), enabled: C.bool }), 50),
+  }),
+  flags: C.dict(/^[a-z][a-z0-9_]{0,63}$/, C.bool, 50),
+});
+
+/**
+ * Действующая конфигурация Mini App (experience-config `/internal/v1/experience/miniapp/current`): объект проверен
+ * белым списком на стороне experience-config (MiniAppExperienceConfig = bff.ts ExperienceConfig), без секретов —
  * передаётся целиком; здесь — только то, что это объект нужного приложения.
  */
 export const experienceCurrent = (app: "miniapp" | "admin"): Codec<Record<string, unknown>> =>
@@ -726,6 +751,9 @@ export const CAMPAIGN: Codec<Campaign> = C.obj<Campaign>({
   started_at: N_TIME,
   finished_at: N_TIME,
   stopped_by: N_ID64,
+  // имена — staff/lookup (`withNames`, ревью T2-6); от домена не берутся
+  scheduled_by_name: C.name,
+  stopped_by_name: C.name,
   stopped_at: N_TIME,
   stop_reason: C.nullable(C.str(500)),
   stats: CAMPAIGN_STATS,

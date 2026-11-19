@@ -19,7 +19,7 @@
 .kpi{display:flex;flex-direction:column;min-width:0}
 .kpi-l{font-size:12.5px;color:var(--ink2)}
 .kpi-v{font:600 26px/1.2 var(--font-display);margin-top:6px;font-variant-numeric:tabular-nums;color:var(--ink)}
-.kpi-n{font-size:12px;margin-top:4px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi-n{font-size:12px;margin-top:4px;color:var(--ink2);overflow-wrap:anywhere} /* wraps, never cut (QA D2-02) */
 .kpi.is-bad .kpi-v{color:var(--err)}
 .attention{display:flex;flex-direction:column;gap:6px}
 .attention .h2{margin-bottom:4px}

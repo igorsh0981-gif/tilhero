@@ -91,7 +91,7 @@ identity-consent `GET /admin/v1/users?updated_after=&cursor=&limit=500` и learn
 идёт (в процессе или на другой реплике) — новый не ждёт: `skipped`. Сбой источника не роняет сервис и не влияет на
 readiness: тип ошибки — в лог и `reconcile_state.last_error`. Источники должны принимать вызывающего `user-admin`.
 
-## Данные (схема `user_admin`, миграция 0001)
+## Данные (схема `user_admin`, миграции 0001–0002)
 - `admin_learner_summary` — строка на ученика: поля `AdminLearnerRow` + JSONB `consent`, `security`, `notifications`,
   `plan` + служебные (`search_text`, `source_updated_at`, версии групп полей, `profile_known`, `refreshed_at`,
   `erased_at`). CHECK: формат маски, у детского профиля нет Telegram, опекун только у ребёнка, у DELETED нет PII,
@@ -99,6 +99,10 @@ readiness: тип ошибки — в лог и `reconcile_state.last_error`. И
   `last_activity_at`;
 - `ticket_refs` — номер/статус/автор обращения (счётчики пересчитываются из неё — идемпотентно);
 - `reconcile_state` — водяной знак и исход сверки по источнику; `outbox`/`inbox` (`create_messaging_tables`).
+
+Миграция данных 0002 (ревью P2-9): `search_text` всех строк пересчитывается как в коде — только отображаемое имя
+(строки до 35c3fd1 хранили имя + username). Пачки по 1000 по `user_id`; строку, имя которой поменялось параллельно,
+не трогает. Откат данных не возвращает.
 
 ## Настройки
 `DATABASE_URL`, `MIGRATION_DATABASE_URL`, `NATS_URL`, `INTERNAL_JWT_*` (общие), `IDENTITY_CONSENT_URL`

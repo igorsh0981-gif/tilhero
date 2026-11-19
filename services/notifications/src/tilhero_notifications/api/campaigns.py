@@ -10,7 +10,7 @@ PATCH /admin/v1/notifications/campaigns/{id}                  → Campaign
 POST  /admin/v1/notifications/campaigns/{id}/estimate         → CampaignEstimate
 POST  /admin/v1/notifications/campaigns/{id}/preview          → TemplatePreview
 POST  /admin/v1/notifications/campaigns/{id}/test             → TestSendResult
-POST  /admin/v1/notifications/campaigns/{id}/schedule         → Campaign (scheduled)
+POST  /admin/v1/notifications/campaigns/{id}/schedule         → Campaign (scheduled; «сейчас» — sending)
 POST  /admin/v1/notifications/campaigns/{id}/unschedule       → Campaign (draft)
 POST  /admin/v1/notifications/campaigns/{id}/stop             → Campaign (stopped)
 """
@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, tuple_
 from sqlalchemy.exc import IntegrityError
@@ -257,25 +257,32 @@ async def test_campaign(
 async def schedule_campaign(
     campaign_id: uuid.UUID,
     body: CampaignScheduleIn,
+    request: Request,
     principal: Principal = Depends(staff),
     rt: Runtime = Depends(get_runtime),
     idempotency_key: str | None = IdempotencyKey,
 ) -> JSONResponse:
-    """send_at ближе CAMPAIGN_ASAP_SECONDS (в т. ч. до CAMPAIGN_PAST_TOLERANCE_SECONDS в прошлом — так UI передаёт
-    «Отправить сейчас») — «как можно скорее» (ближайший dispatch); раньше — 422 CAMPAIGN_INVALID send_at in_past
-    (ревью T2-2); дальше CAMPAIGN_MAX_SCHEDULE_DAYS — 422 too_far; аудитория 0 — 422 CAMPAIGN_EMPTY_AUDIENCE."""
+    """send_at=null — «Отправить сейчас» по часам сервера (QA D2-03, ревью T2-11); send_at не позже
+    now+CAMPAIGN_ASAP_SECONDS (в т. ч. до CAMPAIGN_PAST_TOLERANCE_SECONDS в прошлом) — так же. «Сейчас» —
+    запуск в этой команде (ответ уже `sending`, send_at = now), первая пачка получателей — в фоне сразу после
+    коммита, дальше — :dispatch. Раньше now−CAMPAIGN_PAST_TOLERANCE_SECONDS — 422 CAMPAIGN_INVALID send_at
+    in_past (ревью T2-2); дальше CAMPAIGN_MAX_SCHEDULE_DAYS — 422 too_far; аудитория 0 — 422
+    CAMPAIGN_EMPTY_AUDIENCE. Повтор с тем же Idempotency-Key — сохранённый ответ, второй запуск не начинается."""
     actor = principal.require_permission(SEND)
     reason = _reason(body.reason)
     s = _s(rt)
 
     async def run() -> tuple[int, dict[str, Any]]:
         now = datetime.now(UTC)
-        send_at = body.send_at if body.send_at.tzinfo else body.send_at.replace(tzinfo=UTC)
-        if send_at > now + timedelta(days=s.campaign_max_schedule_days):
-            raise cmp.campaign_invalid([{"path": "send_at", "reason": "too_far"}])
-        if send_at < now - timedelta(seconds=s.campaign_past_tolerance_seconds):
-            raise cmp.campaign_invalid([{"path": "send_at", "reason": "in_past"}])  # ревью T2-2
-        if send_at - now < timedelta(seconds=s.campaign_asap_seconds):
+        send_at = now
+        if body.send_at is not None:
+            send_at = body.send_at if body.send_at.tzinfo else body.send_at.replace(tzinfo=UTC)
+            if send_at > now + timedelta(days=s.campaign_max_schedule_days):
+                raise cmp.campaign_invalid([{"path": "send_at", "reason": "too_far"}])
+            if send_at < now - timedelta(seconds=s.campaign_past_tolerance_seconds):
+                raise cmp.campaign_invalid([{"path": "send_at", "reason": "in_past"}])  # ревью T2-2
+        start = send_at - now <= timedelta(seconds=s.campaign_asap_seconds)
+        if start:
             send_at = now
         current = await _get(rt, campaign_id)
         cmp.require_draft(current, body.expected_version)
@@ -288,9 +295,12 @@ async def schedule_campaign(
         async with rt.transaction() as session:
             row = await cmp.schedule(
                 session, campaign_id, expected_version=body.expected_version, send_at=send_at, reason=reason,
-                audience=count.count, actor=actor, now=now,
+                audience=count.count, actor=actor, now=now, start=start,
             )
-            return 200, await cmp.view_one(session, row)
+            out = await cmp.view_one(session, row)
+        if start:  # после коммита: рассылка уже sending — первая пачка в фоне, ответ от неё не зависит
+            cast(cmp.StartNow, request.app.state.campaign_start_now).spawn(campaign_id)
+        return 200, out
 
     return await idempotent(rt, scope=f"{actor.id}:campaigns:schedule:{campaign_id}", key=idempotency_key,
                             request=body.model_dump(mode="json"), run=run)

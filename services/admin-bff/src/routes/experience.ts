@@ -4,8 +4,8 @@
  * (повтор двойного клика не создаёт вторую активацию); статус домена сохраняется (201 / 200 no-op).
  * Откат применяется без сборки: Mini App и админка перечитывают конфигурацию при следующем открытии.
  */
-import type { ConfigApp } from "@tilhero/contracts/admin";
 import {
+  ADMIN_EXPERIENCE,
   CONFIG_ACTIVATION,
   CONFIG_ACTIVATION_PAGE,
   CONFIG_STATE,
@@ -32,23 +32,23 @@ export function experienceRoutes(app: App, ctx: BffContext): void {
   /**
    * Действующая конфигурация (experience-config GET /internal/v1/experience/{app}/current).
    * app=admin — тема и раскладка админки нужны КАЖДОМУ вошедшему сотруднику (откат темы без пересборки web),
-   * поэтому доступна любой сессии; app=miniapp — config.read.
+   * поэтому доступна любой сессии; ответ — строго admin.ts AdminExperience (ревью T2-6). app=miniapp — config.read.
    */
-  const current = (a: ConfigApp) => experienceCurrent(a);
   app.get(
     "/admin/v1/experience/admin/current",
-    { config: authenticated(), schema: { response: out(current("admin")) } },
+    { config: authenticated(), schema: { response: out(ADMIN_EXPERIENCE) } },
     async (req) => {
       const auth = staffOf(req);
-      return shaped(ctx, auth, SERVICE, current("admin"), await exp.get<unknown>("/internal/v1/experience/admin/current"));
+      return shaped(ctx, auth, SERVICE, ADMIN_EXPERIENCE, await exp.get<unknown>("/internal/v1/experience/admin/current"));
     },
   );
+  const miniappCurrent = experienceCurrent("miniapp");
   app.get(
     "/admin/v1/experience/miniapp/current",
-    { config: requirePermission("config.read"), schema: { response: out(current("miniapp")) } },
+    { config: requirePermission("config.read"), schema: { response: out(miniappCurrent) } },
     async (req) => {
       const auth = staffOf(req);
-      return shaped(ctx, auth, SERVICE, current("miniapp"), await exp.get<unknown>("/internal/v1/experience/miniapp/current"));
+      return shaped(ctx, auth, SERVICE, miniappCurrent, await exp.get<unknown>("/internal/v1/experience/miniapp/current"));
     },
   );
 

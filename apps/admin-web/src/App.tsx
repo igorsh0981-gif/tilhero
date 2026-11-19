@@ -27,6 +27,8 @@ const NOTICE: Record<string, LoginNotice> = {
   SESSION_EXPIRED: { kind: "info", key: "login.notice.expired" },
   SESSION_REVOKED: { kind: "warn", key: "login.notice.revoked" },
   UNAUTHORIZED: { kind: "warn", key: "login.notice.unauthorized" },
+  // sign-out the server did not confirm (review T2-10): the cookie is cleared, the session may live until the idle timeout
+  SESSION_NOT_REVOKED: { kind: "warn", key: "login.notice.notRevoked" },
 };
 
 export function App() {
@@ -131,12 +133,16 @@ export function App() {
 
   const signOut = useCallback(
     async (reason: SignOutReason = "explicit") => {
+      let confirmed = true;
       try {
         await Auth.logout();
-      } catch {
-        /* the cookie is gone either way after the server answers; the UI leaves the session in any case */
+      } catch (e) {
+        // 401 — the session was already gone: an ordinary sign-out. Anything else (503 SESSION_NOT_REVOKED when the
+        // session store is down, another 5xx, 403, the network) — the server did not confirm it (review T2-10): the UI
+        // still leaves the session, but warns instead of showing the ordinary sign-in screen.
+        confirmed = (e as ApiError | null)?.status === 401;
       }
-      toLogin(reason === "explicit" ? null : (NOTICE[reason] ?? null));
+      toLogin(!confirmed ? NOTICE.SESSION_NOT_REVOKED! : reason === "explicit" ? null : (NOTICE[reason] ?? null));
     },
     [toLogin],
   );

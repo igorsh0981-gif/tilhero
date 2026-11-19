@@ -10,7 +10,6 @@ const localAt = (page: Page, offsetMs: number) =>
     const p = (n: number) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
   }, offsetMs);
-const sendAtOf = (b: unknown) => Date.parse(String((b as { send_at?: unknown }).send_at));
 
 test("template: edit → unknown placeholder highlighted → fix → save version → activate with TOTP", async ({ page }) => {
   const bff = await openAs(page, "comms@tilhero.local", "#/news/templates");
@@ -113,6 +112,11 @@ test("campaign: estimate → schedule with TOTP → emergency stop", async ({ pa
   await page.getByTestId("confirm-ok").click();
   await expect(page.getByTestId("cmp-detail")).toContainText("остановлена");
   expect(bff.audit[0]!.action).toBe("campaign.stopped");
+  // who scheduled and who stopped — names from staff/lookup, not UUIDs (review T2-6)
+  await expect(page.getByTestId("cmp-stopped-by")).toContainText("Остановлена Дилноза");
+  await expect(page.getByTestId("cmp-stopped-by")).toContainText("Ошибка в тексте UZ");
+  await expect(page.getByTestId("cmp-scheduled-by")).toContainText("Запланировал Дилноза");
+  await expect(page.getByTestId("cmp-detail")).not.toContainText("0b6c3e1a-");
 });
 
 test("new campaign: RU and UZ required, only {learner_name}, children never in the segment", async ({ page }) => {
@@ -136,7 +140,7 @@ test("new campaign: RU and UZ required, only {learner_name}, children never in t
   expect((c.body as { segment: { age?: string[] } }).segment.age).not.toContain("kids");
 });
 
-test("schedule (T2-2): explicit choice; a past time → error at the field, inactive button; «Send now» passes now", async ({ page }) => {
+test("schedule (T2-2, D2-03): explicit choice; a past time → error at the field, inactive button; «Send now» passes null", async ({ page }) => {
   const bff = await openAs(page, "comms@tilhero.local", "#/news/campaigns");
   await expect(page.getByTestId("cmp-detail")).toBeVisible();
   await page.getByTestId("cmp-schedule").click();
@@ -166,16 +170,35 @@ test("schedule (T2-2): explicit choice; a past time → error at the field, inac
   await expect(page.getByTestId("cmp-starts")).toContainText("Отправка начнётся");
   await expect(ok).toBeEnabled();
 
-  // explicit «Send now» → send_at = now
+  // explicit «Send now» → send_at = null: the server starts it by its own clock, the answer is already «идёт отправка»
   await page.getByTestId("cmp-when-now").check();
-  await expect(page.getByTestId("cmp-starts")).toContainText("сразу после подтверждения");
+  await expect(page.getByTestId("cmp-starts")).toContainText("Рассылка начнётся сразу после подтверждения");
   await page.locator("#cmd-reason").fill("Срочно: новые уроки уже доступны");
   await ok.click();
   await typeOtp(page, "stepup", TOTP);
-  await expect(page.getByTestId("cmp-detail")).toContainText("в расписании");
+  await expect(page.getByTestId("cmp-confirm")).toHaveCount(0);
+  await expect(page.getByTestId("cmp-detail").locator(".pill").first()).toHaveText("идёт отправка");
+  await expect(page.getByTestId("cmp-stats")).toContainText("старт");
+  await expect(page.getByTestId("cmp-scheduled-by")).toContainText("Запланировал Дилноза");
+  await expect(page.getByText("«Ноябрь: вернуться к урокам»: отправка началась")).toBeVisible();
   const sch = bff.calls("POST", /\/schedule$/);
   expect(sch.length).toBeGreaterThan(0);
-  for (const c of sch) expect(Math.abs(sendAtOf(c.body) - Date.now())).toBeLessThan(2 * MIN);
+  for (const c of sch) expect((c.body as { send_at: unknown }).send_at).toBeNull();
+  expect(sch.at(-1)!.body).toEqual({ expected_version: 2, send_at: null, reason: "Срочно: новые уроки уже доступны" });
+});
+
+test("«Send now» does not depend on the browser clock (review T2-11): a PC clock 10 min ahead still sends null", async ({ page }) => {
+  await page.clock.install({ time: new Date(Date.now() + 10 * MIN) });
+  const bff = await openAs(page, "comms@tilhero.local", "#/news/campaigns");
+  await expect(page.getByTestId("cmp-detail")).toBeVisible();
+  await page.getByTestId("cmp-schedule").click();
+  await page.getByTestId("cmp-when-now").check();
+  await page.locator("#cmd-reason").fill("Срочно");
+  await page.getByTestId("confirm-ok").click();
+  await typeOtp(page, "stepup", TOTP);
+  await expect(page.getByTestId("cmp-detail").locator(".pill").first()).toHaveText("идёт отправка");
+  const sch = bff.calls("POST", /\/schedule$/);
+  expect(sch.at(-1)!.body).toMatchObject({ send_at: null });
 });
 
 test("schedule (T2-2): 422 CAMPAIGN_INVALID {send_at: in_past} from the domain lands at the field; the retry is a new command", async ({ page }) => {

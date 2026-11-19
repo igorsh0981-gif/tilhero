@@ -458,6 +458,19 @@ export function campaignRow(p: Record<string, unknown> = {}) {
   };
 }
 
+/** experience-config AdminExperienceConfig (admin.ts AdminExperience) + служебное поле, которое не уходит клиенту. */
+export function adminExperienceRow(p: Record<string, unknown> = {}) {
+  return {
+    app: "admin",
+    version: "1.0.0",
+    theme: { id: "admin_light", version: "1.0.0", tokens: { "--bg": "#f6f3ea", "--nav-w": "232px", "--font-ui": "Onest, system-ui, sans-serif" } },
+    layout: { density: "comfortable", menu: [{ id: "overview", enabled: true }, { id: "users", enabled: true }, { id: "costs", enabled: false }] },
+    flags: { whats_new: true },
+    checksum: "sha256:internal",
+    ...p,
+  };
+}
+
 export const LEARNER_STATS = {
   total_accounts: 120,
   total_children: 30,
@@ -762,7 +775,7 @@ export class FakeDomains {
 
   private experience(c: Call, key: string): Response {
     const notes = "/admin/v1/release-notes";
-    if (key === "GET /internal/v1/experience/admin/current") return json(200, { app: "admin", version: "1.0.0", theme: { id: "notebook" }, menu: [] });
+    if (key === "GET /internal/v1/experience/admin/current") return json(200, adminExperienceRow());
     if (key === "GET /internal/v1/experience/miniapp/current") return json(200, { app: "miniapp", version: "1.0.0", theme: { id: "notebook" }, home: { sections: [] }, flags: {} });
     if (c.method === "GET" && /^\/admin\/v1\/experience\/[a-z]+\/state$/.test(c.path)) {
       return json(200, { app: c.path.split("/")[4], current: activationRow({ app: c.path.split("/")[4] }), previous_version: null });
@@ -856,7 +869,20 @@ export class FakeDomains {
       }
       if (c.method === "POST" && sub === "/test") return json(200, { sent: true, delivery_id: "dlv-2", error: null });
       if (c.method === "POST" && sub === "/schedule") {
-        return json(200, campaignRow({ campaign_id: id, status: "scheduled", version: 2, send_at: c.body.send_at, scheduled_by: c.actor?.id, scheduled_at: "2026-11-18T10:00:00Z" }));
+        // send_at=null — «Отправить сейчас»: старт сразу, ответ уже в статусе sending (admin.ts, QA D2-03)
+        const now = c.body.send_at === null;
+        return json(
+          200,
+          campaignRow({
+            campaign_id: id,
+            status: now ? "sending" : "scheduled",
+            version: 2,
+            send_at: now ? "2026-11-18T10:00:00Z" : c.body.send_at,
+            scheduled_by: c.actor?.id,
+            scheduled_at: "2026-11-18T10:00:00Z",
+            started_at: now ? "2026-11-18T10:00:00Z" : null,
+          }),
+        );
       }
       if (c.method === "POST" && sub === "/unschedule") return json(200, campaignRow({ campaign_id: id, status: "draft", version: 3 }));
       if (c.method === "POST" && sub === "/stop") {
@@ -890,7 +916,7 @@ export interface Harness {
 
 export async function makeHarness(
   env: Record<string, string> = {},
-  deps: Pick<AppDeps, "responseProbe"> = {},
+  deps: Pick<AppDeps, "responseProbe" | "redis"> = {},
   patch?: (c: Config) => void,
 ): Promise<Harness> {
   const config = testConfig(env);
