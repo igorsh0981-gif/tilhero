@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lesson.session.completed.v1.schema.json",
+  "title": "lesson.session.completed.v1",
+  "type": "object",
+  "required": [
+    "session_id",
+    "user_id",
+    "kind",
+    "pair_id",
+    "status",
+    "minutes",
+    "practice_only",
+    "finished_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "lesson",
+        "scenario",
+        "media",
+        "review"
+      ]
+    },
+    "pair_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "lesson_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scenario_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "asset_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "cancelled",
+        "failed"
+      ]
+    },
+    "outcome": {
+      "anyOf": [
+        {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "success",
+            "alt_success",
+            "fail",
+            null
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "minutes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 600
+    },
+    "local_date": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "evaluation_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "passed": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "practice_only": {
+      "type": "boolean"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

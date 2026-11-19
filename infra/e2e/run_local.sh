@@ -22,6 +22,7 @@
 # user-admin 8121, admin-bff 8002 (Node, tsx; Origin admin-web — E2E_ADMIN_ORIGIN, сам admin-web не поднимается);
 # контент (спринт 3): catalog 8110 (сид курса, сценариев и медиа — миграцией), diagnostics 8111 (сид тестов — миграцией).
 # catalog:tick (истечение прав медиа) на стенде вызывает сценарий с E2E_SCHEDULER_TOKEN, как n8n.
+# урок и оценка (спринт 4): ai-gateway 8114 (провайдер fake; E2E_AI_PROVIDER), assessment 8113, lessons 8112.
 # Сценарий спринта 2 входит bootstrap-учёткой admin-identity (временный пароль → смена → TOTP), а bootstrap срабатывает
 # только при старте admin-identity и только без активного super_admin, — поэтому `test` и `admin` перед прогоном
 # сбрасывают сотрудников и заявки admin-identity (матрица ролей — сид миграции — остаётся) и их ключи Redis (reset_admin).
@@ -87,6 +88,9 @@ PY_SERVICES=(
   "user-admin|services/user-admin|tilhero_user_admin.main:app|8121|user_admin"
   "catalog|services/catalog|tilhero_catalog.main:app|8110|catalog"
   "diagnostics|services/diagnostics|tilhero_diagnostics.main:app|8111|diagnostics"
+  "ai-gateway|services/ai-gateway|tilhero_ai_gateway.main:app|8114|ai_gateway"
+  "assessment|services/assessment|tilhero_assessment.main:app|8113|assessment"
+  "lessons|services/lessons|tilhero_lessons.main:app|8112|lessons"
 )
 
 log() { printf '\033[1;34m[e2e]\033[0m %s\n' "$*"; }
@@ -137,6 +141,13 @@ svc_env() {
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN" ;;
     diagnostics)
       env="$env CATALOG_URL=http://127.0.0.1:8110" ;;
+    ai-gateway)  # стенд — детерминированный fake-провайдер; ключ провайдера не нужен
+      env="$env AI_PROVIDER=${E2E_AI_PROVIDER:-fake}" ;;
+    assessment)
+      env="$env CATALOG_URL=http://127.0.0.1:8110 AI_GATEWAY_URL=http://127.0.0.1:8114" ;;
+    lessons)
+      env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 AI_GATEWAY_URL=http://127.0.0.1:8114"
+      env="$env ASSESSMENT_URL=http://127.0.0.1:8113 LEARNING_PLAN_URL=http://127.0.0.1:8102 DIAGNOSTICS_URL=http://127.0.0.1:8111" ;;
     social)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN INVITE_TOKEN_KEY=$E2E_INVITE_TOKEN_KEY"
       env="$env TELEGRAM_APP_LINK=$E2E_TELEGRAM_APP_LINK IDENTITY_CONSENT_URL=http://127.0.0.1:8101" ;;
@@ -251,6 +262,7 @@ up() {
     IDENTITY_URL=http://127.0.0.1:8101 LEARNING_PLAN_URL=http://127.0.0.1:8102 SUPPORT_URL=http://127.0.0.1:8103 \
     NOTIFICATIONS_URL=http://127.0.0.1:8104 EXPERIENCE_URL=http://127.0.0.1:8106 SOCIAL_URL=http://127.0.0.1:8109 \
     CATALOG_URL=http://127.0.0.1:8110 DIAGNOSTICS_URL=http://127.0.0.1:8111 \
+    LESSONS_URL=http://127.0.0.1:8112 ASSESSMENT_URL=http://127.0.0.1:8113 \
     RATE_LIMIT_SESSION_IP_PER_MIN="${E2E_RATE_LIMIT_SESSION_IP_PER_MIN:-500}" \
     RATE_LIMIT_USER_PER_MIN="${E2E_RATE_LIMIT_USER_PER_MIN:-600}" \
     RATE_LIMIT_PUBLIC_IP_PER_MIN="${E2E_RATE_LIMIT_PUBLIC_IP_PER_MIN:-600}" \
@@ -268,6 +280,7 @@ up() {
     IDENTITY_URL=http://127.0.0.1:8101 SUPPORT_URL=http://127.0.0.1:8103 NOTIFICATIONS_URL=http://127.0.0.1:8104 \
     AUDIT_URL=http://127.0.0.1:8105 EXPERIENCE_URL=http://127.0.0.1:8106 \
     CATALOG_URL=http://127.0.0.1:8110 DIAGNOSTICS_URL=http://127.0.0.1:8111 \
+    AI_GATEWAY_URL=http://127.0.0.1:8114 LESSONS_URL=http://127.0.0.1:8112 ASSESSMENT_URL=http://127.0.0.1:8113 \
     RATE_LIMIT_LOGIN_IP_PER_MIN="${E2E_RATE_LIMIT_LOGIN_IP_PER_MIN:-60}" \
     RATE_LIMIT_AUTH_STEP_IP_PER_MIN="${E2E_RATE_LIMIT_AUTH_STEP_IP_PER_MIN:-120}" \
     npx tsx src/main.ts
@@ -333,7 +346,7 @@ stop_one() {
 
 stop() {
   local f
-  for f in miniapp admin-bff telegram-bff diagnostics catalog user-admin admin-identity notifications telegram-bot-gateway social support \
+  for f in miniapp admin-bff telegram-bff lessons assessment ai-gateway diagnostics catalog user-admin admin-identity notifications telegram-bot-gateway social support \
            learning-plan identity-consent experience-config audit mock-telegram; do
     stop_one "$f"
   done

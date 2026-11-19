@@ -28,6 +28,7 @@ import type {
   AudienceSegment, Band, ControlItemType, GoalCode, LanguagePair, LessonStageType, Localized, MediaRequestStatus,
   MediaType, MediaUse, SkillArea, TopicCode,
 } from "./content.js";
+import type { ConfirmedError, RubricCriterionCode, SessionKind } from "./ai.js";
 
 export interface ErrorBody {
   code: string;
@@ -688,9 +689,9 @@ export interface Trajectory {
   next: (LessonCard & { reason_codes: ReasonCode[]; explanation: Localized }) | null;
   mandatory: Array<LessonCard & { reason_codes: ReasonCode[] }>;
   optional: Array<LessonCard & { reason_codes: ReasonCode[] }>;
-  /** пройденные уроки — со спринта 4 */
-  completed: LessonCard[];
-  /** уроки появятся в следующем обновлении — кнопка «Начать урок» показывает «скоро» */
+  /** пройденные уроки (спринт 4): по последней завершённой сессии урока */
+  completed: Array<LessonCard & { passed: boolean | null; evaluation_id: string | null; completed_at: string }>;
+  /** спринт 4: true — уроки проходятся в Mini App; false — только при отключении уроков флагом */
   lessons_available: boolean;
 }
 
@@ -781,3 +782,195 @@ export interface CourseSnapshot {
     control_item_types: ControlItemType[];
   }>;
 }
+
+// =====================================================================================================================
+// Спринт 4 — урок 20 минут, практика сценариев и медиа, независимая оценка, апелляции
+// Сессии ведёт lessons (машина состояний на сервере), оценки — assessment. ИИ необязателен: при выключенном ИИ,
+// исчерпанном бюджете и для детей ролевая ситуация идёт выбором реплик (ai_mode "choices").
+// Общие коды: 404 LESSON_NOT_AVAILABLE | SESSION_NOT_FOUND; 409 SESSION_ACTIVE {session_id, kind, title} — есть
+// незавершённая сессия (продолжить или отменить); 409 SESSION_STATE {status} — действие недопустимо в этом статусе;
+// 409 STEP_NOT_CURRENT {current_step_id}; 409 HINTS_NOT_ALLOWED — подсказки на проверке без подсказок;
+// 409 PAIR_NOT_AVAILABLE; 403 KIDS_NOT_ALLOWED (свободный текст ребёнку).
+// =====================================================================================================================
+
+export type SessionStatus = "ready" | "in_progress" | "paused" | "completed" | "failed" | "cancelled";
+/** media-сессия: listen → exercises → summary; scenario: roleplay → summary; review: assessment → summary */
+export type SessionStage = LessonStageType | "listen" | "exercises";
+
+// ---------- Карточка урока (APP-LESS-01) ----------
+/** GET /v1/lessons/{lesson_id} → LessonCardDetail. Награды — спринт 6 (не показываются). */
+export interface LessonCardDetail extends LessonCard {
+  version: number;
+  primary_skill: { skill_id: string; title: Localized };
+  stages_detail: Array<{ type: LessonStageType; minutes: number; instructions: Localized }>;
+  key_words_count: number;
+  /** формат ролевой ситуации для этого ученика: свободный текст или выбор реплик */
+  roleplay_mode: "full" | "choices" | null;
+  available: boolean;
+  unavailable_reason: "audience" | "pair_not_available" | null;
+  /** незавершённая сессия этого урока, если есть */
+  active_session_id: string | null;
+}
+
+// ---------- Сессия ----------
+/** POST /v1/lessons/{lesson_id}/sessions | /v1/scenarios/{id}/sessions | /v1/media/{asset_id}/sessions
+ *  (Idempotency-Key) → LessonSession (201). 409 SESSION_ACTIVE, 404 LESSON_NOT_AVAILABLE / NO_EXERCISES.
+ *  GET /v1/sessions/active → {session: LessonSession | null}; GET /v1/sessions/{id} → LessonSession.
+ *  POST /v1/sessions/{id}/pause | resume | cancel → LessonSession. */
+export interface LessonSession {
+  session_id: string;
+  kind: SessionKind;
+  title: Localized;
+  lesson_id: string | null;
+  scenario_id: string | null;
+  asset_id: string | null;
+  status: SessionStatus;
+  stage: SessionStage | null;
+  stages: Array<{ type: SessionStage; status: "done" | "current" | "pending" | "skipped" }>;
+  ai_mode: "full" | "choices";
+  /** «сейчас занятие идёт в упрощённом режиме» — ИИ недоступен (выключен или исчерпан бюджет) */
+  ai_degraded: boolean;
+  started_at: string | null;
+  paused_at: string | null;
+  finished_at: string | null;
+  /** когда пауза истечёт (72 ч) и сессия будет отменена */
+  expires_at: string | null;
+  minutes: number;
+}
+
+// ---------- Шаги (GET /v1/sessions/{id}/current → LessonStep; авто-продолжение после паузы) ----------
+export type StepItemType = ControlItemType | "comprehension" | "gap_fill_media" | "order_lines" | "phrase_meaning" | "meaning_check";
+
+export interface StepItem {
+  item_id: string;
+  item_type: StepItemType;
+  instruction: Localized;
+  prompt_en: string;
+  /** варианты (choice) или слова/реплики для порядка; ключа ответа нет */
+  options: string[];
+}
+
+interface StepBase {
+  step_id: string; // s{n}
+  stage: SessionStage;
+  position: number; // 1-based внутри этапа
+  stage_total: number;
+}
+
+export type LessonStep =
+  | (StepBase & { type: "notice"; text: Localized })
+  | (StepBase & { type: "explanation"; instructions: Localized; examples: Array<{ en: string; gloss: Localized }>;
+      key_words: Array<{ en: string; gloss: Localized; example_en: string }>; can_simplify: boolean })
+  | (StepBase & { type: "item"; item: StepItem; hint_available: boolean; hints_used: number;
+      /** проверка без подсказок — правильность не показывается до итогов */
+      graded_later: boolean })
+  | (StepBase & { type: "roleplay"; node_id: string;
+      character: { id: string; name: string; role: Localized; voice: "en-GB" | "en-US" };
+      line_en: string; gloss: Localized;
+      choices: Array<{ choice_id: string; text_en: string }>;
+      free_text_allowed: boolean; hint_available: boolean; hints_used: number;
+      /** последние реплики сцены для чата */
+      history: Array<{ turn_id: string; speaker: "learner" | "character"; text_en: string; character_id: string | null }>;
+      /** сколько непонятных ответов подряд на этом узле (после 2 — только варианты) */
+      unclear_attempts: number })
+  | (StepBase & { type: "roleplay_end"; outcome: "success" | "alt_success" | "fail"; summary: Localized; can_retry: boolean })
+  | (StepBase & { type: "listen"; asset_id: string; title: Localized; has_audio: boolean;
+      transcript: Array<{ speaker: string; text_en: string; gloss: Localized | null }> | null;
+      voices: Record<string, "en-GB" | "en-US">; can_listen: boolean })
+  | (StepBase & { type: "open_answer"; prompt: Localized; max_length: number })
+  | (StepBase & { type: "done" }); // все шаги пройдены — POST /finish
+
+/** POST /v1/sessions/{id}/steps/{step_id} StepAnswer → StepResult. Повтор того же ответа → тот же результат.
+ *  roleplay: choice_id ИЛИ text (только при free_text_allowed). item: answer (индекс | слова/реплики по порядку |
+ *  строка для пропуска) или dont_know. explanation/notice/listen/roleplay_end: {} — «Дальше». */
+export interface StepAnswer {
+  answer?: number | string[] | string | null;
+  dont_know?: boolean;
+  choice_id?: string;
+  text?: string; // ≤ 500
+}
+export interface StepResult {
+  accepted: boolean;
+  /** только повторение и проверка понимания; на проверке без подсказок — null */
+  feedback: { correct: boolean; correct_answer: string | null } | null;
+  /** ролевая ситуация: ответ персонажа (ИИ или реплика следующего узла графа) */
+  reply: { character_id: string; text_en: string; gloss: Localized | null; clarification: boolean } | null;
+  next: LessonStep;
+}
+
+/** POST /v1/sessions/{id}/steps/{step_id}/hint → {hint: Localized} (отмечается; в проверке без подсказок — 409).
+ *  POST /v1/sessions/{id}/simpler → SimplerExplanation (позиция урока не меняется).
+ *  POST /v1/sessions/{id}/roleplay/retry → LessonStep (один раз после исхода fail, с точки восстановления). */
+export interface SimplerExplanation {
+  explanation: Localized | null; // ИИ на языке ученика или null (следующий пример урока)
+  example_en: string;
+  example_gloss: Localized;
+  source: "ai" | "lesson";
+}
+
+// ---------- Итоги и оценка (APP-LESS-07, APP-COACH-02/04/05) ----------
+/** POST /v1/sessions/{id}/finish → LessonSummary (повтор — тот же итог). GET /v1/sessions/{id}/summary. */
+export interface LessonSummary {
+  session_id: string;
+  kind: SessionKind;
+  title: Localized;
+  status: "completed" | "failed" | "cancelled";
+  outcome: "success" | "alt_success" | "fail" | null;
+  minutes: number;
+  evaluation: EvaluationView | null;
+  skills: Array<{ skill_id: string; title: Localized; from: SkillState; to: SkillState }>;
+  key_words: Array<{ en: string; gloss: Localized }>;
+  next_lesson: LessonCard | null;
+  /** есть задания с ошибкой — можно повторить (без влияния на освоение): POST /v1/sessions/{id}/review */
+  can_review: boolean;
+}
+
+export interface EvaluationView {
+  evaluation_id: string;
+  status: "ok" | "partial" | "insufficient_evidence" | "pending_review";
+  passed: boolean | null;
+  task_completed: boolean | null;
+  scores: Array<{ code: RubricCriterionCode; title: Localized; score: 0 | 1 | 2 | 3 | null }>;
+  /** 1–3 ключевые ошибки с фрагментом ответа и исправлением */
+  key_errors: ConfirmedError[];
+  items: Array<{ item_id: string; prompt_en: string; your_answer: string | null; correct: boolean; hinted: boolean;
+                 /** только если ответ неверен */ correct_answer: string | null }>;
+  practice_only: boolean;
+  /** версии для прозрачности: рубрика и модель оценщика (null — оценено правилами) */
+  rubric_version: string; // "r-a1@2"
+  evaluator: { model_id: string; prompt_version: string } | null;
+  /** заменена переоценкой (по апелляции или QA) — показывается актуальная */
+  superseded_by: string | null;
+  appeal: Appeal | null;
+  created_at: string;
+}
+
+// ---------- Апелляции (UC-ADM-03) ----------
+/** POST /v1/evaluations/{id}/appeal {reason} (Idempotency-Key) → Appeal (201). 409 APPEAL_EXISTS,
+ *  409 APPEAL_WINDOW_CLOSED (> 14 дней). GET /v1/appeals → {items: Appeal[]}. */
+export interface Appeal {
+  appeal_id: string;
+  evaluation_id: string;
+  status: "new" | "in_review" | "upheld" | "corrected";
+  reason: string; // ≤ 500
+  decision_note: string | null; // ≤ 500
+  new_evaluation_id: string | null;
+  created_at: string;
+  decided_at: string | null;
+}
+
+// ---------- История (APP-PROG-03, частично) ----------
+/** GET /v1/sessions?kind=&cursor= → Page<LessonHistoryItem> */
+export interface LessonHistoryItem {
+  session_id: string;
+  kind: SessionKind;
+  title: Localized;
+  status: SessionStatus;
+  outcome: "success" | "alt_success" | "fail" | null;
+  passed: boolean | null;
+  minutes: number;
+  evaluation_id: string | null;
+  finished_at: string | null;
+  started_at: string | null;
+}
+

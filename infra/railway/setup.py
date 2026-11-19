@@ -64,26 +64,31 @@ SERVICES: tuple[Service, ...] = (
     Service("social", 8109, "services/social/Dockerfile", "social", calls=("identity-consent",)),
     Service("telegram-bff", 8001, "services/telegram-bff/Dockerfile", public=True,
             calls=("identity-consent", "learning-plan", "support", "notifications", "experience-config", "social",
-                   "catalog", "diagnostics")),
+                   "catalog", "diagnostics", "lessons", "assessment")),
     Service("telegram-miniapp", 8080, "apps/telegram-miniapp/Dockerfile", public=True, health="/healthz"),
     # спринт 3 — учебный контур: контент и диагностика
     Service("catalog", 8110, "services/catalog/Dockerfile", "catalog"),
     Service("diagnostics", 8111, "services/diagnostics/Dockerfile", "diagnostics", calls=("catalog",)),
+    # спринт 4 — урок 20 минут, независимая оценка, ИИ (ai-gateway — единственный, у кого ключ провайдера)
+    Service("lessons", 8112, "services/lessons/Dockerfile", "lessons",
+            calls=("catalog", "ai-gateway", "assessment", "learning-plan", "diagnostics")),
+    Service("assessment", 8113, "services/assessment/Dockerfile", "assessment", calls=("catalog", "ai-gateway")),
+    Service("ai-gateway", 8114, "services/ai-gateway/Dockerfile", "ai_gateway"),
     # спринт 2 — админка: admin-bff без публичного домена, admin-web проксирует /admin/v1/* на него (один origin)
     Service("admin-identity", 8120, "services/admin-identity/Dockerfile", "admin_identity"),
     Service("user-admin", 8121, "services/user-admin/Dockerfile", "user_admin",
             calls=("identity-consent", "learning-plan")),
     Service("admin-bff", 8002, "services/admin-bff/Dockerfile", health="/health/ready",
             calls=("admin-identity", "user-admin", "identity-consent", "support", "audit", "experience-config",
-                   "notifications", "catalog", "diagnostics")),
+                   "notifications", "catalog", "diagnostics", "ai-gateway", "lessons", "assessment")),
     Service("admin-web", 8080, "apps/admin-web/Dockerfile", public=True, health="/healthz"),
     Service("n8n", 5678, "infra/n8n/Dockerfile", health="/healthz",
-            calls=("learning-plan", "notifications", "social", "user-admin", "catalog")),
+            calls=("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons")),
 )
 JWT_ISSUERS = ("identity-consent", "learning-plan", "support", "notifications", "audit", "experience-config",
                "telegram-bot-gateway", "social", "telegram-bff", "admin-bff", "admin-identity", "user-admin",
-               "catalog", "diagnostics")
-SCHEDULED = ("learning-plan", "notifications", "social", "user-admin", "catalog")
+               "catalog", "diagnostics", "lessons", "assessment", "ai-gateway")
+SCHEDULED = ("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons")
 # имя переменной адреса в коде вызывающего (BFF и Python-сервисы называют identity по-разному)
 URL_VAR = {
     ("telegram-bff", "identity-consent"): "IDENTITY_URL",
@@ -201,6 +206,8 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
         lines += [f"ADMIN_MFA_ENC_KEY={sec.mfa_key}"]
         if admin_email:  # первый super_admin; после первого входа переменные удалить
             lines += [f"ADMIN_BOOTSTRAP_EMAIL={admin_email}", f"ADMIN_BOOTSTRAP_PASSWORD={sec.admin_password}"]
+    if svc.name == "ai-gateway":  # ключ провайдера вводит владелец в Railway; пусто — ИИ выключен (урок без ИИ)
+        lines += ["AI_PROVIDER=anthropic", "ANTHROPIC_API_KEY="]
     if svc.name == "notifications":
         lines.append("ADMIN_TEST_CHAT_IDS=")  # Telegram chat id тестовых чатов через запятую (тестовая отправка)
     if svc.name == "telegram-bot-gateway":

@@ -7,7 +7,7 @@ from tilhero_common.settings import ServiceSettings
 # Домены спринта 1, которые обязаны подтвердить удаление (user.domain.deleted.v1) до обезличивания профиля
 # (INTERNAL_API §1, ARCHITECTURE «Данные ученика и удаление»). Новый домен с данными ученика добавляется сюда.
 DEFAULT_DELETION_DOMAINS = ("learning-plan", "social", "notifications", "support", "experience-config", "catalog",
-                            "diagnostics")
+                            "diagnostics", "lessons", "assessment", "ai-gateway")
 
 
 class Settings(ServiceSettings):

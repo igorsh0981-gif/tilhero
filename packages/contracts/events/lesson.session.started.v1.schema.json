@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lesson.session.started.v1.schema.json",
+  "title": "lesson.session.started.v1",
+  "type": "object",
+  "required": [
+    "session_id",
+    "user_id",
+    "kind",
+    "pair_id",
+    "ai_mode",
+    "started_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "lesson",
+        "scenario",
+        "media",
+        "review"
+      ]
+    },
+    "pair_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "lesson_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scenario_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "asset_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 200
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ai_mode": {
+      "type": "string",
+      "enum": [
+        "full",
+        "choices"
+      ]
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

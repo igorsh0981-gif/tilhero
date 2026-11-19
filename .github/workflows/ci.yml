@@ -35,6 +35,9 @@ jobs:
           - services/user-admin
           - services/catalog
           - services/diagnostics
+          - services/lessons
+          - services/assessment
+          - services/ai-gateway
           - apps/telegram-bot-gateway
           - infra/n8n
           - infra/railway
@@ -102,6 +105,9 @@ jobs:
           - services/user-admin
           - services/catalog
           - services/diagnostics
+          - services/lessons
+          - services/assessment
+          - services/ai-gateway
           - apps/telegram-bot-gateway
           - infra/n8n
           - infra/railway
@@ -178,6 +184,9 @@ jobs:
           - services/user-admin
           - services/catalog
           - services/diagnostics
+          - services/lessons
+          - services/assessment
+          - services/ai-gateway
           - apps/telegram-bot-gateway
           - services/telegram-bff
           - apps/telegram-miniapp

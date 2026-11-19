@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "assessment.reevaluated.v1.schema.json",
+  "title": "assessment.reevaluated.v1",
+  "type": "object",
+  "required": [
+    "evaluation_id",
+    "supersedes",
+    "user_id",
+    "pair_id",
+    "skill_outcomes",
+    "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "evaluation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "supersedes": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "pair_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "skill_outcomes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "skill_id",
+          "outcome"
+        ],
+        "properties": {
+          "skill_id": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "demonstrated",
+              "learning",
+              "not_assessed"
+            ]
+          }
+        }
+      },
+      "maxItems": 100
+    },
+    "passed": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "appeal_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

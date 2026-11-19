@@ -40,7 +40,7 @@ SERVICE_DIR = str(Path(__file__).resolve().parents[1])
 AUDITOR = Actor(id="staff-7", role="auditor", permissions=frozenset({"audit.read"}))
 SUPPORT = Actor(id="staff-8", role="support", permissions=frozenset({"support.reply"}))
 SPRINT1_WRITERS = ("identity-consent", "learning-plan", "social", "experience-config", "support", "notifications")
-BUS_WRITERS = (*SPRINT1_WRITERS, "admin-identity", "catalog", "diagnostics")
+BUS_WRITERS = (*SPRINT1_WRITERS, "admin-identity", "catalog", "diagnostics", "lessons", "assessment", "ai-gateway")
 HTTP_WRITERS = ("identity-consent",)
 
 
@@ -130,6 +130,16 @@ WRITER_RECORDS: dict[str, dict[str, Any]] = {
     "diagnostics": record(actor_type="system", actor_id="seed", actor_role=None, action="diagnostics.test_published",
                           object_type="diagnostic_test", object_id="dx-en-adult", before=None,
                           after={"version": 1, "status": "published"}, reason="Сид спринта 3"),
+    # спринт 4: публикация версии агента, переоценка, просмотр реплик с причиной — без текстов учеников
+    "ai-gateway": record(actor_id=str(uuid.uuid4()), actor_role="methodist", action="ai.version_published",
+                         object_type="agent", object_id="conversation_partner", before={"version": 1},
+                         after={"version": 2}, reason="Новая версия инструкции после золотых тестов"),
+    "assessment": record(actor_id=str(uuid.uuid4()), actor_role="methodist", action="qa.reevaluated",
+                         object_type="evaluation", object_id=str(uuid.uuid4()), before={"passed": False},
+                         after={"passed": True}, reason="Апелляция: ответ верен, вариант допустим"),
+    "lessons": record(actor_id=str(uuid.uuid4()), actor_role="qa_analyst", action="qa.transcript_viewed",
+                      object_type="lesson_session", object_id=str(uuid.uuid4()), before=None, after=None,
+                      reason="Разбор спорной оценки по обращению"),
 }
 
 

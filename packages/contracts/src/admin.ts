@@ -30,12 +30,18 @@
  * уведомления; расписание и остановка рассылки; активация и откат конфигурации; раскрытие Telegram ID; все команды
  * по сотрудникам, ролям и заявкам four-eyes. Спринт 3: публикация, снятие и откат версии контента; подтверждение прав
  * медиа; решение по заявке ученика на песню/фильм; правка языков и языковых пар; публикация версии теста диагностики.
+ * Спринт 4: публикация, канарейка и откат версии агента; правка моделей и цен; бюджет и аварийная остановка ИИ;
+ * переоценка; решение по апелляции.
  */
 
 import type {
   ContentKind, Language, LanguagePair, LocaleCheck, MediaRequestStatus, ScenarioTestRun, VersionStatus,
   Localized as ContentLocalized, Band,
 } from "./content.js";
+import type {
+  Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiModel, AiProviderStatus, ConfirmedError, GoldenCase,
+  RubricCriterionCode, SessionKind, TestRun, TestRunSummary,
+} from "./ai.js";
 
 export interface ErrorBody {
   code: string;
@@ -86,13 +92,23 @@ export type Permission =
   | "content.review" // проверка методиста и локализаций (не своих черновиков)
   | "content.publish" // публикация, архив, откат контента и версий теста диагностики (step-up)
   | "media.rights" // права и лицензии медиа, решения по заявкам учеников (step-up)
-  | "lang.manage"; // языки и языковые пары (step-up)
+  | "lang.manage" // языки и языковые пары (step-up)
+  // спринт 4 — ИИ-агенты, контроль диалогов, затраты
+  | "ai.read" // агенты, версии, золотые тесты, маршрутизация моделей — чтение
+  | "ai.manage" // черновики версий, золотые тесты, запуск прогона
+  | "ai.publish" // публикация, канарейка, откат версии агента; модели и цены (step-up)
+  | "qa.read" // журнал сессий, карточки оценок, апелляции — без текста реплик
+  | "qa.transcripts" // текст реплик и ответов ученика — с причиной, каждое открытие в аудите
+  | "qa.review" // переоценка и решение по апелляции (step-up)
+  | "costs.read" // затраты ИИ
+  | "costs.manage"; // лимиты ИИ и аварийная остановка (step-up)
 
 export const PERMISSIONS: readonly Permission[] = [
   "dashboard.read", "users.read", "users.sensitive.read", "support.read", "support.reply", "support.manage",
   "audit.read", "config.read", "config.edit", "config.publish", "whatsnew.manage", "whatsnew.publish",
   "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send", "staff.manage", "roles.manage",
   "content.read", "content.edit", "content.review", "content.publish", "media.rights", "lang.manage",
+  "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "costs.read", "costs.manage",
 ];
 
 export type RoleCode =
@@ -102,6 +118,7 @@ export type RoleCode =
   | "support"
   | "methodist" // курс, уроки, сценарии, рубрики: правка, проверка, публикация
   | "content_manager" // медиа, права и лицензии, заявки учеников
+  | "qa_analyst" // контроль диалогов: журнал, оценки, реплики с причиной (спринт 4)
   | "analyst"
   | "auditor"
   | "read_only";
@@ -438,6 +455,9 @@ export interface Dashboard {
   /** спринт 3 */
   content: DashboardBlock<ContentSummary>;
   diagnostics: DashboardBlock<DiagnosticStats>;
+  /** спринт 4 */
+  lessons: DashboardBlock<LessonStats>;
+  ai: DashboardBlock<AiUsageSummary>;
 }
 
 // =====================================================================================================================
@@ -1188,3 +1208,203 @@ export interface DiagnosticStats {
  *  POST /admin/v1/diagnostics/tests/{id}/versions/{v}/publish {reason} (content.publish, step-up) → DiagnosticTestRow;
  *  GET /admin/v1/diagnostics/stats?period= (dashboard.read) → DiagnosticStats */
 export type { Language, LanguagePair };
+
+// =====================================================================================================================
+// ИИ, контроль диалогов, затраты (спринт 4) — ai-gateway, lessons, assessment через admin-bff. Типы агентов — ./ai.ts.
+// Права: ai.read / ai.manage / ai.publish (step-up); qa.read / qa.transcripts (причина, аудит) / qa.review (step-up);
+// costs.read / costs.manage (step-up). Ключ провайдера ИИ в админке не показывается и не вводится (переменная
+// ai-gateway; в UI — только «задан / не задан»).
+// =====================================================================================================================
+
+// ---------- Агенты и скиллы (ADM-AGENT-01…05) ----------
+export interface AgentRow extends Agent {
+  rollout: AgentRollout | null; // только llm
+  published: { version: number; model_id: string; published_at: string; published_by_name: string | null } | null;
+  draft_version: number | null;
+  last_test_run: TestRunSummary | null;
+  calls_7d: number;
+  unavailable_pct_7d: number | null; // 0–100
+}
+/** GET /admin/v1/ai/agents (ai.read) → {items: AgentRow[]}
+ *  GET /admin/v1/ai/agents/{agent_id} (ai.read) → AgentRow & {versions: AgentVersionRow[]}
+ *  GET /admin/v1/ai/agents/{agent_id}/versions/{v} (ai.read) → AgentVersion & names
+ *  POST /admin/v1/ai/agents/{agent_id}/versions {from_version?} (ai.manage) → AgentVersion (черновик; 409 DRAFT_EXISTS)
+ *  PATCH /admin/v1/ai/agents/{agent_id}/versions/{v} AgentVersionPatch (ai.manage; только draft — 409 VERSION_NOT_DRAFT;
+ *    If-Match: updated_at → 409 VERSION_CONFLICT) → AgentVersion; DELETE …/versions/{v} (ai.manage, draft) → 204
+ *  POST /admin/v1/ai/agents/{agent_id}/versions/{v}/test-runs (ai.manage) → TestRunSummary (202; опрос GET …/test-runs/{run_id} → TestRun)
+ *  POST /admin/v1/ai/agents/{agent_id}/versions/{v}/publish {reason} (ai.publish, step-up) → AgentRow;
+ *    422 TESTS_REQUIRED | TESTS_FAILED {case_ids}
+ *  PUT /admin/v1/ai/agents/{agent_id}/canary {version, percent 1..50, reason} (ai.publish, step-up) → AgentRow;
+ *  DELETE /admin/v1/ai/agents/{agent_id}/canary {reason} (ai.publish, step-up) → AgentRow
+ *  POST /admin/v1/ai/agents/{agent_id}/rollback {reason} (ai.publish, step-up) → AgentRow (409 NO_PREVIOUS_VERSION)
+ *  GET|POST /admin/v1/ai/agents/{agent_id}/golden-cases (ai.read | ai.manage) → {items: GoldenCase[]} | GoldenCase;
+ *  PATCH|DELETE /admin/v1/ai/golden-cases/{case_id} (ai.manage) — удаление = архив */
+export interface AgentVersionRow {
+  version: number;
+  status: AgentVersion["status"];
+  model_id: string;
+  author_name: string | null;
+  created_at: string;
+  published_at: string | null;
+  published_by_name: string | null;
+  last_test_run: TestRunSummary | null;
+  canary: boolean;
+}
+export type AgentVersionPatch = Partial<Pick<AgentVersion,
+  "instructions" | "rules" | "output_schema" | "schema_version" | "model_id" | "fallback_model_id" | "temperature" |
+  "max_output_tokens" | "timeout_ms" | "max_cost_usd" | "notes">>;
+export type GoldenCaseInput = Pick<GoldenCase, "title" | "input" | "checks" | "mandatory">;
+
+// ---------- Модели и затраты (ADM-AGENT-05, ADM-MONEY-01/02) ----------
+/** GET /admin/v1/ai/models (ai.read) → {items: AiModel[]}; PUT /admin/v1/ai/models/{model_id} {input_usd_per_mtok,
+ *  output_usd_per_mtok, active, reason} (ai.publish, step-up) → AiModel.
+ *  GET /admin/v1/ai/provider (ai.read) → AiProviderStatus.
+ *  GET /admin/v1/ai/budget (costs.read) → AiBudget; PUT /admin/v1/ai/budget AiBudget-поля & {reason} (costs.manage,
+ *  step-up) → AiBudget; POST /admin/v1/ai/emergency-stop {enabled: boolean, reason} (costs.manage, step-up) → AiBudget.
+ *  GET /admin/v1/ai/usage/summary?period=day|week|month (costs.read) → AiUsageSummary.
+ *  GET /admin/v1/ai/usage?session_id=|agent_id=&cursor= (costs.read | qa.read для session_id) → Page<AiCall>. */
+export interface AiUsageSummary {
+  period: "day" | "week" | "month";
+  spent_usd: number;
+  monthly_cap_usd: number;
+  /** доля потолка месяца, 0–100 */
+  cap_used_pct: number;
+  calls: number;
+  unavailable: number;
+  unavailable_pct: number | null; // 0–100
+  p95_latency_ms: number | null;
+  by_agent: Array<{ agent_id: AgentId; calls: number; spent_usd: number; unavailable: number }>;
+  by_model: Array<{ model_id: string; calls: number; input_tokens: number; output_tokens: number; spent_usd: number }>;
+  by_day: Array<{ date: string; spent_usd: number; calls: number }>;
+  avg_cost_per_lesson_usd: number | null;
+  ai_enabled: boolean;
+}
+export interface AiCall {
+  call_id: string;
+  agent_id: AgentId;
+  version: number | null;
+  model_id: string | null;
+  status: "ok" | "unavailable" | "refused";
+  reason: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  latency_ms: number;
+  session_id: string | null;
+  canary: boolean;
+  created_at: string;
+}
+
+// ---------- Контроль диалогов (ADM-QA-01…04) ----------
+export type SessionFlag = "ai_used" | "ai_unavailable" | "hints" | "human_review" | "appealed" | "flagged" | "failed";
+export interface SessionRow {
+  session_id: string;
+  kind: SessionKind;
+  title: ContentLocalized;
+  lesson_id: string | null;
+  scenario_id: string | null;
+  asset_id: string | null;
+  level: Band | null;
+  status: "ready" | "in_progress" | "paused" | "completed" | "failed" | "cancelled";
+  outcome: "success" | "alt_success" | "fail" | null;
+  passed: boolean | null;
+  minutes: number;
+  audience: "kids" | "teens" | "adults";
+  ai_mode: "full" | "choices";
+  models: string[];
+  cost_usd: number;
+  p95_latency_ms: number | null;
+  flags: SessionFlag[];
+  started_at: string | null;
+  finished_at: string | null;
+}
+/** GET /admin/v1/qa/sessions?from=&to=&kind=&status=&outcome=&flag=&lesson_id=&level=&cursor= (qa.read) → Page<SessionRow>
+ *  GET /admin/v1/qa/sessions/{id} (qa.read) → SessionCard (блоки lessons / assessment / ai-gateway независимы)
+ *  POST /admin/v1/qa/sessions/{id}/transcript {reason ≥ 10} (qa.transcripts) → Transcript (аудит qa.transcript_viewed)
+ *  POST /admin/v1/qa/evaluations/{id}/flag {reason} (qa.read) → EvaluationCard
+ *  POST /admin/v1/qa/evaluations/{id}/reevaluate Reevaluation (qa.review, step-up) → EvaluationCard
+ *    409 EVALUATION_SUPERSEDED | SELF_REEVALUATION (не свою оценку как ученика — не применяется к сотрудникам)
+ *  GET /admin/v1/qa/appeals?status=&cursor= (qa.read) → Page<AdminAppeal>
+ *  POST /admin/v1/qa/appeals/{id}/take (qa.review) → AdminAppeal
+ *  POST /admin/v1/qa/appeals/{id}/decide AppealDecision (qa.review, step-up) → AdminAppeal
+ *  Постановка задачи (ADM-QA-04) — формирует admin-web из SessionCard (без запроса). */
+export interface SessionCard {
+  session: SessionRow & {
+    user_ref: string; // обезличенный: первые 8 символов sha256(user_id) — не user_id
+    content_versions: Record<string, number>; // lesson, scenario, rubric, media_asset…
+    status_history: Array<{ from: string | null; to: string; reason: string; at: string }>;
+    steps: Array<{ step_id: string; stage: string; type: string; result: "correct" | "incorrect" | "skipped" | null; hinted: boolean; answered_at: string | null }>;
+    turns_meta: Array<{ turn_id: string; speaker: "learner" | "character"; mode: "choice" | "text"; intent: string | null; ai_call_id: string | null; redacted: boolean }>;
+  } | null;
+  evaluations: EvaluationCard[] | null; // цепочка: исходная и переоценки (новая — последней)
+  ai_calls: AiCall[] | null;
+  errors: Partial<Record<"lessons" | "assessment" | "ai-gateway", string>>; // блок недоступен — код
+}
+export interface Transcript {
+  session_id: string;
+  turns: Array<{ turn_id: string; speaker: "learner" | "character"; text: string | null; mode: "choice" | "text"; redacted: boolean }>;
+  answers: Array<{ step_id: string; item_id: string; answer: string | null }>;
+  open_answer: string | null;
+}
+export interface EvaluationCard {
+  evaluation_id: string;
+  session_id: string;
+  status: "ok" | "partial" | "insufficient_evidence" | "pending_review";
+  rubric: { rubric_id: string; version: number };
+  scores: Array<{ code: RubricCriterionCode; score: 0 | 1 | 2 | 3 | null }>;
+  weighted: number | null;
+  passed: boolean | null;
+  task_completed: boolean | null;
+  confirmed_errors: ConfirmedError[];
+  items: Array<{ item_id: string; skill_id: string; correct: boolean; hinted: boolean }>;
+  skill_outcomes: Array<{ skill_id: string; outcome: "demonstrated" | "learning" | "not_assessed" }>;
+  evaluator: { agent_id: AgentId; agent_version: number; prompt_version: string; model_id: string; schema_version: string; canary: boolean } | null;
+  requires_human_review: boolean;
+  practice_only: boolean;
+  supersedes: string | null;
+  created_by_name: string | null; // null — система
+  reason: string | null; // основание переоценки
+  flags: Array<{ reason: string; by_name: string | null; at: string }>;
+  created_at: string;
+}
+export interface Reevaluation {
+  scores: Partial<Record<RubricCriterionCode, 0 | 1 | 2 | 3 | null>>;
+  skill_outcomes: Array<{ skill_id: string; outcome: "demonstrated" | "learning" | "not_assessed" }>;
+  confirmed_errors: ConfirmedError[];
+  reason: string; // ≥ 10
+  appeal_id: string | null;
+}
+export interface AdminAppeal {
+  appeal_id: string;
+  evaluation_id: string;
+  session_id: string;
+  status: "new" | "in_review" | "upheld" | "corrected";
+  reason: string; // текст ученика — показывается сотрудникам с qa.read (без PII ученика)
+  decision_note: string | null;
+  taken_by_name: string | null;
+  decided_by_name: string | null;
+  new_evaluation_id: string | null;
+  created_at: string;
+  decided_at: string | null;
+}
+export interface AppealDecision {
+  decision: "upheld" | "corrected";
+  note: string; // 10..500, видна ученику
+  new_evaluation_id: string | null; // для corrected — переоценка, сделанная по этой апелляции
+}
+
+// ---------- Обзор (спринт 4) ----------
+export interface LessonStats {
+  period: Period;
+  started: number;
+  completed: number;
+  completion_pct: number | null; // 0–100
+  median_minutes: number | null;
+  by_kind: Record<SessionKind, number>;
+  ai_degraded_pct: number | null; // доля сессий в упрощённом режиме, 0–100
+  appeals_open: number;
+  human_review_open: number;
+}
+
+export type { Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiModel, AiProviderStatus, GoldenCase, TestRun, TestRunSummary };
+
