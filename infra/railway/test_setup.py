@@ -66,7 +66,7 @@ def test_scheduler_and_service_specific_secrets():
     n8n = env_of(files, "n8n")
     assert {k for k in n8n if k.endswith("_URL")} == {"LEARNING_PLAN_URL", "NOTIFICATIONS_URL", "SOCIAL_URL",
                                                        "USER_ADMIN_URL", "CATALOG_URL", "LESSONS_URL",
-                                                       "ASSESSMENT_URL", "MEMORY_URL"}
+                                                       "ASSESSMENT_URL", "MEMORY_URL", "GAMIFICATION_URL"}
     assert n8n["RAILWAY_RUN_UID"] == "0" and len(n8n["N8N_ENCRYPTION_KEY"]) >= 32
 
 
@@ -124,7 +124,7 @@ def test_admin_services_sprint2():
     assert {k for k in bff if k.endswith("_URL") and k != "REDIS_URL"} == {
         "ADMIN_IDENTITY_URL", "USER_ADMIN_URL", "IDENTITY_URL", "SUPPORT_URL", "AUDIT_URL", "EXPERIENCE_URL",
         "NOTIFICATIONS_URL", "CATALOG_URL", "DIAGNOSTICS_URL", "AI_GATEWAY_URL", "LESSONS_URL", "ASSESSMENT_URL",
-        "MEMORY_URL"}
+        "MEMORY_URL", "GAMIFICATION_URL"}
     assert not rs.by_name("admin-bff").public and rs.by_name("admin-web").public
     web = env_of(files, "admin-web")
     assert web["ADMIN_BFF_URL"] == "http://${{admin-bff.RAILWAY_PRIVATE_DOMAIN}}:8002"
@@ -232,4 +232,16 @@ def test_memory_sprint5():
     # tts принимает токены ai-gateway (распознавание) и telegram-bff (озвучка)
     pub = json.loads(env_of(files, "tts")["INTERNAL_JWT_PUBLIC_KEYS"])
     assert {"ai-gateway", "telegram-bff"} <= set(pub)
+
+
+def test_gamification_sprint6():
+    sec, files = build()
+    game = env_of(files, "gamification")
+    # начисления — только по событиям: gamification никого не вызывает синхронно
+    assert {k for k in game if k.endswith("_URL") and k not in ("REDIS_URL", "NATS_URL", "DATABASE_URL",
+                                                                  "MIGRATION_DATABASE_URL")} == set()
+    assert game["PORT"] == "8117" and game["SCHEDULER_TOKEN"] == sec.scheduler and game["NATS_URL"]
+    for caller in ("telegram-bff", "admin-bff", "n8n"):
+        assert env_of(files, caller)["GAMIFICATION_URL"].endswith(":8117"), caller
+    assert "gamification" in json.loads(env_of(files, "learning-plan")["INTERNAL_JWT_PUBLIC_KEYS"])
 

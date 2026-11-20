@@ -102,6 +102,7 @@ PY_SERVICES=(
   "lessons|services/lessons|tilhero_lessons.main:app|8112|lessons"
   "tts|services/tts|tilhero_tts.main:app|8115|"
   "memory|services/memory|tilhero_memory.main:app|8116|memory"
+  "gamification|services/gamification|tilhero_gamification.main:app|8117|gamification"
 )
 
 log() { printf '\033[1;34m[e2e]\033[0m %s\n' "$*"; }
@@ -165,6 +166,8 @@ svc_env() {
     memory)  # спринт 5: SCHEDULER_TOKEN — вход n8n memory-tick (на стенде tick вызывает сценарий)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 ASSESSMENT_URL=http://127.0.0.1:8113"
       env="$env AI_GATEWAY_URL=http://127.0.0.1:8114 IDENTITY_CONSENT_URL=http://127.0.0.1:8101" ;;
+    gamification)  # спринт 6: SCHEDULER_TOKEN — вход n8n game-tick (на стенде tick вызывает сценарий)
+      env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN" ;;
     social)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN INVITE_TOKEN_KEY=$E2E_INVITE_TOKEN_KEY"
       env="$env TELEGRAM_APP_LINK=$E2E_TELEGRAM_APP_LINK IDENTITY_CONSENT_URL=http://127.0.0.1:8101" ;;
@@ -280,7 +283,7 @@ up() {
     NOTIFICATIONS_URL=http://127.0.0.1:8104 EXPERIENCE_URL=http://127.0.0.1:8106 SOCIAL_URL=http://127.0.0.1:8109 \
     CATALOG_URL=http://127.0.0.1:8110 DIAGNOSTICS_URL=http://127.0.0.1:8111 \
     LESSONS_URL=http://127.0.0.1:8112 ASSESSMENT_URL=http://127.0.0.1:8113 TTS_URL=http://127.0.0.1:8115 \
-    MEMORY_URL=http://127.0.0.1:8116 \
+    MEMORY_URL=http://127.0.0.1:8116 GAMIFICATION_URL=http://127.0.0.1:8117 \
     RATE_LIMIT_SESSION_IP_PER_MIN="${E2E_RATE_LIMIT_SESSION_IP_PER_MIN:-500}" \
     RATE_LIMIT_USER_PER_MIN="${E2E_RATE_LIMIT_USER_PER_MIN:-600}" \
     RATE_LIMIT_PUBLIC_IP_PER_MIN="${E2E_RATE_LIMIT_PUBLIC_IP_PER_MIN:-600}" \
@@ -299,7 +302,7 @@ up() {
     AUDIT_URL=http://127.0.0.1:8105 EXPERIENCE_URL=http://127.0.0.1:8106 \
     CATALOG_URL=http://127.0.0.1:8110 DIAGNOSTICS_URL=http://127.0.0.1:8111 \
     AI_GATEWAY_URL=http://127.0.0.1:8114 LESSONS_URL=http://127.0.0.1:8112 ASSESSMENT_URL=http://127.0.0.1:8113 \
-    MEMORY_URL=http://127.0.0.1:8116 \
+    MEMORY_URL=http://127.0.0.1:8116 GAMIFICATION_URL=http://127.0.0.1:8117 \
     RATE_LIMIT_LOGIN_IP_PER_MIN="${E2E_RATE_LIMIT_LOGIN_IP_PER_MIN:-60}" \
     RATE_LIMIT_AUTH_STEP_IP_PER_MIN="${E2E_RATE_LIMIT_AUTH_STEP_IP_PER_MIN:-120}" \
     npx tsx src/main.ts
@@ -365,7 +368,7 @@ stop_one() {
 
 stop() {
   local f
-  for f in miniapp admin-bff telegram-bff memory tts lessons assessment ai-gateway diagnostics catalog user-admin admin-identity notifications telegram-bot-gateway social support \
+  for f in miniapp admin-bff telegram-bff gamification memory tts lessons assessment ai-gateway diagnostics catalog user-admin admin-identity notifications telegram-bot-gateway social support \
            learning-plan identity-consent experience-config audit mock-telegram; do
     stop_one "$f"
   done
@@ -408,14 +411,18 @@ case "${1:-up}" in
     if [ -f infra/e2e/scenario_memory.py ]; then
       echo; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_memory.py || rc=1
     fi
+    if [ -f infra/e2e/scenario_game.py ]; then
+      echo; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_game.py || rc=1
+    fi
     exit $rc ;;
   content) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_content.py "$@" ;;
   lessons) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_lessons.py "$@" ;;  # уборка — в шаге L00
   memory) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_memory.py "$@" ;;  # уборка — в шаге M00
+  game) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_game.py "$@" ;;  # спринт 6
   admin) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_admin.py "$@" ;;  # уборка — в шаге A00
   stop|down) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi ;;
   restart) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi; up ;;
   status) status ;;
-  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|content [аргументы]|lessons [аргументы]|memory [аргументы]|ui [tg_id]|status|stop [name]|restart [name]"
+  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|content [аргументы]|lessons [аргументы]|memory [аргументы]|game [аргументы]|ui [tg_id]|status|stop [name]|restart [name]"
      exit 2 ;;
 esac

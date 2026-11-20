@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "game.badge.earned.v1.schema.json",
+  "title": "game.badge.earned.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "badge_code",
+    "notify",
+    "earned_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "badge_code": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]{3,40}$"
+    },
+    "notify": {
+      "type": "boolean"
+    },
+    "earned_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

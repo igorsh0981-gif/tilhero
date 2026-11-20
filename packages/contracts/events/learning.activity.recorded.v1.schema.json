@@ -42,6 +42,17 @@
     "recorded_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "streak_days": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   }
 }

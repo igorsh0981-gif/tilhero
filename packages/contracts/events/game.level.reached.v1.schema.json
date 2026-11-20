@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "game.level.reached.v1.schema.json",
+  "title": "game.level.reached.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "level",
+    "xp_total",
+    "reached_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "level": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 100
+    },
+    "xp_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reached_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

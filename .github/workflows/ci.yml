@@ -40,6 +40,7 @@ jobs:
           - services/ai-gateway
           - services/tts
           - services/memory
+          - services/gamification
           - apps/telegram-bot-gateway
           - infra/n8n
           - infra/railway
@@ -112,6 +113,7 @@ jobs:
           - services/ai-gateway
           - services/tts
           - services/memory
+          - services/gamification
           - apps/telegram-bot-gateway
           - infra/n8n
           - infra/railway
@@ -193,6 +195,7 @@ jobs:
           - services/ai-gateway
           - services/tts
           - services/memory
+          - services/gamification
           - apps/telegram-bot-gateway
           - services/telegram-bff
           - apps/telegram-miniapp

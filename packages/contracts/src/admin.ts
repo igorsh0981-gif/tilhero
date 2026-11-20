@@ -39,6 +39,9 @@ import type {
   MediaRequestStatus, PartOfSpeech, ScenarioTestRun, VersionStatus, Localized as ContentLocalized, Band,
 } from "./content.js";
 import type {
+  GameAction, GameCurrency, GameReason, HeroLine, HeroStage, QuestKind, ShopItemKind,
+} from "./bff.js";
+import type {
   Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiModel, AiProviderStatus, ConfirmedError, GoldenCase,
   RubricCriterionCode, SessionKind, TestRun, TestRunSummary,
 } from "./ai.js";
@@ -105,7 +108,12 @@ export type Permission =
   // спринт 5 — память, словарь курса
   | "memory.read" // очередь и история карточек ученика, проверки удержания, аналитика забывания
   | "memory.manage" // ручная правка карточки: перенос срока, сброс, заморозка (step-up, по одной, с причиной)
-  | "glossary.manage"; // словарь курса и модерация переводов ИИ
+  | "glossary.manage" // словарь курса и модерация переводов ИИ
+  // спринт 6 — игра и герои
+  | "game.read" // правила, герои, магазин, события, кошельки учеников — чтение
+  | "game.manage" // черновики правил, герои и картинки, предметы магазина, события недели
+  | "game.publish" // активация и откат правил, публикация героев, предметов и событий (step-up)
+  | "wallet.adjust"; // ручное начисление и списание, обратная запись, возврат покупки (step-up, причина)
 
 export const PERMISSIONS: readonly Permission[] = [
   "dashboard.read", "users.read", "users.sensitive.read", "support.read", "support.reply", "support.manage",
@@ -114,6 +122,7 @@ export const PERMISSIONS: readonly Permission[] = [
   "content.read", "content.edit", "content.review", "content.publish", "media.rights", "lang.manage",
   "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "costs.read", "costs.manage",
   "memory.read", "memory.manage", "glossary.manage",
+  "game.read", "game.manage", "game.publish", "wallet.adjust",
 ];
 
 export type RoleCode =
@@ -465,6 +474,8 @@ export interface Dashboard {
   ai: DashboardBlock<AiUsageSummary>;
   /** спринт 5 */
   memory: DashboardBlock<MemoryStats>;
+  /** спринт 6 */
+  game: DashboardBlock<GameStats>;
 }
 
 // =====================================================================================================================
@@ -1644,4 +1655,271 @@ export interface MemoryStats {
   d30_pass_pct: number | null; // 0–100
   avg_due_per_learner: number | null;
   ai_glosses_pending: number | null; // очередь переводов ИИ (из catalog); null — catalog недоступен
+}
+
+// =====================================================================================================================
+// Игра и герои (спринт 6): ADM-GAME-01 правила, ADM-GAME-03 герои, ADM-GAME-04 магазин и кошельки,
+// ADM-GAME-05 события и сезоны. Источник — gamification через admin-bff (/admin/v1/game/*).
+// Правила: черновик → проверка → активация (step-up, комментарий ≥ 10), история и откат новой версией.
+// Проведённые операции задним числом не меняются: исправление — обратной записью.
+// Коды: 422 RULES_INVALID {errors: [{path, code}]}; 409 RULES_NOT_VALIDATED; 409 DRAFT_CONFLICT; 409 HERO_IN_USE
+// {learners}; 409 EVENT_OVERLAP {event_id}; 409 BALANCE_NEGATIVE; 409 ALREADY_REVERSED; 413 ASSET_TOO_LARGE;
+// 422 ASSET_INVALID {reason}; 404 RULES_VERSION_NOT_FOUND | HERO_NOT_FOUND | ITEM_NOT_FOUND | EVENT_NOT_FOUND |
+// WALLET_NOT_FOUND | ASSET_NOT_FOUND.
+// =====================================================================================================================
+
+export type GameAudience = "kids" | "teens" | "adults";
+
+export interface GameAmount {
+  xp: number;
+  til: number;
+}
+
+export interface QuestTemplate {
+  code: string;
+  kind: QuestKind;
+  target: number;
+  reward: GameAmount;
+  audiences: GameAudience[];
+  weight: number; // 1..10
+}
+
+/** Правила игры — payload версии (INTERNAL_API спринта 6 §1.3) */
+export interface GameRules {
+  earn: {
+    lesson: GameAmount;
+    lesson_passed_bonus: GameAmount;
+    lesson_practice: GameAmount;
+    scenario: GameAmount;
+    media: GameAmount;
+    reading: GameAmount;
+    review: { min_cards: number; xp_base: number; xp_per_correct_cap: number; til: number };
+    skill_demonstrated: GameAmount;
+    skill_retained: GameAmount;
+    skill_max_per_event: number;
+  };
+  caps: { xp_per_day: number; til_per_day: number };
+  /** пороги XP уровней по возрастанию, первый 0 */
+  levels: number[];
+  /** пороги подтверждённых навыков для ступеней 1–3, первый 0 */
+  hero: { stage_thresholds: [number, number, number] };
+  freeze: { price_til: number; max_stock: number };
+  bonuses: { registration_freeze: number; referral_freeze: number; referral_monthly_cap: number };
+  quests: { per_day: number; all_done_bonus: GameAmount; templates: QuestTemplate[] };
+  badges: { streak: number[]; skills: number[]; reviews_cards: number[]; readings: number[] };
+}
+
+export type RulesStatus = "draft" | "active" | "archived";
+export interface RulesVersionSummary {
+  version: number;
+  status: RulesStatus;
+  comment: string | null;
+  based_on: number | null;
+  created_by: StaffRef;
+  created_at: string;
+  validated_at: string | null;
+  activated_by: StaffRef | null;
+  activated_at: string | null;
+}
+export interface RulesVersion extends RulesVersionSummary {
+  payload: GameRules;
+  /** отличия от активной версии */
+  diff: Array<{ path: string; from: unknown; to: unknown }>;
+  updated_at: string;
+}
+/** GET /admin/v1/game/rules (game.read) → {items: RulesVersionSummary[]}
+ *  GET /admin/v1/game/rules/{version} → RulesVersion
+ *  PUT /admin/v1/game/rules/draft (game.manage; If-Match: <updated_at> черновика) → RulesVersion
+ *  DELETE /admin/v1/game/rules/draft (game.manage) → 204
+ *  POST /admin/v1/game/rules/draft/validate (game.manage) → RulesValidation
+ *  POST /admin/v1/game/rules/draft/activate (game.publish, step-up) {comment} → RulesVersion
+ *  POST /admin/v1/game/rules/{version}/rollback (game.publish, step-up) {comment} → RulesVersion */
+export interface RulesDraftRequest {
+  payload: GameRules;
+  comment: string | null;
+  based_on: number | null;
+}
+export interface RulesValidation {
+  ok: boolean;
+  errors: Array<{ path: string; code: string }>;
+  warnings: Array<{ path: string; code: string }>;
+}
+export interface RulesActivateRequest {
+  comment: string; // ≥ 10
+}
+
+export interface StaffRef {
+  staff_id: string;
+  name: string;
+}
+
+// ---------- Герои (ADM-GAME-03) ----------
+export interface AdminGameImage {
+  asset_id: string;
+  sha256: string;
+  url: string; // /admin/v1/game/assets/{asset_id}/content
+  width: number;
+  height: number;
+  size: number;
+}
+export interface AdminHeroFields {
+  name: ContentLocalized;
+  tagline: ContentLocalized;
+  audiences: GameAudience[];
+  stages: Array<{ stage: HeroStage; name: ContentLocalized; asset_id: string }>;
+}
+export interface AdminHero extends AdminHeroFields {
+  code: string;
+  line: HeroLine;
+  order: number;
+  version: number;
+  published_at: string | null;
+  published_by: StaffRef | null;
+  /** картинки ступеней живой версии */
+  images: Array<{ stage: HeroStage; image: AdminGameImage }>;
+  draft: (AdminHeroFields & { images: Array<{ stage: HeroStage; image: AdminGameImage }>; updated_at: string }) | null;
+  /** учеников с этим героем */
+  learners: number;
+}
+/** GET /admin/v1/game/heroes (game.read) → {items: AdminHero[]}
+ *  PUT /admin/v1/game/heroes/{code}/draft (game.manage) AdminHeroFields → AdminHero
+ *  POST /admin/v1/game/heroes/{code}/publish (game.publish, step-up) {comment} → AdminHero
+ *  POST /admin/v1/game/assets?purpose=hero_stage|shop_item|badge (game.manage), тело — байты image/webp | image/png
+ *    (≤ 300 КБ, ≤ 1024×1024) → AdminGameImage. Та же картинка — тот же asset_id.
+ *  GET /admin/v1/game/assets/{asset_id}/content (game.read) → байты картинки */
+
+// ---------- Магазин и кошельки (ADM-GAME-04) ----------
+export type ShopItemStatus = "draft" | "published" | "retired";
+export interface AdminShopItem {
+  code: string;
+  kind: ShopItemKind;
+  title: ContentLocalized;
+  description: ContentLocalized;
+  image: AdminGameImage | null;
+  theme: { bg: string; accent: string } | null;
+  /** у streak_freeze — из правил (freeze.price_til), только чтение */
+  price_til: number;
+  audiences: GameAudience[];
+  available_from: string | null;
+  available_until: string | null;
+  status: ShopItemStatus;
+  order: number;
+  owners: number;
+  updated_at: string;
+}
+/** GET /admin/v1/game/shop/items (game.read) → {items: AdminShopItem[]}
+ *  POST /admin/v1/game/shop/items (game.manage, Idempotency-Key) ShopItemCreate → AdminShopItem (draft)
+ *  PATCH /admin/v1/game/shop/items/{code} (game.manage) Partial<ShopItemCreate> → AdminShopItem
+ *    (у published — только available_until и order)
+ *  POST /admin/v1/game/shop/items/{code}/publish | /retire (game.publish, step-up) {comment} → AdminShopItem */
+export interface ShopItemCreate {
+  code: string; // [a-z0-9_]{3,40}
+  kind: Exclude<ShopItemKind, "streak_freeze">;
+  title: ContentLocalized;
+  description: ContentLocalized;
+  asset_id: string | null;
+  theme: { bg: string; accent: string } | null;
+  price_til: number; // 1..10000
+  audiences: GameAudience[];
+  available_from: string | null;
+  available_until: string | null;
+  order: number;
+}
+
+export interface AdminWallet {
+  user_id: string;
+  audience: GameAudience;
+  level: number;
+  xp_total: number;
+  til_balance: number;
+  freeze_stock: number;
+  hero: { code: string; stage: HeroStage } | null;
+  confirmed_skills: number;
+  owned_items: Array<{ code: string; kind: ShopItemKind; purchased_at: string; purchase_id: string }>;
+  quests_today: Array<{ code: string; kind: QuestKind; target: number; progress: number; status: string }>;
+  badges: Array<{ code: string; earned_at: string }>;
+  referrals: { pending: number; rewarded: number; capped: number };
+  settings: { auto_freeze: boolean; quests_hidden: boolean };
+}
+export interface AdminLedgerOperation {
+  op_id: string;
+  currency: GameCurrency;
+  amount: number;
+  reason: GameReason;
+  source: { kind: "event" | "command" | "staff"; ref: string };
+  rules_version: number | null;
+  multiplier: number;
+  capped: boolean;
+  local_date: string;
+  status: "confirmed" | "reversed";
+  reversed_by: string | null;
+  reversal_of: string | null;
+  actor: string; // system | learner | staff:<id>
+  comment: string | null;
+  created_at: string;
+}
+/** GET /admin/v1/game/wallets/{user_id} (game.read) → AdminWallet
+ *  GET /admin/v1/game/wallets/{user_id}/ledger?currency=&cursor= (game.read) → Page<AdminLedgerOperation>
+ *  POST /admin/v1/game/wallets/{user_id}/adjustments (wallet.adjust, step-up, Idempotency-Key) WalletAdjustment
+ *    → AdminLedgerOperation
+ *  POST /admin/v1/game/wallets/{user_id}/ledger/{op_id}/reverse (wallet.adjust, step-up) {reason} → AdminLedgerOperation
+ *  POST /admin/v1/game/wallets/{user_id}/purchases/{purchase_id}/refund (wallet.adjust, step-up) {reason}
+ *    → {operations: AdminLedgerOperation[]} */
+export interface WalletAdjustment {
+  currency: GameCurrency;
+  /** ±1..10000; xp ±1..100000; минус не ниже нуля */
+  amount: number;
+  reason: string; // ≥ 10
+}
+
+// ---------- События и сезоны (ADM-GAME-05) ----------
+export type GameEventStatus = "draft" | "published" | "cancelled" | "finished";
+export interface GameMultiplier {
+  action: GameAction;
+  currency: "xp" | "til";
+  factor: 1.5 | 2 | 3;
+}
+export interface GameEventFields {
+  code: string; // [a-z0-9_]{3,40}
+  title: ContentLocalized;
+  description: ContentLocalized;
+  starts_at: string;
+  ends_at: string; // ≤ 14 дней после starts_at
+  audiences: GameAudience[];
+  multipliers: GameMultiplier[]; // 1..5
+}
+export interface AdminGameEvent extends GameEventFields {
+  event_id: string;
+  status: GameEventStatus;
+  created_by: StaffRef;
+  published_by: StaffRef | null;
+  updated_at: string;
+}
+/** GET /admin/v1/game/events?status= (game.read) → {items: AdminGameEvent[]}
+ *  POST /admin/v1/game/events (game.manage, Idempotency-Key) GameEventFields → AdminGameEvent (draft)
+ *  PATCH /admin/v1/game/events/{id} (game.manage, только draft) Partial<GameEventFields> → AdminGameEvent
+ *  POST /admin/v1/game/events/{id}/publish | /cancel (game.publish, step-up) {comment} → AdminGameEvent */
+
+// ---------- Обзор ----------
+/** GET /admin/v1/game/overview?period=7d|30d (game.read) → GameOverview */
+export interface GameOverview {
+  period: "7d" | "30d";
+  active_rules_version: number;
+  earned: { xp: number; til: number };
+  spent_til: number;
+  freezes: { granted: number; bought: number; used: number };
+  quests_completed: number;
+  badges_earned: number;
+  purchases: number;
+  by_audience: Array<{ audience: GameAudience; earned_xp: number; earned_til: number; quests_completed: number }>;
+  active_events: Array<{ event_id: string; title: ContentLocalized; ends_at: string }>;
+}
+/** Блок главной админки (dashboard.read) */
+export interface GameStats {
+  period: Period;
+  earned_xp: number;
+  earned_til: number;
+  freezes_used: number;
+  quests_completed: number;
+  active_event: { title: ContentLocalized; ends_at: string } | null;
 }

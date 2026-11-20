@@ -66,6 +66,12 @@ EXPECTED: dict[str, dict[str, Any]] = {
         "body": None,
         "on_start": False,
     },
+    "game-tick.json": {
+        "cron": "*/15 * * * *",  # каждые 15 минут: задания дня, события недели, рефералы, сверка кошельков (спринт 6)
+        "url": "={{ $env.GAMIFICATION_URL }}/internal/v1/game:tick",
+        "body": None,
+        "on_start": False,
+    },
     "user-admin-reconcile.json": {
         "cron": "25 * * * *",  # каждый час: страховочная сверка read-модели учеников админки (спринт 2)
         "url": "={{ $env.USER_ADMIN_URL }}/internal/v1/reconcile",
@@ -155,7 +161,8 @@ def test_entrypoint_imports_activates_known_ids_then_starts():
 URL_VARS = {"invites-tick.json": "SOCIAL_URL", "notifications-dispatch.json": "NOTIFICATIONS_URL",
             "plan-tick.json": "LEARNING_PLAN_URL", "user-admin-reconcile.json": "USER_ADMIN_URL",
             "catalog-tick.json": "CATALOG_URL", "lessons-tick.json": "LESSONS_URL",
-            "assessment-tick.json": "ASSESSMENT_URL", "memory-tick.json": "MEMORY_URL"}
+            "assessment-tick.json": "ASSESSMENT_URL", "memory-tick.json": "MEMORY_URL",
+            "game-tick.json": "GAMIFICATION_URL"}
 
 
 def _run_entrypoint(tmp_path: Path, env: dict[str, str]) -> tuple[subprocess.CompletedProcess, list[str]]:
@@ -193,7 +200,8 @@ def test_entrypoint_activates_only_workflows_with_url(tmp_path: Path):
     shutil.rmtree(tmp_path / "bin")
     new = {**old, "SOCIAL_URL": "http://social:8109", "USER_ADMIN_URL": "http://user-admin:8121",
            "CATALOG_URL": "http://catalog:8110", "LESSONS_URL": "http://lessons:8112",
-           "ASSESSMENT_URL": "http://assessment:8113", "MEMORY_URL": "http://memory:8116"}
+           "ASSESSMENT_URL": "http://assessment:8113", "MEMORY_URL": "http://memory:8116",
+           "GAMIFICATION_URL": "http://gamification:8117"}
     proc, calls = _run_entrypoint(tmp_path, new)
     assert proc.returncode == 0, proc.stderr
     activated = [c.split("--id=")[1].split()[0] for c in calls if c.startswith("update:workflow")]

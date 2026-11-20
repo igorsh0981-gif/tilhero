@@ -163,6 +163,32 @@ CATALOG = {
                                      "evidence_id": UUID, "checked_at": TS},
                                     ["check_id", "user_id", "pair_id", "skill_id", "stage", "passed",
                                      "consecutive_failures", "checked_at"]),
+    # ------------------------------------------------------------ gamification (спринт 6)
+    # заморозка закрыла пропуск дня графика — learning-plan: день frozen, серия не рвётся; notifications streak_frozen
+    "game.streak.frozen.v1": ({"user_id": UUID, "local_date": DATE, "op_id": UUID,
+                               "freeze_left": {"type": "integer", "minimum": 0, "maximum": 30}, "frozen_at": TS},
+                              ["user_id", "local_date", "op_id", "freeze_left", "frozen_at"]),
+    "game.level.reached.v1": ({"user_id": UUID, "level": {"type": "integer", "minimum": 2, "maximum": 100},
+                               "xp_total": INT, "reached_at": TS},
+                              ["user_id", "level", "xp_total", "reached_at"]),
+    # notify=false — ученик выключил игровые уведомления (notifications не отправляет)
+    "game.hero.stage_reached.v1": ({"user_id": UUID, "hero_code": {"type": "string", "pattern": r"^(robot|pet|human)_[0-9]$"},
+                                    "stage": {"type": "integer", "enum": [2, 3]}, "confirmed_skills": INT,
+                                    "notify": BOOL, "reached_at": TS},
+                                   ["user_id", "hero_code", "stage", "confirmed_skills", "notify", "reached_at"]),
+    "game.badge.earned.v1": ({"user_id": UUID, "badge_code": {"type": "string", "pattern": r"^[a-z0-9_]{3,40}$"},
+                              "notify": BOOL, "earned_at": TS},
+                             ["user_id", "badge_code", "notify", "earned_at"]),
+    "game.purchase.completed.v1": ({"purchase_id": UUID, "user_id": UUID,
+                                    "item_code": {"type": "string", "pattern": r"^[a-z0-9_]{3,40}$"},
+                                    "item_kind": enum("background", "hero_frame", "streak_freeze"),
+                                    "price_til": {"type": "integer", "minimum": 1, "maximum": 10000},
+                                    "purchased_at": TS},
+                                   ["purchase_id", "user_id", "item_code", "item_kind", "price_til", "purchased_at"]),
+    "game.rules.activated.v1": ({"version": {"type": "integer", "minimum": 1},
+                                 "based_on": {"type": "integer", "minimum": 1}, "activated_by": UUID,
+                                 "activated_at": TS},
+                                ["version", "activated_by", "activated_at"]),
     # ------------------------------------------------------------ catalog: словарь курса (спринт 5)
     "catalog.glossary.changed.v1": ({"pair_id": STR, "entry_id": UUID, "forms": arr(STR, 8),
                                      "change": enum("created", "updated", "reviewed", "archived"), "occurred_at": TS},
@@ -193,10 +219,11 @@ CATALOG = {
                                     "next_slot_date": DATE},
                                    ["user_id", "local_date", "slot_time", "timezone", "consecutive_missed"]),
     # занятие засчитано в день графика (урок, повторение, практика)
+    # streak_days (спринт 6, необязательное) — серия после записи занятия (gamification: значки серии)
     "learning.activity.recorded.v1": ({"user_id": UUID, "activity_id": UUID, "local_date": DATE,
                                        "kind": enum("lesson", "review", "practice", "diagnostic"),
                                        "minutes": {"type": "integer", "minimum": 0, "maximum": 240},
-                                       "recorded_at": TS},
+                                       "recorded_at": TS, "streak_days": INT},
                                       ["user_id", "activity_id", "local_date", "kind", "minutes", "recorded_at"]),
     # ------------------------------------------------------------ social
     "social.invite.created.v1": ({"invite_id": UUID, "inviter_user_id": UUID, "kind": enum("family", "friend", "referral"),
