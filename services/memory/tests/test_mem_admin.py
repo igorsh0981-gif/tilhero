@@ -87,9 +87,9 @@ async def test_card_actions_with_audit(env, user: uuid.UUID) -> None:  # type: i
     assert entry["actor"] == "staff" and entry["actor_name"] == "Оператор" and entry["grade"] is None
     assert entry["actor_id"] == await audit_actor(env)
     assert entry["reason"] == "ученик уезжает, просьба родителя" and entry["task_type"] == "manual"
-    for bad, code in (({"action": "reschedule", "due_at": (env.now + timedelta(hours=5)).isoformat(),
-                        "reason": "слишком рано для срока"}, "DUE_AT_RANGE"),
-                      ({"action": "reschedule", "due_at": (env.now + timedelta(days=400)).isoformat(),
+    for bad, code in (({"action": "reschedule", "due_at": (env.now - timedelta(hours=1)).isoformat(),
+                        "reason": "срок в прошлом нельзя"}, "DUE_AT_RANGE"),
+                      ({"action": "reschedule", "due_at": (env.now + timedelta(days=366, hours=1)).isoformat(),
                         "reason": "слишком поздно для срока"}, "DUE_AT_RANGE"),
                       ({"action": "freeze", "reason": "коротко"}, "VALIDATION_ERROR"),
                       ({"action": "reschedule", "reason": "без нового срока"}, "VALIDATION_ERROR"),
@@ -118,8 +118,8 @@ async def test_card_actions_with_audit(env, user: uuid.UUID) -> None:  # type: i
     assert reset["log"]["items"][0]["after"]["state"] == "new"
     await adm(env, "POST", f"cards/{uuid.uuid4()}/actions", "memory.manage",
               body={"action": "reset", "reason": "нет такой карточки"}, expect=404)
+    await env.events("admin.audit.recorded.v1")  # сначала доставить outbox — затем считать
     audits = [e for e in env.bus.published if e.event_type == "admin.audit.recorded.v1"]
-    await env.events("admin.audit.recorded.v1")
     assert [a.payload["action"] for a in audits] == ["memory.card_adjusted"] * 4
     first = audits[0].payload
     assert first["object_type"] == "memory_card" and first["object_id"] == str(cid)

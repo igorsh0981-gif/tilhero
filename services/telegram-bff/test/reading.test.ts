@@ -234,6 +234,21 @@ describe("согласие опекуна на запись голоса (PUT /v
     expect(off.json().voice_consent).toBe(false);
   });
 
+  it("learning-plan недоступен после сохранения согласия — 200 (onboarding_completed = false), а не 503", async () => {
+    acceptConsent(s.userId);
+    const child = h.fake.addChild(s.userId, "Мадина", "6-9");
+    h.fake.onboard(child);
+    h.fake.down.add("learningPlan");
+    const res = await put(`/v1/learners/${child}/voice-consent`, { granted: true });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({ learner_id: child, kind: "child", voice_consent: true, onboarding_completed: false });
+    expect(h.fake.children.get(child)!.voiceConsent).toBe(true);
+    expect(h.logs.text).toContain("onboarding unknown, voice consent saved");
+    h.fake.down.delete("learningPlan");
+    h.fake.override("learningPlan", "GET", "/internal/v1/me/plan", () => json(500, { code: "BOOM" }));
+    expect((await put(`/v1/learners/${child}/voice-consent`, { granted: false })).json()).toMatchObject({ voice_consent: false, onboarding_completed: false });
+  });
+
   it("своё согласие с voice_recording — voice_consent аккаунта true (сессия и профиль)", async () => {
     acceptConsent(s.userId, ["terms", "privacy", "learning", "voice_recording"]);
     expect((await get("/v1/profile")).json().learner.voice_consent).toBe(true);

@@ -33,7 +33,7 @@
 | `INACTIVITY_MINUTES` / `SESSION_EXPIRY_MINUTES` | 10 / 120 | пауза не идёт в активное время; бездействие → expired |
 | `CARDS_LIMIT` | 2000 | карточек на ученика |
 | `GLOSS_CACHE_TTL_SECONDS` | 3600 | кеш перевода Redis `gloss:v1:<pair>:<key>` |
-| `REMINDER_HOUR` / `REMINDER_WINDOW_MINUTES` / `REMINDER_MIN_DUE` / `REMINDERS_PER_TICK` | 19 / 15 / 5 / 500 | вечернее напоминание |
+| `REMINDER_HOUR` / `REMINDER_UNTIL_HOUR` / `REMINDER_MIN_DUE` / `REMINDERS_PER_TICK` | 19 / 22 / 5 / 500 | вечернее напоминание: окно 19:00–22:00 по поясу плана, раз в день (пропущенный tick и остаток догоняются) |
 | `INACTIVITY_DAYS_FOR_CHECKS` | 14 | без активности — срок проверки +1 день |
 | `ERROR_CARD_RETENTION_DAYS` / `PRONUNCIATION_RETENTION_DAYS` / `ANSWER_RETENTION_DAYS` | 90 / 180 / 90 | сроки хранения |
 | `STATS_TIMEZONE` | `Asia/Tashkent` | граница «сегодня» блока обзора |
@@ -69,10 +69,10 @@
 | Метод и путь | Право | Ответ |
 |---|---|---|
 | `GET /admin/v1/memory/learners/{user_id}` | `memory.read` | `LearnerMemorySummary`; 404 `MEMORY_LEARNER_NOT_FOUND` |
-| `GET /admin/v1/memory/learners/{user_id}/cards?status=&kind=&cursor=` | `memory.read` | `Page<AdminCardRow>` (без цитаты ошибки) |
+| `GET /admin/v1/memory/learners/{user_id}/cards?status=&kind=&cursor=` | `memory.read` | `Page<AdminCardRow>` (у ошибок `text_en` и `example_en` = null — выведены из текста ученика) |
 | `GET /admin/v1/memory/cards/{card_id}` | `memory.read` | `AdminCardDetail` + первая страница истории |
 | `GET /admin/v1/memory/cards/{card_id}/log?cursor=` | `memory.read` | `Page<ReviewLogRow>` (`actor_id` — UUID сотрудника у ручных правок, иначе null) |
-| `POST /admin/v1/memory/cards/{card_id}/actions` `CardAction` | `memory.manage` | `AdminCardDetail`; 409 `CARD_STATE {status}`; 422 `DUE_AT_RANGE` / reason < 10 |
+| `POST /admin/v1/memory/cards/{card_id}/actions` `CardAction` (Idempotency-Key) | `memory.manage` | `AdminCardDetail`; повтор того же сотрудника с тем же ключом за 24 ч — тот же ответ без истории и аудита; 409 `CARD_STATE {status}`; 422 `DUE_AT_RANGE` (1..365 дней ± сутки) / reason < 10 / `IDEMPOTENCY_KEY_REUSED` |
 | `GET /admin/v1/memory/analytics?pair_id=&period=30d\|90d` | `memory.read` \| `dashboard.read` | `ForgettingAnalytics` (k-анонимность: < 5 учеников — `hidden`) |
 | `GET /admin/v1/memory/stats?period=today\|7d\|30d` | `dashboard.read` | `MemoryStats` (`ai_glosses_pending` = null — дописывает admin-bff из catalog) |
 
@@ -82,7 +82,8 @@
 
 ## Планировщик
 `POST /internal/v1/memory:tick` (n8n `memory-tick`, каждые 15 минут, `SCHEDULER_TOKEN`; одна реплика — сессионная
-advisory-блокировка, занято — `{skipped: true}`): истечение сессий → напоминания (19:00–19:14 по поясу плана) →
+advisory-блокировка, занято — `{skipped: true}`): истечение сессий (раскрытые «Не помню» без ответа — again) →
+напоминания (первый tick после 19:00 по поясу плана, до 22:00) →
 перенос проверок без активности 14 дней → сроки хранения (ошибки 90 дней → archived + цитата стёрта; произношение
 180 дней — удалить; ввод в заданиях 90 дней — стереть; ключи идемпотентности 7 дней). Ответ — счётчики шагов.
 
@@ -118,7 +119,12 @@ advisory-блокировка, занято — `{skipped: true}`): истече
   ключевых слов того же урока / фраз медиа (снимок в карточке) и карточек ученика, без дублей перевода.
 - **Сравнение** (`domain/normalize.py`): §1.6 + без внутренней пунктуации, заготовка «…» = 0..3 слова,
   «A / B» — варианты; check_item — правила assessment.
-- **Перевод**: слово обязано быть в опубликованной версии (catalog lookup); детям ИИ разрешён (текста ученика нет).
+- **Перевод**: слово обязано быть в опубликованной версии (catalog lookup с аудиторией ученика: детям недетский
+  контент — 404); в ИИ, статью ИИ и карточку уходит фрагмент предложения, не сырой ввод; детям ИИ разрешён.
+- **Аудитория в catalog**: `audience` ученика — в lookup, ai-entries и `versions?audience=` (эталон произношения,
+  уровень текста); consumers читают версии без аудитории (урок уже пройден учеником).
+- **Цитата ошибки** хранится только в карточке (стирается через 90 дней); в задание `error_fix` подставляется при
+  выдаче. История планирования: UPDATE и прямой DELETE запрещены триггерами (DELETE — только каскадом с карточкой).
 - **Произношение**: аудио — только в памяти процесса; в логах — длительность и статус.
 
 ## Обходы и запросы к общему коду

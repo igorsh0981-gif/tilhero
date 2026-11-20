@@ -503,8 +503,13 @@ def drop_restore(*keys: str) -> None:
         RESTORE_FILE.unlink()
 
 
+# поля AiBudget в теле PUT /admin/v1/ai/budget (admin.ts: «AiBudget-поля & {reason, updated_at}»); спринт 5 —
+# + speech_monthly_cap_usd (подлимит оценки произношения, ai.ts AiBudget)
+BUDGET_FIELDS = ("monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "speech_monthly_cap_usd", "alert_percent")
+
+
 def budget_body(b: dict[str, Any], reason: str, **changes: Any) -> dict[str, Any]:
-    body = {k: b[k] for k in ("monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "alert_percent")}
+    body = {k: b[k] for k in BUDGET_FIELDS if k in b}
     body.update(changes)
     body["reason"] = reason
     return body
@@ -634,19 +639,8 @@ def s_stand(c: s2.Ctx) -> None:
 def warm_admin_identity(c: s2.Ctx) -> None:
     """admin-identity сразу после старта (и под нагрузкой машины) считает хеш пароля дольше таймаута admin-bff (~3 с)
     → 503 на смене пароля bootstrap-учётки, хотя пароль уже сменён (учётка израсходована, прогон надо повторять со
-    сбросом). Прогрев: вход несуществующей учёткой (тот же расчёт хеша — dummy-хеш) до ответа быстрее 1,5 с, ≤ 90 с."""
-    b = c.browser("warmup")
-    deadline = time.monotonic() + 90
-    dt = 0.0
-    while time.monotonic() < deadline:
-        t0 = time.monotonic()
-        r = b.post("/admin/v1/auth/login", {"email": f"warmup.{c.tag.lower()}@tilhero.local",
-                                            "password": "Warmup-e2e-not-a-password-0"})
-        dt = time.monotonic() - t0
-        if r.status_code == 401 and dt < 1.5:
-            return
-        time.sleep(3)
-    print(f"      admin-identity медленно считает хеш ({dt:.1f} с) — возможен 503 на смене пароля", flush=True)
+    сбросом). Прогрев — общий со сценарием спринта 3: три быстрых ответа подряд (scenario_content.warm_admin_identity)."""
+    s3.warm_admin_identity(c)
 
 
 def s_staff(c: s2.Ctx) -> None:
@@ -1861,8 +1855,7 @@ def s_budget(c: s2.Ctx) -> None:
         rb = expect(ops.browser.request("PUT", "/admin/v1/ai/budget", json_body=budget_body(
             b0, "e2e: прежние лимиты", ai_enabled=b0["ai_enabled"], updated_at=cur_b["updated_at"]),
             headers=idem()), 200)
-        check(all(rb[k] == b0[k] for k in ("monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd",
-                                           "alert_percent", "ai_enabled"))
+        check(all(rb.get(k) == b0.get(k) for k in (*BUDGET_FIELDS, "ai_enabled"))
               and fm["input_usd_per_mtok"] == fake0["input_usd_per_mtok"], f"бюджет не возвращён: {rb} / {fm}")
         drop_restore("budget", "fake_model")
 

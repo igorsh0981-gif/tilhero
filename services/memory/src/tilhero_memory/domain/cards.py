@@ -414,11 +414,13 @@ async def add_manual(ctx: Ctx, text_en: str, source: dict[str, Any], idem_key: s
         raise gloss_unavailable()
     forms = [f for f in entry.get("forms") or [] if isinstance(f, str)]
     example = entry.get("example_en") if isinstance(entry.get("example_en"), str) else None
-    spec = CardSpec(kind="word" if word_count(text_en) == 1 else "phrase", text_en=text_en.strip()[:120], gloss=gloss,
+    # текст карточки — фрагмент предложения контента (не сырой ввод ученика)
+    surface = (resolved.surface or text_en).strip()[:120]
+    spec = CardSpec(kind="word" if word_count(surface) == 1 else "phrase", text_en=surface, gloss=gloss,
                     gloss_source=str(entry.get("source")) if entry.get("source") in ("course", "methodist", "ai")
                     else "course",
                     example_en=(resolved.sentence_en or example or None),
-                    answers=[*split_alternatives(text_en.strip()), *forms],
+                    answers=[*split_alternatives(surface), *forms],
                     source={"kind": CONTENT_TO_SOURCE[ref["kind"]], "key": ref["key"], "version": ref["version"],
                             "at": iso(ctx.now)},
                     origin_lesson_id=ref["key"] if ref["kind"] == "lesson" else None)

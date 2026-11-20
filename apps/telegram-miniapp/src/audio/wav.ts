@@ -9,6 +9,8 @@ export const MIN_RECORD_MS = 500;
 export const MAX_RECORD_MS = 15_000;
 export const MAX_WAV_BYTES = 600_000;
 export const WAV_HEADER_BYTES = 44;
+/** 0,5 s of 16 kHz: the BFF compares the data size (≥ 16 000 bytes), so the client counts samples, not rounded ms */
+export const MIN_WAV_SAMPLES = (WAV_RATE * MIN_RECORD_MS) / 1000;
 
 /** Channels → one (the mean of the samples). */
 export function mixToMono(channels: readonly Float32Array[]): Float32Array {
@@ -131,10 +133,13 @@ export function level(frame: Float32Array): number {
  * The recording → a WAV Blob of at most `maxMs`: mono samples of `rate` Hz resampled to 16 kHz. `durationMs` is the
  * length of the audio actually written.
  */
-export function toWav(samples: Float32Array, rate: number, maxMs: number = MAX_RECORD_MS): { wav: Blob; durationMs: number; bytes: number } {
+export function toWav(samples: Float32Array, rate: number, maxMs: number = MAX_RECORD_MS): { wav: Blob; durationMs: number; bytes: number; samples: number } {
   const limit = Math.floor((rate * maxMs) / 1000);
   const cut = samples.length > limit ? samples.subarray(0, limit) : samples;
   const pcm = resample(cut, rate, WAV_RATE);
   const buf = encodeWav(pcm, WAV_RATE);
-  return { wav: new Blob([buf], { type: "audio/wav" }), durationMs: Math.round((pcm.length / WAV_RATE) * 1000), bytes: buf.byteLength };
+  return { wav: new Blob([buf], { type: "audio/wav" }), durationMs: Math.round((pcm.length / WAV_RATE) * 1000), bytes: buf.byteLength, samples: pcm.length };
 }
+
+/** Shorter than 0,5 s by the number of 16 kHz samples written (as the BFF checks it): not sent, «Слишком коротко». */
+export const isTooShort = (r: { samples: number }): boolean => r.samples < MIN_WAV_SAMPLES;

@@ -116,7 +116,8 @@ async def test_reference_data_seeded(roles_env) -> None:
         "fake-speech": ("0.0000", "0.0000", "fake_speech", "0.0000")}
     budget = (await _fetch(roles.runtime_url, roles.schema, "SELECT * FROM budget"))[0]
     assert (budget["ai_enabled"], str(budget["monthly_cap_usd"]), str(budget["learner_daily_cap_usd"]),
-            str(budget["lesson_cap_usd"]), budget["alert_percent"]) == (True, "20.00", "0.0500", "0.0300", 80)
+            str(budget["lesson_cap_usd"]), budget["alert_percent"], str(budget["speech_monthly_cap_usd"])) == (
+        True, "20.00", "0.0500", "0.0300", 80, "5.00")
     rollouts = await _fetch(roles.runtime_url, roles.schema, "SELECT agent_id FROM agent_rollout")
     assert {r["agent_id"] for r in rollouts} == set(LLM_AGENT_IDS)
     assert len(AGENTS) == 17

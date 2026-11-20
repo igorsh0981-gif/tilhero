@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MEM_SECRET } from "./fakeMemory.js";
+import { makeWav } from "./wavFixture.js";
 import { bearer, closeRedis, idem, json, login, makeHarness, switchTo, testRedis, type Harness, type LoggedIn, TG_OTHER } from "./helpers.js";
 
 let h: Harness;
@@ -69,6 +70,35 @@ describe("обзор и вызов memory от имени ученика", () =>
     const bad = await get("/v1/memory/overview");
     expect(bad.statusCode).toBe(503);
     expect(bad.json()).toMatchObject({ code: "UPSTREAM_UNAVAILABLE", details: { service: "memory" } });
+  });
+});
+
+describe("аудитория контента — во все вызовы memory (memory сама проверяет аудиторию ContentRef)", () => {
+  it("translate, «в словарь», cards/lookup, произношение, список: ?audience= активного ученика (ребёнку — kids)", async () => {
+    const touch = async (token: string) => {
+      const content = { kind: "reading", key: "r-a1-coffee-shop", version: 2 };
+      await post("/v1/memory/translate", { text: "coffee", content }, {}, token);
+      await post("/v1/memory/cards", { text_en: "receipt", source: content }, idem(), token);
+      await get("/v1/practice/readings/r-a0-zoo", token);
+      await get("/v1/practice/readings/r-a1-coffee-shop", token);
+      await h.app.inject({ method: "POST", url: `/v1/memory/pronunciation?target=${encodeURIComponent("sentence:reading:r-a1-coffee-shop:2:s1")}`, headers: { ...bearer(token), "content-type": "audio/wav" }, payload: makeWav() });
+      await get("/v1/memory/cards", token);
+    };
+    const paths = ["/internal/v1/translate", "/internal/v1/cards", "/internal/v1/cards/lookup", "/internal/v1/pronunciation"];
+    await touch(s.access);
+    for (const p of paths) {
+      const calls = h.fake.callsTo("memory").filter((c) => c.path === p);
+      expect(calls.length, p).toBeGreaterThan(0);
+      for (const c of calls) expect(c.query.audience, p).toBe("adults");
+    }
+    const { kid: k } = await kid("6-9");
+    h.fake.calls.length = 0;
+    await touch(k.access);
+    for (const p of paths) {
+      const calls = h.fake.callsTo("memory").filter((c) => c.path === p);
+      expect(calls.length, p).toBeGreaterThan(0);
+      for (const c of calls) expect([c.query.audience, c.claims.age_band], p).toEqual(["kids", "6-9"]);
+    }
   });
 });
 
@@ -405,6 +435,23 @@ describe("перевод по тапу", () => {
     const res = await post("/v1/memory/translate", { text: "lion", content: { kind: "reading", key: "r-a0-zoo", version: 1 } }, {}, k.access);
     expect(res.statusCode).toBe(200);
     expect(h.fake.callsTo("memory", "POST", "/internal/v1/translate").at(-1)!.claims).toMatchObject({ lrn: child, age_band: "6-9" });
+  });
+
+  it("«В словарь» — общий с переводом лимит tg.memory.translate (обход перевода ИИ закрыт); повтор ключа лимит не тратит", async () => {
+    const src = { kind: "reading", key: "r-a1-coffee-shop", version: 2 };
+    const repeatKey = idem();
+    expect((await post("/v1/memory/cards", { text_en: "receipt", source: src }, repeatKey)).statusCode).toBe(201);
+    for (let i = 0; i < 30; i++) expect((await post("/v1/memory/translate", { text: "coffee", content: src })).statusCode, `t${i}`).toBe(200);
+    for (let i = 0; i < 29; i++) expect((await post("/v1/memory/cards", { text_en: `word${i}`, source: src }, idem())).statusCode, `c${i}`).toBe(201);
+    // 1 + 30 + 29 = 60: дальше — 429 и на «в словарь», и на перевод; memory не вызывается
+    const card = await post("/v1/memory/cards", { text_en: "menu", source: src }, idem());
+    expect(card.statusCode).toBe(429);
+    expect(card.json()).toMatchObject({ code: "RATE_LIMITED", details: { policy: "tg.memory.translate" } });
+    expect((await post("/v1/memory/translate", { text: "coffee", content: src })).statusCode).toBe(429);
+    expect(h.fake.callsTo("memory", "POST", "/internal/v1/cards")).toHaveLength(30);
+    // повтор уже отвеченного ключа — проходит (тот же ответ memory), лимит не тратит
+    const again = await post("/v1/memory/cards", { text_en: "receipt", source: src }, repeatKey);
+    expect(again.statusCode).toBe(201);
   });
 
   it("лимит tg.memory.translate: 60 за 10 минут на ученика, 61-й — 429 без вызова memory", async () => {

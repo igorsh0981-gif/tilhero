@@ -27,13 +27,16 @@ from tilhero_memory.domain.common import (
     cursor_time_id,
     emit_audit,
     encode_cursor,
+    idempotency_reused,
     iso,
     lock_user,
+    request_hash,
 )
 from tilhero_memory.domain.views import admin_row, snapshot
 from tilhero_memory.models import (
     CARD_STATUSES,
     Card,
+    Idempotency,
     LearnerProjection,
     RetentionCheck,
     ReviewLog,
@@ -42,7 +45,9 @@ from tilhero_memory.models import (
 
 ADJUSTABLE: Final = {"reschedule": ("new", "learning", "review"), "reset": ("new", "learning", "review", "known"),
                      "freeze": ("new", "learning", "review", "known"), "unfreeze": ("frozen",)}
-SKEW: Final = timedelta(minutes=5)
+DUE_TOLERANCE: Final = timedelta(days=1)
+IDEM_SCOPE: Final = "admin.card_action"
+IDEM_TTL: Final = timedelta(hours=24)
 
 
 def learner_not_found() -> ApiError:
@@ -142,7 +147,7 @@ async def card_detail(db: AsyncSession, card_id: uuid.UUID, now: datetime, log_l
     if card is None:
         raise card_not_found()
     body = admin_row(card, now)
-    body.update({"user_id": str(card.user_id), "example_en": card.example_en,
+    body.update({"user_id": str(card.user_id), "example_en": None if card.kind == "error" else card.example_en,
                  "sources": [{"kind": str(s.get("kind")), "key": s.get("key") if isinstance(s.get("key"), str)
                               else None, "version": s.get("version") if isinstance(s.get("version"), int) else None,
                               "at": s.get("at")} for s in card.sources],
@@ -150,12 +155,33 @@ async def card_detail(db: AsyncSession, card_id: uuid.UUID, now: datetime, log_l
     return body
 
 
+def _actor_uuid(actor: Actor) -> uuid.UUID:
+    try:
+        return uuid.UUID(actor.id)
+    except ValueError:
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"tilhero:staff:{actor.id}")
+
+
 async def card_action(db: AsyncSession, actor: Actor, card_id: uuid.UUID, action: str, due_at: datetime | None,
-                      reason: str, now: datetime) -> dict[str, Any]:
+                      reason: str, now: datetime, idem_key: str | None = None) -> dict[str, Any]:
+    """Idempotency-Key (admin-bff): повтор того же сотрудника с тем же ключом за 24 ч — тот же ответ, без новой
+    строки истории и аудита; тот же ключ с другими данными — 422 IDEMPOTENCY_KEY_REUSED."""
     card = await db.get(Card, card_id)
     if card is None:
         raise card_not_found()
     await lock_user(db, card.user_id)
+    fp = request_hash({"card_id": str(card_id), "action": action, "due_at": due_at.isoformat() if due_at else None,
+                       "reason": reason})
+    staff_id = _actor_uuid(actor)
+    if idem_key is not None:
+        prior = await db.get(Idempotency, (staff_id, IDEM_SCOPE, idem_key), with_for_update=True)
+        if prior is not None and prior.created_at >= now - IDEM_TTL:
+            if prior.request_hash != fp:
+                raise idempotency_reused()
+            return dict(prior.response)
+        if prior is not None:
+            await db.delete(prior)
+            await db.flush()
     card = await db.get(Card, card_id, with_for_update=True, populate_existing=True)
     if card is None:
         raise card_not_found()
@@ -165,7 +191,8 @@ async def card_action(db: AsyncSession, actor: Actor, card_id: uuid.UUID, action
     if action == "reschedule":
         assert due_at is not None
         delta = due_at - now
-        if delta < timedelta(days=1) - SKEW or delta > timedelta(days=365) + SKEW:
+        # 1..365 дней с допуском ±1 сутки: клиент шлёт полдень выбранного местного дня
+        if delta <= timedelta(days=1) - DUE_TOLERANCE or delta > timedelta(days=365) + DUE_TOLERANCE:
             raise due_at_range()
         card.due_at = due_at
     elif action == "reset":
@@ -187,4 +214,8 @@ async def card_action(db: AsyncSession, actor: Actor, card_id: uuid.UUID, action
                                        after={"card_id": str(card.card_id), "user_id": str(card.user_id),
                                               "action": action, **after}, reason=reason))
     await db.flush()
-    return await card_detail(db, card_id, now)
+    body = await card_detail(db, card_id, now)
+    if idem_key is not None:
+        db.add(Idempotency(user_id=staff_id, scope=IDEM_SCOPE, key=idem_key, request_hash=fp, status_code=200,
+                           response=body, created_at=now))
+    return body

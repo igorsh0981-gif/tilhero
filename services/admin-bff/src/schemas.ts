@@ -370,7 +370,8 @@ export const MODEL_UPDATE = obj(
 );
 /**
  * PUT budget: поля AiBudget & {reason}; ai_enabled — необязательно (аварийная остановка — своя команда), updated_at —
- * необязательно (защита ai-gateway от гонки правок → 409 BUDGET_CONFLICT {updated_at}).
+ * необязательно (защита ai-gateway от гонки правок → 409 BUDGET_CONFLICT {updated_at}). Спринт 5: подлимит речи
+ * `speech_monthly_cap_usd` — обязателен, 0..monthly_cap_usd (сравнение полей — в маршруте, до домена).
  */
 export const BUDGET_UPDATE = obj(
   {
@@ -379,10 +380,11 @@ export const BUDGET_UPDATE = obj(
     monthly_cap_usd: USD(100_000),
     learner_daily_cap_usd: USD(1000),
     lesson_cap_usd: USD(1000),
+    speech_monthly_cap_usd: USD(100_000),
     alert_percent: integer(1, 100),
     reason: REASON,
   },
-  ["monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "alert_percent", "reason"],
+  ["monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "speech_monthly_cap_usd", "alert_percent", "reason"],
 );
 export const EMERGENCY_STOP = obj({ enabled: { type: "boolean" }, reason: REASON }, ["enabled", "reason"]);
 

@@ -317,6 +317,23 @@ def upgrade() -> None:
     )
     op.execute("CREATE TRIGGER review_log_immutable BEFORE UPDATE ON review_log "
                "FOR EACH ROW EXECUTE FUNCTION memory_append_only()")
+    # DELETE строки истории напрямую запрещён; разрешён только каскад от удаления карточки (сага удаления):
+    # каскад FK выполняется триггером ссылочной целостности — глубина вложенности триггеров > 1
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION review_log_no_delete() RETURNS trigger AS $$
+        BEGIN
+          IF pg_trigger_depth() <= 1 THEN
+            RAISE EXCEPTION 'review_log is immutable (DELETE only with the card)'
+              USING ERRCODE = 'insufficient_privilege';
+          END IF;
+          RETURN OLD;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+    op.execute("CREATE TRIGGER review_log_no_delete BEFORE DELETE ON review_log "
+               "FOR EACH ROW EXECUTE FUNCTION review_log_no_delete()")
     # Показанное задание неизменяемо (содержимое и ключ); подсказки и пропуск — только до ответа; ответ записывается
     # один раз (повтор — тот же результат); после ответа — только стирание ввода по сроку (answer → NULL + redacted_at,
     # в тот же момент — ввод ученика в сохранённом итоге проверки).
@@ -357,10 +374,12 @@ def upgrade() -> None:
 def downgrade() -> None:
     drop_messaging_tables(op)
     op.execute("DROP TRIGGER IF EXISTS review_tasks_guard ON review_tasks")
+    op.execute("DROP TRIGGER IF EXISTS review_log_no_delete ON review_log")
     op.execute("DROP TRIGGER IF EXISTS review_log_immutable ON review_log")
     for table in ("deleted_users", "idempotency", "feed_log", "activity_days", "reminders_sent", "skill_projection",
                   "learner_projection", "pronunciation_attempts", "retention_checks", "review_tasks",
                   "review_sessions", "review_log", "cards"):
         op.drop_table(table)
     op.execute("DROP FUNCTION IF EXISTS review_tasks_guard()")
+    op.execute("DROP FUNCTION IF EXISTS review_log_no_delete()")
     op.execute("DROP FUNCTION IF EXISTS memory_append_only()")

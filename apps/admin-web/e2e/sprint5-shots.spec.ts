@@ -71,6 +71,10 @@ for (const mode of THEMES) {
       await page.locator('[data-nav="costs"]').click();
       await page.getByTestId("cs-speech").scrollIntoViewIfNeeded();
       await snap(page, `s5-10-costs-speech-${mode}`, false);
+      await page.getByTestId("csf-speech_monthly_cap_usd").scrollIntoViewIfNeeded();
+      await expect(page.getByTestId("csf-speech-hours")).toBeVisible();
+      await expectNoHScroll(page);
+      await snap(page, `s5-12-costs-limits-${mode}`, false);
       await page.locator('[data-nav="overview"]').click();
       await page.getByTestId("block-memory").scrollIntoViewIfNeeded();
       await expectNoHScroll(page);

@@ -345,6 +345,7 @@
 - **Приоритет поиска:** `course` (с `override`) → `methodist` → `ai` `approved` → `ai` `pending`. `rejected` и архивные не выдаются.
 
 ### 2.3 Внутренние API словаря (вызывающий memory)
+- **Аудитория (ревью).** `lookup`, `ai-entries` и `versions` принимают необязательное `audience`; при `kids` недетский контент → 404 `CONTENT_NOT_FOUND` (детям — только детские тексты, CONVENTIONS §8). memory передаёт аудиторию ученика всегда.
 - **`POST /internal/v1/glossary/lookup`** `{pair_id, text ≤ 60, content_ref: {kind, key, version, locator?}}`:
   - версия опубликована или бывшая опубликованной; черновик → 404 `CONTENT_NOT_FOUND`;
   - текст — в предложении `locator` или где угодно в версии: токены по границам слов, сравнение нормализованных форм. Нет → 422 `WORD_NOT_IN_CONTENT`;
@@ -486,6 +487,7 @@
     - чужой ребёнок → 404.
   - `/public` детского профиля: `purposes ∋ voice_recording`, если её дал опекун. Остальные необязательные цели детям по-прежнему недоступны.
   - Подростки — как раньше: `voice_recording` только после согласия родителя.
+  - **Политика 1.1** (решение владельца): цель `voice_recording` — «Оценка произношения по записи голоса», звук не хранится. `voice_recording` из согласий версии 1.0 (там — «хранить записи 30 дней») оценку произношения не открывает: `/public` и `voice_consent` её не учитывают, пока ученик не подтвердит согласие по 1.1.
   - `LearnerSummary.voice_consent: boolean` (bff.ts).
   - memory допущен к `/public`; `DELETION_DOMAINS` + `memory`.
 - **audit.** `AUDIT_EVENT_PRODUCERS` + `memory`; catalog уже есть.
@@ -516,7 +518,10 @@
 - **CI-матрицы.**
 - **Стенд e2e** — `AI_PROVIDER=fake`, `SPEECH_PROVIDER=fake`, memory с `SCHEDULER_TOKEN`.
 - **Схемы событий:** `memory.review.completed.v1`, `memory.reviews.due.v1`, `memory.retention.checked.v1`, `catalog.glossary.changed.v1`; `kind` + `reading` в `lesson.session.*`, `assessment.completed.v1`, `catalog.version.published.v1`.
-- **Порядок деплоя** (enum событий расширен):
-  1. потребители: learning-plan, diagnostics, notifications, memory;
-  2. издатели: lessons, assessment, catalog;
-  3. BFF и фронт.
+- **Порядок деплоя** (enum событий расширен; после ревью):
+  1. audit (издатель `memory`), identity-consent (политика 1.1, `memory` в саге), admin-identity (права);
+  2. потребители: learning-plan, diagnostics, notifications;
+  3. издатели и соседи memory: catalog (словарь, чтение), assessment (`memory-feed`), ai-gateway (gloss, речь), lessons;
+  4. memory (его новые consumers читают историю стрима — соседи уже должны отвечать по-новому);
+  5. BFF и фронт.
+- **Подлимит речи** `AiBudget.speech_monthly_cap_usd` = $5 внутри общих $20 (решение владельца после ревью).

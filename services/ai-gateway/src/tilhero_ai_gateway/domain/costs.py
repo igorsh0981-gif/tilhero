@@ -51,7 +51,8 @@ def model_view(m: ModelRow) -> dict[str, Any]:
 def budget_view(b: BudgetRow) -> dict[str, Any]:
     return {"ai_enabled": b.ai_enabled, "monthly_cap_usd": float(b.monthly_cap_usd),
             "learner_daily_cap_usd": float(b.learner_daily_cap_usd), "lesson_cap_usd": float(b.lesson_cap_usd),
-            "alert_percent": b.alert_percent, "updated_at": iso_z(b.updated_at)}
+            "speech_monthly_cap_usd": float(b.speech_monthly_cap_usd), "alert_percent": b.alert_percent,
+            "updated_at": iso_z(b.updated_at)}
 
 
 async def list_models(session: AsyncSession) -> list[ModelRow]:
@@ -149,6 +150,10 @@ async def update_budget(session: AsyncSession, values: dict[str, Any], expected_
     before = budget_view(row)
     for key, value in values.items():
         setattr(row, key, value)
+    # подлимит речи — внутри потолка месяца (решение владельца 20.11.2026; в БД — CHECK ck_budget_speech)
+    if row.speech_monthly_cap_usd > row.monthly_cap_usd:
+        raise unprocessable("BUDGET_INVALID", "Подлимит оценки произношения больше потолка месяца",
+                            {"fields": ["speech_monthly_cap_usd"]})
     after = budget_view(row)
     if {k: v for k, v in after.items() if k != "updated_at"} == {k: v for k, v in before.items() if k != "updated_at"}:
         return row
@@ -189,16 +194,17 @@ def _p95(values: list[int]) -> int | None:
     return ordered[index]
 
 
-async def speech_summary(session: AsyncSession, since: datetime, speech_available: bool) -> dict[str, Any]:
+async def speech_summary(session: AsyncSession, since: datetime, speech_available: bool,
+                         cap: Decimal) -> dict[str, Any]:
     """AiUsageSummary.speech: вызовы pronunciation_coach за период, минуты оценённого аудио (status ok — провайдер
-    обработал запись), расход."""
+    обработал запись), расход, подлимит месяца (AiBudget.speech_monthly_cap_usd)."""
     calls, audio_ms, spent = (await session.execute(
         select(func.count(),
                func.coalesce(func.sum(UsageRow.audio_ms).filter(UsageRow.status == "ok"), 0),
                func.coalesce(func.sum(UsageRow.cost_usd), 0))
         .where(UsageRow.created_at >= since, UsageRow.status != "pending", UsageRow.agent_id == SPEECH_AGENT))).one()
     return {"calls": int(calls), "audio_minutes": round(int(audio_ms) / 60_000, 2), "spent_usd": usd(spent),
-            "speech_available": speech_available}
+            "speech_available": speech_available, "cap_usd": float(cap)}
 
 
 async def summary(session: AsyncSession, period: str, now: datetime, tz: str,
@@ -260,14 +266,15 @@ async def summary(session: AsyncSession, period: str, now: datetime, tz: str,
         if per_lesson else None,
         "ai_enabled": budget.ai_enabled,
         "alert_percent": budget.alert_percent,
-        "speech": await speech_summary(session, since, speech_available),
+        "speech": await speech_summary(session, since, speech_available, Decimal(budget.speech_monthly_cap_usd)),
     }
 
 
 def call_view(u: UsageRow) -> dict[str, Any]:
     """AiCall (admin.ts) — без текстов и без user_id."""
     return {"call_id": str(u.call_id), "agent_id": u.agent_id, "version": u.version, "model_id": u.model_id,
-            "status": u.status, "reason": u.reason, "input_tokens": u.input_tokens, "output_tokens": u.output_tokens,
+            "status": u.status, "reason": u.reason, "audio_ms": u.audio_ms, "input_tokens": u.input_tokens,
+            "output_tokens": u.output_tokens,
             "cost_usd": usd(u.cost_usd), "latency_ms": u.latency_ms,
             "session_id": str(u.session_id) if u.session_id else None, "canary": u.canary,
             "created_at": iso_z(u.created_at)}

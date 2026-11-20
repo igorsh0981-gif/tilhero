@@ -2,7 +2,8 @@
  * «Затраты и лимиты» (costs.read; sprint 4, ADM-MONEY-01/02, AT-51): the month's spend against the cap (bar, percent
  * and the warning from alert_percent), spend per day (an accessible SVG bar chart with a table view), per agent and per
  * model (tables), the average cost of a lesson and the share of AI refusals; the settings (costs.manage, step-up and a
- * reason): monthly cap, learner's daily cap, lesson cap, alert threshold — saved against the `updated_at` that was read
+ * reason): monthly cap, learner's daily cap, lesson cap, alert threshold, the sub-cap of pronunciation (sprint 5: 0…the
+ * month, «≈ N ч аудио» at the price of the speech model) — saved against the `updated_at` that was read
  * (someone saved in between → 409 BUDGET_CONFLICT: the budget is re-read, the edited fields keep the entered values,
  * «проверьте и сохраните ещё раз» with the values saved now); and the EMERGENCY STOP of the AI — a big
  * switch with a confirmation and a reason. With the AI off the three sprint 4 sections show the banner «ИИ выключен —
@@ -21,7 +22,7 @@ import { ConfirmCommand } from "../../ui/overlays";
 import { useToast } from "../../ui/toasts";
 import { errText } from "../../ui/errors";
 import { setAiEnabled } from "./aiState";
-import { budgetForm, checkBudget, mergeBudgetForm, type BudgetForm } from "./model";
+import { budgetForm, capPct, checkBudget, decimal, mergeBudgetForm, speechHourPrice, speechHours, type BudgetForm } from "./model";
 import { AiOffBanner, BarChart, BudgetBar, Kv, useKeyed, useUsd } from "./parts";
 
 type UsagePeriod = AiUsageSummary["period"];
@@ -305,8 +306,36 @@ function SpeechBlock({ s }: { s: AiUsageSummary }) {
           <div className="kpi-n">{t("cs.speechShare", { s: money(s.spent_usd) })}</div>
         </div>
       </div>
+      {sp.cap_usd == null ? null : sp.cap_usd === 0 ? (
+        <p className="small warn-ink" data-testid="cs-speech-cap-m">
+          {t("cs.speechCapZero")}
+        </p>
+      ) : s.period === "month" ? (
+        // the month's speech spend against its sub-cap (AiBudget.speech_monthly_cap_usd)
+        <div className="stack sm">
+          <span className="kpi-l">{t("cs.speechCapL")}</span>
+          <BudgetBar spent={sp.spent_usd} cap={sp.cap_usd} pct={capPct(sp.spent_usd, sp.cap_usd)} alert={s.alert_percent} testId="cs-speech-cap" compact />
+        </div>
+      ) : (
+        <p className="small" data-testid="cs-speech-cap-m">
+          {t("cs.speechCap", { c: money(sp.cap_usd) })}
+        </p>
+      )}
       <p className="xs muted">{sp.speech_available ? t("cs.speechNote") : t("cs.speechOffM")}</p>
     </section>
+  );
+}
+
+/** «≈ N ч аудио при текущей цене $X/ч» under the sub-cap of pronunciation; nothing when the price is unknown. */
+function SpeechHours({ cap, hourUsd }: { cap: number | null; hourUsd: number | null }) {
+  const { t, fmt } = useI18n();
+  const money = useUsd();
+  const h = speechHours(cap, hourUsd);
+  if (h == null || hourUsd == null) return null;
+  return (
+    <span className="block" data-testid="csf-speech-hours">
+      {t("csf.speechHours", { h: fmt.num(h, Number.isInteger(h) ? 0 : 1), p: money(hourUsd) })}
+    </span>
   );
 }
 
@@ -394,6 +423,8 @@ const FIELDS: ReadonlyArray<{ k: keyof BudgetForm; unit: "usd" | "pct" }> = [
   { k: "learner_daily_cap_usd", unit: "usd" },
   { k: "lesson_cap_usd", unit: "usd" },
   { k: "alert_percent", unit: "pct" },
+  // sprint 5: inside the monthly cap — on its own row (its label is long)
+  { k: "speech_monthly_cap_usd", unit: "usd" },
 ];
 
 function SettingsCard({ budget, error, onRetry, onSaved, onConflict }: { budget: AiBudget | null; error: unknown; onRetry: () => void; onSaved: (b: AiBudget) => void; onConflict: () => Promise<AiBudget> }) {
@@ -409,6 +440,19 @@ function SettingsCard({ budget, error, onRetry, onSaved, onConflict }: { budget:
   const [conflict, setConflict] = useState(false);
   /** the form to show over the re-read limits (set only when those limits differ — the effect below runs) */
   const keep = useRef<BudgetForm | null>(null);
+  /** the price of an hour of audio of the speech model (ai.read) — for «≈ N ч аудио»; null — unknown */
+  const [hourUsd, setHourUsd] = useState<number | null>(null);
+  const readModels = can("ai.read");
+  useEffect(() => {
+    if (!readModels) return;
+    let alive = true;
+    Ai.models()
+      .then((r) => alive && setHourUsd(speechHourPrice(r.items)))
+      .catch(() => alive && setHourUsd(null));
+    return () => {
+      alive = false;
+    };
+  }, [readModels]);
   // re-filled only when the limits themselves change (the emergency stop must not drop unsaved edits)
   const limitsKey = budget ? JSON.stringify(budgetForm(budget)) : "";
   useEffect(() => {
@@ -483,6 +527,7 @@ function SettingsCard({ budget, error, onRetry, onSaved, onConflict }: { budget:
             </div>
             <span className="hint" id={`csf-${k}-h`}>
               {t(`csf.h.${k}`)}
+              {k === "speech_monthly_cap_usd" && <SpeechHours cap={decimal(form[k])} hourUsd={hourUsd} />}
               {conflict && form[k] !== base[k] && (
                 <b className="block" data-testid={`csf-${k}-saved`}>
                   {t("csf.savedNow", { v: saved(k, unit) })}
@@ -512,7 +557,7 @@ function SettingsCard({ budget, error, onRetry, onSaved, onConflict }: { budget:
       {ask && (
         <ConfirmCommand
           title={t("csf.saveT")}
-          text={t("csf.saveM", { m: money(ask.monthly_cap_usd), d: money(ask.learner_daily_cap_usd), l: money(ask.lesson_cap_usd), a: ask.alert_percent })}
+          text={t("csf.saveM", { m: money(ask.monthly_cap_usd), d: money(ask.learner_daily_cap_usd), l: money(ask.lesson_cap_usd), s: money(ask.speech_monthly_cap_usd), a: ask.alert_percent })}
           icon="gauge"
           ok={t("common.save")}
           testId="csf-dialog"

@@ -156,7 +156,7 @@ def sentence_text(kind: str, payload: dict[str, Any], locator: str) -> str | Non
     return node.get("line_en") if isinstance(node, dict) and isinstance(node.get("line_en"), str) else None
 
 
-async def reference_text(ctx: Ctx, t: Target) -> str:
+async def reference_text(ctx: Ctx, t: Target, audience: str) -> str:
     if t.kind == "card":
         async with ctx.rt.transaction() as db:
             card = (await db.execute(select(Card).where(Card.card_id == t.card_id, Card.user_id == ctx.user_id))
@@ -167,9 +167,12 @@ async def reference_text(ctx: Ctx, t: Target) -> str:
     else:
         assert t.content is not None
         try:
-            payload = await ctx.catalog.version(t.content["kind"], t.content["key"], t.content["version"])
+            payload = await ctx.catalog.version(t.content["kind"], t.content["key"], t.content["version"], audience)
         except ContentGone:
             raise content_not_found() from None
+        allowed = payload.get("audience")
+        if audience == "kids" and not (isinstance(allowed, list) and "kids" in allowed):
+            raise content_not_found()  # детям — только детский контент
         found = sentence_text(t.content["kind"], payload, t.content["locator"])
         if found is None:
             raise content_not_found()
@@ -240,7 +243,7 @@ async def assess(ctx: Ctx, target_kind: str | None, target: str, audio: bytes,
     async with ctx.rt.transaction() as db:
         await learners.ensure_not_deleted(db, ctx.user_id)
         prof = await learners.profile(db, ctx.learner, ctx.settings)
-    reference = await reference_text(ctx, t)
+    reference = await reference_text(ctx, t, prof.audience)
     public = await clients.public_profile(ctx.rt, ctx.user_id)
     if public is None:
         raise speech_unavailable()

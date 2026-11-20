@@ -9,6 +9,7 @@ import { failureOf } from "../src/audio/recorder";
 import { concatChunks, encodeWav, level, MAX_RECORD_MS, MAX_WAV_BYTES, mixToMono, resample, toWav, WAV_HEADER_BYTES, wavInfo } from "../src/audio/wav";
 import { ApiError } from "../src/api/errors";
 import {
+  canAnswer,
   cardTarget,
   daysUntil,
   initialReview,
@@ -353,6 +354,22 @@ describe("review player reducer", () => {
     expect(s.error?.kind).toBe("send");
     s = reviewReducer(s, { type: "failed", error: { kind: "action", error: new ApiError(422, "ANSWER_INVALID", "x") } });
     expect(s.pending).toBeNull();
+  });
+  it("a lost answer locks the task: no new answer and no hint until it is re-sent and answered", () => {
+    let s = loaded();
+    expect(canAnswer(s)).toBe(true);
+    s = reviewReducer(s, { type: "send", taskId: "t1", body: { text: "to go" } });
+    expect(canAnswer(s)).toBe(false);
+    s = reviewReducer(s, { type: "sendFailed", error: new ApiError(0, "NETWORK", "x") });
+    expect(s.phase).toBe("ready");
+    expect(canAnswer(s)).toBe(false);
+    // «Отправить ещё раз» — the same body
+    s = reviewReducer(s, { type: "send", taskId: s.pending!.taskId, body: s.pending!.body });
+    s = reviewReducer(s, { type: "result", result: result({ next: task({ task_id: "t2" }) }) });
+    s = reviewReducer(s, { type: "advance" });
+    expect(canAnswer(s)).toBe(true);
+    expect(canAnswer({ phase: "feedback", task: task(), pending: null })).toBe(false);
+    expect(canAnswer({ phase: "ready", task: null, pending: null })).toBe(false);
   });
   it("hints: the first letter and the revealed answer stay on the task; a new task starts clean", () => {
     let s = reviewReducer(loaded(), { type: "hint", hint: { kind: "first_letter", text: "t…" } });

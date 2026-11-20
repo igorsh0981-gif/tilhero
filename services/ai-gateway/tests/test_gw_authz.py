@@ -11,6 +11,7 @@ A = "/admin/v1/ai/agents/conversation_partner"
 CASE = {"title": "Кейс", "mandatory": False, "checks": [{"kind": "schema_valid"}],
         "input": {"audience": "adults", "context": {}}}
 BUDGET = {"monthly_cap_usd": 20, "learner_daily_cap_usd": 0.05, "lesson_cap_usd": 0.03, "alert_percent": 80,
+          "speech_monthly_cap_usd": 5,
           "reason": "Лимиты"}
 
 # (метод, путь, тело, право)

@@ -14,10 +14,11 @@ import { CID } from "./fixtures/memory-data";
 test.describe.configure({ timeout: 90_000 });
 
 const menu = (page: Page) => page.locator("[data-nav]").evaluateAll((els) => els.map((e) => e.getAttribute("data-nav")));
-const ymd = (days: number) => {
-  const d = new Date(Date.now() + days * 86_400_000);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
+/** a local day of the browser (playwright.config: Asia/Tashkent, UTC+5, no DST) N days ahead */
+const TZ_MS = 5 * 3_600_000;
+const ymd = (days: number) => new Date(Date.now() + days * 86_400_000 + TZ_MS).toISOString().slice(0, 10);
+/** noon of that local day — what the admin sends as the new due moment (admin.ts) */
+const noonOf = (day: string) => new Date(Date.parse(`${day}T12:00:00Z`) - TZ_MS).toISOString();
 
 test("AT-61 learner card → «Память»: summary, checks, cards, the history with names → reschedule (reason ≥ 10, step-up) → audit", async ({ page }) => {
   const bff = await openAs(page, "ops@tilhero.local", `#/users/${LEARNER.madina}`);
@@ -39,12 +40,17 @@ test("AT-61 learner card → «Память»: summary, checks, cards, the histo
   await expect(page.locator('[data-testid^="mem-card-c1"]')).toHaveCount(6);
   await expect(page.getByTestId(`mem-card-${CID.c4}`)).toContainText("просрочено");
   await expect(page.getByTestId(`mem-card-${CID.c4}`)).toContainText("word_order");
+  // an error card: the label of its code instead of a text — the correction came from the learner's own answer
+  await expect(page.getByTestId(`mem-open-${CID.c4}`)).toHaveText("Порядок слов");
   await page.getByTestId("mem-f-status").selectOption("frozen");
   await expect(page.locator('[data-testid^="mem-card-c1"]')).toHaveCount(1);
   await page.getByTestId("mem-f-status").selectOption("");
-  // the error card: the code, never the learner's quote
+  // the error card: the code and its label, never the learner's text or its correction
+  await expect(page.getByTestId("mem-learner")).toContainText("Тексты и исправления ученика не показываются");
   await page.getByTestId(`mem-open-${CID.c4}`).click();
-  await expect(page.getByTestId("mem-card-meta")).toContainText("Цитата ученика в админке не показывается");
+  await expect(page.getByTestId("mem-card-meta")).toContainText("Текст ученика и исправление в админке не показываются");
+  await expect(page.getByTestId("mem-card")).toContainText("Порядок слов");
+  await expect(page.getByTestId("mem-card")).toContainText("word_order");
   await page.getByTestId("drawer-close").click();
   // the card with the scheduling history: before → after, algorithm and version, who (a staff member by name)
   await page.getByTestId(`mem-open-${CID.c1}`).click();
@@ -74,10 +80,8 @@ test("AT-61 learner card → «Память»: summary, checks, cards, the histo
   await expect(log.locator("tbody tr").first()).toContainText("Тимур");
   await expect(log.locator("tbody tr").first()).toContainText("ручная правка");
   const post = bff.calls("POST", `/memory/cards/${CID.c1}/actions`).at(-1)!;
-  expect(post.body).toMatchObject({ action: "reschedule", reason: "Ученица уезжает, перенос по её просьбе в поддержке", due_at: expect.stringMatching(/Z$/) });
-  const days = (Date.parse((post.body as { due_at: string }).due_at) - Date.now()) / 86_400_000;
-  expect(days).toBeGreaterThan(2.9);
-  expect(days).toBeLessThan(3.1);
+  // the chosen day as local noon (memory allows ±1 day at the borders 1..365)
+  expect(post.body).toEqual({ action: "reschedule", reason: "Ученица уезжает, перенос по её просьбе в поддержке", due_at: noonOf(ymd(3)) });
   expect(post.headers["idempotency-key"]).toBeTruthy();
   expect(bff.memory.audit.at(-1)).toMatchObject({ action: "memory.card_adjusted", id: CID.c1 });
   // a frozen card offers only reset and unfreeze
@@ -143,6 +147,55 @@ test("forgetting analytics (dashboard.read): totals d7 / d30, hidden groups «м
   await expect(page.getByTestId("mem-learner")).toHaveCount(0);
 });
 
+test("manual action: the answer is lost (502) → the retry carries the same Idempotency-Key → one history row, one audit record; the next command gets a new key", async ({ page }) => {
+  const bff = await openAs(page, "ops@tilhero.local", `#/memory/learners/${LEARNER.madina}/${CID.c2}`, { memory: { actionLostOnce: true } });
+  await expect(page.getByTestId("mem-card-body")).toHaveAttribute("data-status", "learning");
+  const reason = "Ученица в отпуске до конца месяца";
+  await page.getByTestId("mem-act-freeze").click();
+  const dlg = page.getByTestId("mem-act-dialog");
+  await dlg.locator("#cmd-reason").fill(reason);
+  await dlg.getByTestId("confirm-ok").click();
+  await typeOtp(page, "stepup", TOTP);
+  // memory applied the action, the answer did not come back: the dialog stays with the error, the command is repeated
+  await expect(dlg).toContainText("Сервис временно недоступен");
+  await dlg.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("toasts")).toContainText("Карточка заморожена");
+  await expect(page.getByTestId("mem-card-body")).toHaveAttribute("data-status", "frozen");
+  const keys = bff.memory.actionKeys;
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).toBe(keys[0]);
+  expect(bff.memory.audit.filter((a) => a.id === CID.c2)).toHaveLength(1);
+  expect(bff.memory.card(CID.c2)!.log.filter((r) => r.reason === reason)).toHaveLength(1);
+  await expect(page.getByTestId("mem-log").locator('tr[data-actor="staff"]')).toHaveCount(1);
+  // a new command after a success — a new key
+  await page.getByTestId("mem-act-unfreeze").click();
+  await page.locator("#cmd-reason").fill("Ученица вернулась к занятиям");
+  await page.getByTestId("confirm-ok").click();
+  await expect(page.getByTestId("toasts")).toContainText("Карточка разморожена");
+  expect(keys).toHaveLength(3);
+  expect(keys[2]).not.toBe(keys[0]);
+});
+
+test("analytics: a late answer of the period the staff member already left is dropped (30 → 90 days)", async ({ page }) => {
+  const bff = await openAs(page, "comms@tilhero.local", "#/memory", { memory: { analyticsDelay: { "30d": 1500 } } });
+  // the 30-day answer is still on its way — switch to 90 days, which answers at once
+  await page.getByTestId("fa-period").getByRole("button", { name: "90 дней" }).click();
+  await expect(page.getByTestId("fa-body")).toHaveAttribute("data-period", "90d");
+  await expect(page.getByTestId("fa-d30-pct")).toHaveText("78,9 %");
+  // the late 30-day answer arrives and must not replace the chosen period
+  expect(bff.calls("GET", "/memory/analytics").length).toBeGreaterThanOrEqual(2);
+  await page.waitForTimeout(1_800); // past the delay of the 30-day answer
+  await expect(page.getByTestId("mem-analytics")).toHaveAttribute("data-period", "90d");
+  await expect(page.getByTestId("fa-body")).toHaveAttribute("data-period", "90d");
+  await expect(page.getByTestId("fa-d30-pct")).toHaveText("78,9 %");
+  // back to 30 days: the 90-day figures stay dimmed (busy) until the 30-day answer comes — never shown as 30 days
+  await page.getByTestId("fa-period").getByRole("button", { name: "30 дней" }).click();
+  await expect(page.getByTestId("fa-body")).toHaveAttribute("aria-busy", "true");
+  await expect(page.getByTestId("fa-body")).toHaveAttribute("data-period", "30d");
+  await expect(page.getByTestId("fa-body")).not.toHaveAttribute("aria-busy", "true");
+  await expect(page.getByTestId("fa-d30")).toHaveAttribute("data-hidden", "true");
+});
+
 test("overview: the block «Память и повторения» and the AI queue link; a failed memory block does not break the overview", async ({ page }) => {
   await openAs(page, "methodist@tilhero.local", "#/overview");
   const blk = page.getByTestId("block-memory");
@@ -204,9 +257,48 @@ test("speech: audio hour price of the speech model (step-up), provider status wi
   await page.locator('[data-nav="costs"]').click();
   const cs = page.getByTestId("cs-speech");
   await expect(cs).toHaveAttribute("data-available", "true");
-  await expect(page.getByTestId("cs-speech-minutes")).toHaveText("412,5");
-  await expect(page.getByTestId("cs-speech-calls")).toHaveText(/2\s?475/);
+  await expect(page.getByTestId("cs-speech-minutes")).toHaveText("136,5");
+  await expect(page.getByTestId("cs-speech-calls")).toHaveText("819");
   await expect(cs).toContainText("звук не хранится");
+});
+
+test("pronunciation sub-cap: «≈ N ч аудио» at the current price, 0…month, step-up; the costs show the spend against it", async ({ page }) => {
+  const bff = await openAs(page, "ops@tilhero.local", "#/costs");
+  // the month's speech spend against the sub-cap: 136,5 min × $1,32/h = $3,00 of $5,00
+  const bar = page.getByTestId("cs-speech-cap");
+  await expect(bar).toContainText("$3,00");
+  await expect(bar).toContainText("из $5,00");
+  await expect(page.getByTestId("cs-speech-cap-pct")).toHaveText("60,1 %");
+  await expect(page.getByTestId("cs-speech-on")).toBeVisible();
+  // the field and the hint from the price of the speech model
+  const f = page.getByTestId("csf-speech_monthly_cap_usd");
+  await expect(f).toHaveValue("5");
+  await expect(page.locator('label[for="csf-speech_monthly_cap_usd"]')).toHaveText("Подлимит оценки произношения, $ в месяц");
+  await expect(page.getByTestId("csf-speech-hours")).toHaveText("≈ 3,8 ч аудио при текущей цене $1,32/ч");
+  await f.fill("2,64");
+  await expect(page.getByTestId("csf-speech-hours")).toHaveText("≈ 2 ч аудио при текущей цене $1,32/ч");
+  // 0…the monthly cap
+  await f.fill("25");
+  await page.getByTestId("csf-save").click();
+  await expect(page.getByTestId("cs-settings")).toContainText("Не больше месячного потолка");
+  await f.fill("-1");
+  await expect(page.getByTestId("cs-settings")).toContainText("Число не меньше 0");
+  await f.fill("2,5");
+  await page.getByTestId("csf-save").click();
+  const sd = page.getByTestId("csf-dialog");
+  await expect(sd).toContainText("произношение $2,50 в месяц");
+  await sd.locator("#cmd-reason").fill("Сокращаем подлимит речи до конца пилота");
+  await sd.getByTestId("confirm-ok").click();
+  await typeOtp(page, "stepup", TOTP);
+  await expect(page.getByTestId("toasts")).toContainText("Лимиты сохранены");
+  expect(bff.calls("PUT", "/ai/budget").at(-1)!.body).toMatchObject({ monthly_cap_usd: 20, speech_monthly_cap_usd: 2.5, reason: "Сокращаем подлимит речи до конца пилота" });
+  // $3,00 spent of $2,50: the sub-cap is reached — the feature is hidden from learners
+  await expect(page.getByTestId("cs-speech-off")).toBeVisible();
+  await expect(bar).toHaveAttribute("data-level", "over");
+  await expect(bar).toContainText("из $2,50");
+  // a week: the sub-cap of the month as text
+  await page.getByTestId("cs-period").getByRole("button", { name: /неделя/i }).click();
+  await expect(page.getByTestId("cs-speech-cap-m")).toHaveText("Подлимит произношения: $2,50 в месяц");
 });
 
 test("speech without the Azure key: «не задан», the feature is shown as unavailable", async ({ page }) => {

@@ -80,6 +80,8 @@ class BudgetIn(BaseModel):
     monthly_cap_usd: float = Field(ge=0, le=100_000)
     learner_daily_cap_usd: float = Field(ge=0, le=1000)
     lesson_cap_usd: float = Field(ge=0, le=1000)
+    # подлимит речи (спринт 5, решение владельца 20.11.2026): обязателен, 0..monthly_cap_usd (проверка — в домене)
+    speech_monthly_cap_usd: float = Field(ge=0, le=100_000)
     alert_percent: int = Field(ge=1, le=100)
     ai_enabled: bool | None = None
     updated_at: str | None = Field(default=None, max_length=40)

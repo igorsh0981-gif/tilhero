@@ -25,7 +25,7 @@ from tilhero_memory import clients
 from tilhero_memory.domain.common import local_date, word_not_in_content
 from tilhero_memory.domain.context import Ctx
 from tilhero_memory.domain.learners import Profile
-from tilhero_memory.domain.normalize import normalize
+from tilhero_memory.domain.normalize import find_in_sentence, normalize
 from tilhero_memory.settings import Settings
 
 log = logging.getLogger("tilhero.memory.glossary")
@@ -42,6 +42,7 @@ class Resolved:
     entry: dict[str, Any] | None  # статья, которую можно показать ученику
     sentence_en: str | None
     note: dict[str, str] | None = None  # пояснение глоссария текста («фразовый глагол») — из lookup catalog
+    surface: str = ""  # слово как в предложении контента (не сырой ввод): для ИИ, статьи ИИ и карточки
 
 
 def usable(entry: dict[str, Any] | None) -> bool:
@@ -68,9 +69,10 @@ def gloss_key(settings: Settings, pair_id: str, key: str) -> str:
     return f"gloss:v1:{settings.gloss_cache_namespace}{pair_id}:{key}"
 
 
-def _in_content_key(settings: Settings, pair_id: str, ref: dict[str, Any], key: str) -> str:
-    raw = json.dumps([pair_id, ref.get("kind"), ref.get("key"), ref.get("version"), ref.get("locator"), key],
-                     ensure_ascii=False)
+def _in_content_key(settings: Settings, pair_id: str, ref: dict[str, Any], key: str, audience: str) -> str:
+    """Проверка «слово есть в этом тексте» для аудитории (детям недетский контент — 404) — версии неизменяемы."""
+    raw = json.dumps([pair_id, ref.get("kind"), ref.get("key"), ref.get("version"), ref.get("locator"), key,
+                      audience], ensure_ascii=False)
     return f"gloss:v1:{settings.gloss_cache_namespace}in:{hashlib.sha256(raw.encode()).hexdigest()[:40]}"
 
 
@@ -112,9 +114,9 @@ async def invalidate(rt: Runtime, settings: Settings, pair_id: str, forms: list[
         return 0
 
 
-async def _level(ctx: Ctx, ref: dict[str, Any]) -> str:
+async def _level(ctx: Ctx, ref: dict[str, Any], audience: str) -> str:
     try:
-        payload = await ctx.catalog.version(str(ref["kind"]), str(ref["key"]), int(ref["version"]))
+        payload = await ctx.catalog.version(str(ref["kind"]), str(ref["key"]), int(ref["version"]), audience)
     except Exception:  # ContentGone, CATALOG_UNAVAILABLE — уровень по умолчанию
         return "A1"
     level = payload.get("level")
@@ -151,7 +153,7 @@ async def resolve(ctx: Ctx, prof: Profile, text: str, ref: dict[str, Any]) -> Re
     if not key or ref.get("kind") not in CONTENT_KINDS:
         raise word_not_in_content()
     s = ctx.settings
-    in_key = _in_content_key(s, prof.pair_id, ref, key)
+    in_key = _in_content_key(s, prof.pair_id, ref, key, prof.audience)
     g_key = gloss_key(s, prof.pair_id, key)
     cached_in = await _cache_get(ctx.rt, in_key)
     cached_gloss = await _cache_get(ctx.rt, g_key)
@@ -160,7 +162,7 @@ async def resolve(ctx: Ctx, prof: Profile, text: str, ref: dict[str, Any]) -> Re
         note = cached_in.get("note") if isinstance(cached_in.get("note"), dict) else None
         entry, blocked = cached_gloss.get("entry"), cached_gloss.get("blocked") is True
     else:
-        look = await ctx.catalog.lookup(prof.pair_id, text, ref)
+        look = await ctx.catalog.lookup(prof.pair_id, text, ref, prof.audience)
         sentence = look["sentence_en"]
         note = look["note"]
         entry = look["entry"]
@@ -169,11 +171,12 @@ async def resolve(ctx: Ctx, prof: Profile, text: str, ref: dict[str, Any]) -> Re
         if entry is not None or blocked:
             await _cache_set(ctx.rt, g_key, {"entry": entry if usable(entry) else None, "blocked": blocked},
                              s.gloss_cache_ttl_seconds)
+    surface = (find_in_sentence(sentence, [text]) if sentence else None) or key
     if usable(entry):
-        return Resolved(entry, sentence, note)
+        return Resolved(entry, sentence, note, surface)
     if blocked:
-        return Resolved(None, sentence, note)
-    return Resolved(await _ai_gloss(ctx, prof, text, key, ref, sentence), sentence, note)
+        return Resolved(None, sentence, note, surface)
+    return Resolved(await _ai_gloss(ctx, prof, surface[:60], key, ref, sentence), sentence, note, surface)
 
 
 async def _ai_gloss(ctx: Ctx, prof: Profile, text: str, key: str, ref: dict[str, Any],
@@ -183,7 +186,7 @@ async def _ai_gloss(ctx: Ctx, prof: Profile, text: str, key: str, ref: dict[str,
     session_id = uuid.uuid5(GLOSS_NS, f"{ctx.user_id}:{day}")
     request_id = uuid.uuid5(GLOSS_NS, f"{ctx.user_id}:{day}:{prof.pair_id}:{key}")
     context = {"request": "gloss_word", "word": text[:60], "sentence_en": (sentence or text)[:300],
-               "level": await _level(ctx, ref), "content_kind": ref["kind"]}
+               "level": await _level(ctx, ref, prof.audience), "content_kind": ref["kind"]}
     res = await clients.invoke_gloss(ctx.rt, request_id=request_id, session_id=session_id, user_id=ctx.user_id,
                                      audience=prof.audience, locale=prof.locale, context=context)
     if res.status != "ok" or res.output is None:
@@ -194,6 +197,7 @@ async def _ai_gloss(ctx: Ctx, prof: Profile, text: str, key: str, ref: dict[str,
         log.warning("gloss_word output malformed")
         return None
     body = {"pair_id": prof.pair_id, "surface": text[:60], **out, "agent_version": res.agent_version,
+            "audience": prof.audience,
             "content_ref": {k: ref[k] for k in ("kind", "key", "version", "locator") if ref.get(k) is not None}}
     entry = await ctx.catalog.ai_entry(body)
     if entry is not None:

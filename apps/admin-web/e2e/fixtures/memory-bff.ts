@@ -22,6 +22,11 @@ export interface MemoryScenario {
   glossesUnknown?: boolean;
   /** the analytics of memory answers 503 */
   analyticsDown?: boolean;
+  /** the first manual card action is applied, but its answer is lost on the way back (502): the retry with the same
+   *  Idempotency-Key gets the stored answer — no second history row, no second audit record */
+  actionLostOnce?: boolean;
+  /** delay of the analytics answer per period, ms (the race of a period switch) */
+  analyticsDelay?: Partial<Record<"30d" | "90d", number>>;
 }
 
 const CYR = /[Ѐ-ӿ]/;
@@ -35,6 +40,11 @@ export class MemoryStore {
   /** audit actions of this part (the shared audit log gets them too) */
   readonly audit: Array<{ action: string; id: string; reason: string | null }> = [];
   private seq = 0;
+  /** Idempotency-Key of the manual card actions → the request and its stored answer (memory: 24 h per staff member) */
+  private readonly idem = new Map<string, { sig: string; res: unknown }>();
+  /** every Idempotency-Key the manual actions arrived with, in order (e2e checks the retry) */
+  readonly actionKeys: string[] = [];
+  private lost = 0;
 
   constructor(private readonly sc: MemoryScenario = {}) {}
 
@@ -326,7 +336,10 @@ export class MemoryStore {
       if (!(await need(["memory.read", "dashboard.read"]))) return true;
       if (this.sc.analyticsDown) return fail(503, "UPSTREAM_UNAVAILABLE", { service: "memory" });
       const p = q.get("period") ?? "30d";
-      return p === "30d" || p === "90d" ? done(200, M.analytics(p)) : fail(422, "VALIDATION_ERROR", { in: "query", field: "period", errors: [] });
+      if (p !== "30d" && p !== "90d") return fail(422, "VALIDATION_ERROR", { in: "query", field: "period", errors: [] });
+      const wait = this.sc.analyticsDelay?.[p] ?? 0;
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      return done(200, M.analytics(p));
     }
     if (key === "GET /memory/stats") {
       if (!(await need("dashboard.read"))) return true;
@@ -361,6 +374,12 @@ export class MemoryStore {
       if (method === "POST" && m[2] === "/actions") {
         if (!(await need("memory.manage", true))) return true;
         if (!c) return fail(404, "CARD_NOT_FOUND");
+        const idemKey = headers["idempotency-key"];
+        if (!idemKey) return fail(422, "IDEMPOTENCY_KEY_REQUIRED");
+        this.actionKeys.push(idemKey);
+        const sig = JSON.stringify([c.card_id, body]);
+        const prior = this.idem.get(`${x.me.staff_id}:${idemKey}`);
+        if (prior) return prior.sig === sig ? done(200, prior.res) : fail(422, "IDEMPOTENCY_KEY_REUSED");
         const a = body as unknown as CardAction & { due_at?: string };
         const reason = String(a.reason ?? "").trim();
         if (reason.length < 10 || reason.length > 300) return fail(422, "VALIDATION_ERROR", { in: "body", field: "reason", errors: [] });
@@ -371,7 +390,8 @@ export class MemoryStore {
         if (a.action === "reschedule") {
           const due = Date.parse(String(a.due_at ?? ""));
           const days = (due - Date.now()) / DAY;
-          if (!Number.isFinite(due) || days < 1 - 1 / 1440 || days > 365 + 1 / 1440) return fail(422, "DUE_AT_RANGE");
+          // admin.ts: the chosen day comes as local noon; ±1 day at the borders 1..365
+          if (!Number.isFinite(due) || days < 1 - 1 || days > 365 + 1) return fail(422, "DUE_AT_RANGE");
           c.due_at = new Date(due).toISOString();
         } else if (a.action === "reset") Object.assign(c, { status: "new", stability: null, difficulty: null, retrievability: null, reps: 0, lapses: 0, due_at: iso(0) });
         else if (a.action === "freeze") c.status = "frozen";
@@ -380,7 +400,10 @@ export class MemoryStore {
         const after = { state: (c.status === "new" ? "new" : c.status === "review" ? "review" : "learning") as ReviewLogRow["after"]["state"], stability: c.stability, difficulty: c.difficulty, due_at: c.due_at, status: c.status };
         c.log.unshift({ log_id: `1a000000-0000-4000-8000-${String(900 + ++this.seq).padStart(12, "0")}`, at: iso(0), task_type: "manual", answer_mode: "manual", grade: null, hinted: false, revealed: false, elapsed_days: null, before, after, algorithm: "fsrs-5", params_version: "fsrs5-default-1", actor: "staff", actor_id: x.me.staff_id, actor_name: x.me.display_name, reason });
         audit("memory.card_adjusted", "memory_card", c.card_id, reason, { action: a.action, user_id: c.user_id });
-        return done(200, this.cardDetail(c));
+        const res = this.cardDetail(c);
+        this.idem.set(`${x.me.staff_id}:${idemKey}`, { sig, res });
+        if (this.sc.actionLostOnce && this.lost++ === 0) return fail(502, "UPSTREAM_UNAVAILABLE", { service: "memory" });
+        return done(200, res);
       }
       return fail(404, "NOT_FOUND", { path });
     }

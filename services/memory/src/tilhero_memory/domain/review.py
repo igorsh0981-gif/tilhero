@@ -110,6 +110,20 @@ def task_view(t: ReviewTask, rows: list[ReviewTask], settings: Settings) -> dict
             "voice": settings.review_voice}
 
 
+async def render(db: AsyncSession, t: ReviewTask | None, rows: list[ReviewTask],
+                 settings: Settings) -> dict[str, Any] | None:
+    """ReviewTask для ученика; у error_fix цитата ученика берётся из карточки в момент выдачи (в задании она не
+    хранится; стёрта по сроку — задание без цитаты)."""
+    if t is None:
+        return None
+    view = task_view(t, rows, settings)
+    if t.type == "error_fix" and t.card_id is not None:
+        card = await db.get(Card, t.card_id)
+        evidence = (card.error or {}).get("evidence") if card is not None and card.user_id else None
+        view["prompt"] = {**view["prompt"], "evidence": evidence if isinstance(evidence, str) else None}
+    return view
+
+
 async def _own_session(db: AsyncSession, user_id: uuid.UUID, session_id: uuid.UUID) -> ReviewSession:
     s = (await db.execute(select(ReviewSession).where(ReviewSession.session_id == session_id,
                                                       ReviewSession.user_id == user_id).with_for_update())
@@ -147,9 +161,40 @@ async def _summary(db: AsyncSession, s: ReviewSession, settings: Settings, now: 
             "next_due_at": iso(next_due), "due_tomorrow": int(due_tomorrow or 0)}
 
 
+async def _settle_revealed(db: AsyncSession, s: ReviewSession, at: datetime) -> None:
+    """«Не помню» без последующего ответа (сессия отменена или истекла): раскрытое задание — again (ответ ученик уже
+    видел), строка истории с revealed."""
+    stats = dict(s.stats or {})
+    first = dict(stats.get("first") or {})
+    for t in await _tasks(db, s.session_id):
+        if t.answered_at is not None or t.skipped or "reveal" not in (t.hints or []) or t.card_id is None \
+                or t.type not in tasks.GRADED_CARD_TASKS:
+            continue
+        response: dict[str, Any] = {"result": "incorrect", "correct_answer": t.key.get("display"),
+                                    "next_review_in_days": None, "requeued": False, "check_result": None}
+        card = await db.get(Card, t.card_id, with_for_update=True)
+        if card is not None and card.status in ("new", "learning", "review"):
+            before = snapshot(card)
+            outcome = fsrs.review(memory_of(card), "again", at)
+            apply_memory(card, outcome.memory)
+            card.status = card.fsrs_state
+            card.updated_at = at
+            db.add(log_row(card, before, at, task_type=t.type, answer_mode=tasks.ANSWER_MODE[t.type], grade="again",
+                           hinted="first_letter" in (t.hints or []), revealed=True,
+                           elapsed_days=outcome.elapsed_days, session_id=s.session_id, task_id=t.task_id))
+            response["next_review_in_days"] = outcome.interval_days
+            first.setdefault(str(card.card_id), "again")
+        t.result, t.grade, t.answer, t.response, t.answered_at = "incorrect", "again", {}, response, at
+    stats["first"] = first
+    s.stats = stats
+
+
 async def _close(db: AsyncSession, s: ReviewSession, status: str, now: datetime, settings: Settings) -> None:
     """completed | expired | cancelled: минуты, итог, проверки посреди блока — обратно в очередь, событие (completed;
-    expired — если был хотя бы один ответ), день активности (если были ответы)."""
+    expired — если был хотя бы один ответ), день активности (если были ответы). Раскрытые без ответа — again."""
+    if status != "completed":
+        await _settle_revealed(db, s, s.last_activity_at if status == "expired" else now)
+        await db.flush()
     answered = await _answered_count(db, s.session_id)
     if status == "completed":
         _touch(s, now, settings)
@@ -383,7 +428,9 @@ async def current(ctx: Ctx, session_id: uuid.UUID) -> dict[str, Any]:
             cur = _current(rows)
             if cur is None:
                 raise task_not_current(None)
-            return task_view(cur, rows, ctx.settings)
+            view = await render(db, cur, rows, ctx.settings)
+            assert view is not None
+            return view
     assert expired
     raise session_state("expired")
 
@@ -412,7 +459,7 @@ async def answer(ctx: Ctx, session_id: uuid.UUID, task_id: uuid.UUID, body: dict
             raise task_not_found()
         if t.answered_at is not None and t.response is not None:
             cur = _current(rows) if s.status == "active" else None
-            return {**t.response, "next": task_view(cur, rows, s_cfg) if cur is not None else None}
+            return {**t.response, "next": await render(db, cur, rows, s_cfg)}
         if s.status != "active":
             raise session_state(s.status)
         if is_stale(s, ctx.now, s_cfg):
@@ -426,7 +473,7 @@ async def answer(ctx: Ctx, session_id: uuid.UUID, task_id: uuid.UUID, body: dict
             _touch(s, ctx.now, s_cfg)
             rows = await _tasks(db, s.session_id)
             nxt = _current(rows)
-            return {**response, "next": task_view(nxt, rows, s_cfg) if nxt is not None else None}
+            return {**response, "next": await render(db, nxt, rows, s_cfg)}
     assert expired
     raise session_state("expired")
 

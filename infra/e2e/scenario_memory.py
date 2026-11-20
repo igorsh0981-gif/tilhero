@@ -3,8 +3,7 @@
 напоминание, админка памяти и словаря, сага удаления) через публичные API — как Mini App (telegram-bff) и браузер
 admin-web (admin-bff).
 
-Предусловие: `infra/e2e/run_local.sh memory` (сброс учёток admin-identity + перезапуск memory с окном напоминания стенда
-+ up + этот сценарий; стенд — `AI_PROVIDER=fake`, `SPEECH_PROVIDER=fake`, ключей провайдеров нет и не нужно). Отдельно,
+Предусловие: `infra/e2e/run_local.sh memory` (сброс учёток admin-identity + up + этот сценарий; стенд — `AI_PROVIDER=fake`, `SPEECH_PROVIDER=fake`, ключей провайдеров нет и не нужно). Отдельно,
 на уже поднятом стенде со свежим bootstrap-сотрудником:
     uv run python infra/e2e/scenario_memory.py [--admin-bff http://127.0.0.1:8002] [--bff http://127.0.0.1:8001] [-v]
     uv run python infra/e2e/scenario_memory.py --cleanup   # только уборка остатков прерванного прогона
@@ -35,11 +34,9 @@ admin-web (admin-bff).
     переводы ИИ слов e2e-текста остаются (это словарь курса, а не данные ученика; формы уникальны для прогона);
   * согласие на запись голоса ребёнка — отзывается в конце шага.
 
-Окно вечернего напоминания: prod — 19:00–19:14 (tick каждые 15 минут). На стенде n8n нет, tick вызывает сценарий; пояс
-выбирается так, чтобы сейчас там было 19:xx. Часовых поясов со смещением :15 нет, поэтому в UTC-минуты 45–59 (и
-многие другие) пояса с местным 19:00–19:14 нет вовсе — run_local.sh запускает memory с `REMINDER_WINDOW_MINUTES=60`
-(E2E_MEMORY_REMINDER_WINDOW_MINUTES). Сценарий сам выбирает пояс внутри prod-окна, если такой есть, и сверяет окно
-процесса memory (/proc/<pid>/environ).
+Окно вечернего напоминания — как prod: с REMINDER_HOUR (19:00) до REMINDER_UNTIL_HOUR (22:00) по поясу плана, не чаще
+раза в местный день. На стенде n8n нет, tick вызывает сценарий; пояс плана выбирается так, чтобы сейчас там было
+19:xx–20:xx (часы окна сценарий сверяет с окружением процесса memory, /proc/<pid>/environ).
 
 Печатает PASS/FAIL/SKIP по шагам и «Итого: N/M PASS»; код выхода 1, если хоть один шаг упал. Замечания (отклонения от
 контракта, не роняющие шаг) печатаются в конце. Шаги после сбоя критичного шага — SKIP.
@@ -88,7 +85,7 @@ LESSONS, ASSESSMENT, AI_GATEWAY = s4.LESSONS, s4.ASSESSMENT, s4.AI_GATEWAY
 PAIR = "ru-en"
 REQUIRED = s1.REQUIRED
 VOICE = "voice_recording"
-PROD_REMINDER_WINDOW = 15
+REMINDER_HOURS = (19, 22)  # REMINDER_HOUR, REMINDER_UNTIL_HOUR memory по умолчанию (prod)
 MARK = "[e2e "  # маркер прогона в заголовках контента: «[e2e MABCD]»
 READING_PREFIX = "r-e2e-"
 METHODIST_WORD = "pelmar"  # префикс формы статьи методиста (уборка находит остатки по нему)
@@ -503,21 +500,19 @@ def cleanup_leftovers() -> list[str]:
     return done
 
 
-def memory_reminder_window() -> int:
-    """REMINDER_WINDOW_MINUTES процесса memory стенда (по умолчанию 15, как prod)."""
+def memory_reminder_hours() -> tuple[int, int]:
+    """(REMINDER_HOUR, REMINDER_UNTIL_HOUR) процесса memory стенда; не заданы — значения prod (19, 22)."""
     pid_file = s1.ROOT / ".dev" / "run" / "memory.pid"
+    found: dict[str, int] = {}
     try:
         pid = int(pid_file.read_text().strip())
-        env = Path(f"/proc/{pid}/environ").read_bytes().split(b"\x00")
+        for kv in Path(f"/proc/{pid}/environ").read_bytes().split(b"\x00"):
+            name, _, value = kv.decode(errors="replace").partition("=")
+            if name in ("REMINDER_HOUR", "REMINDER_UNTIL_HOUR") and value.isdigit():
+                found[name] = int(value)
     except (OSError, ValueError):
-        return PROD_REMINDER_WINDOW
-    for kv in env:
-        if kv.startswith(b"REMINDER_WINDOW_MINUTES="):
-            try:
-                return int(kv.split(b"=", 1)[1])
-            except ValueError:
-                return PROD_REMINDER_WINDOW
-    return PROD_REMINDER_WINDOW
+        pass
+    return found.get("REMINDER_HOUR", REMINDER_HOURS[0]), found.get("REMINDER_UNTIL_HOUR", REMINDER_HOURS[1])
 
 
 # =============================================================================================== шаги
@@ -567,10 +562,10 @@ def s_stand(c: s2.Ctx) -> None:
     check((seed["tc"] or 0) >= 2 and seed["speech"] and seed["ai"] is True,
           f"teaching_coach v{seed['tc']}, fake-речь {seed['speech']}, ИИ включён {seed['ai']}")
     c.data.update(seed_kids=kids, seed_adults=adults)
-    window = memory_reminder_window()
-    c.data["reminder_window"] = window
+    hours = memory_reminder_hours()
+    c.data["reminder_hours"] = hours
     print(f"      текстов {len(readings)} (детских {len(kids)}), словарь {seed['glossary']}, teaching_coach "
-          f"v{seed['tc']}; окно напоминания memory {window} мин", flush=True)
+          f"v{seed['tc']}; окно напоминания memory {hours[0]:02d}:00–{hours[1]:02d}:00", flush=True)
     c.data["dlq_before"] = s1.dlq_counts()
     c.data["policy"] = expect(httpx.get(f"{TG_BFF}/v1/legal/policy", params={"lang": "ru"}), 200)
     c.lc.data["policy"] = c.data["policy"]
@@ -923,7 +918,8 @@ def s_review_first(c: s2.Ctx) -> None:
     check(summ["status"] == "completed" and summ["reviewed"] == 4 and summ["correct"] == 4 and summ["again"] == 0
           and summ["new_learned"] == 4 and summ["checks"] == [] and summ["minutes"] >= 0
           and summ["next_due_at"] and parse_ts(summ["next_due_at"]) > datetime.now(UTC)
-          and summ["due_tomorrow"] >= 4, f"итоги R1: {summ}")
+          and summ["due_tomorrow"] >= sum(1 for e in graded if e["result"]["next_review_in_days"] == 1),
+          f"итоги R1: {summ}")
     check(la.ok("POST", f"{rs(sid)}/finish") == summ, "повтор finish — другой итог")
     la.ok("POST", f"{rs(sid)}/cancel", 409, "REVIEW_SESSION_STATE")
     kc = la.ok("GET", f"/v1/memory/cards/{known_card}")
@@ -1789,17 +1785,15 @@ def s_ai_off(c: s2.Ctx) -> None:
 # ---------------------------------------------------------------- AT-59 вечернее напоминание
 
 
-def reminder_zone(c: s2.Ctx, window: int) -> str | None:
-    now = datetime.now(UTC)
-    for hi in (min(PROD_REMINDER_WINDOW, window), window):
-        lo, top = 19 * 60, 19 * 60 + hi - 2  # запас 2 мин до конца окна
-        if top <= lo:
-            continue
-        try:
-            return s1.pick_zone(now, lo, top, lo + 1)
-        except StepFailed:
-            continue
-    return None
+def reminder_zone(hours: tuple[int, int]) -> str | None:
+    """Пояс, где сейчас начало окна напоминания: [начало, начало + 2 ч) и не позже конца окна − 5 мин (уведомление
+    позже 19:00 + 3 ч notifications кладёт только в центр — берём ближе к началу окна)."""
+    lo = hours[0] * 60
+    hi = min(hours[1] * 60 - 5, lo + 120)
+    try:
+        return s1.pick_zone(datetime.now(UTC), lo, hi, lo + 30) if hi > lo else None
+    except StepFailed:
+        return None
 
 
 def projection(user_id: str) -> dict[str, Any] | None:
@@ -1818,7 +1812,7 @@ def s_reminder(c: s2.Ctx) -> None:
     lr = c.lc.users["LR"]
     since = c.data["started_at"]
     uid = lr.learner_id
-    window = c.data.get("reminder_window", PROD_REMINDER_WINDOW)
+    hours = c.data.get("reminder_hours", REMINDER_HOURS)
     # 5 слов «в словарь» из опубликованного текста (урока сегодня не было — день графика ещё не засчитан)
     rid = "r-a0-new-group"
     v = lr.ok("GET", f"/v1/practice/readings/{rid}")
@@ -1841,16 +1835,12 @@ def s_reminder(c: s2.Ctx) -> None:
     shift_cards(uid, 1.01, card_ids=ids[:4])
     ov = lr.ok("GET", "/v1/memory/overview")
     check(ov["due_count"] == 4 and ov["done_today"] is False, f"обзор LR: {ov}")
-    # пояс, где сейчас 19:xx (prod-окно 19:00–19:14, если такое есть; иначе окно стенда)
-    zone = reminder_zone(c, window)
+    # пояс, где сейчас начало окна напоминания (19:xx–20:xx)
+    zone = reminder_zone(hours)
     if zone is None:
-        raise StepFailed(f"нет часового пояса, где сейчас 19:00–19:{window - 1:02d} (окно memory {window} мин; "
-                         "перезапустите memory через `run_local.sh memory` — окно стенда 60 мин)")
+        raise StepFailed(f"нет часового пояса, где сейчас {hours[0]:02d}:00–{hours[1]:02d}:00 (окно memory)")
     local = s1.loc(datetime.now(UTC), zone)
-    if local.minute >= PROD_REMINDER_WINDOW:
-        print(f"      пояс {zone}: сейчас {local:%H:%M} — вне prod-окна 19:00–19:14 (окно стенда {window} мин)",
-              flush=True)
-    # ученик в другом поясе (сейчас там не 19:xx) — напоминания нет
+    # ученик в другом поясе (сейчас там днём, вне окна) — напоминания нет
     check(memory_tick()["reminders_sent"] >= 0, "tick")
     check(not reviews_due_events(uid, since), "напоминание не в 19:00 по поясу плана")
     # пояс плана (и уведомлений) → 19:xx; проекция memory обновилась
@@ -2297,7 +2287,7 @@ STEPS: list[tuple[str, Callable[[s2.Ctx], None], bool]] = [
      "guardian → согласие родителя → можно → отзыв; затраты", s_pronunciation, False),
     ("M14b ИИ и речь выключены (аварийная остановка, step-up): «Произнести» скрыто (503), перевод ИИ → «нет "
      "перевода», словарь курса и повторение работают", s_ai_off, False),
-    ("M15 AT-59 вечернее напоминание: пояс плана 19:xx, ≥ 5 к сроку, tick → memory.reviews.due.v1 → Telegram и центр, "
+    ("M15 AT-59 вечернее напоминание: пояс плана 19:00–22:00, ≥ 5 к сроку, tick → memory.reviews.due.v1 → Telegram и центр, "
      "повторный tick — без второго; повторение засчитано в день графика", s_reminder, False),
     ("M16 AT-61 «Память» в админке: сводка, карточки без цитат, правка со step-up (перенос, заморозка, сброс), 403; "
      "аналитика забывания (скрытые группы), блок обзора", s_memory_admin, False),

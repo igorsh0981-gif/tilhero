@@ -144,18 +144,24 @@ def letters_of(value: str) -> list[str]:
     return [ch for ch in normalize(value) if ch.isalpha() or ch == "'"]
 
 
-def find_in_sentence(sentence: str, candidates: Iterable[str]) -> str | None:
-    """Первая из форм, встречающаяся в предложении по границам слов (без регистра) → фрагмент как в предложении."""
-    base = unicodedata.normalize("NFC", sentence).translate(_APOSTROPHES)
+def locate(sentence: str, candidates: Iterable[str]) -> tuple[int, int] | None:
+    """Позиция первой из форм в предложении по границам слов (без регистра; апострофы ’ ‘ ` ʼ = ') — индексы
+    в ИСХОДНОЙ строке: замена апострофов посимвольная, длина не меняется."""
+    base = sentence.translate(_APOSTROPHES)
     for cand in candidates:
-        c = normalize(cand)
-        c = _PLACEHOLDER.sub("", c).strip()
+        c = _PLACEHOLDER.sub("", normalize(cand)).strip()
         if not c:
             continue
         m = re.search(rf"(?<![\w']){re.escape(c)}(?![\w'])", base, flags=re.IGNORECASE)
         if m:
-            return m.group(0)
+            return m.start(), m.end()
     return None
+
+
+def find_in_sentence(sentence: str, candidates: Iterable[str]) -> str | None:
+    """Фрагмент предложения (как в исходной строке), совпавший с одной из форм."""
+    span = locate(sentence, candidates)
+    return sentence[span[0]:span[1]] if span else None
 
 
 # ---------------------------------------------------------------- контрольные задания (правила assessment)

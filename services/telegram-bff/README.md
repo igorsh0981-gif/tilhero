@@ -127,7 +127,7 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 | GET | `/v1/memory/overview` | memory `/overview` (**аккаунт**, claims `lrn`, `age_band` ученика; query `audience`, `locale`) | спринт 5, `MemoryOverview` (`pronunciation`: available / consent_self / consent_guardian / unavailable) |
 | GET | `/v1/memory/cards?kind=&status=&q=&cursor=&limit=` | memory `/cards` | `Page<DictionaryCard>` (элемент не по контракту отбрасывается); `q` ≤ 60, в лог не пишется |
 | GET | `/v1/memory/cards/{id}` | memory `/cards/{id}` | `DictionaryCardDetail`; чужая — 404 `CARD_NOT_FOUND` |
-| POST | `/v1/memory/cards` | memory `/cards` | `AddCardRequest`, `Idempotency-Key` обязателен → 201 новая / 200 уже была (статус memory); 422 `WORD_NOT_IN_CONTENT` / `GLOSS_UNAVAILABLE` / `CARDS_LIMIT {limit}`; 404 `CONTENT_NOT_FOUND` |
+| POST | `/v1/memory/cards` | memory `/cards` (таймаут `MEMORY_TRANSLATE_TIMEOUT_MS`) | `AddCardRequest`, `Idempotency-Key` обязателен → 201 новая / 200 уже была (статус memory); 422 `WORD_NOT_IN_CONTENT` / `GLOSS_UNAVAILABLE` / `CARDS_LIMIT {limit}`; 404 `CONTENT_NOT_FOUND`; 429 — общий с переводом лимит `tg.memory.translate` (может вызвать перевод ИИ; повтор отвеченного ключа лимит не тратит, отметка в Redis на 24 ч) |
 | POST / DELETE | `/v1/memory/cards/{id}/known` | memory | `DictionaryCard`; 409 `CARD_STATE {status}` |
 | DELETE | `/v1/memory/cards/{id}` | memory | 204 |
 | GET | `/v1/memory/errors?cursor=&limit=` | memory `/errors` | `Page<ErrorJournalItem>` (у детей пусто) |

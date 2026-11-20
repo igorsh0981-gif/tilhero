@@ -293,9 +293,15 @@ def segments(kind: str, p: dict[str, Any]) -> list[tuple[str, str]]:
     return out
 
 
-async def _content_version(session: AsyncSession, ref: ContentRefIn) -> dict[str, Any]:
+def hidden_for(payload: dict[str, Any], audience: str | None) -> bool:
+    """Детям (CONVENTIONS §8) — только детский контент: у урока, медиа, текста и сценария аудитория без kids при
+    audience=kids — «нет такого». Без audience и у видов без поля аудитории — без ограничений."""
+    return audience == "kids" and isinstance(payload.get("audience"), list) and "kids" not in payload["audience"]
+
+
+async def _content_version(session: AsyncSession, ref: ContentRefIn, audience: str | None = None) -> dict[str, Any]:
     payload = (await _released(session, [(ref.kind, ref.key, ref.version)])).get((ref.kind, ref.key, ref.version))
-    if payload is None:
+    if payload is None or hidden_for(payload, audience):
         raise content_not_found()
     return payload
 
@@ -322,9 +328,11 @@ def _note(kind: str, payload: dict[str, Any], key: str) -> dict[str, str] | None
     return None
 
 
-async def lookup(session: AsyncSession, pair_id: str, query: str, ref: ContentRefIn) -> dict[str, Any]:
-    """{in_content, sentence_en, locator, entry: GlossaryEntry | null, rejected, note}."""
-    payload = await _content_version(session, ref)
+async def lookup(session: AsyncSession, pair_id: str, query: str, ref: ContentRefIn,
+                 audience: str | None = None) -> dict[str, Any]:
+    """{in_content, sentence_en, locator, entry: GlossaryEntry | null, rejected, note}. audience=kids — только
+    детский контент (иначе 404 CONTENT_NOT_FOUND)."""
+    payload = await _content_version(session, ref, audience)
     locator, sentence = find_in_content(ref.kind, payload, query, ref.locator)
     key = form_key(query)
     entry = (await _holders(session, pair_id, [key])).get(key)
@@ -336,12 +344,13 @@ async def lookup(session: AsyncSession, pair_id: str, query: str, ref: ContentRe
     }
 
 
-async def ai_entry(session: AsyncSession, body: AiEntryIn, now: datetime) -> tuple[dict[str, Any], bool]:
+async def ai_entry(session: AsyncSession, body: AiEntryIn, now: datetime,
+                   audience: str | None = None) -> tuple[dict[str, Any], bool]:
     """Перевод ИИ → статья ai pending (201). Любая форма уже занята действующей статьёй → она же (200, перевод не
     меняется; у статьи ai на проверке дописывается новое место в контенте — очередь методиста сортируется по числу
     мест). Слово должно быть в этой опубликованной версии контента (иначе 404 / 422) — произвольный текст в словарь
     не попадает."""
-    payload = await _content_version(session, body.content_ref)
+    payload = await _content_version(session, body.content_ref, audience)
     find_in_content(body.content_ref.kind, payload, body.surface, body.content_ref.locator)
     if not await _pair_exists(session, body.pair_id):
         raise not_found("PAIR_NOT_FOUND", "Языковая пара не найдена")

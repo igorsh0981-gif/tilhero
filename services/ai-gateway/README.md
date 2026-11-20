@@ -21,7 +21,7 @@ memory) обязан продолжить без ИИ при `unavailable`/`refu
 | Метод | Путь | Ответ / ошибки |
 |---|---|---|
 | POST | `/agents/{agent_id}/invoke` `AgentInvokeRequest` (+ `deadline_ms?` 1000..60000; `session_kind` — `AiSessionKind`: + `reading`, `memory`) | 200 `AgentInvokeResult`; 404 `AGENT_NOT_FOUND`, `AGENT_NOT_ACTIVE` (не `llm`+`active`); 403 `CALLER_NOT_ALLOWED {agent_id, request}` (политика вызывающих ниже); 422 `CONTEXT_INVALID {errors}` (контекст не по ai.ts), `IDEMPOTENCY_KEY_REUSED`; 409 `IDEMPOTENCY_IN_PROGRESS` (дубль не дождался первого вызова); 401 `USER_CONTEXT_REQUIRED` (в токене нет `sub`); 403 `USER_CONTEXT_MISMATCH` |
-| GET | `/status` | `AiStatus {ai_available, speech_available}` — `ai_available`: аварийной остановки нет и провайдер LLM готов (lessons — при старте занятия); `speech_available`: нет остановки, ключ и регион Azure заданы (или fake), модель речи включена, месячный потолок не превышен (memory — перед «Произнести») |
+| GET | `/status` | `AiStatus {ai_available, speech_available}` — `ai_available`: аварийной остановки нет и провайдер LLM готов (lessons — при старте занятия); `speech_available`: нет остановки, ключ и регион Azure заданы (или fake), модель речи включена, месячный потолок не превышен и расход речи за месяц < подлимита речи (memory — перед «Произнести») |
 | POST | `/speech/pronunciation` (только memory) | см. «Оценка произношения» |
 
 **Политика вызывающих (спринт 5, защита в глубину):** memory — только `teaching_coach` с `context.request = gloss_word`
@@ -101,10 +101,10 @@ pattern, anyOf; прочие ключевые слова отклоняются 
 | PATCH / DELETE | `/golden-cases/{case_id}` | ai.manage | `GoldenCase` / 204 (удаление = архив); 409 `GOLDEN_CASE_ARCHIVED` |
 | GET / PUT | `/models` / `/models/{model_id}` `{input_usd_per_mtok, output_usd_per_mtok, audio_usd_per_hour?, active, reason}` | ai.read / ai.publish (снижение цены — ещё costs.manage) | `{items: AiModel[]}` (+ `audio_usd_per_hour`: речь — $ за час аудио, LLM — null) / `AiModel`; 403 `PERMISSION_DENIED {permission: costs.manage}` (снижение цены, в т. ч. часа аудио); 404 `MODEL_NOT_FOUND`; 409 `MODEL_IN_USE {versions}` (LLM; модель речи выключать можно — оценка произношения → `not_configured`); 422 `PRICE_REQUIRED {fields}` (anthropic — цены > 0; azure_speech — час аудио > 0), `PRICE_NOT_APPLICABLE {fields}` (цены токенов у речи ≠ 0 или час аудио у LLM). `audio_usd_per_hour` не передана — прежняя |
 | GET | `/provider` | ai.read | `AiProviderStatus` — ключ только «задан / не задан», ошибка — код и время; `speech {provider, key_configured, region, last_error}` (ключ Azure не показывается никогда; регион — как введён) |
-| GET / PUT | `/budget` / `AiBudget`-поля `& {reason}` (`updated_at?` — защита от гонки, `ai_enabled?`) | costs.read / costs.manage | `AiBudget`; 409 `BUDGET_CONFLICT` |
+| GET / PUT | `/budget` / `AiBudget`-поля `& {reason}` (`updated_at?` — защита от гонки, `ai_enabled?`; `speech_monthly_cap_usd` обязателен) | costs.read / costs.manage | `AiBudget` (+ `speech_monthly_cap_usd`); 409 `BUDGET_CONFLICT`; 422 `BUDGET_INVALID {fields}` (подлимит речи > потолка месяца) |
 | POST | `/emergency-stop` `{enabled, reason}` | costs.manage | `AiBudget`; `enabled: true` — остановка включена (ИИ выключен) |
-| GET | `/usage/summary?period=day\|week\|month` | costs.read \| dashboard.read | `AiUsageSummary` (+ `speech {calls, audio_minutes, spent_usd, speech_available}` — вызовы `pronunciation_coach` за период, минуты оценённого аудио, расход; входит в `spent_usd`) |
-| GET | `/usage?session_id=\|agent_id=&cursor=&limit=` | costs.read (с `session_id` — ещё qa.read) | `Page<AiCall>` (без user_id и текстов) |
+| GET | `/usage/summary?period=day\|week\|month` | costs.read \| dashboard.read | `AiUsageSummary` (+ `speech {calls, audio_minutes, spent_usd, speech_available, cap_usd}` — вызовы `pronunciation_coach` за период, минуты оценённого аудио, расход; входит в `spent_usd`) |
+| GET | `/usage?session_id=\|agent_id=&cursor=&limit=` | costs.read (с `session_id` — ещё qa.read) | `Page<AiCall>` (без user_id и текстов; `audio_ms` — длительность аудио речи, у LLM 0; у речи `status ok` бывает с причиной insufficient_evidence) |
 | GET | `/usage/by-session?session_id=<id>&session_id=…` (≤ 50) | qa.read \| costs.read | `{items: [{session_id, models, cost_usd, p95_latency_ms}]}` — для журнала «Контроля диалогов»; сессии без вызовов — нули; 422 `TOO_MANY_SESSIONS` |
 
 Создающие и публикующие команды принимают `Idempotency-Key` (повтор — сохранённый ответ, `idempotent-replay: true`).
@@ -204,10 +204,17 @@ azure_speech | fake_speech`, `session_kind memory`, `audio_ms`, `cost_usd = audi
 
 ## Бюджеты (решение владельца 19.11.2026)
 `budget` (singleton): `ai_enabled` (аварийная остановка), `monthly_cap_usd` 20 (календарный месяц UTC),
+`speech_monthly_cap_usd` 5 (подлимит речи, спринт 5),
 `learner_daily_cap_usd` 0.05 (день — Asia/Tashkent), `lesson_cap_usd` 0.03 (сумма по `session_id`), `alert_percent` 80.
 Перевод по тапу (`gloss_word`, `session_kind: memory`) — из лимитов месяца и ученика в день; лимит урока к дневной
-сессии memory не применяется (занятия нет). Оценка произношения входит в те же месяц и лимит ученика в день (резерв — оценка стоимости длительности, $1,32 за
-час аудио по умолчанию; лимит урока к ней не применяется — сессии нет).
+сессии memory не применяется (занятия нет). Оценка произношения входит в те же месяц и лимит ученика в день (резерв —
+оценка стоимости длительности, $1,32 за час аудио по умолчанию; лимит урока к ней не применяется — сессии нет) и, кроме
+того, в **подлимит речи** `speech_monthly_cap_usd` (решение владельца 20.11.2026: 5 $ в месяц внутри общих 20 $,
+календарный месяц UTC, миграция 0005): не помещается оценка записи → `unavailable: budget_exceeded`; потрачено на речь
+за месяц ≥ подлимита → `speech_available=false` («Произнести» скрыто). Вызовы агентов подлимит не проверяют. Подлимит —
+поле `AiBudget` (всегда в ответе), в `PUT /budget` обязателен, 0..`monthly_cap_usd` (больше потолка → 422
+`BUDGET_INVALID {fields}`; в БД — CHECK), правка — costs.manage (+ step-up в admin-bff), аудит `ai.budget_updated`; в
+сводке — `speech.cap_usd`.
 Резерв: строка usage вызова в статусе `pending` держит `reserved_usd` (оценка следующей попытки) — под транзакционной
 advisory-блокировкой параллельные вызовы видят резервы друг друга; «зависший» pending старше 10 минут снимается.
 Дополнительно — `max_cost_usd` версии на вызов (накопительно по попыткам, причина отказа `cost_limit`). Стоимость —

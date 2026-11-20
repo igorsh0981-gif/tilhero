@@ -5,7 +5,7 @@
  * «мало данных (< 5 учеников)» — never as a zero. The bars follow the chart rules of the admin: a title, the value as
  * text next to every bar (never colour alone), a meter role for screen readers.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CheckRate, ForgettingAnalytics } from "@tilhero/contracts/admin";
 import { Memory } from "../../api/endpoints";
 import { useI18n } from "../../i18n";
@@ -24,15 +24,23 @@ export function AnalyticsTab() {
   const [data, setData] = useState<ForgettingAnalytics | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
+  // the latest request wins: an answer for a period the staff member already left is dropped (30d → 90d → 30d)
+  const req = useRef(0);
   const load = useCallback(() => {
+    const n = ++req.current;
     setLoading(true);
     Memory.analytics(period)
       .then((d) => {
+        if (n !== req.current) return;
         setData(d);
         setError(null);
       })
-      .catch(setError)
-      .finally(() => setLoading(false));
+      .catch((e: unknown) => {
+        if (n === req.current) setError(e);
+      })
+      .finally(() => {
+        if (n === req.current) setLoading(false);
+      });
   }, [period]);
   useEffect(load, [load]);
   return (
@@ -48,7 +56,16 @@ export function AnalyticsTab() {
         <Btn size="sm" icon="refresh" label={t("common.refresh")} busy={loading && !!data} onClick={load} />
       </div>
       <p className="small muted">{t("fa.lead")}</p>
-      {error && !data ? <LoadError error={error} onRetry={load} /> : !data ? <Spinner label={t("common.loading")} /> : <Body d={data} />}
+      {error && (!data || data.period !== period) ? (
+        <LoadError error={error} onRetry={load} />
+      ) : !data ? (
+        <Spinner label={t("common.loading")} />
+      ) : (
+        // the figures of the previous period stay dimmed until the chosen one arrives — never shown as the new one
+        <div className={cx("stack", data.period !== period && "fa-stale")} aria-busy={data.period !== period || undefined} data-testid="fa-body" data-period={data.period}>
+          <Body d={data} />
+        </div>
+      )}
     </div>
   );
 }

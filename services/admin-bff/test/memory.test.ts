@@ -11,6 +11,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import type {
   AdminCardDetail,
+  AdminCardRow,
   Dashboard,
   ForgettingAnalytics,
   GlossaryDetail,
@@ -33,6 +34,7 @@ import {
   SEED_ACTOR_ID,
   SESSION_ID,
   adminCardDetailDomain,
+  adminCardRow,
   aiCall,
   aiProvider,
   browser,
@@ -385,13 +387,34 @@ describe("память ученика (memory)", () => {
     const res = await get(s, `${M}/learners/${LEARNER_USER_ID}/cards?status=review&kind=error&limit=10&cursor=c1`);
     expect(res.statusCode).toBe(200);
     expect(h.fake.callsTo("memory", "GET", `${M}/learners/${LEARNER_USER_ID}/cards`)[0]!.query).toEqual({ status: "review", kind: "error", limit: "10", cursor: "c1" });
-    const page = res.json() as Page<{ card_id: string; error_code: string | null }>;
+    const page = res.json() as Page<AdminCardRow>;
     expect(page.items).toHaveLength(2);
-    expect(page.items[1]).toMatchObject({ kind: "error", error_code: "article" });
-    for (const leak of [EVIDENCE, "answers_en", "\"key\""]) expect(res.body).not.toContain(leak);
+    expect(page.items[0]).toMatchObject({ kind: "word", text_en: "coffee" });
+    // карточка ошибки: исправление выведено из текста ученика — text_en null, даже если memory прислала строку
+    expect(page.items[1]).toMatchObject({ kind: "error", text_en: null, error_code: "article" });
+    for (const leak of [EVIDENCE, "answers_en", "\"key\"", "I'd like a latte"]) expect(res.body).not.toContain(leak);
     for (const q of ["status=deleted", "kind=sentence", "limit=0", "limit=101"]) {
       expect((await get(s, `${M}/learners/${LEARNER_USER_ID}/cards?${q}`)).statusCode, q).toBe(422);
     }
+  });
+
+  it("карточка ошибки: text_en и example_en — null (memory прислала null или строку); у слова text_en null допустим", async () => {
+    const { s } = await loginAs(h, "methodist");
+    for (const fromMemory of [{ text_en: null, example_en: null }, { text_en: "I'd like a latte, please", example_en: "Learner said: I want latte" }]) {
+      h.fake.on("memory", "GET", CARD, () => json(200, adminCardDetailDomain({ kind: "error", error_code: "article", gloss: { ru: "Артикль", uz: "Artikl" }, ...fromMemory })));
+      const res = await get(s, CARD);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ kind: "error", text_en: null, example_en: null, error_code: "article", gloss: { ru: "Артикль", uz: "Artikl" } });
+      for (const leak of ["latte", EVIDENCE]) expect(res.body).not.toContain(leak);
+    }
+    // у слова text_en null (admin.ts допускает) — проходит; пример слова — как есть
+    h.fake.on("memory", "GET", CARD, () => json(200, adminCardDetailDomain({ text_en: null })));
+    expect((await get(s, CARD)).json()).toMatchObject({ kind: "word", text_en: null, example_en: "A coffee, please." });
+    // список: строка ошибки от memory с null — проходит
+    h.fake.on("memory", "GET", `${M}/learners/${LEARNER_USER_ID}/cards`, () =>
+      json(200, { items: [adminCardRow({ kind: "error", text_en: null, error_code: "word_order" })], next_cursor: null }),
+    );
+    expect((await get(s, `${M}/learners/${LEARNER_USER_ID}/cards`)).json().items[0]).toMatchObject({ kind: "error", text_en: null, error_code: "word_order" });
   });
 
   it("карточка: история планирования (было/стало, алгоритм, версия), actor_name — lookup по staff:<uuid>, иначе имя memory; learner — null", async () => {
@@ -483,6 +506,14 @@ describe("память ученика (memory)", () => {
     const again = await send(s, "POST", `${CARD}/actions`, { action: "freeze", reason: "Ученик просил паузу" }, { "idempotency-key": "card-action-0002" });
     expect(again.statusCode).toBe(200);
     expect(again.headers["idempotent-replayed"]).toBe("true");
+    // Idempotency-Key клиента — в memory как есть (дедупликация staff + ключ 24 ч); без ключа — без заголовка; неверный — 422
+    expect(h.fake.callsTo("memory", "POST", `${CARD}/actions`).at(-1)!.headers["idempotency-key"]).toBe("card-action-0002");
+    expect(h.fake.callsTo("memory", "POST", `${CARD}/actions`)[0]!.headers["idempotency-key"]).toBeUndefined();
+    const before = h.fake.callsTo("memory", "POST").length;
+    const badKey = await send(s, "POST", `${CARD}/actions`, { action: "freeze", reason: "Ученик просил паузу" }, { "idempotency-key": "short" });
+    expect(badKey.statusCode).toBe(422);
+    expect(badKey.json().code).toBe("IDEMPOTENCY_KEY_INVALID");
+    expect(h.fake.callsTo("memory", "POST")).toHaveLength(before);
     // причина правки и цитата ученика — не в логах
     expect(h.logs.text).not.toContain("Ученик просил паузу");
     expect(h.logs.text).not.toContain(EVIDENCE);
@@ -585,7 +616,7 @@ describe("аналитика забывания и обзор", () => {
     const d = (await get(s, "/admin/v1/dashboard?period=7d")).json() as Dashboard;
     expect(d.memory).toEqual({ available: true, data: { ...memoryStats(), period: "7d", ai_glosses_pending: 7 } });
     expect(h.fake.callsTo("memory", "GET", `${M}/stats`)[0]!.query).toEqual({ period: "7d" });
-    expect(d.ai.data?.speech).toEqual({ calls: 40, audio_minutes: 3.5, spent_usd: 0.08, speech_available: true });
+    expect(d.ai.data?.speech).toEqual({ calls: 40, audio_minutes: 3.5, spent_usd: 0.08, speech_available: true, cap_usd: 5 });
 
     h.fake.on("memory", "GET", `${M}/stats`, () => json(200, memoryStats({ d30_pass_pct: 140 })));
     const bad = (await get(s, "/admin/v1/dashboard")).json() as Dashboard;
@@ -723,9 +754,37 @@ describe("тексты для чтения, журнал сессий reading, �
     expect((await get(s, "/admin/v1/ai/usage?agent_id=pronunciation_coach")).statusCode).toBe(503);
   });
 
+  it("подлимит речи (решение владельца, $5/мес): PUT budget — costs.manage + step-up, 0..monthly_cap_usd до домена; бюджет и сводка — строго", async () => {
+    const { s } = await loginAs(h, "operations");
+    const budget = { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80, reason: "решение владельца 20.11" };
+    expect((await get(s, "/admin/v1/ai/budget")).json()).toMatchObject({ speech_monthly_cap_usd: 5 });
+    expect((await send(s, "PUT", "/admin/v1/ai/budget", budget)).json()).toMatchObject({ code: "STEP_UP_REQUIRED", details: { permission: "costs.manage" } });
+    await stepUp(h, s);
+    const ok = await send(s, "PUT", "/admin/v1/ai/budget", { ...budget, speech_monthly_cap_usd: 7.5 });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({ speech_monthly_cap_usd: 7.5, monthly_cap_usd: 20 });
+    expect(h.fake.callsTo("aiGateway", "PUT", "/admin/v1/ai/budget")[0]!.body).toEqual({ ...budget, speech_monthly_cap_usd: 7.5 });
+    // граница: равен потолку — можно; 0 — речь выключена лимитом
+    for (const cap of [20, 0]) expect((await send(s, "PUT", "/admin/v1/ai/budget", { ...budget, speech_monthly_cap_usd: cap })).statusCode, String(cap)).toBe(200);
+    const before = h.fake.callsTo("aiGateway", "PUT").length;
+    const over = await send(s, "PUT", "/admin/v1/ai/budget", { ...budget, speech_monthly_cap_usd: 20.01 });
+    expect(over.statusCode).toBe(422);
+    expect(over.json()).toMatchObject({ code: "VALIDATION_ERROR", details: { field: "speech_monthly_cap_usd" } });
+    const { speech_monthly_cap_usd: _drop, ...without } = budget;
+    for (const body of [without, { ...budget, speech_monthly_cap_usd: -1 }, { ...budget, speech_monthly_cap_usd: "5" }]) {
+      expect((await send(s, "PUT", "/admin/v1/ai/budget", body)).statusCode).toBe(422);
+    }
+    expect(h.fake.callsTo("aiGateway", "PUT")).toHaveLength(before);
+    // строго: бюджет без подлимита, сводка без cap_usd → 503
+    h.fake.on("aiGateway", "GET", "/admin/v1/ai/budget", () => json(200, without));
+    expect((await get(s, "/admin/v1/ai/budget")).statusCode).toBe(503);
+    h.fake.on("aiGateway", "GET", "/admin/v1/ai/usage/summary", () => json(200, { ...AI_USAGE_SUMMARY, speech: { calls: 1, audio_minutes: 0.1, spent_usd: 0, speech_available: false } }));
+    expect((await get(s, "/admin/v1/ai/usage/summary")).statusCode).toBe(503);
+  });
+
   it("затраты: сводка с блоком speech (входит в spent_usd); без speech от ai-gateway → 503 (строго)", async () => {
     const { s } = await loginAs(h, "operations");
-    expect((await get(s, "/admin/v1/ai/usage/summary")).json().speech).toEqual({ calls: 40, audio_minutes: 3.5, spent_usd: 0.08, speech_available: true });
+    expect((await get(s, "/admin/v1/ai/usage/summary")).json().speech).toEqual({ calls: 40, audio_minutes: 3.5, spent_usd: 0.08, speech_available: true, cap_usd: 5 });
     h.fake.on("aiGateway", "GET", "/admin/v1/ai/usage/summary", () => json(200, { ...AI_USAGE_SUMMARY, speech: { calls: 1 } }));
     expect((await get(s, "/admin/v1/ai/usage/summary")).statusCode).toBe(503);
   });

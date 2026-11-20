@@ -482,3 +482,74 @@ async def test_check_items_audience_pair_and_errors(env) -> None:
         r = await env.c.get(url, params={"audience": "adults"}, headers=env.svc(caller))
         assert r.status_code == 403, caller
     assert CONTENT_MANAGER.id
+
+
+# ---------------------------------------------------------------- дети — только детский контент (CONVENTIONS §8)
+
+
+async def test_kids_only_kids_content_in_lookup_and_ai_entries(env) -> None:
+    await env.published_new("lesson", lesson("l-adults-only", audience=["adults"]))
+    adult_text, kids_text = ref(), ref("reading", "r-a0-my-cat")
+
+    async def look(text: str, content: dict[str, Any], audience: str | None = None, headers=None):
+        body: dict[str, Any] = {"pair_id": "ru-en", "text": text, "content_ref": content}
+        if audience is not None:
+            body["audience"] = audience
+        return await env.c.post(LOOKUP, json=body, headers=headers or env.memory())
+
+    # ребёнок + взрослый текст / урок → 404, как будто контента нет
+    for text, content in (("coffee shop", adult_text), ("hello", ref("lesson", "l-adults-only"))):
+        r = await look(text, content, "kids")
+        assert r.status_code == 404 and r.json()["code"] == "CONTENT_NOT_FOUND", content
+    # ребёнок + детский текст, урок и медиа для всех аудиторий → ok
+    for text, content in (("cat", kids_text), ("hello", ref("lesson", "l-01-greetings")),
+                          ("hot chocolate", ref("media_asset", "m-own-coffee-order")),
+                          ("What can I get you", ref("scenario", "sc-cafe-coffee"))):
+        r = await look(text, content, "kids")
+        assert r.status_code == 200, (content, r.text)
+    # взрослый и без audience (обратная совместимость) — как раньше
+    assert (await look("coffee shop", adult_text, "adults")).status_code == 200
+    assert (await look("coffee shop", adult_text)).status_code == 200
+    assert (await look("hello", ref("lesson", "l-adults-only"), "teens")).status_code == 200
+    # детский профиль по claims — kids принудительно, что бы ни пришло
+    child = uuid.uuid4()
+    r = await look("coffee shop", adult_text, "adults", env.memory(child, lrn=str(child), age_band="6-9"))
+    assert r.status_code == 404 and r.json()["code"] == "CONTENT_NOT_FOUND"
+    assert (await look("bad", adult_text, "elders")).status_code == 422
+    # перевод ИИ: ребёнок + взрослый текст → 404, ребёнок + детский → 201
+    r = await env.c.post(AI, json={**ai_body("office"), "audience": "kids"}, headers=env.memory())
+    assert r.status_code == 404 and r.json()["code"] == "CONTENT_NOT_FOUND"
+    assert (await env.c.get(FORMS, params={"pair_id": "ru-en", "forms": "office"}, headers=env.memory())
+            ).json()["items"][0]["entry"] is None
+    r = await env.c.post(AI, json={**ai_body("bed", content=ref("reading", "r-a0-my-cat", locator="s4")),
+                                   "audience": "kids"}, headers=env.memory())
+    assert r.status_code == 201, r.text
+    assert (await env.c.post(AI, json={**ai_body("office"), "audience": "adults"}, headers=env.memory())
+            ).status_code == 201
+
+
+async def test_kids_only_kids_versions_for_memory(env) -> None:
+    await env.published_new("lesson", lesson("l-adults-only", audience=["adults"]))
+    child = uuid.uuid4()
+    child_claims = env.memory(child, lrn=str(child), age_band="10-13")
+    for path in ("/internal/v1/versions/reading/r-a1-coffee-shop/1", "/internal/v1/versions/reading/r-a1-coffee-shop",
+                 "/internal/v1/versions/lesson/l-adults-only/1", "/internal/v1/versions/lesson/l-adults-only"):
+        r = await env.c.get(path, params={"audience": "kids"}, headers=env.memory())
+        assert r.status_code == 404 and r.json()["code"] == "VERSION_NOT_FOUND", path
+        r = await env.c.get(path, headers=child_claims)  # детский профиль в claims — и без параметра
+        assert r.status_code == 404, path
+        assert (await env.c.get(path, headers=env.memory())).status_code == 200, path  # без audience — как раньше
+        assert (await env.c.get(path, params={"audience": "adults"}, headers=env.memory())).status_code == 200
+    for path in ("/internal/v1/versions/reading/r-a0-my-cat/1", "/internal/v1/versions/lesson/l-01-greetings/1",
+                 "/internal/v1/versions/media_asset/m-own-coffee-order",
+                 "/internal/v1/versions/scenario/sc-cafe-coffee/1"):
+        r = await env.c.get(path, params={"audience": "kids"}, headers=env.memory())
+        assert r.status_code == 200, path
+    # lessons и assessment — без изменений (claims не ограничивают; виды без аудитории — без фильтра)
+    lessons_child = env.svc("lessons", str(child), lrn=str(child), age_band="6-9")
+    assert (await env.c.get("/internal/v1/versions/lesson/l-adults-only/1", headers=lessons_child)).status_code == 200
+    r = await env.c.get("/internal/v1/versions/rubric/r-lesson-core/1", params={"audience": "kids"},
+                        headers=env.svc("assessment"))
+    assert r.status_code == 200
+    assert (await env.c.get("/internal/v1/versions/reading/r-a0-my-cat/1", params={"audience": "elders"},
+                            headers=env.memory())).status_code == 422

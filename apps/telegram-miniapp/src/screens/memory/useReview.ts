@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { Bff } from "../../api/bff";
 import { newIdempotencyKey } from "../../api/client";
 import { ApiError } from "../../api/errors";
-import { initialReview, isRetryableReview, reviewReducer, type ReviewState } from "../../domain/memory";
+import { canAnswer, initialReview, isRetryableReview, reviewReducer, type ReviewState } from "../../domain/memory";
 
 export interface ReviewApi {
   st: ReviewState;
@@ -116,7 +116,8 @@ export function useReview(bff: Bff): ReviewApi {
   const answer = useCallback(
     async (body: ReviewAnswer) => {
       const s = ref.current;
-      if (!s.task || s.phase !== "ready") return;
+      // a lost answer waits: only resend() sends it, unchanged
+      if (!s.task || !canAnswer(s)) return;
       await send(s.task.task_id, body);
     },
     [send],
@@ -131,7 +132,7 @@ export function useReview(bff: Bff): ReviewApi {
     async (kind: ReviewHint["kind"]) => {
       const s = ref.current;
       const id = s.session?.session_id;
-      if (!id || !s.task) return;
+      if (!id || !s.task || !canAnswer(s)) return;
       try {
         safe({ type: "hint", hint: await bff.reviewHint(id, s.task.task_id, kind) });
       } catch (e) {

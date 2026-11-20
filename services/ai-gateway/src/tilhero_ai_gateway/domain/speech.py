@@ -3,8 +3,9 @@
 
 Порядок:
 1. Доступность: аварийная остановка → `unavailable: ai_disabled`; нет ключа или региона Azure (или модель речи
-   выключена в админке) → `unavailable: not_configured`; бюджет (месяц UTC, ученик за день по Ташкенту) по оценке
-   стоимости длительности аудио → `unavailable: budget_exceeded` — всё до вызова провайдера.
+   выключена в админке) → `unavailable: not_configured`; бюджет (месяц UTC, подлимит речи в месяц
+   `speech_monthly_cap_usd` — решение владельца 20.11.2026, ученик за день по Ташкенту) по оценке стоимости длительности
+   аудио → `unavailable: budget_exceeded` — всё до вызова провайдера.
 2. Провайдер: таймаут попытки ≤ 12 с; один повтор при 5xx или сетевой ошибке, если до дедлайна (15 с ожидания memory,
    с запасом) осталось ≥ 4 с. Таймаут не повторяется (запрос мог быть обработан и оплачен).
 3. Разбор `NBest[0]`: `RecognitionStatus` ≠ Success → `insufficient_evidence: not_recognized`; `Confidence` < 0,4 →
@@ -234,12 +235,14 @@ async def speech_model(session: AsyncSession, provider: SpeechProvider) -> Model
 
 async def speech_available(session: AsyncSession, provider: SpeechProvider, now: datetime) -> bool:
     """AiStatus.speech_available: нет аварийной остановки, ключ и регион заданы (fake — всегда), модель речи включена,
-    месячный потолок не превышен."""
+    месячный потолок не превышен и расход речи за месяц меньше подлимита речи."""
     budget = await session.get(BudgetRow, 1)
     if budget is None or not budget.ai_enabled or not provider.ready():
         return False
     model = await speech_model(session, provider)
     if model is None or not model.active:
+        return False
+    if await budgets.speech_month_spent(session, now) >= Decimal(budget.speech_monthly_cap_usd):
         return False
     return await budgets.month_spent(session, now) < Decimal(budget.monthly_cap_usd)
 
@@ -285,7 +288,7 @@ async def assess(deps: SpeechDeps, meta: SpeechAssessMeta, audio: bytes, info: W
     estimate = audio_cost(info.duration_ms, price, ceiling=True)
     async with deps.rt.transaction() as s:
         s.add(UsageRow(**base, status="pending"))
-    scope = budgets.Scope(call_id=call_id, user_id=user_id, session_id=None, learner_limits=True)
+    scope = budgets.Scope(call_id=call_id, user_id=user_id, session_id=None, learner_limits=True, speech=True)
     async with deps.rt.transaction() as s:
         reserved = await budgets.try_reserve(s, budget, scope, actual=Decimal(0), estimate=estimate,
                                              now=deps.clock(), tz=deps.settings.timezone)

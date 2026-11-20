@@ -269,7 +269,7 @@ describe("overview · sprint 4 blocks", () => {
       data: {
         period: "month", spent_usd: 18.4, monthly_cap_usd: 20, cap_used_pct: 92, calls: 2400, unavailable: 110, unavailable_pct: 4.6, p95_latency_ms: 2380,
         by_agent: [], by_model: [], by_day: [], avg_cost_per_lesson_usd: 0.0118, ai_enabled: false, alert_percent: 80,
-        speech: { calls: 120, audio_minutes: 18.5, spent_usd: 0.41, speech_available: false },
+        speech: { calls: 120, audio_minutes: 18.5, spent_usd: 0.41, speech_available: false, cap_usd: 5 },
       },
     },
     memory: { available: true, data: { period: "today", review_sessions: 84, learners_reviewing: 61, median_minutes: 6, d30_pass_pct: 78.9, avg_due_per_learner: 11.4, ai_glosses_pending: 3 } },

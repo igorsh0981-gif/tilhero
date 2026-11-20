@@ -427,6 +427,8 @@ export const AI_BUDGET: Codec<AiBudget> = C.obj<AiBudget>({
   monthly_cap_usd: C.num(0, 100_000),
   learner_daily_cap_usd: C.num(0, 1000),
   lesson_cap_usd: C.num(0, 1000),
+  // спринт 5 (решение владельца): подлимит оценки произношения внутри monthly_cap_usd, по умолчанию 5
+  speech_monthly_cap_usd: C.num(0, 100_000),
   alert_percent: C.int(1, 100),
   updated_at: C.time,
 });
@@ -471,7 +473,14 @@ export const AI_USAGE_SUMMARY: Codec<AiUsageSummary> = C.obj<AiUsageSummary>({
   ai_enabled: C.bool,
   alert_percent: C.int(1, 100),
   // спринт 5: оценка произношения (pronunciation_coach) — входит в spent_usd; минуты — оценённого аудио
-  speech: C.obj<AiUsageSummary["speech"]>({ calls: COUNT, audio_minutes: C.num(0, 1e9), spent_usd: USD, speech_available: C.bool }),
+  speech: C.obj<AiUsageSummary["speech"]>({
+    calls: COUNT,
+    audio_minutes: C.num(0, 1e9),
+    spent_usd: USD,
+    speech_available: C.bool,
+    // подлимит речи на месяц (AiBudget.speech_monthly_cap_usd)
+    cap_usd: C.num(0, 100_000),
+  }),
 });
 
 // ---------------------------------------------------------------- контроль диалогов: сессии (lessons)

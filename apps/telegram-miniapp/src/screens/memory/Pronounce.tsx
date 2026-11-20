@@ -1,7 +1,7 @@
 import type { PronunciationView } from "@tilhero/contracts/bff";
 import { useEffect, useRef, useState } from "react";
 import { canRecord, RecorderError, startRecording, type RecordedAudio, type RecorderFailure, type Recording } from "../../audio/recorder";
-import { MAX_RECORD_MS, MIN_RECORD_MS } from "../../audio/wav";
+import { isTooShort, MAX_RECORD_MS } from "../../audio/wav";
 import { ApiError, errorText } from "../../api/errors";
 import { wordMark, type PronunciationAccess, type WordMark } from "../../domain/memory";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -124,7 +124,7 @@ export function PronounceSheet(props: { target: string; text: string; voice?: En
     if (sent.current.has(audio) || !alive.current) return;
     sent.current.add(audio);
     rec.current = null;
-    if (audio.durationMs < MIN_RECORD_MS) {
+    if (isTooShort(audio)) {
       setPhase({ k: "tooShort" });
       return;
     }

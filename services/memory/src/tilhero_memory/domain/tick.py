@@ -4,9 +4,10 @@
 прохода; запуск, пока идёт предыдущий, сразу отвечает `skipped`. Шаги — короткими транзакциями:
 1. Сессии: active без действий > 2 ч или с окончившимся местным днём → expired (ответы учтены; был ответ —
    `memory.review.completed.v1 {status: expired}`).
-2. Напоминания: reminders_enabled, местное время 19:00–19:14, к концу дня ≥ 5 карточек к сроку, повторения сегодня
-   не было, напоминания сегодня не было → `memory.reviews.due.v1` + reminders_sent; не больше 500 за tick (остаток —
-   следующим tick в том же окне). Детям тоже — адресат (опекун), тихие часы и мягкий текст решает notifications.
+2. Напоминания: reminders_enabled, местное время с 19:00 до 22:00 (первый tick окна; пропущенный tick и остаток
+   сверх 500 — следующими tick вечера), к концу дня ≥ 5 карточек к сроку, повторения сегодня не было, напоминания
+   сегодня не было → `memory.reviews.due.v1` + reminders_sent; не больше 500 за tick. Детям тоже — адресат
+   (опекун), тихие часы и мягкий текст решает notifications.
 3. Проверки удержания: срок наступил, а активности 14 дней нет — срок +1 день (не провал).
 4. Сроки хранения: карточки ошибок старше 90 дней → archived, цитата стирается; попытки произношения старше
    180 дней — удаляются; ввод в заданиях завершённых сессий старше 90 дней — стирается; ключи идемпотентности
@@ -83,7 +84,10 @@ async def expire_sessions(rt: Runtime, settings: Settings, now: datetime) -> dic
 
 
 async def reminders(rt: Runtime, settings: Settings, now: datetime) -> dict[str, int]:
-    """Вечернее напоминание о повторении — по поясу плана, раз в местный день."""
+    """Вечернее напоминание о повторении — по поясу плана, раз в местный день. Окно — с REMINDER_HOUR (19:00) до
+    REMINDER_UNTIL_HOUR (22:00): пропущенный tick или остаток сверх лимита догоняются следующими tick того же вечера
+    (отметка reminders_sent — ровно одно напоминание в день). «≥ 5 к сроку» и «повторения сегодня не было» — в SQL;
+    постранично: уже отправленные исключаются отметкой, лимит — REMINDERS_PER_TICK за tick."""
     sent = 0
     budget = settings.reminders_per_tick
     async with rt.transaction() as db:
@@ -94,37 +98,36 @@ async def reminders(rt: Runtime, settings: Settings, now: datetime) -> dict[str,
             break
         tz = zone(tz_name, settings.default_timezone)
         local = now.astimezone(tz)
-        if not (local.hour == settings.reminder_hour and local.minute < settings.reminder_window_minutes):
+        if not settings.reminder_hour <= local.hour < settings.reminder_until_hour:
             continue
         today = local.date()
         end = end_of_local_day(now, tz)
         tz_filter = LearnerProjection.timezone.is_(None) if tz_name is None else LearnerProjection.timezone == tz_name
+        due = func.count(Card.card_id)
         async with rt.transaction() as db:
-            candidates = (await db.execute(select(LearnerProjection).where(
-                LearnerProjection.reminders_enabled.is_(True), tz_filter,
-                ~select(ReminderSent.user_id).where(ReminderSent.user_id == LearnerProjection.user_id,
-                                                    ReminderSent.local_date == today).exists(),
-                ~select(ReviewSession.session_id).where(
-                    ReviewSession.user_id == LearnerProjection.user_id, ReviewSession.local_date == today,
-                    ReviewSession.status.in_(("completed", "expired", "cancelled")),
-                    func.coalesce(ReviewSession.summary["reviewed"].as_integer(), 0) > 0).exists(),
-            ).order_by(LearnerProjection.user_id).limit(budget * 4))).scalars().all()
-            for proj in candidates:
-                if budget <= 0:
-                    break
-                cards = [Card.user_id == proj.user_id, Card.status.in_(("learning", "review")), Card.due_at <= end]
-                if proj.course_pair:
-                    cards.append(Card.pair_id == proj.course_pair)
-                due = int(await db.scalar(select(func.count()).select_from(Card).where(*cards)) or 0)
-                if due < settings.reminder_min_due:
-                    continue
+            rows = (await db.execute(
+                select(LearnerProjection.user_id, due)
+                .join(Card, (Card.user_id == LearnerProjection.user_id)
+                      & Card.status.in_(("learning", "review")) & (Card.due_at <= end)
+                      & ((LearnerProjection.course_pair.is_(None)) | (Card.pair_id == LearnerProjection.course_pair)))
+                .where(LearnerProjection.reminders_enabled.is_(True), tz_filter,
+                       ~select(ReminderSent.user_id).where(ReminderSent.user_id == LearnerProjection.user_id,
+                                                           ReminderSent.local_date == today).exists(),
+                       ~select(ReviewSession.session_id).where(
+                           ReviewSession.user_id == LearnerProjection.user_id, ReviewSession.local_date == today,
+                           ReviewSession.status.in_(("completed", "expired", "cancelled")),
+                           func.coalesce(ReviewSession.summary["reviewed"].as_integer(), 0) > 0).exists())
+                .group_by(LearnerProjection.user_id)
+                .having(due >= settings.reminder_min_due)
+                .order_by(LearnerProjection.user_id).limit(budget))).all()
+            for user_id, count in rows:
                 inserted = (await db.execute(insert(ReminderSent).values(
-                    user_id=proj.user_id, local_date=today, due_count=due, sent_at=now,
+                    user_id=user_id, local_date=today, due_count=int(count), sent_at=now,
                 ).on_conflict_do_nothing().returning(ReminderSent.user_id))).first()
                 if inserted is None:
                     continue
-                await emit_event(db, REVIEWS_DUE, {"user_id": str(proj.user_id), "local_date": today.isoformat(),
-                                                   "due_count": min(due, 2000), "timezone": str(tz.key)})
+                await emit_event(db, REVIEWS_DUE, {"user_id": str(user_id), "local_date": today.isoformat(),
+                                                   "due_count": min(int(count), 2000), "timezone": str(tz.key)})
                 sent += 1
                 budget -= 1
     return {"reminders_sent": sent}

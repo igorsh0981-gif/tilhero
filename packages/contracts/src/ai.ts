@@ -242,7 +242,7 @@ export interface PronunciationResult {
 /** GET /internal/v1/status (вызывающие lessons, assessment, memory) */
 export interface AiStatus {
   ai_available: boolean; // нет аварийной остановки и провайдер LLM готов (лимиты не учитываются)
-  speech_available: boolean; // нет аварийной остановки, ключ и регион Azure заданы, месячный потолок не превышен
+  speech_available: boolean; // нет аварийной остановки, ключ и регион Azure заданы, месячный потолок и подлимит речи не превышены
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -346,6 +346,10 @@ export interface AiBudget {
   monthly_cap_usd: number; // по умолчанию 20
   learner_daily_cap_usd: number; // 0.05
   lesson_cap_usd: number; // 0.03
+  /** спринт 5 (решение владельца 20.11.2026): подлимит оценки произношения внутри monthly_cap_usd, по умолчанию 5
+   *  (≈ 3,8 ч аудио по $1,32/ч). Исчерпан — speech_available=false, «Произнести» скрыто; ИИ уроков и оценка не затронуты.
+   *  0..monthly_cap_usd; повышение — costs.manage + step-up, как остальные лимиты. */
+  speech_monthly_cap_usd: number;
   alert_percent: number; // 80 — предупреждение на обзоре
   updated_at: string;
 }

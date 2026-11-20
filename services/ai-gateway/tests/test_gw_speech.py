@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from gw_kit import ANALYST, OPERATIONS, PRICING, PUBLISHER, SPEECH_URL, meta_header, speech_meta
@@ -246,6 +247,76 @@ async def test_budget_by_audio_duration(env) -> None:
     assert (await env.speech(WAV, speech_meta())).json()["reason"] == "budget_exceeded"
 
 
+async def _speech_spend(env, usd: str, *, agent: str = "pronunciation_coach") -> None:
+    provider, model = ("fake_speech", "fake-speech") if agent == "pronunciation_coach" else ("fake", "fake")
+    await env.sql("INSERT INTO usage (call_id, request_id, caller, agent_id, model_id, provider, status, cost_usd, "
+                  "audio_ms, session_kind, created_at, finished_at) VALUES ($1, $2, 'memory', $3, $4, $5, 'ok', "
+                  "$6::numeric, $7, 'memory', $8, $8)", uuid.uuid4(), uuid.uuid4(), agent, model, provider, usd,
+                  1000 if provider == "fake_speech" else 0, env.now)
+
+
+async def test_speech_monthly_sub_cap(env) -> None:
+    """Подлимит речи 5 $/мес внутри общих 20 $ (решение владельца 20.11.2026): исчерпан по оценке стоимости
+    записи → budget_exceeded до провайдера, speech_available=false; вызовы агентов подлимит не затрагивает; прошлый
+    месяц не считается."""
+    r = await env.c.put("/admin/v1/ai/models/fake-speech", json={
+        "input_usd_per_mtok": 0, "output_usd_per_mtok": 0, "audio_usd_per_hour": 36, "active": True,
+        "reason": "Цена в тесте"}, headers=env.h(PRICING))  # 0,01 $ в секунду → 2 с = 0,02 $
+    assert r.status_code == 200
+    await _speech_spend(env, "4.97")
+    await _speech_spend(env, "10", agent="conversation_partner")  # агенты — в общий потолок, не в подлимит речи
+    assert (await env.c.get("/internal/v1/status", headers=env.svc("memory"))).json() == {
+        "ai_available": True, "speech_available": True}
+    assert (await env.speech(WAV)).json()["status"] == "ok"  # 4,97 + 0,02 ≤ 5
+    res = (await env.speech(WAV)).json()  # 4,99 + 0,02 > 5
+    assert (res["status"], res["reason"], res["provider"]) == ("unavailable", "budget_exceeded", None)
+    row = (await env.usage())[-1]
+    assert (row["status"], row["reason"], row["attempts"], row["reserved_usd"]) == (
+        "unavailable", "budget_exceeded", 0, 0)
+    await _speech_spend(env, "0.01")  # ровно 5 $ потрачено → функция скрыта
+    status = (await env.c.get("/internal/v1/status", headers=env.svc("memory"))).json()
+    assert status == {"ai_available": True, "speech_available": False}
+    summary = (await env.c.get("/admin/v1/ai/usage/summary", headers=env.h(OPERATIONS))).json()
+    assert summary["speech"]["cap_usd"] == 5.0 and summary["speech"]["speech_available"] is False
+    assert summary["speech"]["spent_usd"] == pytest.approx(5.0)
+    assert (await env.ok())["status"] == "ok"  # ИИ агентов — по общему потолку (15 $ из 20)
+    # повышение подлимита (costs.manage) — речь снова доступна; аудит ai.budget_updated
+    await env.set_budget(speech_monthly_cap_usd=6)
+    assert (await env.c.get("/internal/v1/status", headers=env.svc("memory"))).json()["speech_available"] is True
+    assert (await env.speech(WAV)).json()["status"] == "ok"
+    audit = await env.audit("ai.budget_updated")
+    assert audit[-1]["before"]["speech_monthly_cap_usd"] == 5.0 and audit[-1]["after"]["speech_monthly_cap_usd"] == 6.0
+    # новый месяц — подлимит заново
+    env.set_now(datetime(2026, 12, 1, 0, 30, tzinfo=UTC))
+    await env.set_budget(speech_monthly_cap_usd=0.02)
+    assert (await env.speech(WAV)).json()["status"] == "ok"
+
+
+async def test_speech_cap_validation(env) -> None:
+    current = (await env.c.get("/admin/v1/ai/budget", headers=env.h(OPERATIONS))).json()
+    assert current["speech_monthly_cap_usd"] == 5.0  # всегда в ответе AiBudget
+    body = {k: current[k] for k in ("monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "alert_percent",
+                                    "speech_monthly_cap_usd")}
+    for bad in ({"speech_monthly_cap_usd": 21}, {"monthly_cap_usd": 4}, {"monthly_cap_usd": 4,
+                                                                        "speech_monthly_cap_usd": 4.5}):
+        r = await env.c.put("/admin/v1/ai/budget", json={**body, **bad, "reason": "Лимиты"}, headers=env.h(OPERATIONS))
+        assert r.status_code == 422 and r.json()["code"] == "BUDGET_INVALID", bad  # подлимит больше потолка
+        assert r.json()["details"] == {"fields": ["speech_monthly_cap_usd"]}
+    no_cap = {k: v for k, v in body.items() if k != "speech_monthly_cap_usd"}
+    r = await env.c.put("/admin/v1/ai/budget", json={**no_cap, "reason": "Лимиты"}, headers=env.h(OPERATIONS))
+    assert r.status_code == 422 and r.json()["code"] == "VALIDATION_ERROR", r.text  # поле обязательно
+    r = await env.c.put("/admin/v1/ai/budget", json={**body, "speech_monthly_cap_usd": -1, "reason": "Лимиты"},
+                        headers=env.h(OPERATIONS))
+    assert r.status_code == 422
+    r = await env.c.put("/admin/v1/ai/budget", json={**body, "monthly_cap_usd": 4, "speech_monthly_cap_usd": 4,
+                                                     "reason": "Лимиты"}, headers=env.h(OPERATIONS))
+    assert r.status_code == 200 and r.json()["speech_monthly_cap_usd"] == 4.0
+    r = await env.c.put("/admin/v1/ai/budget", json={**body, "speech_monthly_cap_usd": 1, "reason": "Лимиты"},
+                        headers=env.h(ANALYST))
+    assert r.status_code == 403 and r.json()["details"]["permission"] == "costs.manage"
+    assert (await env.c.get("/admin/v1/ai/budget", headers=env.h(OPERATIONS))).json()["speech_monthly_cap_usd"] == 4.0
+
+
 async def test_speech_prices_rules(env) -> None:
     url = "/admin/v1/ai/models/azure-speech-pa"
     body = {"input_usd_per_mtok": 0, "output_usd_per_mtok": 0, "audio_usd_per_hour": 1.32, "active": True,
@@ -318,7 +389,13 @@ async def test_summary_provider_and_registry(env) -> None:
     summary = (await env.c.get("/admin/v1/ai/usage/summary", params={"period": "day"},
                                headers=env.h(OPERATIONS))).json()
     assert summary["speech"] == {"calls": 2, "audio_minutes": round(4500 / 60_000, 2),
-                                 "spent_usd": pytest.approx(0.00165), "speech_available": True}
+                                 "spent_usd": pytest.approx(0.00165), "speech_available": True, "cap_usd": 5.0}
+    calls = (await env.c.get("/admin/v1/ai/usage", params={"agent_id": "pronunciation_coach"},
+                             headers=env.h(OPERATIONS))).json()["items"]
+    assert [c["audio_ms"] for c in calls] == [1500, 3000] and all("user_id" not in c for c in calls)
+    llm = (await env.c.get("/admin/v1/ai/usage", params={"agent_id": "conversation_partner"},
+                           headers=env.h(OPERATIONS))).json()["items"]
+    assert llm[0]["audio_ms"] == 0
     assert summary["spent_usd"] == pytest.approx(0.00165) and summary["calls"] == 3
     assert {a["agent_id"] for a in summary["by_agent"]} == {"pronunciation_coach", "conversation_partner"}
     assert "fake-speech" in {m["model_id"] for m in summary["by_model"]}

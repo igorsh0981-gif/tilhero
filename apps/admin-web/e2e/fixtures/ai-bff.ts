@@ -60,7 +60,7 @@ export class AiStore {
 
   constructor(private readonly sc: AiScenario = {}) {
     this.spent = sc.spentUsd ?? 12.4;
-    this.budget = { ai_enabled: !sc.aiOff, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 80, updated_at: iso(-6 * DAY) };
+    this.budget = { ai_enabled: !sc.aiOff, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80, updated_at: iso(-6 * DAY) };
     const speech: AiProviderStatus["speech"] = sc.noSpeechKey
       ? { provider: "azure_speech", key_configured: false, region: null, last_error: { code: "not_configured", at: iso(-3 * HOUR) } }
       : { provider: "azure_speech", key_configured: true, region: "westeurope", last_error: null };
@@ -238,9 +238,13 @@ export class AiStore {
       alert_percent: this.budget.alert_percent,
       // sprint 5: pronunciation (pronunciation_coach, azure-speech-pa) — part of spent_usd
       speech: (() => {
-        const minutes = period === "day" ? 14.5 : period === "week" ? 96 : 412.5;
+        const minutes = period === "day" ? 14.5 : period === "week" ? 96 : 136.5;
         const price = this.models.find((m) => m.model_id === "azure-speech-pa")?.audio_usd_per_hour ?? 1.32;
-        return { calls: Math.round(minutes * 6), audio_minutes: minutes, spent_usd: Math.round((minutes / 60) * price * 10_000) / 10_000, speech_available: this.budget.ai_enabled && !this.sc.noSpeechKey };
+        const spentUsd = Math.round((minutes / 60) * price * 10_000) / 10_000;
+        const monthUsd = Math.round((136.5 / 60) * price * 10_000) / 10_000;
+        // the sub-cap of pronunciation (AiBudget.speech_monthly_cap_usd): reached → the feature is hidden from learners
+        const cap = this.budget.speech_monthly_cap_usd;
+        return { calls: Math.round(minutes * 6), audio_minutes: minutes, spent_usd: spentUsd, speech_available: this.budget.ai_enabled && !this.sc.noSpeechKey && monthUsd < cap, cap_usd: cap };
       })(),
     };
   }
@@ -505,10 +509,13 @@ export class AiStore {
       if (!reason) return bad("reason").then(() => true);
       const n = (k: string) => (typeof body[k] === "number" ? (body[k] as number) : NaN);
       const [mo, dl, ls, al] = [n("monthly_cap_usd"), n("learner_daily_cap_usd"), n("lesson_cap_usd"), n("alert_percent")];
+      // sprint 5: the sub-cap of pronunciation 0..monthly_cap_usd (absent — kept as it is)
+      const sp = body.speech_monthly_cap_usd === undefined ? this.budget.speech_monthly_cap_usd : n("speech_monthly_cap_usd");
       if (!(mo > 0) || !(dl > 0 && dl <= mo) || !(ls > 0 && ls <= dl) || !(Number.isInteger(al) && al >= 1 && al <= 100)) return bad("monthly_cap_usd").then(() => true);
+      if (!(sp >= 0 && sp <= mo)) return bad("speech_monthly_cap_usd").then(() => true);
       // ai-gateway: the updated_at that was read — someone saved in between → 409 BUDGET_CONFLICT {updated_at}
       if (body.updated_at !== undefined && body.updated_at !== this.budget.updated_at) return fail(409, "BUDGET_CONFLICT", { updated_at: this.budget.updated_at });
-      Object.assign(this.budget, { monthly_cap_usd: mo, learner_daily_cap_usd: dl, lesson_cap_usd: ls, alert_percent: al, updated_at: iso(0) });
+      Object.assign(this.budget, { monthly_cap_usd: mo, learner_daily_cap_usd: dl, lesson_cap_usd: ls, speech_monthly_cap_usd: sp, alert_percent: al, updated_at: iso(0) });
       audit("ai.budget_updated", "budget", reason);
       return done(200, this.budget);
     }

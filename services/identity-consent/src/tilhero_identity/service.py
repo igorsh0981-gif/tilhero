@@ -184,6 +184,10 @@ def _deletion_word(raw: str | None) -> str:
     return (raw or "").strip().upper().translate(_APOSTROPHES)
 
 
+# версии политики, где voice_recording — «оценка произношения по записи голоса» (спринт 5); новые версии — добавлять
+VOICE_PRONUNCIATION_POLICIES = frozenset({"1.1"})
+
+
 def optional_purposes_of(policy_version: str) -> frozenset[str]:
     policy = POLICIES.get(policy_version)
     return policy.optional_purposes if policy is not None else frozenset(OPTIONAL_PURPOSES)
@@ -202,6 +206,10 @@ def learner_purposes(learner: User, consent: Consent | None) -> list[str]:
         blocked = frozenset()
     else:
         blocked = optional
+    if consent.policy_version not in VOICE_PRONUNCIATION_POLICIES:
+        # до 1.1 цель voice_recording значила «хранить записи 30 дней» без передачи в сервис оценки — согласием на
+        # оценку произношения (Azure) она не считается: нужно подтвердить согласие по действующей политике
+        blocked = blocked | {VOICE_PURPOSE}
     return effective_purposes(consent.purposes, optional=blocked, optional_allowed=False)
 
 

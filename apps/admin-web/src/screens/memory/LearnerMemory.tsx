@@ -23,7 +23,7 @@ import { useToast } from "../../ui/toasts";
 import { errText } from "../../ui/errors";
 import { useKeyed } from "../ai/parts";
 import { SummaryCard } from "./Summary";
-import { actionBody, allowedActions, CARD_ACTIONS, CARD_KINDS, CARD_STATUSES, CARD_TONE, CHECK_TONE, daysUntil, DUE_MAX_DAYS, DUE_MIN_DAYS, GRADE_TONE, isOverdue, localDate, REASON_MAX, REASON_MIN, rescheduleDueAt } from "./model";
+import { actionBody, allowedActions, CARD_ACTIONS, CARD_KINDS, CARD_STATUSES, CARD_TONE, cardTitle, CHECK_TONE, CommandKey, commandSig, daysUntil, DUE_MAX_DAYS, DUE_MIN_DAYS, GRADE_TONE, isOverdue, localDate, REASON_MAX, REASON_MIN, rescheduleDueAt } from "./model";
 
 export function LearnerMemory({ userId, cardId }: { userId: string; cardId: string | null }) {
   const { t } = useI18n();
@@ -215,14 +215,21 @@ function CardsPanel({ userId, selected, tick, onOpen }: { userId: string; select
               {rows.map((c) => {
                 const f = fsrsText(fmt, c.stability, c.difficulty);
                 const over = isOverdue(c, now);
+                const title = cardTitle(c);
                 return (
                   <tr key={c.card_id} className={cx(selected === c.card_id && "is-sel")} data-testid={`mem-card-${c.card_id}`}>
                     <td>
-                      <button type="button" className="tr" lang="en" onClick={() => onOpen(c.card_id)} data-testid={`mem-open-${c.card_id}`}>
-                        {c.text_en}
+                      <button type="button" className="tr" lang={title.lang} onClick={() => onOpen(c.card_id)} data-testid={`mem-open-${c.card_id}`}>
+                        {title.text}
                       </button>
                       <span className="xs muted block">
-                        {t(`ckind.${c.kind}` as MessageKey)} · <span lang="ru">{c.gloss.ru}</span>
+                        {t(`ckind.${c.kind}` as MessageKey)}
+                        {!title.label && (
+                          <>
+                            {" · "}
+                            <span lang="ru">{c.gloss.ru}</span>
+                          </>
+                        )}
                         {c.error_code && (
                           <>
                             {" · "}
@@ -310,7 +317,7 @@ function CardDrawer({ id, onClose, onChanged }: { id: string; onClose: () => voi
   const [moreErr, setMoreErr] = useState<string | null>(null);
   const [ask, setAsk] = useState<CardAction["action"] | null>(null);
   const [due, setDue] = useState("");
-  const actKey = useRef(uuid());
+  const [actKey] = useState(() => new CommandKey(uuid));
   const apply = (d: AdminCardDetail) => {
     setC(d);
     setLog(d.log.items);
@@ -346,18 +353,20 @@ function CardDrawer({ id, onClose, onChanged }: { id: string; onClose: () => voi
   const dueAt = ask === "reschedule" ? rescheduleDueAt(due, now) : null;
   const n = daysUntil(due, now);
   const f = c ? fsrsText(fmt, c.stability, c.difficulty) : null;
+  const title = c ? cardTitle(c) : null;
   return (
     <Drawer
       wide
       testId="mem-card"
       onClose={onClose}
-      title={c ? <span lang="en">{c.text_en}</span> : t("mem.card")}
+      title={c && title ? <span lang={title.lang}>{title.text}</span> : t("mem.card")}
       sub={
-        c && (
+        c &&
+        title && (
           <>
             <Pill tone={CARD_TONE[c.status]}>{t(`cst.${c.status}` as MessageKey)}</Pill>
             <span className="tag plain">{t(`ckind.${c.kind}` as MessageKey)}</span>
-            <span lang="ru">{c.gloss.ru}</span>
+            {!title.label && <span lang="ru">{c.gloss.ru}</span>}
             <span className="muted" lang="uz-Latn">
               {c.gloss.uz}
             </span>
@@ -498,7 +507,7 @@ function CardDrawer({ id, onClose, onChanged }: { id: string; onClose: () => voi
       )}
       {ask && c && (
         <ConfirmCommand
-          title={t(`mact.${ask}.t` as MessageKey, { w: c.text_en })}
+          title={t(`mact.${ask}.t` as MessageKey, { w: title?.text ?? "" })}
           text={t(`mact.${ask}.m` as MessageKey)}
           icon={ask === "reschedule" ? "calendar" : ask === "reset" ? "rollback" : ask === "freeze" ? "pause" : "play"}
           tone={ask === "reset" ? "bad" : "warn"}
@@ -532,16 +541,18 @@ function CardDrawer({ id, onClose, onChanged }: { id: string; onClose: () => voi
             if (reason.length > REASON_MAX) return t("mem.reasonMax", { n: REASON_MAX });
             const body = actionBody(ask, reason, dueAt);
             if (!body) return ask === "reschedule" ? t("err.DUE_AT_RANGE") : t("cmd.errReason", { n: REASON_MIN });
+            // the same command after a network failure / 5xx keeps its Idempotency-Key (memory replays the answer)
+            const key = actKey.for(commandSig(c.card_id, body));
             try {
-              const d = await Memory.act(c.card_id, body, actKey.current);
-              actKey.current = uuid();
+              const d = await Memory.act(c.card_id, body, key);
+              actKey.settle();
               apply(d);
               onChanged();
               toast(t(`mact.${ask}.done` as MessageKey), "ok", "memory.card_adjusted");
               return null;
             } catch (e) {
+              actKey.settle(e);
               if ((e as ApiError)?.cancelled) return t("stepup.cancelled");
-              actKey.current = uuid();
               return errText(i18n, e);
             }
           }}

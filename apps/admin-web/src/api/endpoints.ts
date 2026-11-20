@@ -362,7 +362,7 @@ export const Diagnostics = {
 /** admin.ts AgentDetail (row + versions) and AgentVersionView (version + names; `updated_at` — the If-Match of PATCH) */
 export type { AgentDetail, AgentVersionView };
 export type AgentCardView = AgentDetail;
-export type BudgetInput = Pick<AiBudget, "monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "alert_percent">;
+export type BudgetInput = Pick<AiBudget, "monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "speech_monthly_cap_usd" | "alert_percent">;
 
 export const Ai = {
   agents: (background = false) => api.get<{ items: AgentRow[] }>("/ai/agents", { background }),

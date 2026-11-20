@@ -111,7 +111,7 @@ describe("права и step-up (PLAN спринта 4)", () => {
     expect((await get(s, "/admin/v1/ai/usage?agent_id=teaching_coach")).statusCode).toBe(200);
     expect((await get(s, "/admin/v1/ai/agents")).statusCode).toBe(200);
     expect((await get(s, "/admin/v1/qa/sessions")).statusCode).toBe(200);
-    const budget = { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 80, reason: "решение владельца" };
+    const budget = { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80, reason: "решение владельца" };
     expect((await send(s, "PUT", "/admin/v1/ai/budget", budget)).json()).toMatchObject({ code: "STEP_UP_REQUIRED", details: { permission: "costs.manage" } });
     expect((await send(s, "POST", "/admin/v1/ai/emergency-stop", { enabled: true, reason: "аномальный расход" })).json().code).toBe("STEP_UP_REQUIRED");
     await stepUp(h, s);
@@ -156,7 +156,7 @@ describe("права и step-up (PLAN спринта 4)", () => {
         expect((await get(s, url)).statusCode, `${role} ${url}`).toBe(200);
       }
       denied(await send(s, "POST", `/admin/v1/qa/sessions/${SESSION_ID}/transcript`, { reason: "просто посмотреть" }), "qa.transcripts");
-      denied(await send(s, "PUT", "/admin/v1/ai/budget", { monthly_cap_usd: 1, learner_daily_cap_usd: 0, lesson_cap_usd: 0, alert_percent: 80, reason: "ой" }), "costs.manage");
+      denied(await send(s, "PUT", "/admin/v1/ai/budget", { monthly_cap_usd: 1, learner_daily_cap_usd: 0, lesson_cap_usd: 0, speech_monthly_cap_usd: 0, alert_percent: 80, reason: "ой" }), "costs.manage");
     }
     for (const role of ["read_only", "support"] as const) {
       const { s } = await loginAs(h, role);
@@ -375,7 +375,7 @@ describe("ключ провайдера ИИ никогда не уходит и
       ["GET", `${AG}/versions/1`, () => json(200, agentVersion({ notes: `ключ для теста: ${KEY}` })), () => get(s, `${AG}/versions/1`)],
       ["GET", "/admin/v1/ai/models", () => json(200, { items: [{ model_id: "claude-haiku-5-5", provider: "anthropic", input_usd_per_mtok: 0.1, output_usd_per_mtok: 0.5, active: true, updated_at: "2026-11-19T00:00:00Z", provider_config: { secret: "s" } }] }), () => get(s, "/admin/v1/ai/models")],
       ["POST", `${AG}/versions/2/publish`, () => domainError(422, "TESTS_FAILED", { case_ids: ["c1"], debug: { authorization: `Bearer ${KEY}` } }), () => send(s, "POST", `${AG}/versions/2/publish`, { reason: "публикую" })],
-      ["PUT", "/admin/v1/ai/budget", () => json(400, { code: "PROVIDER_ERROR", message: `upstream said ${KEY}`, trace_id: "t", details: {} }), () => send(s, "PUT", "/admin/v1/ai/budget", { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 80, reason: "лимиты" })],
+      ["PUT", "/admin/v1/ai/budget", () => json(400, { code: "PROVIDER_ERROR", message: `upstream said ${KEY}`, trace_id: "t", details: {} }), () => send(s, "PUT", "/admin/v1/ai/budget", { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80, reason: "лимиты" })],
     ];
     for (const [method, path, handler, call] of leaks) {
       h.fake.on("aiGateway", method, path, handler);
@@ -729,7 +729,7 @@ describe("затраты, модели и обзор", () => {
     expect(h.fake.calls.find((c) => c.service === "aiGateway" && c.path === "/admin/v1/ai/usage")!.query).toEqual({ session_id: SESSION_ID });
     expect(calls.body).not.toContain(LEARNER_USER_ID);
     expect(calls.body).not.toContain("request_id");
-    expect((await get(s, "/admin/v1/ai/budget")).json()).toEqual({ ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 80, updated_at: "2026-11-19T00:00:00Z" });
+    expect((await get(s, "/admin/v1/ai/budget")).json()).toEqual({ ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80, updated_at: "2026-11-19T00:00:00Z" });
   });
 
   it("дашборд: lessons = статистика lessons (period) + счётчики assessment; ai = сводка месяца; assessment недоступен → блок lessons недоступен", async () => {

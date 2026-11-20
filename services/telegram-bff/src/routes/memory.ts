@@ -16,7 +16,7 @@
  * их прислал (защита в глубину, как graded_later в уроке).
  *
  * Лимиты: `tg.memory.answer` (300 за 10 минут на ученика) — ответы на задания; `tg.memory.translate` (60 за 10 минут) —
- * перевод. Таймауты: memory 10 с, перевод 12 с (MEMORY_TIMEOUT_MS, MEMORY_TRANSLATE_TIMEOUT_MS).
+ * перевод и «в словарь» (общий счётчик: добавление слова тоже может вызвать перевод ИИ). Таймауты: memory 10 с, перевод 12 с (MEMORY_TIMEOUT_MS, MEMORY_TRANSLATE_TIMEOUT_MS).
  *
  * Логи: без текстов ученика (ввод в повторении, поиск по словарю, слово перевода, цитаты ошибок) — тела запросов не
  * пишутся, ключи вычищаются (logging.ts).
@@ -215,7 +215,8 @@ export function memoryRoutes(app: App, ctx: BffContext): void {
         description:
           "Idempotency-Key (UUID) обязателен. Только текст из этой опубликованной версии контента (проверяет memory через catalog); " +
           "свой текст ученика — нельзя: 422 WORD_NOT_IN_CONTENT. 422 GLOSS_UNAVAILABLE — перевода нет; 422 CARDS_LIMIT {limit: 2000}; " +
-          "404 CONTENT_NOT_FOUND.",
+          "404 CONTENT_NOT_FOUND. 429 RATE_LIMITED — общий с переводом лимит tg.memory.translate (60 за 10 минут на ученика; " +
+          "может вызвать перевод ИИ); повтор того же Idempotency-Key лимит не тратит.",
         security: BEARER,
         headers: IdempotencyHeadersSchema,
         body: AddCardRequestSchema,
@@ -223,11 +224,30 @@ export function memoryRoutes(app: App, ctx: BffContext): void {
       },
     },
     async (req, reply) => {
+      const auth = authOf(req);
       const key = idempotencyKey(req, true)!;
-      const { ro } = await memoryCall(ctx, authOf(req), req);
+      // «В словарь» может вызвать перевод ИИ (слова нет в словаре курса) — общий счётчик с переводом по тапу.
+      // Повтор того же Idempotency-Key, на который memory уже ответила (или исход неизвестен), лимит не тратит.
+      const seenKey = `${ctx.config.redisKeyPrefix}mem:card-seen:${auth.learnerId}:${key}`;
+      const repeat = await ctx.redis.exists(seenKey).then((v) => v > 0, () => false);
+      if (!repeat) await ctx.limiter.enforce("tg.memory.translate", auth.learnerId);
+      const markSeen = () => ctx.redis.set(seenKey, "1", "EX", 86_400).then(() => undefined, () => undefined);
+      const { ro } = await memoryCall(ctx, auth, req);
       const b = req.body;
       const source: C.ContentRef = { kind: b.source.kind, key: b.source.key, version: b.source.version, ...(b.source.locator ? { locator: b.source.locator } : {}) };
-      const res = await memory.jsonWithStatus("POST", "/internal/v1/cards", { ...ro, idempotencyKey: key, body: { text_en: b.text_en.trim(), source } });
+      let res: { status: number; body: unknown };
+      try {
+        res = await memory.jsonWithStatus("POST", "/internal/v1/cards", {
+          ...ro,
+          idempotencyKey: key,
+          body: { text_en: b.text_en.trim(), source },
+          timeoutMs: ctx.config.memoryTranslateTimeoutMs,
+        });
+      } catch (err) {
+        if (!(err instanceof AppError) || err.status >= 500) await markSeen();
+        throw err;
+      }
+      await markSeen();
       const view = expectShape(log, MEMORY, "card", DictionaryCardSchema, res.body);
       return reply.code(res.status === 201 ? 201 : 200).send(view);
     },

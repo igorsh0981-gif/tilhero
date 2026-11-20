@@ -40,7 +40,7 @@ import {
   publicAgentRow,
 } from "../contractAi.js";
 import type { BffContext } from "../context.js";
-import { hasPermission, idempotencyKeyOf, ifMatchOf, passReplayed, staffOf, type App, type StaffAuth } from "../http.js";
+import { hasPermission, idempotencyKeyOf, ifMatchOf, passReplayed, staffOf, validationError, type App, type StaffAuth } from "../http.js";
 import { requirePermission, requireStepUp } from "../rbac.js";
 import { NO_CONTENT } from "../responses.js";
 import {
@@ -358,11 +358,15 @@ export function aiRoutes(app: App, ctx: BffContext): void {
     return shaped(ctx, auth, AI_SERVICE, AI_BUDGET, await aiGet(ctx, `${BASE}/budget`, { actor: auth.actor }));
   });
 
-  app.put<{ Body: Record<string, unknown> }>(
+  /** Лимиты ИИ (costs.manage, step-up); подлимит речи — не больше месячного потолка (422 до домена). */
+  app.put<{ Body: { monthly_cap_usd: number; speech_monthly_cap_usd: number } & Record<string, unknown> }>(
     `${BASE}/budget`,
     { config: { ...requirePermission("costs.manage"), ...requireStepUp() }, schema: { response: out(AI_BUDGET), body: BUDGET_UPDATE } },
     async (req, reply) => {
       const auth = staffOf(req);
+      if (req.body.speech_monthly_cap_usd > req.body.monthly_cap_usd) {
+        throw validationError("speech_monthly_cap_usd", "Подлимит речи — не больше месячного потолка ИИ");
+      }
       const res = await aiCall(ctx, "PUT", `${BASE}/budget`, { actor: auth.actor, body: req.body, idempotencyKey: idempotencyKeyOf(req, false) });
       return relayAi(auth, reply, AI_BUDGET, res);
     },

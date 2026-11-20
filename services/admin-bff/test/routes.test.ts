@@ -573,7 +573,7 @@ const CASES: Record<string, Case> = {
   "GET /admin/v1/ai/budget": { url: "/admin/v1/ai/budget", status: 200, domain: ["aiGateway", "GET", "/admin/v1/ai/budget"] },
   "PUT /admin/v1/ai/budget": {
     url: "/admin/v1/ai/budget",
-    payload: { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 80, reason: "решение владельца" },
+    payload: { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80, reason: "решение владельца" },
     status: 200,
     domain: ["aiGateway", "PUT", "/admin/v1/ai/budget"],
   },

@@ -193,8 +193,8 @@ describe("i18n dictionaries", () => {
       ...["0", "1", "2", "3"].map((x) => `rv2.band.${x}`),
       ...["upheld", "corrected"].flatMap((x) => [`ap.d.${x}`, `ap.d.${x}.h`]),
       ...["bug", "method"].map((x) => `qt.kind.${x}`),
-      ...["range", "gt_daily", "gt_monthly"].map((x) => `csf.${x}`),
-      ...["monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "alert_percent"].flatMap((x) => [`csf.l.${x}`, `csf.h.${x}`]),
+      ...["range", "range0", "gt_daily", "gt_monthly"].map((x) => `csf.${x}`),
+      ...["monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "speech_monthly_cap_usd", "alert_percent"].flatMap((x) => [`csf.l.${x}`, `csf.h.${x}`]),
       // sprint 5: reading, course dictionary, memory, forgetting analytics, overview block
       ...["memory"].flatMap((b) => [`dash.b.${b}`, `dash.empty.${b}`, `dash.svc.${b}`]),
       ...["READING_WORDS", "SENTENCE_TOO_LONG", "GLOSSARY_NOT_IN_TEXT", "TEXT_TOO_LONG"].map((c) => `ci.${c}`),

@@ -60,8 +60,9 @@ class Settings(ServiceSettings):
     gloss_cache_namespace: str = Field(default="", max_length=64, pattern=r"^[a-z0-9_]*$")
 
     # напоминания и tick (INTERNAL_API §1.8)
+    # окно напоминания: с REMINDER_HOUR до REMINDER_UNTIL_HOUR по поясу плана (раз в день; пропущенный tick догоняется)
     reminder_hour: int = Field(default=19, ge=0, le=23)
-    reminder_window_minutes: int = Field(default=15, ge=1, le=60)
+    reminder_until_hour: int = Field(default=22, ge=1, le=24)
     reminder_min_due: int = Field(default=5, ge=1, le=2000)
     reminders_per_tick: int = Field(default=500, ge=1, le=10_000)
     inactivity_days_for_checks: int = Field(default=14, ge=1, le=90)
@@ -98,6 +99,8 @@ class Settings(ServiceSettings):
         token = self.scheduler_token.get_secret_value()
         if self.is_secure_env and len(token) < MIN_SCHEDULER_TOKEN_LEN:
             raise ValueError(f"SCHEDULER_TOKEN is required (>= {MIN_SCHEDULER_TOKEN_LEN} chars) in stage/prod")
+        if self.reminder_until_hour <= self.reminder_hour:
+            raise ValueError("REMINDER_UNTIL_HOUR must be after REMINDER_HOUR")
         if self.gloss_timeout_seconds * 1000 <= self.gloss_deadline_ms:
             raise ValueError("GLOSS_TIMEOUT_SECONDS must exceed GLOSS_DEADLINE_MS")
         return self

@@ -71,7 +71,7 @@ def _parse_version(data: Any, version: int | None) -> tuple[int, str, dict[str, 
 class CatalogGateway:
     def __init__(self, runtime: Runtime) -> None:
         self.runtime = runtime
-        self._versions: OrderedDict[tuple[str, str, int], tuple[str, dict[str, Any]]] = OrderedDict()
+        self._versions: OrderedDict[tuple[str, str, int, str], tuple[str, dict[str, Any]]] = OrderedDict()
         self._titles: dict[tuple[str, str], tuple[float, dict[str, str] | None]] = {}
 
     @property
@@ -82,14 +82,16 @@ class CatalogGateway:
     def client(self) -> ServiceClient:
         return self.runtime.client(CATALOG)
 
-    async def version(self, kind: str, key: str, version: int) -> dict[str, Any]:
-        """Полная версия (payload с ключами), опубликованная или бывшая опубликованной. 404 / черновик → ContentGone;
-        сбой → 503 CATALOG_UNAVAILABLE."""
-        ck = (kind, key, version)
+    async def version(self, kind: str, key: str, version: int, audience: str | None = None) -> dict[str, Any]:
+        """Полная версия (payload с ключами), опубликованная или бывшая опубликованной. audience — ученика (kids:
+        недетский контент — 404); без аудитории — служебное чтение (consumers: урок, который ученик уже прошёл).
+        404 / черновик → ContentGone; сбой → 503 CATALOG_UNAVAILABLE."""
+        ck = (kind, key, version, audience or "")
         hit = self._versions.get(ck)
         if hit is None:
             try:
-                data = await self.client.get(f"/internal/v1/versions/{kind}/{key}/{version}")
+                data = await self.client.get(f"/internal/v1/versions/{kind}/{key}/{version}",
+                                             params={"audience": audience} if audience else None)
                 _, status, payload = _parse_version(data, version)
             except UpstreamError as exc:
                 if exc.status == 404:
@@ -149,10 +151,11 @@ class CatalogGateway:
         self._titles[("skill", skill_id)] = (now + ttl, title)
         return title
 
-    async def lookup(self, pair_id: str, text: str, ref: dict[str, Any]) -> dict[str, Any]:
-        """POST /internal/v1/glossary/lookup → {in_content, sentence_en, entry | null, rejected}.
-        404 → CONTENT_NOT_FOUND; 422 WORD_NOT_IN_CONTENT; сбой → 503 CATALOG_UNAVAILABLE."""
-        body = {"pair_id": pair_id, "text": text, "content_ref": ref}
+    async def lookup(self, pair_id: str, text: str, ref: dict[str, Any], audience: str) -> dict[str, Any]:
+        """POST /internal/v1/glossary/lookup → {in_content, sentence_en, locator, note, entry | null, rejected}.
+        audience — ученика: детям недетский контент «не существует» (404). 404 → CONTENT_NOT_FOUND; 422
+        WORD_NOT_IN_CONTENT; сбой → 503 CATALOG_UNAVAILABLE."""
+        body = {"pair_id": pair_id, "text": text, "content_ref": ref, "audience": audience}
         try:
             data = await self.client.post("/internal/v1/glossary/lookup", json=body)
         except UpstreamError as exc:
@@ -226,13 +229,15 @@ class CatalogGateway:
 
 
 async def memory_feed(rt: Runtime, evaluation_id: uuid.UUID, user_id: uuid.UUID) -> dict[str, Any] | None:
-    """Актуальная запись цепочки оценки с подтверждёнными ошибками текста ученика; 404 (нет оценки) и 410 (ученик
-    удалён) → None — событие не повторяется; сбой → TransientError (consumer повторит доставку)."""
+    """Актуальная запись цепочки оценки с подтверждёнными ошибками текста ученика. None — только 404
+    EVALUATION_NOT_FOUND (оценки нет) и 410 (ученик удалён): событие не повторяется. Любой другой ответ (в т. ч.
+    404 без маршрута у старой версии assessment) и сбой → TransientError: consumer повторит доставку, событие не
+    теряется."""
     try:
         data = await rt.client(ASSESSMENT).get(f"/internal/v1/evaluations/{evaluation_id}/memory-feed",
                                                subject=str(user_id))
     except UpstreamError as exc:
-        if exc.status in (404, 410):
+        if (exc.status == 404 and exc.code == "EVALUATION_NOT_FOUND") or exc.status == 410:
             return None
         log.warning("assessment memory-feed unavailable", extra={"error_type": type(exc).__name__,
                                                                  "status": exc.status})

@@ -5,7 +5,9 @@
  *
  * Память (memory, docs/sprint5/INTERNAL_API.md §1.11):
  *  - цитата ошибки ученика (`evidence`, `error`) в админку не попадает никогда — её нет в контракте, и если memory её
- *    пришлёт, кодек её отбросит; `user_id` — только в сводке и карточке (сотрудник пришёл из карточки ученика);
+ *    пришлёт, кодек её отбросит; у карточки ошибки (`kind: error`) `text_en` (исправление выведено из свободного текста
+ *    ученика) и `example_en` — всегда null, что бы ни прислала memory: показываются только `error_code` и подпись;
+ *    `user_id` — только в сводке и карточке (сотрудник пришёл из карточки ученика);
  *  - строка истории планирования неизменяема; кто правил — `actor: staff`, `actor_id` (staff_id; memory прошлой версии —
  *    `actor: "staff:<uuid>"`) и `actor_name`: имя по `actor_id` через admin-identity staff/lookup, иначе — имя, которое
  *    memory записала из actor-токена; у learner/system — `actor_id` и `actor_name` null;
@@ -219,7 +221,8 @@ const DIFFICULTY = C.nullable(C.num(1, 10));
 const CARD_ROW_PROPS = {
   card_id: C.uuid,
   kind: C.oneOf(KINDS),
-  text_en: EN_TEXT,
+  // null у карточек ошибок (admin.ts); у word/phrase — слово или фраза контента
+  text_en: C.nullable(EN_TEXT),
   gloss: LOCALIZED,
   status: C.oneOf(STATUSES),
   stability: STABILITY,
@@ -231,7 +234,10 @@ const CARD_ROW_PROPS = {
   last_review_at: N_TIME,
   error_code: C.nullable(CODE),
 };
-export const ADMIN_CARD_ROW: Codec<AdminCardRow> = C.obj<AdminCardRow>(CARD_ROW_PROPS);
+/** Карточка ошибки: текст, выведенный из ответа ученика, не показывается (защита в глубину — даже если memory прислала). */
+const withoutLearnerText = <T extends { kind: AdminCardRow["kind"]; text_en: string | null }>(c: Codec<T>, nulls: Partial<Record<keyof T, null>>): Codec<T> =>
+  C.map(c, c.schema, (card) => (card.kind === "error" ? { ...card, text_en: null, ...nulls } : card));
+export const ADMIN_CARD_ROW: Codec<AdminCardRow> = withoutLearnerText(C.obj<AdminCardRow>(CARD_ROW_PROPS), {});
 export const ADMIN_CARD_PAGE = pageOf(ADMIN_CARD_ROW, 100);
 
 const SNAPSHOT: Codec<FsrsSnapshot> = C.obj<FsrsSnapshot>({
@@ -290,7 +296,10 @@ const DETAIL_EXTRA = {
   example_en: C.optText(400),
   sources: C.arr(SOURCE, 20),
 };
-export const ADMIN_CARD_DETAIL: Codec<AdminCardDetail> = C.obj<AdminCardDetail>({ ...CARD_ROW_PROPS, ...DETAIL_EXTRA, log: REVIEW_LOG_PAGE });
+export const ADMIN_CARD_DETAIL: Codec<AdminCardDetail> = withoutLearnerText(
+  C.obj<AdminCardDetail>({ ...CARD_ROW_PROPS, ...DETAIL_EXTRA, log: REVIEW_LOG_PAGE }),
+  { example_en: null },
+);
 
 // ---------------------------------------------------------------- аналитика забывания и обзор (memory)
 

@@ -258,7 +258,8 @@ class TestRunRow(Base):
 
 
 class BudgetRow(Base):
-    """Бюджет ИИ (singleton, id = 1): аварийная остановка, потолок месяца, лимит ученика в день и урока."""
+    """Бюджет ИИ (singleton, id = 1): аварийная остановка, потолок месяца, лимит ученика в день и урока; подлимит
+    оценки произношения в месяц внутри потолка (спринт 5, миграция 0005)."""
 
     __tablename__ = "budget"
     __table_args__ = (
@@ -267,6 +268,8 @@ class BudgetRow(Base):
         CheckConstraint("learner_daily_cap_usd >= 0 AND learner_daily_cap_usd <= 1000", name="ck_budget_daily"),
         CheckConstraint("lesson_cap_usd >= 0 AND lesson_cap_usd <= 1000", name="ck_budget_lesson"),
         CheckConstraint("alert_percent BETWEEN 1 AND 100", name="ck_budget_alert"),
+        CheckConstraint("speech_monthly_cap_usd >= 0 AND speech_monthly_cap_usd <= monthly_cap_usd",
+                        name="ck_budget_speech"),
     )
 
     id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
@@ -274,6 +277,7 @@ class BudgetRow(Base):
     monthly_cap_usd: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     learner_daily_cap_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
     lesson_cap_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    speech_monthly_cap_usd: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="5.00")
     alert_percent: Mapped[int] = mapped_column(Integer, nullable=False)
     updated_by: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())

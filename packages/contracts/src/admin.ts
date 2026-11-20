@@ -1298,7 +1298,8 @@ export interface AiUsageSummary {
   ai_enabled: boolean;
   alert_percent: number; // порог предупреждения из AiBudget (1–100) — обзору не нужен отдельный GET /ai/budget
   /** спринт 5: оценка произношения (агент pronunciation_coach) — входит в spent_usd */
-  speech: { calls: number; audio_minutes: number; spent_usd: number; speech_available: boolean };
+  speech: { calls: number; audio_minutes: number; spent_usd: number; speech_available: boolean;
+            /** подлимит речи (AiBudget.speech_monthly_cap_usd) */ cap_usd: number };
 }
 export interface AiCall {
   call_id: string;
@@ -1454,8 +1455,8 @@ export type { Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiModel, AiP
  *  POST /admin/v1/glossary/{entry_id}/review GlossaryReview (glossary.manage) → GlossaryDetail; 409 NOT_PENDING.
  *  DELETE /admin/v1/glossary/{entry_id} {reason} (glossary.manage; только methodist, иначе 409 ARCHIVE_NOT_ALLOWED) → 204.
  *  GET /admin/v1/glossary/stats?pair_id= (dashboard.read | content.read) → GlossaryStats.
- *  Коды: 404 GLOSSARY_ENTRY_NOT_FOUND; 409 ENTRY_ARCHIVED | COURSE_ENTRY_LOCKED (у course — только override) |
- *  OVERRIDE_COURSE_ONLY; 422 GLOSSARY_INVALID {errors}. Форму отклонённого перевода ИИ методист может занять своей
+ *  Коды: 404 GLOSSARY_ENTRY_NOT_FOUND; 409 ENTRY_ARCHIVED | OVERRIDE_COURSE_ONLY; 422 GLOSSARY_INVALID {errors} (в т. ч.
+ *  COURSE_ENTRY_LOCKED — правка полей статьи course: у неё только override). Форму отклонённого перевода ИИ методист может занять своей
  *  статьёй (отклонённая архивируется). */
 export interface GlossaryStats {
   pair_id: string | null;
@@ -1546,7 +1547,9 @@ export interface RetentionCheckRow {
 export interface AdminCardRow {
   card_id: string;
   kind: "word" | "phrase" | "error";
-  text_en: string;
+  /** null у карточек ошибок: исправление выведено из свободного текста ученика (может содержать его данные) — в
+   *  админке показываются только error_code и его подпись (тексты ученика — только qa.transcripts в «Контроле диалогов») */
+  text_en: string | null;
   gloss: ContentLocalized;
   status: AdminCardStatus;
   stability: number | null; // дни
@@ -1593,7 +1596,9 @@ export interface ReviewLogRow {
   reason: string | null;
 }
 
-/** POST /admin/v1/memory/cards/{card_id}/actions CardAction (memory.manage, step-up) → AdminCardDetail.
+/** POST /admin/v1/memory/cards/{card_id}/actions CardAction (memory.manage, step-up; Idempotency-Key — повтор с тем же
+ *  ключом от того же сотрудника за 24 ч возвращает тот же ответ без новой строки истории и аудита) → AdminCardDetail.
+ *  reschedule.due_at — выбранный день (клиент шлёт полдень местного дня); допуск ±1 сутки к границам 1..365 дней.
  *  409 CARD_STATE {status} (например, unfreeze не замороженной); 422 DUE_AT_RANGE (1..365 дней от сейчас). */
 export type CardAction =
   | { action: "reschedule"; due_at: string; reason: string }
@@ -1616,7 +1621,8 @@ export interface ForgettingAnalytics {
                      hidden: boolean }>;
   repeated_errors: Array<{ error_code: string; label: ContentLocalized; learners_with_repeats: number; cards: number;
                            hidden: boolean }>;
-  forgotten_words: Array<{ text_en: string; answers: number; again_pct: number }>; // ≤ 20, при ≥ 20 ответах
+  /** ≤ 20, только карточки слов и фраз контента (не ошибок), при ≥ 20 ответах и ≥ 5 учениках */
+  forgotten_words: Array<{ text_en: string; answers: number; again_pct: number }>;
 }
 export interface CheckRate {
   scheduled: number;

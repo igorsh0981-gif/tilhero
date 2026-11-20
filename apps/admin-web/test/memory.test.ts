@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest";
 import type { GlossaryDetail } from "@tilhero/contracts/admin";
 import { checkEntry, createBody, emptyForm, entryActions, formOf, historyChanges, parseForms, patchBody, refRoute, serverIssues } from "../src/screens/content/glossary";
 import { parseGlossaryRoute } from "../src/screens/content/GlossaryTab";
-import { actionBody, allowedActions, daysUntil, isOverdue, localDate, memoryTabs, parseMemoryRoute, rateShown, rescheduleDueAt } from "../src/screens/memory/model";
+import { ApiError } from "../src/api/errors";
+import { actionBody, allowedActions, cardTitle, CommandKey, commandSig, daysUntil, isOverdue, localDate, memoryTabs, outcomeUnknown, parseMemoryRoute, rateShown, rescheduleDueAt } from "../src/screens/memory/model";
 
 const UID = "a1000000-0000-4000-8000-000000000001";
 const CARD = "c1000000-0000-4000-8000-000000000001";
@@ -104,12 +105,16 @@ describe("memory", () => {
     expect(allowedActions("new")).toMatchObject({ reset: false, freeze: true });
     expect(Object.values(allowedActions("archived")).some(Boolean)).toBe(false);
   });
-  it("reschedule: a date 1..365 days ahead → now + N whole days; today, the past and day 366 are refused", () => {
+  it("reschedule: a date 1..365 days ahead → noon of that local day; today, the past and day 366 are refused", () => {
     const now = new Date(2026, 10, 20, 15, 30).getTime();
     expect(daysUntil(localDate(now), now)).toBe(0);
     expect(daysUntil("2026-11-21", now)).toBe(1);
     expect(daysUntil("2026-02-30", now)).toBeNaN();
-    expect(rescheduleDueAt("2026-11-21", now)).toBe(new Date(now + 86_400_000).toISOString());
+    expect(rescheduleDueAt("2026-11-21", now)).toBe(new Date(2026, 10, 21, 12, 0, 0, 0).toISOString());
+    // the value depends on the chosen day only, not on the moment of the render: a retry sends the same body
+    const later = new Date(2026, 10, 20, 23, 59).getTime();
+    expect(rescheduleDueAt("2026-12-01", later)).toBe(rescheduleDueAt("2026-12-01", now));
+    expect(new Date(rescheduleDueAt("2026-12-01", now)!).getHours()).toBe(12);
     expect(rescheduleDueAt(localDate(now), now)).toBeNull();
     expect(rescheduleDueAt("2026-11-19", now)).toBeNull();
     const d365 = localDate(now + 365 * 86_400_000);
@@ -123,6 +128,36 @@ describe("memory", () => {
     expect(actionBody("reschedule", "Ученик попросил перенести", null)).toBeNull();
     expect(actionBody("reschedule", "Ученик попросил перенести", "2026-11-25T10:00:00.000Z")).toEqual({ action: "reschedule", due_at: "2026-11-25T10:00:00.000Z", reason: "Ученик попросил перенести" });
     expect(actionBody("reset", "x".repeat(301), null)).toBeNull();
+  });
+  it("an error card shows the label of its code, never a text (its correction came from the learner's answer)", () => {
+    const L = (ru: string, uz: string) => ({ ru, uz });
+    expect(cardTitle({ kind: "word", text_en: "queue", gloss: L("очередь", "navbat"), error_code: null })).toEqual({ text: "queue", lang: "en", label: false });
+    expect(cardTitle({ kind: "error", text_en: null, gloss: L("Порядок слов", "So'z tartibi"), error_code: "word_order" })).toEqual({ text: "Порядок слов", lang: "ru", label: true });
+    // even a text that slipped through for an error card is not shown
+    expect(cardTitle({ kind: "error", text_en: "I would like a large coffee", gloss: L("", ""), error_code: "word_order" })).toEqual({ text: "word_order", lang: undefined, label: true });
+    expect(cardTitle({ kind: "error", text_en: null, gloss: L("", ""), error_code: null }).text).toBe("—");
+  });
+  it("Idempotency-Key of a manual action: kept after a network failure / 5xx, new after a 4xx or a success or another command", () => {
+    let n = 0;
+    const keys = new CommandKey(() => `k${++n}`);
+    const freeze = commandSig("c1", { action: "freeze", reason: "Ученик в отпуске две недели" });
+    const k1 = keys.for(freeze);
+    keys.settle(new ApiError(0, null, "network"));
+    expect(keys.for(freeze)).toBe(k1);
+    keys.settle(new ApiError(502, { code: "UPSTREAM_UNAVAILABLE" }));
+    expect(keys.for(freeze)).toBe(k1);
+    // the staff member changed the reason — another command, another key
+    const other = commandSig("c1", { action: "freeze", reason: "Ученик в отпуске три недели" });
+    const k2 = keys.for(other);
+    expect(k2).not.toBe(k1);
+    keys.settle(new ApiError(409, { code: "CARD_STATE" }));
+    expect(keys.current).toBeNull();
+    expect(keys.for(other)).not.toBe(k2);
+    keys.settle();
+    expect(keys.current).toBeNull();
+    expect(outcomeUnknown(new ApiError(403, { code: "STEP_UP_REQUIRED" }))).toBe(false);
+    expect(outcomeUnknown(new ApiError(500, null))).toBe(true);
+    expect(outcomeUnknown(new TypeError("x"))).toBe(true);
   });
   it("overdue: learning / review with a past due date only", () => {
     const now = Date.parse("2026-11-20T12:00:00Z");

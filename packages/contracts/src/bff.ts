@@ -1145,7 +1145,8 @@ export interface ReviewTask {
   check: { check_id: string; skill_title: Localized; position: number; of: number } | null;
   /** что показать (по типу):
    *  intro — text_en, gloss, example_en; meaning_choice — text_en, options (переводы на языке интерфейса);
-   *  listen_choice — speech_text (озвучить через /v1/speech), options (английские); typed — gloss, example_gap
+   *  listen_choice — speech_text (озвучить через /v1/speech; это и есть стимул задания на слух — принятое отклонение
+   *  от «ключа нет до ответа»: текст виден только в инструментах разработчика), options (английские); typed — gloss, example_gap
    *  (пример с ___ или null); cloze — example_gap, gloss; assemble — gloss, tiles (буквы или слова, перемешаны);
    *  error_fix — explanation, evidence (ваш фрагмент) или null, gloss null; check_item — instruction, prompt_en, options */
   prompt: {

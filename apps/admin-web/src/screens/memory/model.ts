@@ -1,7 +1,9 @@
 /**
  * «Память и повторения» (sprint 5, ADM-MEM-01/02, AT-61): pure helpers — statuses and their tones, which manual action
  * fits a card (memory.manage: reschedule / reset / freeze / unfreeze; one card at a time, reason ≥ 10), the new due
- * date of a reschedule (1..365 days from now — memory answers 422 DUE_AT_RANGE otherwise), the routes of the section,
+ * date of a reschedule (noon of the chosen local day 1..365 days ahead — memory answers 422 DUE_AT_RANGE otherwise),
+ * the Idempotency-Key of an action (kept for a retry after a network failure / 5xx), the title of a card (an error
+ * card shows the label of its code, never a text derived from the learner's input), the routes of the section,
  * and the hidden groups of the forgetting analytics (fewer than 5 learners — «мало данных», never a zero).
  */
 import type { AdminCardRow, AdminCardStatus, CardAction, CheckRate, ReviewLogRow, RetentionCheckRow } from "@tilhero/contracts/admin";
@@ -76,13 +78,15 @@ export function daysUntil(date: string, now: number = Date.now()): number {
 }
 
 /**
- * The new due moment of a reschedule: the chosen day at the current time of day — exactly N whole days from now, so
- * a date 1..365 days ahead is always inside memory's range. null — outside the range or invalid.
+ * The new due moment of a reschedule: noon of the chosen local day (admin.ts: the client sends the chosen day as local
+ * noon; memory allows ±1 day at the borders 1..365). The value depends only on the chosen day — not on the moment of
+ * the render — so a retry sends the same body. null — outside 1..365 days from today or an invalid date.
  */
 export function rescheduleDueAt(date: string, now: number = Date.now()): string | null {
   const n = daysUntil(date, now);
   if (!Number.isInteger(n) || n < DUE_MIN_DAYS || n > DUE_MAX_DAYS) return null;
-  return new Date(now + n * DAY).toISOString();
+  const [y, m, d] = date.split("-").map(Number) as [number, number, number];
+  return new Date(y, m - 1, d, 12, 0, 0, 0).toISOString();
 }
 
 export function actionBody(action: CardAction["action"], reason: string, dueAt: string | null): CardAction | null {
@@ -96,6 +100,55 @@ export function actionBody(action: CardAction["action"], reason: string, dueAt: 
 export function isOverdue(c: Pick<AdminCardRow, "due_at" | "status">, now: number = Date.now()): boolean {
   return (c.status === "learning" || c.status === "review") && !!c.due_at && Date.parse(c.due_at) < now;
 }
+
+/**
+ * What the admin shows as the name of a card. Words and phrases — their English text. An error card never shows a
+ * text: its correction was derived from the learner's own free text (admin.ts: `text_en` is null there) — the label of
+ * its error code instead (the card's gloss is that label), or the bare code. Even if a text arrives for an error card,
+ * it is not shown.
+ */
+export function cardTitle(c: Pick<AdminCardRow, "kind" | "text_en" | "gloss" | "error_code">): { text: string; lang: "en" | "ru" | undefined; label: boolean } {
+  if (c.kind !== "error" && c.text_en != null && c.text_en.trim() !== "") return { text: c.text_en, lang: "en", label: false };
+  const label = c.kind === "error" ? c.gloss?.ru?.trim() : "";
+  if (label) return { text: label, lang: "ru", label: true };
+  return { text: c.error_code ?? "—", lang: undefined, label: true };
+}
+
+/**
+ * The result of a command is unknown — a network failure or a 5xx (the server may have applied it): a retry must
+ * carry the same Idempotency-Key (memory answers a repeat with the stored answer). A 4xx or a success settles the
+ * command: the next one gets a new key.
+ */
+export function outcomeUnknown(e: unknown): boolean {
+  const st = (e as { status?: unknown } | null)?.status;
+  if (typeof st !== "number") return true;
+  return st === 0 || st >= 500;
+}
+
+/**
+ * The Idempotency-Key of a manual card action: one key per command (card + body). The same command repeated after a
+ * network failure / 5xx reuses the key; a changed command (another action, day or reason — memory would answer 422
+ * IDEMPOTENCY_KEY_REUSED for a key with another body) gets a new one; a success or a 4xx forgets the key.
+ */
+export class CommandKey {
+  private pending: { sig: string; key: string } | null = null;
+  constructor(private readonly gen: () => string) {}
+  /** the key for this command */
+  for(sig: string): string {
+    if (!this.pending || this.pending.sig !== sig) this.pending = { sig, key: this.gen() };
+    return this.pending.key;
+  }
+  /** the command answered: success (no error) or a definite error → forget the key; an unknown outcome → keep it */
+  settle(error?: unknown): void {
+    if (error === undefined || !outcomeUnknown(error)) this.pending = null;
+  }
+  get current(): string | null {
+    return this.pending?.key ?? null;
+  }
+}
+
+/** The signature of a manual card action for its Idempotency-Key. */
+export const commandSig = (cardId: string, body: CardAction): string => JSON.stringify([cardId, body]);
 
 /** Analytics: a rate is shown only when the group is not hidden and has a value. */
 export const rateShown = (r: CheckRate): boolean => !r.hidden && r.pass_pct != null;

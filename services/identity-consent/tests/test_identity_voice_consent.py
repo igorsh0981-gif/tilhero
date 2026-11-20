@@ -248,8 +248,8 @@ def _user(kind: str, age_band: str | None, guardian_consent: str) -> User:
     return User(user_id=uuid.uuid4(), kind=kind, age_band=age_band, guardian_consent=guardian_consent)
 
 
-def _consent(purposes: list[str], basis: str) -> Consent:
-    return Consent(consent_id=uuid.uuid4(), user_id=uuid.uuid4(), policy_version="1.1", purposes=purposes,
+def _consent(purposes: list[str], basis: str, policy_version: str = "1.1") -> Consent:
+    return Consent(consent_id=uuid.uuid4(), user_id=uuid.uuid4(), policy_version=policy_version, purposes=purposes,
                    accepted_at=datetime.now(UTC), basis=basis)
 
 
@@ -269,3 +269,20 @@ def test_learner_purposes_rules(kind: str, age: str | None, gc: str, basis: str,
     assert learner_purposes(user, consent) == expected
     assert voice_consent(user, consent) is (VOICE in expected)
     assert voice_consent(user, None) is False
+
+
+@pytest.mark.parametrize(("kind", "age", "gc", "basis"), [
+    ("account", "18+", "not_required", "self"),
+    ("account", "14-17", "granted", "self"),
+    ("child", "6-9", "granted", "guardian"),
+])
+def test_voice_from_policy_1_0_is_not_pronunciation_consent(kind: str, age: str | None, gc: str, basis: str) -> None:
+    """В 1.0 voice_recording значила «хранить записи 30 дней» (без передачи в сервис оценки): после 1.1 она не даёт
+    оценку произношения — нужно подтвердить согласие заново; остальные цели 1.0 действуют как раньше."""
+    user = _user(kind, age, gc)
+    consent = _consent(list(ALL_PURPOSES), basis, policy_version="1.0")
+    assert VOICE not in learner_purposes(user, consent)
+    assert voice_consent(user, consent) is False
+    if kind == "account":
+        assert [p for p in ALL_PURPOSES if p != VOICE] == learner_purposes(user, consent)
+

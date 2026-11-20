@@ -2,6 +2,7 @@ import type { ReviewAnswer, ReviewTask, ReviewTaskResult } from "@tilhero/contra
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { errorText } from "../../api/errors";
 import {
+  canAnswer,
   isLetterTiles,
   reviewCardState,
   reviewMinutes,
@@ -279,7 +280,9 @@ function TaskView({ api, task, kid, error }: { api: ReviewApi; task: ReviewTask;
   const st = api.st;
   const feedback = st.phase === "feedback" && st.result?.result ? st.result : null;
   const sending = st.phase === "sending";
-  const locked = !!feedback || sending;
+  // a lost answer is held: the inputs stay as sent, only «Отправить ещё раз» (the error line) sends it again
+  const held = !!st.pending;
+  const locked = !!feedback || sending || held;
   const check = task.check;
   const tileSet = task.tiles.length ? task.tiles : task.answer_kind === "order" ? task.options : [];
 
@@ -287,7 +290,7 @@ function TaskView({ api, task, kid, error }: { api: ReviewApi; task: ReviewTask;
   const body: ReviewAnswer | null =
     task.answer_kind === "choice" ? (choice === null ? null : { choice }) : task.answer_kind === "text" ? typedAnswer(text) : task.answer_kind === "order" ? tilesAnswer(tiles, tileSet.length) : null;
   const send = () => {
-    if (!body || locked) return;
+    if (!body || locked || !canAnswer(st)) return;
     haptic.selection();
     void api.answer(body);
   };
@@ -316,10 +319,10 @@ function TaskView({ api, task, kid, error }: { api: ReviewApi; task: ReviewTask;
   } else if (task.answer_kind === "none") {
     foot = (
       <div className="duo">
-        <Btn variant="secondary" busy={sending && st.pending?.body.known === true} disabled={sending} onClick={() => void api.answer({ known: true })} data-testid="rv-known">
+        <Btn variant="secondary" busy={sending && st.pending?.body.known === true} disabled={locked} onClick={() => void api.answer({ known: true })} data-testid="rv-known">
           {t("rv.intro.known")}
         </Btn>
-        <Btn busy={sending && !st.pending?.body.known} disabled={sending} onClick={() => void api.answer({})} data-testid="rv-got">
+        <Btn busy={sending && !st.pending?.body.known} disabled={locked} onClick={() => void api.answer({})} data-testid="rv-got">
           {t("rv.intro.got")}
         </Btn>
       </div>
@@ -328,11 +331,11 @@ function TaskView({ api, task, kid, error }: { api: ReviewApi; task: ReviewTask;
     foot = (
       <div className={canReveal ? "dx-actions" : undefined}>
         {canReveal ? (
-          <Btn variant="secondary" busy={asking === "reveal"} disabled={sending || !!asking} onClick={() => void hint("reveal")} data-testid="rv-reveal">
+          <Btn variant="secondary" busy={asking === "reveal"} disabled={locked || !!asking} onClick={() => void hint("reveal")} data-testid="rv-reveal">
             {t("rv.hint.reveal")}
           </Btn>
         ) : null}
-        <Btn busy={sending} disabled={!body || !!asking} onClick={send} data-testid="rv-answer">
+        <Btn busy={sending} disabled={!body || !!asking || held} onClick={send} data-testid="rv-answer">
           {check ? t("rv.check.answer") : t("rv.answer")}
         </Btn>
       </div>
@@ -404,7 +407,7 @@ function TaskView({ api, task, kid, error }: { api: ReviewApi; task: ReviewTask;
       ) : null}
 
       {canFirst && !feedback ? (
-        <Btn variant="link" busy={asking === "first_letter"} disabled={sending || !!asking} onClick={() => void hint("first_letter")} data-testid="rv-first-letter">
+        <Btn variant="link" busy={asking === "first_letter"} disabled={locked || !!asking} onClick={() => void hint("first_letter")} data-testid="rv-first-letter">
           <Icon name="spark" size={18} />
           {t("rv.hint.first")}
         </Btn>

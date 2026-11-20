@@ -11,11 +11,19 @@ from __future__ import annotations
 import uuid
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 
 from tilhero_common.app import Runtime, get_runtime
 from tilhero_common.internal_auth import Principal
-from tilhero_memory.api.common import PAIR_PATTERN, catalog_of, now, settings_of, staff_auth, staff_with_any
+from tilhero_memory.api.common import (
+    PAIR_PATTERN,
+    catalog_of,
+    idempotency_key,
+    now,
+    settings_of,
+    staff_auth,
+    staff_with_any,
+)
 from tilhero_memory.domain import admin as svc
 from tilhero_memory.domain import analytics
 from tilhero_memory.domain.common import DASHBOARD_READ, MEMORY_MANAGE, MEMORY_READ
@@ -75,14 +83,17 @@ async def card_log(card_id: uuid.UUID, cursor: str | None = Query(default=None, 
 
 @router.post("/cards/{card_id}/actions", responses={
     **_AUTH, 404: {"description": "CARD_NOT_FOUND"}, 409: {"description": "CARD_STATE {status}"},
-    422: {"description": "DUE_AT_RANGE | VALIDATION_ERROR (reason ≥ 10)"}})
+    422: {"description": "DUE_AT_RANGE | VALIDATION_ERROR (reason ≥ 10) | IDEMPOTENCY_KEY_REUSED"}})
 async def card_action(card_id: uuid.UUID, body: CardActionIn, request: Request,
+                      key: str | None = Header(default=None, alias="Idempotency-Key"),
                       principal: Principal = Depends(staff_auth), rt: Runtime = Depends(get_runtime)
                       ) -> dict[str, Any]:
-    """AdminCardDetail после правки: reschedule | reset | freeze | unfreeze (review_log + аудит)."""
+    """AdminCardDetail после правки: reschedule | reset | freeze | unfreeze (review_log + аудит). Idempotency-Key —
+    повтор того же сотрудника за 24 ч возвращает тот же ответ без новой строки истории и аудита."""
     actor = principal.require_permission(MEMORY_MANAGE)
+    k = idempotency_key(key) if key is not None else None
     async with rt.transaction() as db:
-        return await svc.card_action(db, actor, card_id, body.action, body.due_at, body.reason, now(request))
+        return await svc.card_action(db, actor, card_id, body.action, body.due_at, body.reason, now(request), k)
 
 
 @router.get("/analytics", responses=_AUTH)

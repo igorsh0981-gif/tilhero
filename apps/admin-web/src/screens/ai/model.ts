@@ -6,7 +6,7 @@
  * No React here: unit-tested in test/ai.test.ts.
  */
 import type { AgentId, AgentImplementation, AgentVersion, GoldenCheck, RubricCriterionCode, SessionKind } from "@tilhero/contracts/ai";
-import type { AiBudget, SessionCard, SessionFlag, SessionRow } from "@tilhero/contracts/admin";
+import type { AiBudget, AiModel, SessionCard, SessionFlag, SessionRow } from "@tilhero/contracts/admin";
 
 /* ---------------------------------------------------------------- catalogues */
 
@@ -97,6 +97,8 @@ const num = (s: string): number | null => {
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
 };
+/** a decimal typed by a staff member («0,5» or «0.5»); null — not a number */
+export const decimal = num;
 
 /** 1-based line and column of a character offset in `text` */
 export function lineCol(text: string, offset: number): { line: number; col: number } {
@@ -464,15 +466,16 @@ export function budgetLevel(pct: number, alertPercent: number): "ok" | "warn" | 
   return "ok";
 }
 
-export type BudgetForm = Record<"monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "alert_percent", string>;
+export type BudgetForm = Record<"monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "speech_monthly_cap_usd" | "alert_percent", string>;
 export interface BudgetIssue {
   field: keyof BudgetForm;
-  code: "range" | "gt_daily" | "gt_monthly";
+  code: "range" | "range0" | "gt_daily" | "gt_monthly";
 }
 export const budgetForm = (b: Pick<AiBudget, keyof BudgetForm>): BudgetForm => ({
   monthly_cap_usd: String(b.monthly_cap_usd),
   learner_daily_cap_usd: String(b.learner_daily_cap_usd),
   lesson_cap_usd: String(b.lesson_cap_usd),
+  speech_monthly_cap_usd: String(b.speech_monthly_cap_usd),
   alert_percent: String(b.alert_percent),
 });
 
@@ -486,20 +489,39 @@ export function mergeBudgetForm(read: BudgetForm, entered: BudgetForm, now: Budg
   return out;
 }
 
-/** Caps are positive, a lesson ≤ a learner's day ≤ the month; the alert threshold is 1…100 %. */
+/**
+ * Caps are positive, a lesson ≤ a learner's day ≤ the month; the sub-cap of pronunciation (sprint 5, owner's decision:
+ * $5 a month) is 0…the month (0 — the feature is off); the alert threshold is 1…100 %.
+ */
 export function checkBudget(f: BudgetForm): { issues: BudgetIssue[]; value: Pick<AiBudget, keyof BudgetForm> | null } {
   const issues: BudgetIssue[] = [];
   const m = num(f.monthly_cap_usd);
   const d = num(f.learner_daily_cap_usd);
   const l = num(f.lesson_cap_usd);
+  const sp = num(f.speech_monthly_cap_usd);
   const a = num(f.alert_percent);
   if (m == null || m <= 0 || m > 100_000) issues.push({ field: "monthly_cap_usd", code: "range" });
   if (d == null || d <= 0) issues.push({ field: "learner_daily_cap_usd", code: "range" });
   else if (m != null && m > 0 && d > m) issues.push({ field: "learner_daily_cap_usd", code: "gt_monthly" });
   if (l == null || l <= 0) issues.push({ field: "lesson_cap_usd", code: "range" });
   else if (d != null && d > 0 && l > d) issues.push({ field: "lesson_cap_usd", code: "gt_daily" });
+  if (sp == null || sp < 0) issues.push({ field: "speech_monthly_cap_usd", code: "range0" });
+  else if (m != null && m > 0 && sp > m) issues.push({ field: "speech_monthly_cap_usd", code: "gt_monthly" });
   if (a == null || !Number.isInteger(a) || a < 1 || a > 100) issues.push({ field: "alert_percent", code: "range" });
-  return { issues, value: issues.length ? null : { monthly_cap_usd: m!, learner_daily_cap_usd: d!, lesson_cap_usd: l!, alert_percent: a! } };
+  return { issues, value: issues.length ? null : { monthly_cap_usd: m!, learner_daily_cap_usd: d!, lesson_cap_usd: l!, speech_monthly_cap_usd: sp!, alert_percent: a! } };
+}
+
+/** The price of an hour of audio now: the active Azure speech model first, then any active speech model with a price. */
+export function speechHourPrice(models: ReadonlyArray<Pick<AiModel, "provider" | "active" | "audio_usd_per_hour">> | null | undefined): number | null {
+  const priced = (models ?? []).filter((x) => x.active && (x.provider === "azure_speech" || x.provider === "fake_speech") && x.audio_usd_per_hour != null && x.audio_usd_per_hour > 0);
+  const m = priced.find((x) => x.provider === "azure_speech") ?? priced[0];
+  return m ? m.audio_usd_per_hour : null;
+}
+
+/** «≈ N ч аудио» for a sub-cap at the current price of an hour; null — no price or no valid sub-cap. */
+export function speechHours(capUsd: number | null, hourUsd: number | null): number | null {
+  if (capUsd == null || !Number.isFinite(capUsd) || capUsd < 0 || hourUsd == null || !(hourUsd > 0)) return null;
+  return Math.round((capUsd / hourUsd) * 10) / 10;
 }
 
 /** Dollars: ≥ $1 with 2 decimals, below — up to 4 significant decimals ($0.0031). */

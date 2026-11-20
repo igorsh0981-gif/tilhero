@@ -105,7 +105,9 @@ async def get_budget(principal: Principal = Depends(staff_auth), rt: Runtime = D
         return costs.budget_view(await costs.get_budget(session))
 
 
-@router.put("/budget", responses={409: {"description": "BUDGET_CONFLICT {updated_at}"}})
+@router.put("/budget", responses={409: {"description": "BUDGET_CONFLICT {updated_at}"},
+                                   422: {"description": "BUDGET_INVALID {fields} — подлимит речи больше потолка "
+                                                        "месяца"}})
 async def update_budget(body: BudgetIn, principal: Principal = Depends(staff_auth),
                         rt: Runtime = Depends(get_runtime),
                         idempotency_key: str | None = IdempotencyKey) -> JSONResponse:
@@ -114,6 +116,7 @@ async def update_budget(body: BudgetIn, principal: Principal = Depends(staff_aut
         "monthly_cap_usd": Decimal(str(body.monthly_cap_usd)).quantize(Decimal("0.01")),
         "learner_daily_cap_usd": Decimal(str(body.learner_daily_cap_usd)).quantize(Decimal("0.0001")),
         "lesson_cap_usd": Decimal(str(body.lesson_cap_usd)).quantize(Decimal("0.0001")),
+        "speech_monthly_cap_usd": Decimal(str(body.speech_monthly_cap_usd)).quantize(Decimal("0.01")),
         "alert_percent": body.alert_percent,
     }
     if body.ai_enabled is not None:

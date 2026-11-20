@@ -25,6 +25,8 @@ export interface RecordedAudio {
   wav: Blob;
   durationMs: number;
   bytes: number;
+  /** 16 kHz samples written (the 0,5 s minimum is checked on them, as the BFF does) */
+  samples: number;
 }
 
 export interface Recording {
@@ -83,11 +85,24 @@ export async function startRecording(o: { onLevel?: (v: number) => void; onAutoS
   let done: Promise<RecordedAudio> | null = null;
   let closed = false;
 
-  const source = ctx.createMediaStreamSource(stream);
-  // one input channel: Web Audio mixes a stereo microphone down to mono
-  const proc = ctx.createScriptProcessor(4096, 1, 1);
-  const mute = ctx.createGain();
-  mute.gain.value = 0;
+  // the graph: any failure here must release the microphone (tracks stopped, context closed) and say why
+  let source: MediaStreamAudioSourceNode;
+  let proc: ScriptProcessorNode;
+  let mute: GainNode;
+  try {
+    source = ctx.createMediaStreamSource(stream);
+    // one input channel: Web Audio mixes a stereo microphone down to mono
+    proc = ctx.createScriptProcessor(4096, 1, 1);
+    mute = ctx.createGain();
+    mute.gain.value = 0;
+    source.connect(proc);
+    proc.connect(mute);
+    mute.connect(ctx.destination);
+  } catch {
+    for (const t of stream.getTracks()) t.stop();
+    void ctx.close().catch(() => undefined);
+    throw new RecorderError("failed");
+  }
 
   const release = () => {
     if (closed) return;
@@ -124,9 +139,6 @@ export async function startRecording(o: { onLevel?: (v: number) => void; onAutoS
     o.onLevel?.(level(data));
     if (samples >= limit) void finish().then((r) => o.onAutoStop?.(r));
   };
-  source.connect(proc);
-  proc.connect(mute);
-  mute.connect(ctx.destination);
 
   return {
     stop: finish,

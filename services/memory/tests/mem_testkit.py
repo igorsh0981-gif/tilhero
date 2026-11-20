@@ -186,6 +186,8 @@ class FakeCatalog:
             v = int(version) if version else self.published.get((kind, key))
             if v is None or v not in versions or self._version_status(kind, key, v) == "draft":
                 return error(404, "VERSION_NOT_FOUND")
+            if request.url.params.get("audience") == "kids" and "kids" not in (versions[v].get("audience") or []):
+                return error(404, "VERSION_NOT_FOUND")  # детям недетский контент «не существует»
             return httpx.Response(200, json={"kind": kind, "key": key, "version": v,
                                              "status": self._version_status(kind, key, v), "payload": versions[v]})
         if path == "/internal/v1/glossary/lookup":
@@ -197,6 +199,9 @@ class FakeCatalog:
             if v not in versions or self._version_status(ref["kind"], ref["key"], v) == "draft":
                 return error(404, "CONTENT_NOT_FOUND")
             payload = versions[v]
+            assert body.get("audience") in ("kids", "teens", "adults"), "audience ученика обязательна"
+            if body["audience"] == "kids" and "kids" not in (payload.get("audience") or []):
+                return error(404, "CONTENT_NOT_FOUND")  # детям недетский контент «не существует»
             texts = _texts(ref["kind"], payload)
             places = [(ref["locator"], texts[ref["locator"]])] if ref.get("locator") in texts else list(texts.items())
             hit = next(((loc, t) for loc, t in places if _contains(t, body["text"])), None)
@@ -214,7 +219,7 @@ class FakeCatalog:
                 return error(503, "UNAVAILABLE")
             body = json.loads(request.content)
             assert set(body) == {"pair_id", "surface", "lemma", "part_of_speech", "gloss", "forms", "confidence",
-                                 "agent_version", "content_ref"}, body
+                                 "agent_version", "content_ref", "audience"}, body
             for f in body["forms"]:
                 existing = self.by_form(f)
                 if existing is not None:

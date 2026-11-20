@@ -278,7 +278,11 @@ export function App({ boot, client: injected }: { boot: BootMode; client?: Parti
   const syncProfile = useCallback((p: Profile) => {
     setSession((prev) => (prev ? { ...prev, account: p.account, learner: p.learner, learners: p.learners, security: p.security, consent: p.consent } : prev));
   }, []);
-  const patchSession = useCallback((patch: Partial<SessionResponse>) => setSession((prev) => (prev ? { ...prev, ...patch } : prev)), []);
+  const patchSession = useCallback(
+    (patch: Partial<SessionResponse> | ((prev: SessionResponse) => Partial<SessionResponse>)) =>
+      setSession((prev) => (prev ? { ...prev, ...(typeof patch === "function" ? patch(prev) : patch) } : prev)),
+    [],
+  );
   const reloadPlan = useCallback(async () => {
     try {
       const p = await bff.plan(deviceTz);

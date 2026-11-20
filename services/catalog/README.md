@@ -79,13 +79,17 @@ diagnostics); готовность теста диагностики при пе
 | POST | `/catalog:tick` | n8n `catalog-tick` (Bearer SCHEDULER_TOKEN) | `{suspended, expiring, today}` |
 | GET | `/readings?audience=&pair_id=&level=&cursor=&limit=` | telegram-bff, lessons | `Page<{reading_id, version, title, level, topics, est_minutes, word_count}>` (ReadingCard без `last_result` — его дополняет BFF из lessons); пара — только с target = en |
 | GET | `/readings/{reading_id}?audience=` | telegram-bff, lessons | опубликованная версия **без `answer`**: `{…карточка, skill_ids, voice, paragraphs, glossary: [{en, gloss, note}], questions: [{question_id, type, instruction, prompt_en, options}], questions_count, question_types}` (`glossary[].in_dictionary` ReadingView дополняет BFF из memory); 404 `READING_NOT_AVAILABLE` |
-| POST | `/glossary/lookup` `{pair_id, text ≤ 120, content_ref: {kind, key, version, locator?}}` | memory | `{in_content: true, sentence_en ≤ 300, locator, entry: GlossaryEntry \| null, rejected, note}`; 404 `CONTENT_NOT_FOUND` (не опубликована и не была; приостановленное медиа); 422 `WORD_NOT_IN_CONTENT` |
-| POST | `/glossary/ai-entries` `{pair_id, surface, lemma, part_of_speech, gloss, forms ≤ 8, confidence, agent_version, content_ref}` | memory | 201 `GlossaryEntry` (ai pending); 200 — форма уже занята действующей статьёй (она же; у ai pending дописывается место в контенте); 404 `CONTENT_NOT_FOUND`, `PAIR_NOT_FOUND`; 422 `WORD_NOT_IN_CONTENT` |
+| POST | `/glossary/lookup` `{pair_id, text ≤ 120, content_ref: {kind, key, version, locator?}, audience?}` | memory | `{in_content: true, sentence_en ≤ 300, locator, entry: GlossaryEntry \| null, rejected, note}`; 404 `CONTENT_NOT_FOUND` (не опубликована и не была; приостановленное медиа); 422 `WORD_NOT_IN_CONTENT` |
+| POST | `/glossary/ai-entries` `{pair_id, surface, lemma, part_of_speech, gloss, forms ≤ 8, confidence, agent_version, content_ref, audience?}` | memory | 201 `GlossaryEntry` (ai pending); 200 — форма уже занята действующей статьёй (она же; у ai pending дописывается место в контенте); 404 `CONTENT_NOT_FOUND`, `PAIR_NOT_FOUND`; 422 `WORD_NOT_IN_CONTENT` |
 | GET | `/glossary/forms?pair_id=&forms=a&forms=b` (≤ 50) | memory | `{items: [{form, entry: GlossaryEntry \| null}]}` — повторяемый параметр (формы с запятыми); одно значение через запятую — в ответе и целиком, и по частям; варианты «a / b» — каждый |
 | GET | `/skills/{skill_id}/check-items?audience=&pair_id=` | memory | `{skill_id, title, items: [{lesson_id, version, item: ControlItem с ключом}]}` — уроки курса пары с `primary_skill_id` = навык и аудиторией; сначала задания навыка, затем остальные задания этих уроков (по уроку и порядку), ≤ 20; 404 `SKILL_NOT_FOUND` |
 
 `/versions/{kind}/{key}[/{version}]` (спринт 5) — ещё memory, только `lesson`, `media_asset`, `reading`, `scenario`
-(другие виды → 403 `CALLER_NOT_ALLOWED`). Ученические маршруты текстов, как сценарии и медиа: `audience` обязателен,
+(другие виды → 403 `CALLER_NOT_ALLOWED`). **Дети — только детский контент** (CONVENTIONS §8): необязательный
+`audience` (`?audience=` у версий, поле тела у `glossary/lookup` и `glossary/ai-entries`); при `kids` версия, в
+аудитории которой нет kids (урок, медиа, текст, сценарий), — 404 (`VERSION_NOT_FOUND` / `CONTENT_NOT_FOUND`), как
+будто её нет. У memory детский профиль в claims (`lrn` ≠ `sub` или `age_band` 6–13) — kids принудительно; без
+`audience` — как раньше. Ученические маршруты текстов, как сценарии и медиа: `audience` обязателен,
 детскому профилю (claims) — kids принудительно; то же у `check-items`.
 
 **Поиск слова** (`lookup`, `ai-entries`): текст ищется по границам слов (буквы и цифры, апостроф внутри слова —

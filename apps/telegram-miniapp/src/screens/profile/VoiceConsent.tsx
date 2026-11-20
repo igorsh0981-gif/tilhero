@@ -104,11 +104,12 @@ export function VoiceConsent() {
 
 /** A parent's switch for one child profile: «Запись голоса» (the child cannot change it). */
 export function ChildVoiceToggle({ child }: { child: LearnerSummary }) {
-  const { bff, session, patchSession } = useApp();
+  const { bff, patchSession } = useApp();
   const { t } = useI18n();
   const set = useAction(async (granted: boolean) => {
     const l = await bff.setChildVoiceConsent(child.learner_id, granted);
-    patchSession({ learners: session.learners.map((x) => (x.learner_id === l.learner_id ? { ...x, voice_consent: l.voice_consent } : x)) });
+    // from the current session, not this render's: two children switched quickly both keep their answer
+    patchSession((prev) => ({ learners: prev.learners.map((x) => (x.learner_id === l.learner_id ? { ...x, voice_consent: l.voice_consent } : x)) }));
     showToast(l.voice_consent ? t("vc.childOn", { name: child.display_name }) : t("vc.childOff", { name: child.display_name }));
   });
   return (

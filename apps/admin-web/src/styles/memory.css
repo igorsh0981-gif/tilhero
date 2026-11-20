@@ -91,3 +91,4 @@
   .hbars-row{grid-template-columns:1fr;gap:4px}
   .hbars-n{text-align:left}
 }
+.fa-stale{opacity:.55;pointer-events:none;transition:opacity .15s}

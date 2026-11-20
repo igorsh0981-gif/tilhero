@@ -80,3 +80,24 @@ uv run python infra/railway/extend.py --env-from .dev/railway-prod/learning-plan
    - тест на уровень, задание на аудирование: звук на полной громкости, прослушивание списывается только при реальном воспроизведении;
    - урок → разговор → «Прослушать»;
    - медиа без файла.
+
+## 7. Выкладка спринта 5 поверх релиза 4.1 (память и повторения, чтение, произношение)
+Новый сервис `memory` (8116, схема `memory`) — без публичного домена. Остальное — обновления существующих сервисов (автодеплой с main) с миграциями: catalog 0004–0005 (чтение, словарь курса, сид 12 текстов), ai-gateway 0004–0005 (`teaching_coach` v2, речь, подлимит), lessons 0002, assessment 0003, admin-identity 0005, identity-consent — политика 1.1.
+```
+uv run python infra/railway/extend.py --env-from .dev/railway-prod/learning-plan.env \
+  --public-keys .dev/railway-prod-s4/public-keys.json --out .dev/railway-prod-s5 --only memory
+```
+Порядок важен (enum событий расширен, новые consumers memory читают историю стрима, сага удаления ждёт memory):
+1. **База:** разовый `db-bootstrap` с `bootstrap.sql` из `railway-prod-s5` (схема и роли `memory`, `memory_owner`) → `BOOTSTRAP_OK` → удалить сервис.
+2. **Открытые ключи:** `INTERNAL_JWT_PUBLIC_KEYS` из `updates.json` — всем существующим сервисам (catalog, assessment, ai-gateway, identity-consent должны принимать токены издателя `memory`).
+3. **audit** (издатель `memory`) → **admin-identity** (права `memory.*`, `glossary.manage`) → **learning-plan**, **diagnostics**, **notifications** (новые consumers и шаблон `reviews_due`).
+4. **catalog** → **assessment** → **ai-gateway** → **lessons**. Перед ai-gateway: если в prod есть черновик `teaching_coach` от сотрудника — миграция 0004 не создаст v2 (предупреждение в логе); удалить черновик и повторить деплой.
+5. **memory:** сервис из `memory.env` (Dockerfile `services/memory/Dockerfile`, Pre-Deploy `alembic upgrade head`, healthcheck `/health/ready`, europe-west4, restart ON_FAILURE). Проверка: `/health/ready`; в логе consumers без повторяющихся ошибок.
+6. **identity-consent** — после memory (новый домен саги `memory` и политика 1.1: при следующем входе каждый пользователь один раз подтверждает согласие).
+7. **admin-bff** (`MEMORY_URL`) → **admin-web**; **telegram-bff** (`MEMORY_URL`) → **telegram-miniapp**.
+8. **n8n:** `MEMORY_URL` → перезапуск: включается `memory-tick` (каждые 15 мин). Ручной прогон.
+9. **Владелец:**
+   - Azure Speech: ресурс Speech (регион, например `westeurope`), общие переменные проекта `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` (в чат и файлы не попадают) → Deploy ai-gateway. Без них «Произнести» скрыто.
+   - «Агенты» → `teaching_coach` v2 → прогон золотых тестов на anthropic → публикация. До публикации перевод по тапу отвечает «перевод недоступен» (словарь курса работает).
+   - Подлимит речи $5 в месяц — «Затраты ИИ → Лимиты» (по умолчанию уже 5).
+10. **Проверка:** Mini App — урок → слова в «Словаре», «Повторение дня» (выбор, ввод, «Не помню», итоги), чтение с переводом по тапу и «в словарь», вопросы к тексту; «Произнести» (после ключа Azure; ребёнок — после согласия родителя в «Семье»); вечернее напоминание; админка — «Словарь курса» (очередь ИИ), «Контент → Чтение», «Память» ученика, «Аналитика забывания», затраты речи.

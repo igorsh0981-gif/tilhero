@@ -143,7 +143,8 @@ export function familyRoutes(app: App, ctx: BffContext): void {
         description:
           "Только из профиля аккаунта 18+ со своим действующим согласием (identity-consent); из детского профиля — 403 ADULT_REQUIRED " +
           "до вызова identity. Повтор того же значения — без новой записи согласия. 404 LEARNER_NOT_FOUND — не свой ребёнок " +
-          "(и свой аккаунт: своё согласие — POST /v1/profile/consent с целью voice_recording); 403 CONSENT_REQUIRED {purpose}.",
+          "(и свой аккаунт: своё согласие — POST /v1/profile/consent с целью voice_recording); 403 CONSENT_REQUIRED {purpose}. " +
+          "onboarding_completed — из learning-plan; план недоступен — из identity (иначе false), согласие уже сохранено.",
         security: BEARER,
         params: LearnerParamsSchema,
         body: VoiceConsentRequestSchema,
@@ -159,8 +160,15 @@ export function familyRoutes(app: App, ctx: BffContext): void {
         body: { granted: req.body.granted },
       });
       if (!child || typeof child !== "object" || child.learner_id?.toLowerCase() !== childId) throw upstreamUnavailable("identity-consent");
-      const plan = await loadPlan(ctx, child.learner_id, clientTimezone(req));
-      return learnerView({ ...child, kind: "child" }, auth.learnerId, plan.onboarding_completed_at != null);
+      // согласие уже сохранено в identity: сбой learning-plan ответ не валит — онбординг из identity (иначе false)
+      let onboarded = child.onboarding_completed === true;
+      try {
+        onboarded = (await loadPlan(ctx, child.learner_id, clientTimezone(req))).onboarding_completed_at != null;
+      } catch (err) {
+        const e = err as { status?: number; code?: string };
+        ctx.log.warn({ upstream: "learning-plan", check: "voice_consent.onboarding", upstream_status: e.status ?? 0, upstream_code: e.code ?? "UNKNOWN" }, "onboarding unknown, voice consent saved");
+      }
+      return learnerView({ ...child, kind: "child" }, auth.learnerId, onboarded);
     },
   );
 

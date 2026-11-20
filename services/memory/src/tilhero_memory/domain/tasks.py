@@ -22,8 +22,8 @@ from tilhero_memory.domain.normalize import (
     check_gap,
     check_order,
     compare,
-    find_in_sentence,
     letters_of,
+    locate,
     normalize,
     ws,
 )
@@ -76,7 +76,7 @@ def card_task_type(card: Card, *, young: bool, seed: str) -> str:
         if card.kind == "phrase" or 0 < len(letters_of(card.text_en)) <= MAX_LETTER_TILES:
             return "assemble"
         return "meaning_choice"
-    if _cloze_fragment(card) is not None and seeded_pick(seed + ":prod", 2) == 1:
+    if _cloze(card) is not None and seeded_pick(seed + ":prod", 2) == 1:
         return "cloze"
     return "typed"
 
@@ -90,17 +90,20 @@ def _display(card: Card) -> str:
     return str(card.error["correction"]) if card.error is not None else card.text_en
 
 
-def _cloze_fragment(card: Card) -> str | None:
+def _cloze(card: Card) -> tuple[str, str] | None:
+    """(пример с пропуском, вырезанный фрагмент) — режется исходная строка по найденной позиции; если ответ всё ещё
+    виден в примере (повтор слова) — пропуска нет: задание не должно показывать ответ."""
     if not card.example_en:
         return None
-    return find_in_sentence(card.example_en, _answers(card))
-
-
-def _gap(sentence: str, fragment: str) -> str:
-    idx = sentence.lower().find(fragment.lower())
-    if idx < 0:
-        return sentence
-    return sentence[:idx] + GAP + sentence[idx + len(fragment):]
+    sentence = card.example_en
+    span = locate(sentence, _answers(card))
+    if span is None:
+        return None
+    fragment = sentence[span[0]:span[1]]
+    gapped = sentence[:span[0]] + GAP + sentence[span[1]:]
+    if locate(gapped, [fragment]) is not None:
+        return None
+    return gapped, fragment
 
 
 def _gloss_text(gloss: Any, locale: str) -> str:
@@ -164,23 +167,21 @@ def build_card_task(card: Card, task_type: str, *, seed: str, locale: str, pool:
         return Built(task_type, _payload(p, answer_kind="order", hints=full, tiles=tiles),
                      {"target": target, "display": text, "unit": "word" if phrase else "letter"})
     if task_type == "error_fix":
-        err = card.error or {}
-        p = prompt(explanation=explanations.explanation(card.error_code), evidence=err.get("evidence"))
+        # цитата ученика в задании не хранится (стирается через 90 дней в карточке) — подставляется при выдаче
+        p = prompt(explanation=explanations.explanation(card.error_code))
         return Built(task_type, _payload(p, answer_kind="text", hints=full),
                      {"answers": _answers(card), "display": _display(card)})
-    if task_type == "cloze":
-        fragment = _cloze_fragment(card) or card.text_en
-        example = card.example_en or ""
-        p = prompt(example_gap=_gap(example, fragment), gloss=gloss)
+    cloze = _cloze(card) if card.kind != "error" else None
+    if task_type == "cloze" and cloze is not None:
+        gapped, fragment = cloze
+        p = prompt(example_gap=gapped, gloss=gloss)
         return Built(task_type, _payload(p, answer_kind="text", hints=full),
                      {"answers": list(dict.fromkeys([fragment, *_answers(card)])), "display": fragment})
-    # typed
-    gap_fragment = _cloze_fragment(card)
+    # typed (cloze без найденного пропуска — тоже typed)
     if card.kind == "error":
         p = prompt(gloss=gloss, explanation=explanations.explanation(card.error_code))
     else:
-        p = prompt(gloss=gloss, example_gap=_gap(card.example_en, gap_fragment)
-                   if gap_fragment and card.example_en else None)
+        p = prompt(gloss=gloss, example_gap=cloze[0] if cloze else None)
     return Built("typed", _payload(p, answer_kind="text", hints=full),
                  {"answers": _answers(card), "display": _display(card)})
 

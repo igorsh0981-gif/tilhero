@@ -305,8 +305,10 @@ class Env:
     async def set_budget(self, **values: Any) -> dict[str, Any]:
         current = (await self.c.get("/admin/v1/ai/budget", headers=self.h(OPERATIONS))).json()
         body = {k: current[k] for k in ("monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd",
-                                        "alert_percent")}
+                                        "speech_monthly_cap_usd", "alert_percent")}
         body.update(values)
+        if "speech_monthly_cap_usd" not in values:  # подлимит речи — не больше потолка месяца
+            body["speech_monthly_cap_usd"] = min(body["speech_monthly_cap_usd"], body["monthly_cap_usd"])
         body["reason"] = "Лимиты в тесте"
         r = await self.c.put("/admin/v1/ai/budget", json=body, headers=self.h(OPERATIONS))
         assert r.status_code == 200, r.text

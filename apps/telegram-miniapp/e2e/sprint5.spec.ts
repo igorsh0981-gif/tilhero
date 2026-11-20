@@ -173,8 +173,11 @@ test.describe("«Повторение дня»", () => {
     await page.getByTestId("review-card-go").click();
     await page.getByTestId("rv-opt-1").click();
     await page.getByTestId("rv-answer").click();
-    // the answer was handled but the response was lost: the same answer again
+    // the answer was handled but the response was lost: the answer is held as sent — no other choice, only the same again
     await expect(page.getByTestId("rv-send-failed")).toBeVisible();
+    await expect(page.getByTestId("rv-opt-0")).toBeDisabled();
+    await expect(page.getByTestId("rv-opt-1")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("rv-answer")).toBeDisabled();
     await page.getByTestId("rv-resend").click();
     await expect(page.getByTestId("rv-check")).toContainText("задание 2 из 3");
     const answers = bff.calls("POST", /\/tasks\/[0-9a-z-]+$/);

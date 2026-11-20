@@ -845,7 +845,7 @@ export function aiProvider(p: Record<string, unknown> = {}) {
 }
 
 export function aiBudget(p: Record<string, unknown> = {}) {
-  return { ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 80, updated_at: "2026-11-19T00:00:00Z", ...p };
+  return { ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80, updated_at: "2026-11-19T00:00:00Z", ...p };
 }
 
 export function aiCall(p: Record<string, unknown> = {}) {
@@ -885,7 +885,7 @@ export const AI_USAGE_SUMMARY = {
   avg_cost_per_lesson_usd: 0.004,
   ai_enabled: true,
   alert_percent: 80,
-  speech: { calls: 40, audio_minutes: 3.5, spent_usd: 0.08, speech_available: true },
+  speech: { calls: 40, audio_minutes: 3.5, spent_usd: 0.08, speech_available: true, cap_usd: 5 },
 };
 
 export function sessionRowDomain(p: Record<string, unknown> = {}) {
@@ -1567,6 +1567,7 @@ export class FakeDomains {
     if (key === `GET ${B}/analytics`) return json(200, forgettingAnalytics({ pair_id: c.query.pair_id ?? "ru-en", period: c.query.period ?? "30d" }));
     const l = /^\/admin\/v1\/memory\/learners\/([^/]+)(\/cards)?$/.exec(c.path);
     if (l && c.method === "GET" && !l[2]) return json(200, learnerMemorySummary({ user_id: l[1] }));
+    // карточка ошибки с текстом — memory прошлой версии (admin.ts: null); BFF обнуляет сам
     if (l && c.method === "GET" && l[2]) return json(200, { items: [adminCardRow(), adminCardRow({ card_id: CARD_ID_2, kind: "error", text_en: "I'd like a latte, please", status: "learning", error_code: "article" })], next_cursor: null });
     const cm = /^\/admin\/v1\/memory\/cards\/([^/]+)(\/log|\/actions)?$/.exec(c.path);
     if (cm && c.method === "GET" && !cm[2]) return json(200, adminCardDetailDomain({ card_id: cm[1] }));

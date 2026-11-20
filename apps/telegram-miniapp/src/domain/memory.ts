@@ -227,6 +227,15 @@ export function reviewReducer(state: ReviewState, a: ReviewAction): ReviewState 
   }
 }
 
+/**
+ * A new answer can be given: the task is on screen and ready, and no answer is waiting. After a lost answer (sendFailed)
+ * the draft is locked — only «Отправить ещё раз» with the same body: memory answers the task with the first answer it
+ * got, so a changed answer would show a result that is not the learner's last input.
+ */
+export function canAnswer(s: Pick<ReviewState, "phase" | "task" | "pending">): boolean {
+  return s.phase === "ready" && !!s.task && !s.pending;
+}
+
 /** A lost answer (no network, BFF or memory down, rate limit) is re-sent as is — memory answers it the same way. */
 export function isRetryableReview(e: unknown): boolean {
   return e instanceof ApiError && (e.status === 0 || e.status >= 500 || e.code === "RATE_LIMITED");

@@ -92,12 +92,15 @@ async def test_consent_self_guardian_and_child(env) -> None:  # type: ignore[no-
     assert r.status_code == 403 and r.json()["details"] == {"who": "guardian"}
     assert (await env.get(teen, "overview", age_band="14-17"))["pronunciation"] == "consent_guardian"
     env.identity.set(child, age_band="6-9", kind="child")
-    r = await pron(env, child, target, wav(), account=parent)
+    r = await pron(env, child, "sentence:reading:r-kids-cat:1:s1", wav(), account=parent)
     assert r.status_code == 403 and r.json()["code"] == "VOICE_CONSENT_REQUIRED" and r.json()["details"]["who"] == \
         "guardian"
     env.identity.set(child, age_band="6-9", kind="child", voice=True)  # родитель включил запись голоса ребёнку
     r = await pron(env, child, "sentence:reading:r-kids-cat:1:s2", wav(), account=parent)
     assert r.status_code == 200 and env.ai.speech[-1]["meta"]["audience"] == "kids"
+    # детям — только детский контент: эталон из взрослого текста «не существует»
+    r = await pron(env, child, target, wav(), account=parent)
+    assert r.status_code == 404 and r.json()["code"] == "CONTENT_NOT_FOUND"
     assert (await env.get(child, "overview", account=parent))["pronunciation"] == "available"
     env.identity.down = True
     r = await pron(env, adult, target, wav())

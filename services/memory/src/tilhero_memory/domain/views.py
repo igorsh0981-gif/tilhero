@@ -62,9 +62,12 @@ def dictionary_card(card: Card, now: datetime) -> dict[str, Any]:
 
 
 def admin_row(card: Card, now: datetime) -> dict[str, Any]:
+    """AdminCardRow: у карточек ошибок text_en = null — исправление выведено из свободного текста ученика (в админке
+    только error_code и его подпись)."""
     r = retrievability(card, now)
     return {
-        "card_id": str(card.card_id), "kind": card.kind, "text_en": card.text_en, "gloss": dict(card.gloss),
+        "card_id": str(card.card_id), "kind": card.kind, "text_en": None if card.kind == "error" else card.text_en,
+        "gloss": dict(card.gloss),
         "status": card.status,
         "stability": round(card.stability, 4) if card.stability is not None else None,
         "difficulty": round(card.difficulty, 4) if card.difficulty is not None else None,

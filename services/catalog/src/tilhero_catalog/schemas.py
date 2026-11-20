@@ -6,7 +6,15 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, HttpUrl
 
-from tilhero_catalog.content import CONTROL_RE, ID_PATTERN, GlossaryRefKind, LanguagePair, LocaleCheck, PartOfSpeech
+from tilhero_catalog.content import (
+    CONTROL_RE,
+    ID_PATTERN,
+    AudienceSegment,
+    GlossaryRefKind,
+    LanguagePair,
+    LocaleCheck,
+    PartOfSpeech,
+)
 
 _IN = ConfigDict(extra="forbid")
 
@@ -178,6 +186,8 @@ class GlossaryLookupIn(BaseModel):
     pair_id: PairId
     text: FormText
     content_ref: ContentRefIn
+    # аудитория ученика (CONVENTIONS §8): kids — контент без kids в аудитории «не существует» (404)
+    audience: AudienceSegment | None = None
 
 
 class AiEntryIn(BaseModel):
@@ -194,6 +204,7 @@ class AiEntryIn(BaseModel):
     confidence: float = Field(ge=0, le=1)
     agent_version: Annotated[Plain, Field(min_length=1, max_length=64)]
     content_ref: ContentRefIn
+    audience: AudienceSegment | None = None
 
 
 class GlossaryCreateIn(BaseModel):
