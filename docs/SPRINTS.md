@@ -4,6 +4,10 @@
 
 Требования — по реестру LinguaFlow 1.2 (APP-*, ADM-*). Приёмочные тесты TilHero — `AT-NN`.
 
+## Definition of Done — каждый спринт и релиз
+- Тесты на реальном стенде, lint, typecheck зелёные; независимое ревью; QA-отчёт в `docs/qa/`; PR в `main`; деплой Railway.
+- **«Что нового» (требование владельца, с релиза 6.1):** релиз несёт миграцию experience-config с опубликованной заметкой о том, что поменялось и что добавили: взрослая (`teens`, `adults`) и детская (`kids`) версии, тексты RU и UZ, иллюстрация 16:9 в `apps/telegram-miniapp/public/whatsnew/`, ключ в каталоге `packages/contracts/release-notes.json`. Публикация — при выкладке (`system:release`), сотрудник может снять заметку в админке. Правила — [CONVENTIONS §10](CONVENTIONS.md).
+
 ## Спринт 0 — Фундамент
 **Цель:** каркас, на котором любой сервис собирается одинаково. Берётся из «Бот турист» (aievent) и переименовывается.
 - Монорепозиторий: npm workspaces (TS) + uv workspace (Python), CI GitHub Actions (lint, typecheck, тесты на реальных PostgreSQL/Redis/NATS, контракты, Docker).

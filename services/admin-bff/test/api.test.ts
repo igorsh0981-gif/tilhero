@@ -3,8 +3,10 @@
  * Telegram ID, поддержка (имена, сводка ученика, Idempotency-Key), «Что нового», шаблоны и рассылки, сотрудники,
  * конфигурация; строгая проверка ответов доменов (испорченное → 503, лишнее отбрасывается, маска Telegram ID).
  */
+import { readFileSync } from "node:fs";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AdminLearnerCard, Dashboard, StaffTicket } from "@tilhero/contracts/admin";
+import { ILLUSTRATION_PATTERN, NOTE_ICONS, NOTE_ROUTES } from "../src/schemas.js";
 import {
   APPROVAL_ID,
   CAMPAIGN_ID,
@@ -456,6 +458,58 @@ describe("«Что нового»", () => {
     expect(h.fake.callsTo("experience", "POST", `/admin/v1/release-notes/${NOTE_ID}/publish`)[0]!.headers["idempotency-key"]).toBe("pub-note-0001");
   });
 
+  it("каталог release-notes.json: маршруты, иконки и формат ключа иллюстрации admin-bff = общему каталогу", () => {
+    const cat = JSON.parse(readFileSync(new URL("../../../packages/contracts/release-notes.json", import.meta.url), "utf8")) as {
+      routes: string[];
+      icons: string[];
+      illustrations: Array<{ key: string }>;
+      limits: { illustration_pattern: string };
+    };
+    expect([...NOTE_ROUTES]).toEqual(cat.routes);
+    expect([...NOTE_ICONS]).toEqual(cat.icons);
+    expect(ILLUSTRATION_PATTERN).toBe(cat.limits.illustration_pattern);
+    for (const i of cat.illustrations) expect(new RegExp(ILLUSTRATION_PATTERN).test(i.key), i.key).toBe(true);
+  });
+
+  it("релиз 6.1: иллюстрация и новые маршруты проходят через схему входа и строгий кодек ответа", async () => {
+    const { s } = await loginAs(h, "communications");
+    const routes = ["heroes", "shop", "badges", "game_history", "game_settings", "dictionary"] as const;
+    const items = routes.map((link) => ({ title: { ru: link, uz: link }, text: { ru: "Текст", uz: "Matn" }, link, icon: "hero" }));
+    const body = releaseNoteBody({ slug: "s7-test", items, illustration: "s6-heroes" });
+    const res = await send(s, "POST", "/admin/v1/release-notes", body, { "idempotency-key": "note-key-0001" });
+    expect(res.statusCode).toBe(201);
+    expect(h.fake.callsTo("experience", "POST", "/admin/v1/release-notes").at(-1)!.body).toEqual(body);
+    expect(res.json().illustration).toBe("s6-heroes");
+    expect(res.json().items.map((i: { link: string }) => i.link)).toEqual([...routes]);
+    // правка: «reading» и снятие иллюстрации (null)
+    const put = await send(s, "PUT", `/admin/v1/release-notes/${NOTE_ID}`, { ...releaseNoteBody({ illustration: null, items: [{ ...items[0]!, link: "reading" }] }), expected_version: 1 });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().illustration).toBeNull();
+    expect(put.json().items[0].link).toBe("reading");
+    // без поля (admin-web до 6.1) — допустимо, домен сохранит null
+    const { illustration: _omit, ...legacy } = releaseNoteBody();
+    expect((await send(s, "POST", "/admin/v1/release-notes", legacy, { "idempotency-key": "note-key-0002" })).statusCode).toBe(201);
+    // ключ не того формата → 422 до домена
+    const calls = h.fake.callsTo("experience", "POST").length;
+    for (const illustration of ["../x", "S6-heroes", "s6_heroes", "", "a".repeat(33), 5, "welcome.webp"]) {
+      const r = await send(s, "POST", "/admin/v1/release-notes", releaseNoteBody({ illustration }), { "idempotency-key": "note-key-0003" });
+      expect(r.statusCode, String(illustration)).toBe(422);
+      expect(r.json().code).toBe("VALIDATION_ERROR");
+    }
+    expect(h.fake.callsTo("experience", "POST")).toHaveLength(calls);
+    // ответ домена: поля нет (домен до 6.1) → null; ключ не того формата → 503 (строгий кодек), лишнее отбрасывается
+    const { illustration: _gone, ...oldRow } = releaseNoteRow();
+    h.fake.on("experience", "GET", `/admin/v1/release-notes/${NOTE_ID}`, () => json(200, { ...oldRow, image_url: "https://x" }));
+    const old = await get(s, `/admin/v1/release-notes/${NOTE_ID}`);
+    expect(old.statusCode).toBe(200);
+    expect(old.json().illustration).toBeNull();
+    expect(old.json()).not.toHaveProperty("image_url");
+    h.fake.on("experience", "GET", `/admin/v1/release-notes/${NOTE_ID}`, () => json(200, releaseNoteRow({ illustration: "../../etc" })));
+    const bad = await get(s, `/admin/v1/release-notes/${NOTE_ID}`);
+    expect(bad.statusCode).toBe(503);
+    expect(bad.json()).toMatchObject({ code: "UPSTREAM_UNAVAILABLE", details: { service: "experience-config" } });
+  });
+
   it("статистика: ReleaseNoteStats", async () => {
     const { s } = await loginAs(h, "communications");
     const res = await get(s, `/admin/v1/release-notes/${NOTE_ID}/stats`);
@@ -525,6 +579,10 @@ describe("шаблоны уведомлений и рассылки", () => {
     expect(ok.statusCode).toBe(201);
     expect(ok.json()).not.toHaveProperty("cursor");
     expect(ok.json().created_by).toBe(staff.staff_id);
+    // релиз 6.1: кнопка рассылки может вести в новые экраны (тот же каталог маршрутов)
+    const heroes = await send(s, "POST", "/admin/v1/notifications/campaigns", campaignBody({ route: "heroes" }), { "idempotency-key": "camp-key-0002" });
+    expect(heroes.statusCode).toBe(201);
+    expect(heroes.json().route).toBe("heroes");
   });
 
   it("расписание и стоп — notif.campaigns.send + step-up; снятие с расписания — без step-up; 422 CAMPAIGN_EMPTY_AUDIENCE — как есть", async () => {

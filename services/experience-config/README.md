@@ -94,7 +94,7 @@ Mini App — ровно allowlist санитайзера клиента `package
 | GET | `/admin/v1/release-notes/summary` | `dashboard.read` | → `DashboardWhatsNew {published, drafts, latest: {release_note_id, slug, title (RU), views_total, published_at} \| null}` (архив не считается) |
 | GET | `/admin/v1/release-notes/{id}` | `whatsnew.manage` | → `StaffReleaseNote`; 404 `RELEASE_NOTE_NOT_FOUND` |
 | GET | `/admin/v1/release-notes/{id}/stats` | `whatsnew.manage` | → `ReleaseNoteStats {views_total, views_by_lang {ru, uz}, views_by_age {kids, teens, adults}, first_view_at, last_view_at}`; 404 `RELEASE_NOTE_NOT_FOUND` |
-| POST | `/admin/v1/release-notes` | `whatsnew.manage` | `{slug, title {ru, uz}, items[1..6], audience, segments}` → 201 черновик; 409 `RELEASE_NOTE_SLUG_EXISTS`; 422 `RELEASE_NOTE_TRANSLATION_MISSING {missing}`; `Idempotency-Key` |
+| POST | `/admin/v1/release-notes` | `whatsnew.manage` | `{slug, title {ru, uz}, items[1..6], audience, segments, illustration?}` → 201 черновик; 409 `RELEASE_NOTE_SLUG_EXISTS`; 422 `RELEASE_NOTE_TRANSLATION_MISSING {missing}`; `Idempotency-Key` |
 | PUT | `/admin/v1/release-notes/{id}` | `whatsnew.manage` | то же + `expected_version` → черновик (повтор тех же данных — no-op); 409 `RELEASE_NOTE_NOT_DRAFT` / `RELEASE_NOTE_VERSION_CONFLICT {current_version}` |
 | POST | `/admin/v1/release-notes/{id}/publish` | `whatsnew.publish` | `{expected_version, reason}` → 201 (`published_at` = сейчас); уже опубликована → 200; архивная → 409 `RELEASE_NOTE_NOT_DRAFT`; 422 `RELEASE_NOTE_TRANSLATION_MISSING` / `VALIDATION_ERROR` (черновик перепроверяется целиком); `Idempotency-Key` |
 | POST | `/admin/v1/release-notes/{id}/archive` | `whatsnew.publish` | `{reason}` → 201 (снятие с показа); уже в архиве → 200 |
@@ -113,6 +113,12 @@ Mini App — ровно allowlist санитайзера клиента `package
 занимается, `all` — всем. `segments {age?: [kids|teens|adults], ui_lang?: [ru|uz]}` — пусто или нет ключа = всем; хранятся
 без повторов в порядке каталога. Правка опубликованной — только «архив + новая заметка».
 
+Иллюстрация (релиз 6.1): `illustration` — ключ из списка `illustrations` каталога (`welcome`, `s6-heroes`) или null
+(нет поля у клиента до 6.1: при создании — null, при правке черновика — не меняется); ключ не из каталога → 422 `VALIDATION_ERROR` (и при публикации черновика, попавшего в
+БД в обход API). Mini App показывает картинку `apps/telegram-miniapp/public/whatsnew/<key>.webp` (16:9, 1200×675) сверху
+первой карточки заметки; `WhatsNewNote.illustration` — тот же ключ. У опубликованной иллюстрация неизменна (триггер).
+Маршруты 6.1: `heroes`, `shop`, `badges`, `game_history`, `game_settings` (игра), `dictionary`, `reading`.
+
 ## События
 Публикует (outbox, в транзакции команды):
 - `experience.config.activated.v1 {app, version, previous_version, activation_id}` — активация и откат;
@@ -120,7 +126,8 @@ Mini App — ровно allowlist санитайзера клиента `package
   (notifications кладёт её в центр уведомлений);
 - `admin.audit.recorded.v1` — команды сотрудников: `config.create | config.publish | config.rollback`
   (`object_id = "<app>@<version>"`), `release_note.create | update | publish | archive` (`object_id` = id заметки,
-  `after` — метка, статус, аудитория, сегменты, счётчики, без текстов); актор — сотрудник из токена admin-bff;
+  `after` — метка, статус, аудитория, сегменты, иллюстрация, счётчики, без текстов); актор — сотрудник из токена
+  admin-bff, у заметки релиза — `actor_type system`, `actor_id system:release` (миграция при выкладке);
 - `user.domain.deleted.v1 {domain: experience-config, mode: deleted}` — ACK саги удаления.
 
 Потребляет: `user.deletion.requested.v1` (durable `experience-config.user_deleted`, только от identity-consent; от
@@ -134,8 +141,9 @@ Mini App — ровно allowlist санитайзера клиента `package
   `activated_by`, `activated_at`. Текущая = последняя активация приложения. Обе таблицы append-only (триггер).
 - `release_notes` (миграция 0003) — `id`, `seq`, `slug` (уникальна среди неархивных), `title`/`items` JSONB `{ru, uz}`,
   `audience` (`new|existing|all`), `segments` JSONB, `status` draft/published/archived, `version`, кто/когда создал,
-  изменил, опубликовал, архивировал. Триггер `release_notes_guard`: у опубликованной меняется только статус → archived,
-  архивная неизменна, удалить можно только черновик; TRUNCATE запрещён.
+  изменил, опубликовал, архивировал; `illustration` (миграция 0006) — ключ каталога или NULL, CHECK формата ключа.
+  Триггер `release_notes_guard`: у опубликованной меняется только статус → archived (тексты, сегменты, иллюстрация —
+  нет), архивная неизменна, удалить можно только черновик; TRUNCATE запрещён.
 - `release_note_views(user_id, release_note_id, seen_at, ui_lang, age_segment, PK(user_id, release_note_id))` — отметки
   просмотра (FK на заметку); `ui_lang` (`ru|uz`) и `age_segment` (`kids|teens|adults`) — сегмент на момент показа,
   NULL у старых отметок (миграция 0005, CHECK по каталогу);
@@ -144,6 +152,14 @@ Mini App — ровно allowlist санитайзера клиента `package
   Unbounded / Caveat) и admin **1.0.0** (`Admin.dc.html .ad`, все разделы меню); миграция 0004 — опубликованная
   **welcome-1** (audience `new`, пять пунктов знакомства: герой растёт за навыки, урок 20 минут, повторения, график и
   напоминания, семья) и **черновик 2026.11** (audience `existing`). Тексты RU и UZ (латиница).
+- Заметки релизов публикуются миграциями при выкладке (CONVENTIONS «Что нового в каждом релизе»): **0007 — релиз 6.1**:
+  `s6-heroes` (age teens, adults) и `s6-heroes-kids` (age kids, на «ты», без приглашений, голос — с разрешения
+  родителя), audience `existing`, иллюстрация `s6-heroes`, `published_by = system:release`, `published_at` — время
+  миграции; событие публикации и аудит — в outbox той же транзакции (функции домена `published_payload`,
+  `audit_record`). Приветствию `welcome-1` — иллюстрация `welcome` (триггер снимается на один UPDATE владельцем схемы);
+  черновик 2026.11 архивирован (`archived_by = system:release`). Метка занята действующей заметкой сотрудника →
+  миграция падает (архивировать заметку в админке и повторить деплой). `downgrade` удаляет обе заметки, их отметки и
+  неотправленные события публикации, возвращает черновик и снимает иллюстрацию приветствия.
 
 ## Кэш
 Ключ `expcfg:current:<app>`, TTL 60 с, значение `"<seq активации>|<json>"`. Запись — Lua-скриптом «только если seq новее»:
@@ -158,7 +174,8 @@ Redis недоступен или значение повреждено → от
 - **Конфигурация «пропала»** (404 `EXPERIENCE_CONFIG_NOT_FOUND`): `SELECT * FROM activations ORDER BY seq DESC LIMIT 5`;
   Mini App в этом случае использует bundled fallback.
 - **Заметку увидели не те ученики:** снять её (`/archive`), проверить `audience` и `segments`; отметки просмотра
-  (`release_note_views`) не удаляются — повторно её никто не увидит.
+  (`release_note_views`) не удаляются — повторно её никто не увидит. Заметку релиза (`system:release`) снимают так же —
+  в админке «Что нового» → «Снять с показа».
 - **Сброс кэша вручную:** `redis-cli DEL expcfg:current:miniapp`.
 - Миграции: `alembic -c alembic.ini upgrade head` (Railway preDeploy).
 - Локально: `infra/dev/stack.sh up`, `ENV=dev DATABASE_URL=postgresql://experience_config:dev@127.0.0.1:5432/tilhero

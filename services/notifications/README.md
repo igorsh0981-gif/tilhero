@@ -199,7 +199,7 @@ licensed — «материал лицензирован и добавлен», 
 ## Рассылки (спринт 2, AT-22)
 Категория `product`, kind `campaign`. Маршрут кнопки — из каталога `packages/contracts/release-notes.json`
 (`campaigns.ROUTES`; спринт 3 — + `diagnostics`, `plan`, `skills`, `scenarios`, `media`, `media_requests`,
-`languages`). Аудиторию отбирает identity-consent (`GET /internal/v1/audience[/count]?ui_lang=&age=&onboarded=&active_days=`,
+`languages`; релиз 6.1 — + `heroes`, `shop`, `badges`, `game_history`, `game_settings`, `dictionary`, `reading`). Аудиторию отбирает identity-consent (`GET /internal/v1/audience[/count]?ui_lang=&age=&onboarded=&active_days=`,
 `age` по умолчанию `adults`). `POST …:dispatch` сначала выполняет шаги рассылок (`campaigns.Runner`, не больше
 `CAMPAIGN_MAX_BATCHES_PER_CALL`), затем отправку: 1) `scheduled` с `send_at ≤ now` → `sending`, фиксация
 `audience_count` (identity-consent недоступен — запуск при следующем вызове); 2) страницы аудитории по

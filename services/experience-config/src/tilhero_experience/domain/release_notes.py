@@ -15,8 +15,17 @@ RELEASE_NOTE_TRANSLATION_MISSING (и при сохранении чернови�
 release_note_id); разрезы по языку и возрасту — по сегменту ученика на момент показа, который отметка хранит с миграции
 0005 (старые отметки без сегмента в разрезах не учитываются).
 
-Маршруты Mini App, иконки, аудитории, сегменты и лимиты — общий каталог `packages/contracts/release-notes.json`
-(сверка — контрактный тест). Тексты — простой текст без управляющих символов; клиенты выводят их только как текст.
+Маршруты Mini App, иконки, иллюстрации, аудитории, сегменты и лимиты — общий каталог
+`packages/contracts/release-notes.json` (сверка — контрактный тест). Тексты — простой текст без управляющих символов;
+клиенты выводят их только как текст.
+
+Иллюстрация (релиз 6.1, миграция 0006) — ключ из каталога (`welcome`, `s6-heroes`, …): картинка 16:9 сверху первой
+карточки заметки в Mini App (`apps/telegram-miniapp/public/whatsnew/<key>.webp`). Ключ не из каталога → 422
+VALIDATION_ERROR. У опубликованной заметки иллюстрация неизменна, как и тексты (триггер release_notes_guard).
+
+Каждый релиз публикует свою заметку миграцией при выкладке (CONVENTIONS «Что нового в каждом релизе»): автор
+`system:release`, событие публикации и аудит — те же функции, что у публикации сотрудником (`published_payload`,
+`audit_record`).
 """
 
 from __future__ import annotations
@@ -49,6 +58,7 @@ PUBLISHED_EVENT = "experience.release_note.published.v1"
 DOMAIN_DELETED = "user.domain.deleted.v1"
 DELETION_REQUESTED = "user.deletion.requested.v1"
 OBJECT_TYPE = "release_note"
+RELEASE_ACTOR = "system:release"  # публикация заметки релиза миграцией при выкладке
 
 # ---------------------------------------------------------------- каталог (packages/contracts/release-notes.json)
 
@@ -60,11 +70,19 @@ ROUTES: Final[tuple[str, ...]] = (
     "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
     # спринт 3
     "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
+    # релиз 6.1: игра (спринт 6), словарь и чтение (спринт 5)
+    "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
 )
 ICONS: Final[tuple[str, ...]] = (
     "spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield",
     "globe", "trophy", "news",
 )
+# иллюстрации: ключ → (ширина, высота) файла apps/telegram-miniapp/public/whatsnew/<key>.webp
+ILLUSTRATIONS: Final[dict[str, tuple[int, int]]] = {
+    "welcome": (1200, 675),
+    "s6-heroes": (1200, 675),
+}
+ILLUSTRATION_PATTERN = r"^[a-z0-9][a-z0-9-]{0,31}$"
 SLUG_PATTERN = r"^[0-9A-Za-z][0-9A-Za-z.-]{0,31}$"
 TITLE_MAX, ITEM_TITLE_MAX, ITEM_TEXT_MAX = 80, 80, 200
 ITEMS_MIN, ITEMS_MAX = 1, 6
@@ -76,9 +94,11 @@ Audience = Literal["new", "existing", "all"]
 AgeSegment = Literal["kids", "teens", "adults"]
 UiLang = Literal["ru", "uz"]
 Route = Literal["home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support",
-                "news", "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages"]
+                "news", "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
+                "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading"]
 IconName = Literal["spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users",
                    "gift", "shield", "globe", "trophy", "news"]
+Illustration = Literal["welcome", "s6-heroes"]
 
 # управляющие C0/C1, разделители строк, невидимые и bidi: U+061C, U+200B–U+200F (ZWSP, ZWNJ, ZWJ, LRM, RLM),
 # U+2028–U+202E (в т. ч. LRE…RLO), U+2060–U+2064, U+2066–U+2069 (изоляты), U+FEFF (BOM)
@@ -158,6 +178,8 @@ class NoteContent(BaseModel):
     items: list[NoteItem] = Field(min_length=ITEMS_MIN, max_length=ITEMS_MAX)
     audience: Audience = "existing"
     segments: Segments | None = None
+    illustration: Illustration | None = Field(
+        default=None, description="ключ иллюстрации из каталога (картинка сверху первой карточки); нет — без картинки")
 
 
 # ---------------------------------------------------------------- переводы
@@ -188,7 +210,7 @@ def ensure_publishable(n: ReleaseNote) -> None:
     ensure_translations(n.title, n.items)
     try:
         NoteContent.model_validate({"slug": n.slug, "title": n.title, "items": n.items, "audience": n.audience,
-                                    "segments": n.segments})
+                                    "segments": n.segments, "illustration": n.illustration})
     except ValidationError as exc:
         errors = [{"loc": ["note", *(str(p) for p in e["loc"])], "msg": e["msg"], "type": e["type"]}
                   for e in exc.errors()[:20]]
@@ -210,7 +232,7 @@ def staff_view(n: ReleaseNote, views_total: int = 0) -> dict[str, Any]:
     ученики, видевшие заметку; у черновика всегда 0."""
     return {
         "release_note_id": str(n.id), "slug": n.slug, "title": n.title, "items": n.items, "audience": n.audience,
-        "segments": n.segments, "status": n.status, "version": n.version,
+        "segments": n.segments, "illustration": n.illustration, "status": n.status, "version": n.version,
         "created_by": n.created_by, "created_at": iso_z(n.created_at),
         "updated_by": n.updated_by, "updated_at": iso_z(n.updated_at),
         "published_by": n.published_by, "published_at": iso_z(n.published_at),
@@ -241,12 +263,12 @@ async def staff_view_of(session: AsyncSession, n: ReleaseNote) -> dict[str, Any]
 
 
 def localized_view(n: ReleaseNote, lang: str) -> dict[str, Any]:
-    """WhatsNewNote (bff.ts): тексты на языке ученика, без сотрудников и сегментов."""
+    """WhatsNewNote (bff.ts): тексты на языке ученика, без сотрудников и сегментов; иллюстрация — ключ каталога."""
     return {
         "release_note_id": str(n.id), "slug": n.slug, "title": n.title[lang],
         "items": [{"title": i["title"][lang], "text": i["text"][lang], "link": i.get("link"), "icon": i.get("icon")}
                   for i in n.items],
-        "audience": n.audience, "published_at": iso_z(n.published_at),
+        "audience": n.audience, "illustration": n.illustration, "published_at": iso_z(n.published_at),
     }
 
 
@@ -477,23 +499,38 @@ async def delete_user_data(session: AsyncSession, *, user_id: str, request_id: s
 # ---------------------------------------------------------------- аудит
 
 
-def _audit(actor: Actor, action: str, note_id: uuid.UUID, slug: str, before: dict | None, after: dict | None,
-           reason: str | None) -> dict[str, Any]:
-    """Payload admin.audit.recorded.v1 — без текстов заметки (журнал неизменяем)."""
+def audit_record(*, actor_type: Literal["staff", "system"], actor_id: str, actor_role: str | None, action: str,
+                 note_id: uuid.UUID, slug: str, before: dict | None, after: dict | None, reason: str | None,
+                 trace_id: str | None, occurred_at: datetime | None = None) -> dict[str, Any]:
+    """Payload admin.audit.recorded.v1 — без текстов заметки (журнал неизменяем). Общий для команд сотрудника и
+    публикации заметки релиза миграцией (actor_type system, actor_id system:release)."""
     return {
         "record_id": str(uuid.uuid4()),
-        "occurred_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "actor_type": "staff",
-        "actor_id": actor.id[:64],
-        "actor_role": actor.role[:64],
+        "occurred_at": (occurred_at or datetime.now(UTC)).astimezone(UTC).isoformat().replace("+00:00", "Z"),
+        "actor_type": actor_type,
+        "actor_id": actor_id[:64],
+        "actor_role": actor_role[:64] if actor_role is not None else None,
         "action": action,
         "object_type": OBJECT_TYPE,
         "object_id": str(note_id),
         "before": before,
         "after": {"slug": slug, **(after or {})},
         "reason": reason,
-        "trace_id": context.get_trace_id()[:64],
+        "trace_id": trace_id[:64] if trace_id is not None else None,
     }
+
+
+def _audit(actor: Actor, action: str, note_id: uuid.UUID, slug: str, before: dict | None, after: dict | None,
+           reason: str | None) -> dict[str, Any]:
+    return audit_record(actor_type="staff", actor_id=actor.id, actor_role=actor.role, action=action, note_id=note_id,
+                        slug=slug, before=before, after=after, reason=reason, trace_id=context.get_trace_id())
+
+
+def published_payload(note_id: uuid.UUID, slug: str, audience: str, segments: dict[str, Any],
+                      published_at: datetime) -> dict[str, Any]:
+    """Payload experience.release_note.published.v1 — у публикации сотрудником и у заметки релиза (миграция)."""
+    return {"release_note_id": str(note_id), "slug": slug, "audience": audience, "segments": segments,
+            "published_at": iso_z(published_at)}
 
 
 async def _emit_audit(session: AsyncSession, payload: dict[str, Any]) -> None:
@@ -541,7 +578,7 @@ def dump_content(content: NoteContent) -> dict[str, Any]:
     data = content.model_dump(mode="json")
     segments = content.segments.normalized() if content.segments is not None else {}
     return {"slug": data["slug"], "title": data["title"], "items": data["items"], "audience": data["audience"],
-            "segments": segments}
+            "segments": segments, "illustration": data["illustration"]}
 
 
 async def create(session: AsyncSession, content: NoteContent, actor: Actor) -> ReleaseNote:
@@ -556,13 +593,14 @@ async def create(session: AsyncSession, content: NoteContent, actor: Actor) -> R
     await _flush_slug(session, content.slug)
     await _emit_audit(session, _audit(actor, "release_note.create", note.id, note.slug, None,
                                       {"status": "draft", "items": len(note.items), "audience": note.audience,
-                                       "segments": note.segments}, None))
+                                       "segments": note.segments, "illustration": note.illustration}, None))
     return note
 
 
 async def update(session: AsyncSession, note_id: uuid.UUID, expected_version: int, content: NoteContent,
                  actor: Actor) -> ReleaseNote:
-    """Правка черновика. Повтор тех же данных — no-op (версия и аудит не меняются)."""
+    """Правка черновика. Повтор тех же данных — no-op (версия и аудит не меняются). Поля illustration нет в теле
+    (клиент до 6.1) — иллюстрация черновика остаётся; null — снимается."""
     note = await _get_for_update(session, note_id)
     if note.status != "draft":
         raise conflict("RELEASE_NOTE_NOT_DRAFT",
@@ -572,6 +610,8 @@ async def update(session: AsyncSession, note_id: uuid.UUID, expected_version: in
         raise conflict("RELEASE_NOTE_VERSION_CONFLICT", "Заметку уже изменили — обновите страницу",
                        {"current_version": note.version})
     new = dump_content(content)
+    if "illustration" not in content.model_fields_set:
+        new["illustration"] = note.illustration
     ensure_translations(new["title"], new["items"])
     changed = [k for k, v in new.items() if getattr(note, k) != v]
     if not changed:
@@ -612,9 +652,7 @@ async def publish(session: AsyncSession, note_id: uuid.UUID, expected_version: i
     note.updated_by = actor.id[:64]
     note.updated_at = now
     await session.flush()
-    await emit(session, PUBLISHED_EVENT,
-               {"release_note_id": str(note.id), "slug": note.slug, "audience": note.audience,
-                "segments": note.segments, "published_at": iso_z(now)},
+    await emit(session, PUBLISHED_EVENT, published_payload(note.id, note.slug, note.audience, note.segments, now),
                producer=PRODUCER)
     await _emit_audit(session, _audit(actor, "release_note.publish", note.id, note.slug, {"status": "draft"},
                                       {"status": "published", "audience": note.audience, "segments": note.segments,

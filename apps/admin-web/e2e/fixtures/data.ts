@@ -371,6 +371,7 @@ export function releaseNotes(): StaffReleaseNote[] {
     archived_by: null as string | null,
     archived_at: null as string | null,
     segments: {},
+    illustration: null as string | null,
   };
   return [
     {

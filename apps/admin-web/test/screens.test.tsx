@@ -67,6 +67,7 @@ const note = (p: Partial<StaffReleaseNote> = {}): StaffReleaseNote => ({
   ],
   audience: "existing",
   segments: {},
+  illustration: null,
   created_by: "s",
   created_by_name: "Дилноза",
   created_at: "2026-11-16T10:00:00Z",
@@ -123,6 +124,61 @@ describe("«Что нового» editor", () => {
     expect(phone).toHaveTextContent("boʻsh");
     fireEvent.click(within(screen.getByTestId("pv-scheme")).getByRole("button", { name: "Тёмная" }));
     expect(phone).toHaveAttribute("data-scheme", "dark");
+  });
+
+  it("release 6.1: the phone preview shows the illustration on top of the first card only (alt = note title)", () => {
+    const d = { ...emptyNote("2026.12"), illustration: "s6-heroes" };
+    d.title = { ru: "Новое в TilHero", uz: "TilHero’da yangi" };
+    d.items = [
+      { title: { ru: "Герои", uz: "Qahramonlar" }, text: { ru: "Текст", uz: "Matn" }, link: "heroes", icon: "hero" },
+      { title: { ru: "Тилы", uz: "Tillar" }, text: { ru: "Текст", uz: "Matn" }, link: "shop", icon: "gift" },
+    ];
+    ui(<WhatsNewPreview d={d} />, ["whatsnew.manage"]);
+    const art = within(screen.getByTestId("wn-pv-art")).getByRole("img", { name: "Новое в TilHero" });
+    expect(art.getAttribute("src")).toMatch(/s6-heroes.*\.webp/);
+    expect(art).toHaveAttribute("width", "1200");
+    expect(art).toHaveAttribute("height", "675");
+    expect(screen.getByText(/→ Выбор героя/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("wn-pv-next"));
+    expect(screen.queryByTestId("wn-pv-art")).toBeNull();
+    fireEvent.click(within(screen.getByTestId("pv-lang")).getByRole("button", { name: "UZ" }));
+    fireEvent.click(screen.getByTestId("wn-pv-prev"));
+    expect(within(screen.getByTestId("wn-pv-art")).getByRole("img", { name: "TilHero’da yangi" })).toBeInTheDocument();
+  });
+
+  it("release 6.1: the illustration picker — catalogue pictures with previews; the choice is saved with the draft", async () => {
+    handler = (m, p) => {
+      if (m === "GET" && p === "/release-notes") return { status: 200, body: { items: [note()], next_cursor: null } };
+      if (m === "PUT") return { status: 200, body: note({ version: 4, illustration: "welcome" }) };
+      return undefined;
+    };
+    ui(<WhatsNewTab openId={null} />, ["whatsnew.manage", "whatsnew.publish"]);
+    await screen.findByTestId("wn-editor");
+    const group = screen.getByRole("radiogroup", { name: "Иллюстрация заставки" });
+    const radios = within(group).getAllByRole("radio");
+    expect(radios.map((r) => r.getAttribute("data-testid"))).toEqual(["wn-ill-none", "wn-ill-welcome", "wn-ill-s6-heroes"]);
+    expect(screen.getByTestId("wn-ill-none")).toBeChecked();
+    expect(group.querySelectorAll("img")).toHaveLength(2);
+    expect(screen.queryByTestId("wn-pv-art")).toBeNull();
+    fireEvent.click(within(group).getByRole("radio", { name: "welcome" }));
+    expect(screen.getByTestId("wn-ill-welcome")).toBeChecked();
+    expect(screen.getByTestId("wn-pv-art")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("wn-save"));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")).toBeTruthy());
+    expect(calls.find((c) => c.method === "PUT")!.body).toMatchObject({ illustration: "welcome", expected_version: 3 });
+  });
+
+  it("release 6.1: the note of a release (system:release) — illustration read-only, author «релиз приложения», can be withdrawn", async () => {
+    const released = note({ slug: "s6-heroes", status: "published", illustration: "s6-heroes", created_by: "system:release", created_by_name: null, published_by: "system:release", published_at: "2026-11-20T10:00:00Z" });
+    handler = (m, p) => (m === "GET" && p === "/release-notes" ? { status: 200, body: { items: [released], next_cursor: null } } : undefined);
+    ui(<WhatsNewTab openId={null} />, ["whatsnew.manage", "whatsnew.publish"]);
+    await screen.findByTestId("wn-editor");
+    expect(screen.getByTestId("wn-ill-s6-heroes")).toBeChecked();
+    expect(screen.getByTestId("wn-ill-s6-heroes")).toBeDisabled();
+    expect(screen.getByTestId("wn-pv-art")).toBeInTheDocument();
+    expect(screen.getByTestId("wn-row-s6-heroes")).toHaveTextContent("релиз приложения");
+    expect(screen.getByTestId("wn-release-note")).toHaveTextContent("Опубликована автоматически при выкладке релиза");
+    expect(screen.getByTestId("wn-archive")).toBeInTheDocument();
   });
 });
 

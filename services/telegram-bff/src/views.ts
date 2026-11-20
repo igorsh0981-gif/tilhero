@@ -18,7 +18,7 @@ import type {
   UserSummary,
   WhatsNewNote,
 } from "@tilhero/contracts/bff";
-import { INBOX_TELEGRAM, NOTE_ICONS, NOTE_ROUTES, NOTIFICATION_CATEGORIES, NOTIFICATION_CATEGORY_KEYS } from "./schemas.js";
+import { ILLUSTRATION_RE, INBOX_TELEGRAM, NOTE_ICONS, NOTE_ROUTES, NOTIFICATION_CATEGORIES, NOTIFICATION_CATEGORY_KEYS } from "./schemas.js";
 
 /** identity-consent: LearnerSummary; settings — настройки уведомлений детского профиля, если identity их отдаёт
  *  (GET/PATCH /internal/v1/me/learners/{id}; запрос к identity-consent, см. README). */
@@ -168,7 +168,8 @@ export function inboxItemView(i: InboxItem): InboxItem {
   };
 }
 
-/** Заметка «Что нового»: маршрут/иконка не из каталога release-notes.json → null (пункт без ссылки/иконки). */
+/** Заметка «Что нового»: маршрут/иконка не из каталога release-notes.json → null (пункт без ссылки/иконки);
+ *  ключ иллюстрации не того формата (или его нет — домен до 6.1) → null (заметка без картинки). */
 export function noteView(n: WhatsNewNote): WhatsNewNote {
   return {
     release_note_id: n.release_note_id,
@@ -181,6 +182,7 @@ export function noteView(n: WhatsNewNote): WhatsNewNote {
       icon: i.icon && (NOTE_ICONS as readonly string[]).includes(i.icon) ? i.icon : null,
     })),
     audience: n.audience,
+    illustration: typeof n.illustration === "string" && ILLUSTRATION_RE.test(n.illustration) ? n.illustration : null,
     published_at: n.published_at,
   };
 }

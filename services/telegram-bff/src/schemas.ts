@@ -471,6 +471,8 @@ assertSame<Same<Static<typeof InviteAcceptResultSchema>, C.InviteAcceptResult>>(
 export const NOTE_ROUTES = [
   "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
   "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
+  // релиз 6.1
+  "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
 ] as const;
 export const NOTE_ICONS = [
   "spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield", "globe", "trophy", "news",
@@ -479,6 +481,12 @@ const ReleaseNoteRoute = Enum(NOTE_ROUTES);
 assertSame<Same<Static<typeof ReleaseNoteRoute>, C.ReleaseNoteRoute>>();
 const ReleaseNoteIcon = Enum(NOTE_ICONS);
 assertSame<Same<Static<typeof ReleaseNoteIcon>, C.ReleaseNoteIcon>>();
+/**
+ * Ключ иллюстрации (релиз 6.1) — limits.illustration_pattern каталога. Список ключей проверяет experience-config;
+ * BFF пропускает ключ правильного формата (файл `/whatsnew/<key>.webp` — в той же сборке Mini App), иной → null.
+ */
+export const ILLUSTRATION_PATTERN = "^[a-z0-9][a-z0-9-]{0,31}$";
+export const ILLUSTRATION_RE = new RegExp(ILLUSTRATION_PATTERN);
 
 export const ReleaseNoteItemSchema = Type.Object({
   title: Type.String(),
@@ -494,6 +502,7 @@ export const WhatsNewNoteSchema = Type.Object({
   title: Type.String(),
   items: Type.Array(ReleaseNoteItemSchema),
   audience: Enum(["new", "existing", "all"]),
+  illustration: Nullable(Type.String({ pattern: ILLUSTRATION_PATTERN, maxLength: 32 })),
   published_at: IsoTime,
 });
 assertSame<Same<Static<typeof WhatsNewNoteSchema>, C.WhatsNewNote>>();

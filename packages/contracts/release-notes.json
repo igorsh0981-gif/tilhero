@@ -1,5 +1,5 @@
 {
-  "$comment": "«Что нового» TilHero: общий каталог для experience-config (проверка заметки), telegram-bff, Mini App (переход по ссылке пункта, иконка) и admin-web (редактор, предпросмотр). Сверка — контрактные тесты.",
+  "$comment": "«Что нового» TilHero: общий каталог для experience-config (проверка заметки), telegram-bff, Mini App (переход по ссылке пункта, иконка, иллюстрация) и admin-web (редактор, предпросмотр). Иллюстрация — файл apps/telegram-miniapp/public/whatsnew/<key>.webp (16:9, width×height из списка); ключ — limits.illustration_pattern. Сверка — контрактные тесты.",
   "locales": [
     "ru",
     "uz"
@@ -37,7 +37,14 @@
     "scenarios",
     "media",
     "media_requests",
-    "languages"
+    "languages",
+    "heroes",
+    "shop",
+    "badges",
+    "game_history",
+    "game_settings",
+    "dictionary",
+    "reading"
   ],
   "icons": [
     "spark",
@@ -57,6 +64,18 @@
     "trophy",
     "news"
   ],
+  "illustrations": [
+    {
+      "key": "welcome",
+      "width": 1200,
+      "height": 675
+    },
+    {
+      "key": "s6-heroes",
+      "width": 1200,
+      "height": 675
+    }
+  ],
   "limits": {
     "slug_pattern": "^[0-9A-Za-z][0-9A-Za-z.-]{0,31}$",
     "title_max": 80,
@@ -64,6 +83,7 @@
     "item_text_max": 200,
     "items_min": 1,
     "items_max": 6,
-    "client_max_notes": 5
+    "client_max_notes": 5,
+    "illustration_pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
   }
 }
