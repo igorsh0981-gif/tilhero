@@ -1,0 +1,90 @@
+/* =====================================================================
+   game.css — sprint 6: «Герои» (the catalog of 9 heroes, 3 stages with pictures, the draft editor and the live ↔ draft
+   comparison), «Геймификация» (the rules form, the shop, wallets with the ledger, the overview) and «События и сезоны».
+   Every colour is a token (both themes keep AA contrast); a state is never shown by colour alone — a text or an icon
+   goes with it. Pictures keep their aspect ratio inside a fixed frame (transparent PNG / WebP on a sunk surface).
+   ===================================================================== */
+
+/* pictures */
+.g-img{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;border:1px solid var(--line);border-radius:12px;background:var(--surface-sunk);overflow:hidden;color:var(--ink2)}
+.g-img img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;display:block}
+.g-img.is-empty{border-style:dashed}
+.g-img.is-empty svg{width:22px;height:22px}
+.g-upload{display:inline-flex;flex-direction:column;gap:4px;align-items:flex-start}
+/* the file field is visually hidden: its keyboard focus is drawn on the visible button */
+.g-upload:has(input:focus-visible)>label.btn{outline:2px solid var(--pen);outline-offset:2px}
+.g-swatch{display:inline-flex;align-items:flex-end;justify-content:flex-end;flex-shrink:0;border:3px solid;border-radius:12px;padding:5px}
+.g-swatch>span{display:block;width:34%;height:34%;border-radius:50%}
+.img-pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px;max-height:min(420px,55vh);overflow-y:auto;padding:2px}
+.img-pick-i{display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 6px;border:1.5px solid var(--line);border-radius:12px;background:var(--card);text-align:center;min-width:0}
+.img-pick-i:hover{border-color:var(--line-strong)}
+.img-pick-i[aria-pressed="true"]{border-color:var(--pen);background:var(--pen-soft);box-shadow:0 0 0 1px var(--pen)}
+.img-pick-i .xs{overflow-wrap:anywhere}
+
+/* heroes: catalog */
+.hero-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px;padding:14px 16px}
+.hero-card{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-card);background:var(--card);min-width:0}
+.hero-card>.btn{align-self:flex-start}
+.hero-stages{display:flex;gap:6px;align-items:flex-end}
+.hero-stage{margin:0;display:flex;flex-direction:column;align-items:center;gap:3px}
+.hero-meta{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.hero-meta .h3{margin:0}
+.hero-tag{margin:0;min-height:2.8em}
+.hero-card .xs svg,.wl-badges svg{width:13px;height:13px;vertical-align:-2px}
+
+/* heroes: editor and comparison */
+.hero-edit-stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:10px}
+.hero-edit-stage{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-sunk);min-width:0}
+.hero-edit-stage .g-img{align-self:center;background:var(--card)}
+.hero-edit-stage .form-grid{grid-template-columns:1fr}
+.hero-cmp-imgs{display:flex;flex-direction:column;gap:8px}
+.hero-cmp-stage{display:grid;grid-template-columns:90px auto 20px auto 1fr;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:12px}
+.hero-cmp-stage.is-changed{border-color:var(--pen);box-shadow:inset 3px 0 0 var(--pen)}
+.hero-cmp-stage>svg{width:18px;height:18px;color:var(--ink2)}
+.hero-cmp-stage>.pill{justify-self:start}
+.hero-cmp-cell{display:flex;flex-direction:column;gap:3px;align-items:center}
+
+/* rules */
+.gr-form{display:flex;flex-direction:column;gap:14px}
+.gr-sec.is-bad{box-shadow:inset 3px 0 0 var(--err)}
+.gr-row{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-start}
+.gr-row .gr-num{width:170px}
+.gr-num .input{width:100%}
+.gr-num.is-s{width:96px}
+.gr-num.is-s .input{min-width:0;width:100%}
+.gr-list{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
+.gr-list .gr-num>label{font-size:11.5px;font-weight:500;color:var(--ink2)}
+.gr-list-acts{display:inline-flex;gap:6px;align-items:center;padding-bottom:4px}
+.gr-tbl td,.gr-tbl th{vertical-align:top}
+.gr-tbl .gr-num.is-s{width:84px}
+.gr-earn td{width:120px}
+.gr-earn th[scope="row"]{white-space:normal;background:transparent;color:var(--ink);font-size:13px;position:static}
+.gr-tpl .gr-code{width:130px;min-width:110px}
+.gr-tpl .select{min-width:150px}
+.gr-tpl .check{min-height:28px;font-size:12.5px;gap:4px}
+.issues-panel.is-warn{border-color:var(--warn-line);background:var(--warn-soft)}
+.issues-panel.is-warn .h3{color:var(--warn)}
+
+/* shop and events */
+.ev-mult{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:12px;background:var(--surface-sunk)}
+.ev-mult.is-bad{border-color:var(--err)}
+.ev-mult>.err{flex-basis:100%}
+
+/* wallets */
+.wl-kpis{grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr))}
+.wl-quests,.wl-inv,.wl-badges{list-style:none;padding:0;gap:6px}
+.wl-quests li,.wl-inv li,.wl-badges li{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px;min-width:0}
+.wl-quests li:last-child,.wl-inv li:last-child,.wl-badges li:last-child{border-bottom:0}
+.wl-quests .grow,.wl-inv .grow,.wl-badges .grow{flex:1;min-width:0;overflow-wrap:anywhere}
+.wl-prog{position:relative;display:inline-block;width:84px;height:8px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden;flex-shrink:0}
+.wl-prog>span{position:absolute;left:0;top:0;bottom:0;background:var(--pen);border-radius:4px}
+.wl-tbl td{vertical-align:top}
+.tbl tr.is-reversed td{background:var(--surface-sunk)}
+.tbl tr.is-reversed td.num{text-decoration:line-through;text-decoration-thickness:1.5px}
+
+@media (max-width:720px){
+  .hero-cmp-stage{grid-template-columns:1fr 1fr;justify-items:center}
+  .hero-cmp-stage>b,.hero-cmp-stage>.pill{grid-column:1/-1;justify-self:start}
+  .hero-cmp-stage>svg{display:none}
+  .gr-row .gr-num{width:100%}
+}

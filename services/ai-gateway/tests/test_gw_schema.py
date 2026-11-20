@@ -94,7 +94,11 @@ async def test_reference_data_seeded(roles_env) -> None:
         "teaching_coach", "conversation_partner", "independent_evaluator"}
     assert {a for a, r in by_id.items() if r["implementation"] == "code"} == {
         "learning_orchestrator", "curriculum_planner", "diagnostic_assessor", "spaced_repetition_coach",
-        "pronunciation_coach"}
+        "pronunciation_coach", "gameplay_director"}
+    # спринт 6 (0007): игровой режиссёр — правила кодом в gamification, модель не вызывается
+    assert (by_id["gameplay_director"]["availability"], by_id["gameplay_director"]["implemented_in"],
+            by_id["gameplay_director"]["planned_sprint"], by_id["gameplay_director"]["free_text"]) == (
+        "active", "gamification", None, False)
     assert (by_id["spaced_repetition_coach"]["availability"], by_id["spaced_repetition_coach"]["implemented_in"],
             by_id["pronunciation_coach"]["availability"], by_id["pronunciation_coach"]["implemented_in"],
             by_id["pronunciation_coach"]["free_text"], by_id["evening_review_coach"]["availability"]) == (

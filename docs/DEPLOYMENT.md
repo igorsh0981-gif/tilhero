@@ -109,3 +109,18 @@ Azure Speech не используется: запись распознаёт с
 3. **identity-consent:** политика 1.2 (текст «запись распознаётся на серверах TilHero и сразу удаляется»). При следующем входе пользователь один раз подтверждает согласие; согласие на голос по политике 1.1 действует.
 4. **admin-bff → admin-web:** «Агенты → Модели и цены» показывают «Свой сервер (Whisper)»; цена часа не редактируется.
 5. **Проверка:** `GET /internal/v1/status` ai-gateway → `speech_available: true`; в Mini App «Произнести» в словаре и чтении → баллы по словам; время ответа ≤ 10 с; в логах tts нет текста и аудио. Нагрузку tts смотреть в Railway Metrics первые дни.
+
+## 9. Выкладка спринта 6 поверх релиза 5.1 (игра и герои)
+Новый сервис `gamification` (8117, схема `gamification`) — без публичного домена. Остальное — обновления существующих сервисов (автодеплой с main) с миграциями: learning-plan 0006 (`frozen_days`), notifications 0004 (категория `game`), admin-identity 0006 (права `game.*`, `wallet.adjust`), ai-gateway 0007 (`gameplay_director` → code).
+```
+uv run python infra/railway/extend.py --env-from .dev/railway-prod/learning-plan.env \
+  --public-keys .dev/railway-prod-s5/public-keys.json --out .dev/railway-prod-s6 --only gamification
+```
+Порядок:
+1. **База:** разовый `db-bootstrap` с `bootstrap.sql` из `railway-prod-s6` (схема и роли `gamification`, `gamification_owner`) → `BOOTSTRAP_OK`.
+2. **Открытые ключи:** `INTERNAL_JWT_PUBLIC_KEYS` из `updates.json` — существующим сервисам (издатель `gamification`).
+3. **audit** (издатель `gamification`) → **admin-identity** (права, роли) → **learning-plan**, **notifications** (consumers `game.*`), **identity-consent** (домен саги `gamification`) — автодеплой с main.
+4. **gamification:** сервис из `gamification.env` (Dockerfile `services/gamification/Dockerfile`, Pre-Deploy `alembic upgrade head` — сид правил v1, 9 героев, 27 картинок, магазин, значки; healthcheck `/health/ready`, europe-west4, restart ON_FAILURE). Consumers читают стрим с начала (7 дней): прошлые уроки и повторения начисляются задним числом по дате события, уведомления о значках и росте героя по событиям старше 60 минут не отправляются. Бонус 2 заморозки получает каждый ученик при первом ходе (событие или первый запрос).
+5. **telegram-bff**, **admin-bff**: `GAMIFICATION_URL=http://${{gamification.RAILWAY_PRIVATE_DOMAIN}}:8117` → **telegram-miniapp**, **admin-web**.
+6. **n8n:** `GAMIFICATION_URL` → перезапуск: включается `game-tick` (каждые 15 мин).
+7. **Проверка:** Mini App — главная (герой, уровень, тилы, заморозки, задания), выбор героя, магазин, история, значки, награды после урока; админка — «Герои», «Геймификация», «События и сезоны», блок «Игра» на главной; `game:tick` в n8n без ошибок; логи gamification без повторяющихся ошибок consumers.

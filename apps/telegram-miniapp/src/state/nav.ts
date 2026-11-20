@@ -35,16 +35,23 @@ export type Pushed =
   // sprint 4
   | { name: "lessonCard"; id: string }
   | { name: "player"; sessionId: string }
-  | { name: "lessonSummary"; sessionId: string; summary?: LessonSummary }
+  /** fresh — just finished in the player (sprint 6: the rewards of the game are shown and polled only then) */
+  | { name: "lessonSummary"; sessionId: string; summary?: LessonSummary; fresh?: boolean }
   | { name: "appeal"; evaluationId: string; title: Localized }
   // sprint 5: «Повторение дня» (autostart — from the card of Home / the dictionary: the session starts at once; without
   // it — a start panel, e.g. from the notification reviews_due), its summary, a card of the dictionary, a reading text,
   // the voice recording consent
   | { name: "review"; autostart?: boolean }
-  | { name: "reviewSummary"; sessionId: string; summary: ReviewSummary }
+  | { name: "reviewSummary"; sessionId: string; summary: ReviewSummary; fresh?: boolean }
   | { name: "card"; id: string }
   | { name: "reading"; id: string }
-  | { name: "voiceConsent" };
+  | { name: "voiceConsent" }
+  // sprint 6: the game — the hero, the shop, the history of the ledger, badges, the motivation settings
+  | { name: "heroes" }
+  | { name: "shop" }
+  | { name: "gameHistory" }
+  | { name: "badges" }
+  | { name: "gameSettings" };
 
 export type PracticeTab = "scenarios" | "media" | "reading";
 

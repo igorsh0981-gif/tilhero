@@ -187,6 +187,7 @@ def test_today_plan_week_and_next_slot() -> None:
     assert out["week"][0]["local_date"] == "2026-11-16" and len(out["week"]) == 7
     assert [(d["scheduled"], d["done"], d["missed"]) for d in out["week"][:4]] == [
         (True, True, False), (True, False, True), (True, True, False), (False, False, False)]
+    assert not any(d["frozen"] for d in out["week"])
     not_done = sch.today_plan(today=wed, days=[3], preferred_time=time(8, 0), duration_min=10,
                               facts=sch.DayFacts({}, frozenset()), streak_days=0)
     assert not_done["next_slot"] == {"local_date": "2026-11-18", "time": "08:00"}
@@ -194,3 +195,14 @@ def test_today_plan_week_and_next_slot() -> None:
                          facts=sch.DayFacts({}, frozenset()), streak_days=0)
     assert off["is_scheduled_today"] is False and off["slot_time"] is None
     assert off["next_slot"] == {"local_date": "2026-11-23", "time": "08:00"}
+
+
+def test_today_plan_week_frozen() -> None:
+    """Спринт 6: frozen — только пропущенный день (missed остаётся true) с заморозкой; день с занятием важнее
+    заморозки; заморозка без выпущенного пропуска день не помечает."""
+    mon, tue, wed, thu = (date(2026, 11, d) for d in (16, 17, 18, 19))
+    facts = sch.DayFacts({wed: 10}, frozenset({mon, tue, wed}), frozenset({tue, wed, thu}))
+    out = sch.today_plan(today=date(2026, 11, 20), days=[1, 2, 3, 4, 5], preferred_time=time(8, 0),
+                         duration_min=10, facts=facts, streak_days=1)
+    assert [(d["done"], d["missed"], d["frozen"]) for d in out["week"][:4]] == [
+        (False, True, False), (False, True, True), (True, False, False), (False, False, False)]

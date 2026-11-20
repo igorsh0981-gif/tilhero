@@ -259,15 +259,19 @@ def next_slot_date(days: Iterable[int], after: date, *, include: bool = False) -
 
 @dataclass(frozen=True)
 class DayFacts:
-    """Факты о днях ученика, нужные TodayPlan: минуты по датам недели и отметки пропусков недели."""
+    """Факты о днях ученика, нужные TodayPlan: минуты по датам недели, отметки пропусков недели и (спринт 6) дни,
+    закрытые заморозкой серии."""
 
     minutes_by_date: dict[date, int]
     missed_dates: frozenset[date]
+    frozen_dates: frozenset[date] = frozenset()
 
 
 def today_plan(*, today: date, days: Iterable[int], preferred_time: time, duration_min: int,
                facts: DayFacts, streak_days: int) -> dict[str, Any]:
-    """TodayPlan (bff.ts). week.missed — только выпущенные пропуски (slot_marks), если занятие так и не записано."""
+    """TodayPlan (bff.ts). week.missed — только выпущенные пропуски (slot_marks), если занятие так и не записано.
+    week.frozen (спринт 6) — пропущенный день, закрытый заморозкой: missed при этом остаётся true; день с занятием
+    важнее заморозки (done, не missed и не frozen)."""
     allowed = frozenset(days)
     scheduled_today = today.isoweekday() in allowed
     minutes_today = facts.minutes_by_date.get(today, 0)
@@ -278,8 +282,9 @@ def today_plan(*, today: date, days: Iterable[int], preferred_time: time, durati
     for i in range(7):
         d = monday + timedelta(days=i)
         done = d in facts.minutes_by_date
+        missed = (not done) and d in facts.missed_dates
         week.append({"local_date": d.isoformat(), "scheduled": d.isoweekday() in allowed, "done": done,
-                     "missed": (not done) and d in facts.missed_dates})
+                     "missed": missed, "frozen": missed and d in facts.frozen_dates})
     return {
         "local_date": today.isoformat(),
         "is_scheduled_today": scheduled_today,

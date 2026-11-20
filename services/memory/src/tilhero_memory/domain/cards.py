@@ -294,6 +294,9 @@ async def on_assessment_event(rt: Runtime, catalog: CatalogGateway, session: Asy
         return
     event_kind = str(p.get("kind") or "")
     if not reevaluated and event_kind not in FEED_KINDS:
+        await lock_user(session, user_id)
+        if await session.get(DeletedUser, user_id) is not None:
+            return
         session.add(FeedLog(evaluation_id=evaluation_id, user_id=user_id, session_id=None, kind=event_kind[:10],
                             cards_added=0, processed_at=now))
         return
@@ -341,6 +344,9 @@ async def on_assessment_event(rt: Runtime, catalog: CatalogGateway, session: Asy
                 if own & {normalize(f) for f in forms}:
                     s.answers = list(dict.fromkeys([*s.answers, *forms]))
     await lock_user(session, user_id)
+    # повторная проверка под блокировкой: сага могла удалить ученика, пока шли запросы к assessment и catalog
+    if await session.get(DeletedUser, user_id) is not None:
+        return
     added = skipped = 0
     for s in [*specs, *errors]:
         try:

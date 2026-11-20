@@ -26,6 +26,7 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
   | support | аккаунт (пишет и получает ответы в Telegram аккаунт) |
   | identity `telegram-login`, `legal/policy`, `GET guardian-consents/{token}`; experience `experience/miniapp/current` | без sub |
   | catalog (контент ученика), lessons, **memory** (спринт 5) | аккаунт + claims `lrn`, `age_band` (у memory — полоса **активного ученика**, см. «Спринт 5») |
+  | **gamification** (спринт 6) — игра ученика | аккаунт + claims `lrn`, `age_band` активного ученика (как memory); картинки — без sub |
 
   Матрица по всем маршрутам — `test/subjects.test.ts`.
 - **Переключение ученика** (`POST /v1/session/learner`): BFF проверяет ученика в identity-consent `GET /internal/v1/me/learners/{id}` от имени аккаунта (свой или свой ребёнок, иначе `404 LEARNER_NOT_FOUND`; ответ сверяется: тот же id, `kind=child`, есть в `/me.learners`). Выход **из** детского профиля (к родителю или другому ребёнку) при заданном коде родителя требует `pin` (нет/неверный → `401 PIN_INVALID`, блокировка → `423 PIN_LOCKED`, лимит `tg.pin` 5/мин); вход в детский профиль кода не требует. Ответ собирается до перевыпуска refresh (сбой домена не ломает текущую сессию), затем в той же сессии перевыпускаются токены с новым `lrn`. **Активный ученик — свойство сессии в Redis:** access-токен, выданный до переключения, сразу перестаёт действовать (`401 TOKEN_EXPIRED {reason: learner_switched}` → клиент делает refresh).
@@ -143,6 +144,13 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 | GET | `/v1/practice/readings/{id}` | catalog `/readings/{id}?audience=` + memory `/cards/lookup` | `ReadingView` без вопросов и ответов; `in_dictionary` — из memory (сбой — null); 404 `READING_NOT_AVAILABLE` |
 | POST | `/v1/practice/readings/{id}/sessions` | lessons `/readings/{id}/sessions` | `Idempotency-Key` обязателен → 201 `LessonSession` (kind reading); дальше — общие маршруты сессий (шаг `reading` строго по схеме, `in_dictionary` из memory); 404 `READING_NOT_AVAILABLE`; 409 `SESSION_ACTIVE` |
 | PUT | `/v1/learners/{learner_id}/voice-consent` | identity `/me/learners/{id}/voice-consent` (аккаунт) + learning-plan (онбординг ребёнка) | `{granted}` → `LearnerSummary`; из детского профиля → 403 `ADULT_REQUIRED` до identity; 404 `LEARNER_NOT_FOUND` (чужой, свой аккаунт, не UUID); 403 `ADULT_REQUIRED` / `CONSENT_REQUIRED {purpose}` identity |
+| GET | `/v1/game/summary`, `/heroes`, `/quests`, `/badges`, `/shop`, `/settings` | gamification `/internal/v1/game/<то же>` (аккаунт + claims `lrn`, `age_band`) | спринт 6: `GameSummary` (`purchase_available` всегда `false`), `{items: HeroView[], selected, stage}`, `DailyQuests`, `{items: BadgeView[]}`, `{items: ShopItemView[], til_balance, freeze_stock, freeze_max}`, `GameSettings`; url картинок собирает BFF; 429 `tg.game.read` |
+| GET | `/v1/game/history?currency=&cursor=` | gamification `/history` | `Page<GameOperation>` (по 30, без `actor` и комментария сотрудника; элемент не по контракту — отброшен) |
+| GET | `/v1/game/rewards?source_session_id=` | gamification `/rewards` | `SessionRewards` (`pending` / `ready` / `none`); `source_session_id` — UUID, обязателен |
+| PUT | `/v1/game/hero`, `/v1/game/equipment` | gamification `/hero`, `/equipment` | → `GameSummary`; 404 `HERO_NOT_FOUND`, 409 `HERO_NOT_AVAILABLE`, 409 `NOT_OWNED` — как есть; 429 `tg.game.write` |
+| PATCH | `/v1/game/settings` | gamification `/settings` | `Partial<GameSettings>` (≥ 1 поле; в домен — только переданные) → `GameSettings`; 429 `tg.game.write` |
+| POST | `/v1/game/shop/purchases` | gamification `/purchases` | `Idempotency-Key` обязателен; `PurchaseRequest` → 200 `PurchaseResult` (повтор ключа — тот же ответ); 409 `INSUFFICIENT_TILS` (`details.purchase_available` всегда `false`) / `ALREADY_OWNED` / `FREEZE_STOCK_FULL {max}`, 410 `ITEM_NOT_AVAILABLE`, 404 `ITEM_NOT_FOUND`, 422 `IDEMPOTENCY_KEY_REUSED` — как есть; 429 `tg.game.purchase` |
+| GET | `/v1/game/assets/{asset_id}/{sha256}` | gamification `/assets/{asset_id}` (без sub) | **публично**; 600/мин с IP (`tg.game.assets`); байты `image/webp \| image/png` (≤ 1 МБ), `ETag: "<sha256>"`, `Cache-Control: public, max-age=31536000, immutable`, `If-None-Match` → 304; 404 `ASSET_NOT_FOUND` — sha пути ≠ ETag домена, 4xx домена, путь неверного формата (без вызова домена) |
 | POST | `/v1/speech` | tts `/internal/v1/speech` (**аккаунт**, и в детском профиле) | release 4.1, `SpeechRequest` → `audio/mpeg` (MP3 из tts как есть, ≤ 3 МБ), `Cache-Control: private, max-age=86400`. Текст нормализуется как в tts (пробелы, табуляция и переводы строки схлопываются, края обрезаются) и уходит в tts уже нормализованным, `speed` по умолчанию `normal`. 422 `TEXT_INVALID {field}` — после нормализации пусто или > 400 знаков (символов Unicode), управляющие символы, нет латиницы, чужой `variant` / `speed`, лишние поля, а также 422 самого tts; 429 `RATE_LIMITED` (`tg.speech`, 120 за 10 минут на аккаунт); 503 `SPEECH_UNAVAILABLE {service: tts}` — `TTS_URL` не задан, tts недоступен / таймаут `TTS_TIMEOUT_MS` (без повторов) / 5xx / любой другой ответ, в том числе не `audio/mpeg` (Mini App откатывается на синтез речи устройства) |
 
 Сегмент ученика `audience` (kids / teens / adults) — по возрасту активного ученика, как для «Что нового»: детский профиль
@@ -172,6 +180,27 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
   совета, баллы — только при `ok`, `message` (RU/UZ) — для `insufficient_evidence` / `unavailable`, `attempt_id = null`
   при `unavailable`.
 
+### Спринт 6 — игра и герои
+
+- **gamification** (`src/routes/game.ts`): тонкий прокси `/v1/game/*` → `/internal/v1/game/*`, `sub` — аккаунт, claims `lrn`
+  и `age_band` активного ученика (кошелёк, герой, задания, значки — у `lrn`). `GAMIFICATION_URL` необязателен: без него
+  все маршруты игры (и картинки) — `503 GAME_UNAVAILABLE {service: gamification}`, при старте — одно предупреждение.
+- **Ошибки:** 4xx gamification — как есть; недоступность, таймаут, 5xx, отказ внутренней авторизации, ответ не по контракту
+  (строгая сверка `GameDomain.*` в `src/schemas.ts`) → `503 GAME_UNAVAILABLE` (Mini App скрывает игровой блок, учёба
+  работает). Сбой identity при определении полосы ученика — по-прежнему `503 UPSTREAM_UNAVAILABLE {service: identity-consent}`.
+- **Картинки в ответах:** домен отдаёт `{asset_id, sha256, width, height}` — BFF собирает `url =
+  /v1/game/assets/{asset_id}/{sha256}` (путь от адреса BFF, Mini App добавляет `VITE_BFF_URL`). Готовый `url` домена без
+  `sha256` принимается, только если это тот же путь для того же `asset_id`; иначе — 503 и строка лога `rule: image_url`
+  (внутренние адреса наружу не уходят).
+- **Картинка** `GET /v1/game/assets/{asset_id}/{sha256}`: ETag домена (`"<sha>"`, `W/"<sha>"` или без кавычек) должен
+  совпасть с sha пути (иначе 404), sha256 байтов — с ETag, тип — `image/webp | image/png` с верной сигнатурой (иначе 503,
+  лог `game asset rejected` с `reason`). Кеша в BFF нет: каждый запрос — в gamification (она отдаёт только картинки
+  опубликованного), браузер кеширует навсегда.
+- **Деньги:** `purchase_available` в `GameSummary` и в `INSUFFICIENT_TILS.details` BFF всегда ставит `false` (тилы за
+  деньги — спринт 8), независимо от ответа домена.
+- **`TodayPlan.week[].frozen`:** learning-plan до спринта 6 поля не присылает — BFF отдаёт `false`
+  (`routes/plan.ts todayView`).
+
 ## Переменные окружения
 
 | Переменная | По умолчанию (вне production) | Описание |
@@ -198,9 +227,10 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 | `TTS_TIMEOUT_MS` | `15000` | таймаут вызова tts (1000–60000), без повторов: длинная фраза синтезируется секунды, кеш MP3 — у tts |
 | `MEMORY_URL` | `http://127.0.0.1:8116` | спринт 5: memory (Railway: `http://memory.railway.internal:8116`); в stage/prod обязателен |
 | `MEMORY_TIMEOUT_MS` / `MEMORY_TRANSLATE_TIMEOUT_MS` / `MEMORY_PRONUNCIATION_TIMEOUT_MS` | `10000` / `12000` / `20000` | таймауты memory (1000–60000): обычные вызовы / перевод по тапу (memory ждёт `gloss_word` до 8 с) / оценка произношения (memory ждёт ai-gateway до 15 с); GET повторяются по `UPSTREAM_RETRIES`, команды и аудио — нет |
+| `GAMIFICATION_URL` | — | спринт 6: gamification (Railway: `http://gamification.railway.internal:8117`, локально `http://127.0.0.1:8117`). **Необязателен и в stage/prod**: без него `/v1/game/*` отвечают 503 `GAME_UNAVAILABLE`, при старте — предупреждение `GAMIFICATION_URL is not set`. Таймаут и повторы GET — `UPSTREAM_TIMEOUT_MS` / `UPSTREAM_RETRIES`; команды не повторяются |
 | `UPSTREAM_TIMEOUT_MS` / `UPSTREAM_RETRIES` | `3000` / `1` | таймаут и повторы (GET и команды с `Idempotency-Key`) |
 | `EXPERIENCE_CACHE_SECONDS` | `60` | кэш конфига интерфейса |
-| `RATE_LIMIT_USER_PER_MIN` / `RATE_LIMIT_SESSION_IP_PER_MIN` / `RATE_LIMIT_PIN_PER_MIN` / `RATE_LIMIT_PUBLIC_IP_PER_MIN` | `120` / `10` / `5` / `120` | политики `tg.user`, `tg.session_ip`, `tg.pin` (код родителя, в т. ч. при выходе из детского профиля; сброс — отдельный счётчик), `tg.public_ip`; `tg.support_create`, `tg.speech` (120 за 600 с на аккаунт, `POST /v1/speech`) и спринт 5 — `tg.memory.translate` (60), `tg.memory.pronunciation` (20), `tg.memory.answer` (300) за 600 с на **ученика** — из каталога |
+| `RATE_LIMIT_USER_PER_MIN` / `RATE_LIMIT_SESSION_IP_PER_MIN` / `RATE_LIMIT_PIN_PER_MIN` / `RATE_LIMIT_PUBLIC_IP_PER_MIN` | `120` / `10` / `5` / `120` | политики `tg.user`, `tg.session_ip`, `tg.pin` (код родителя, в т. ч. при выходе из детского профиля; сброс — отдельный счётчик), `tg.public_ip`; `tg.support_create`, `tg.speech` (120 за 600 с на аккаунт, `POST /v1/speech`) и спринт 5 — `tg.memory.translate` (60), `tg.memory.pronunciation` (20), `tg.memory.answer` (300) за 600 с на **ученика**; спринт 6 — `tg.game.read` (120), `tg.game.write` (30), `tg.game.purchase` (10) в минуту на **ученика**, `tg.game.assets` (600 в минуту с IP) — из каталога |
 | `RATE_LIMITS_ENABLED`, `RATE_LIMIT_OVERRIDE_REFRESH_SECONDS` | `true`, `30` | единый лимитер ts-common |
 | `TRUST_PROXY_HOPS` | `1` | доверенные прокси (Railway edge) |
 | `LOG_LEVEL`, `SERVICE_VERSION` | `info`, версия package.json | |
@@ -280,6 +310,18 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
     (201 / 200).
   - **Шаг `reading`** общих маршрутов сессий получает `in_dictionary` глоссария из memory (как `GET /v1/practice/readings/{id}`).
 
+- **Спринт 6:**
+  - **Пути gamification**, которых нет в INTERNAL_API явно: `GET /internal/v1/game/heroes`, `/quests`, `/badges`, `/shop`
+    (по образцу `/summary`, `/history`, `/rewards`, `/settings`); покупка — `POST /internal/v1/game/purchases` (§1.7), в
+    публичном API — `/v1/game/shop/purchases`.
+  - **Картинки:** в INTERNAL_API нет формы картинки в ответах ученика — BFF принимает `sha256` (как `AdminGameImage`) или
+    готовый `url` того же пути (см. «Спринт 6»).
+  - **`SessionRewards.operations`** сверяется с `GameOperation` контракта (`op_id`, `status`, `created_at` обязательны), хотя
+    §1.8 перечисляет только `currency, amount, reason, capped, multiplier`.
+  - **`PATCH /v1/game/settings {}`** → 422 (нужно хотя бы одно поле); `?limit=` у истории не принимается (контракт — по 30).
+  - **Покупка** всегда отвечает 200 (в т. ч. на первый запрос): «повтор ключа — тот же ответ».
+  - **Картинки:** 4xx gamification (кроме 429) → `404 ASSET_NOT_FOUND`, путь неверного формата — тот же 404 (не 422).
+
 ## Локальная разработка
 
 ```bash
@@ -303,6 +345,11 @@ npx tsx scripts/dev-init-data.ts --user-id 900001 --name Игорь --start-para
   Массовые `503 UPSTREAM_UNAVAILABLE {service: memory}` на «Повторении дня» при живом memory — строки `domain response does
   not match the contract` с `check: review_task` (`rule: additionalProperties` / `answer_revealed`): memory отдаёт ключ в задании.
 - **`503 SPEECH_UNAVAILABLE` на `/v1/speech`:** при старте `TTS_URL is not set` — переменная не задана; иначе строки `domain unavailable` / `speech unavailable` / `speech audio rejected` с `upstream: tts` (статус, код, причина). Mini App в это время озвучивает синтезом устройства, где он есть (в Telegram на Android его нет — там аудирование отмечается недоступным).
+- **Спринт 6, игровой блок пропал (`503 GAME_UNAVAILABLE`):** при старте `GAMIFICATION_URL is not set` — переменная не
+  задана; строки `domain unavailable` с `upstream: gamification` — домен недоступен / 5xx / `INTERNAL_TOKEN_*`
+  (нет открытого ключа `telegram-bff` у gamification); `domain response does not match the contract` с `upstream:
+  gamification` (`check`, `path`, `rule`; `rule: image_url` — картинка без `sha256`). Картинки: `game asset rejected`
+  (`reason`: `no etag`, `sha256 mismatch`, `unexpected content type`, `signature mismatch`, `image too large`).
 - **Вход падает 503 `learning-plan`:** сессия не создаётся (онбординг ученика неизвестен), initData можно предъявить снова после восстановления.
 - **Частые `401 TOKEN_EXPIRED {reason: learner_switched}`:** Mini App продолжает слать старый access-токен после `POST /v1/session/learner` — ошибка клиента (токены надо заменить из ответа).
 - **Отозвать сессии аккаунта:** `redis-cli smembers bff:usid:<user_id>` → `del bff:sid:<sid>` для каждого. Компрометация `SESSION_JWT_SECRET` — заменить секрет и удалить `bff:sid:*`, `bff:rt:*`, `bff:usid:*`.

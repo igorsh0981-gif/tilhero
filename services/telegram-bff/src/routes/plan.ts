@@ -31,6 +31,11 @@ export function planView(p: LearningPlan, learnerId: string): LearningPlan {
   return { ...p, learner_id: learnerId };
 }
 
+/** План на сегодня: `week[].frozen` (спринт 6) — learning-plan до спринта 6 поля не присылает → false. */
+export function todayView(t: TodayPlan): TodayPlan {
+  return Array.isArray(t.week) ? { ...t, week: t.week.map((d) => ({ ...d, frozen: d.frozen === true })) } : t;
+}
+
 /** If-Match: 3 | "3" | W/"3" → "3". */
 const ifMatchVersion = (v: string | undefined): string | undefined => (v === undefined ? undefined : v.replace(/^W\//, "").replace(/"/g, ""));
 
@@ -113,13 +118,14 @@ export function planRoutes(app: App, ctx: BffContext): void {
       schema: {
         tags: TAG,
         summary: "План на сегодня: слот, минуты, серия, неделя (по часовому поясу плана)",
+        description: "week[].frozen (спринт 6) — пропущенный день графика, закрытый заморозкой серии (missed остаётся true).",
         security: BEARER,
         response: { 200: TodayPlanSchema, ...errorResponses(401, 423) },
       },
     },
     async (req) => {
       const auth = authOf(req);
-      return lp.get<TodayPlan>("/internal/v1/me/plan/today", { subject: asLearner(auth) });
+      return todayView(await lp.get<TodayPlan>("/internal/v1/me/plan/today", { subject: asLearner(auth) }));
     },
   );
 
@@ -140,11 +146,13 @@ export function planRoutes(app: App, ctx: BffContext): void {
     async (req) => {
       const auth = authOf(req);
       const key = idempotencyKey(req, true)!;
-      return lp.post<TodayPlan>("/internal/v1/me/activities", {
-        subject: asLearner(auth),
-        body: { kind: req.body.kind, minutes: req.body.minutes },
-        idempotencyKey: key,
-      });
+      return todayView(
+        await lp.post<TodayPlan>("/internal/v1/me/activities", {
+          subject: asLearner(auth),
+          body: { kind: req.body.kind, minutes: req.body.minutes },
+          idempotencyKey: key,
+        }),
+      );
     },
   );
 

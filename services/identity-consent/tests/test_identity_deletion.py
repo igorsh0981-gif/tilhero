@@ -158,6 +158,19 @@ async def test_full_deletion_cycle_and_reregistration(env) -> None:
     assert (await env.user_row(uid)).telegram_user_id == tg
     await env.bus.publish(ack(uid, request_id, "experience-config"))
     await env.flush()
+    # спринт 6: без gamification (кошелёк, реестр, инвентарь, задания, значки) профиль тоже не обезличивается;
+    # ACK за gamification от другого издателя не засчитывается
+    req = await request_of(env, uid)
+    assert req.status == "REQUESTED" and "gamification" not in req.acked_domains
+    assert (await env.user_row(uid)).telegram_user_id == tg
+    forged = make_envelope("user.domain.deleted.v1", {"user_id": uid, "request_id": request_id,
+                                                      "domain": "gamification", "mode": "deleted"},
+                           producer="learning-plan")
+    await env.bus.publish(forged)
+    await env.flush()
+    assert "gamification" not in (await request_of(env, uid)).acked_domains
+    await env.bus.publish(ack(uid, request_id, "gamification"))
+    await env.flush()
 
     user = await env.user_row(uid)
     assert user.status == "DELETED" and user.telegram_user_id is None

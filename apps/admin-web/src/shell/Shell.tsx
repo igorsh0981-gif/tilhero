@@ -38,8 +38,12 @@ const QaPage = lazy(() => import("../screens/ai/Qa").then((m) => ({ default: m.Q
 const CostsPage = lazy(() => import("../screens/ai/Costs").then((m) => ({ default: m.CostsPage })));
 // sprint 5: «Память и повторения»
 const MemoryPage = lazy(() => import("../screens/memory/MemoryPage").then((m) => ({ default: m.MemoryPage })));
+// sprint 6: «Герои», «Геймификация», «События и сезоны»
+const HeroesPage = lazy(() => import("../screens/game/HeroesPage").then((m) => ({ default: m.HeroesPage })));
+const GamePage = lazy(() => import("../screens/game/GamePage").then((m) => ({ default: m.GamePage })));
+const EventsPage = lazy(() => import("../screens/game/EventsPage").then((m) => ({ default: m.EventsPage })));
 
-export const APP_VERSION = "admin-web 0.2.0";
+export const APP_VERSION = "admin-web 0.3.0";
 
 /** Sections whose route id is a tab or an object: «#/news/templates/streak.reminder», «#/support/TCK-1042». */
 function crumbOf(page: PageId | "", id: string | null): string | null {
@@ -49,6 +53,7 @@ function crumbOf(page: PageId | "", id: string | null): string | null {
   if (page === "qa") return id.startsWith("sessions/") ? id.slice(9, 17) : id.startsWith("appeals/") ? id.slice(8, 16) : null;
   if (page === "agents") return id === "models" ? null : id;
   if (page === "memory") return null;
+  if (page === "game") return id.split("/").slice(1).join("/") || null;
   return id;
 }
 
@@ -187,7 +192,7 @@ export function Shell() {
                   <button
                     key={it.id}
                     type="button"
-                    className={cx("sn-item", it.soon && "is-soon")}
+                    className={cx("sn-item", !!it.soon && "is-soon")}
                     aria-current={page === it.id ? "page" : undefined}
                     title={collapsed ? t(`page.${it.id}`) : undefined}
                     onClick={() => navigate(it.id)}
@@ -200,7 +205,7 @@ export function Shell() {
                         {openCount}
                       </span>
                     ) : null}
-                    {it.soon && <span className="sn-tag">{t("nav.soonN", { n: it.soon })}</span>}
+                    {!!it.soon && <span className="sn-tag">{t("nav.soonN", { n: it.soon })}</span>}
                   </button>
                 ))}
               </div>
@@ -379,6 +384,18 @@ export function Shell() {
               ) : page === "memory" ? (
                 <Suspense fallback={<Spinner label={t("common.loading")} />}>
                   <MemoryPage routeId={route.id} />
+                </Suspense>
+              ) : page === "heroes" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <HeroesPage routeId={route.id} />
+                </Suspense>
+              ) : page === "game" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <GamePage routeId={route.id} />
+                </Suspense>
+              ) : page === "events" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <EventsPage routeId={route.id} />
                 </Suspense>
               ) : null}
             </ErrorBoundary>

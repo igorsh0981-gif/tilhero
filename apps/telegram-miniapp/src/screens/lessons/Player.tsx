@@ -67,7 +67,7 @@ export function LessonPlayer({ sessionId }: { sessionId: string }) {
     if (!summary) return;
     playerMarker.clear();
     haptic.notify("success");
-    nav.replace({ name: "lessonSummary", sessionId, summary });
+    nav.replace({ name: "lessonSummary", sessionId, summary, fresh: true });
   };
 
   const top = (

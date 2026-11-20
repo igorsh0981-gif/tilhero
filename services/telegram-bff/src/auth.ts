@@ -1,6 +1,7 @@
 /**
  * Авторизация запросов Mini App (onRequest — до разбора и валидации тела):
- *   public — лимит по IP (tg.session_ip — вход, closed; tg.public_ip — прочие, open; IP только хешем);
+ *   public — лимит по IP (tg.session_ip — вход, closed; tg.game.assets — картинки игры; tg.public_ip — прочие, open;
+ *            IP только хешем);
  *   user   — Bearer access JWT → сессия не отозвана (Redis) и её активный ученик = lrn токена (иначе 401 TOKEN_EXPIRED:
  *            после переключения ученика прежний access-токен не действует) → tg.user на аккаунт →
  *            tg.pin для операций с кодом родителя → гейт PIN (pin=false → только pinExempt-маршруты, иначе 423).
@@ -18,6 +19,9 @@ export const pinRequired = () =>
   new AppError(423, "PIN_REQUIRED", "Подтвердите вход кодом родителя");
 export const sessionRevoked = () => new AppError(401, "SESSION_REVOKED", "Сессия завершена, войдите заново");
 /** Клиент обновляет токен (POST /v1/session/refresh) — как при истечении. */
+/** Политика лимита публичного маршрута по IP (config.ipLimit). */
+const IP_POLICY = { session: "tg.session_ip", public: "tg.public_ip", game_assets: "tg.game.assets" } as const;
+
 export const learnerSwitched = () =>
   new AppError(401, "TOKEN_EXPIRED", "Активный профиль сменился, обновите токен", { reason: "learner_switched" });
 
@@ -29,8 +33,7 @@ export function registerAuth(app: App, ctx: BffContext): void {
     if (!rc?.access) return;
 
     if (rc.access === "public") {
-      const policy = rc.ipLimit === "session" ? "tg.session_ip" : "tg.public_ip";
-      await limiter.enforce(policy, () => limiter.hashedSubject("ip", req.ip));
+      await limiter.enforce(IP_POLICY[rc.ipLimit ?? "public"], () => limiter.hashedSubject("ip", req.ip));
       return;
     }
 

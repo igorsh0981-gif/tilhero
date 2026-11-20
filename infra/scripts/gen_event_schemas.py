@@ -166,7 +166,7 @@ CATALOG = {
     # ------------------------------------------------------------ gamification (спринт 6)
     # заморозка закрыла пропуск дня графика — learning-plan: день frozen, серия не рвётся; notifications streak_frozen
     "game.streak.frozen.v1": ({"user_id": UUID, "local_date": DATE, "op_id": UUID,
-                               "freeze_left": {"type": "integer", "minimum": 0, "maximum": 30}, "frozen_at": TS},
+                               "freeze_left": INT, "frozen_at": TS},
                               ["user_id", "local_date", "op_id", "freeze_left", "frozen_at"]),
     "game.level.reached.v1": ({"user_id": UUID, "level": {"type": "integer", "minimum": 2, "maximum": 100},
                                "xp_total": INT, "reached_at": TS},

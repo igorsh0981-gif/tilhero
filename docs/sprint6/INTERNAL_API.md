@@ -84,7 +84,7 @@ Consumers — с inbox, дедупликацией по `event_id` и прове
 - **Множитель события недели.** К `xp` и `til` действия применяется максимум одного опубликованного события, активного на момент события, с подходящей аудиторией. Результат округляется вниз. Заморозки и бонусы не умножаются.
 - **Дневной лимит.** `caps.xp_per_day` и `caps.til_per_day` на местный день, считаются по операциям с reason из таблицы выше, включая задания. Превышение урезает сумму до остатка, `capped = true`; при нулевом остатке операция не создаётся. Ручные операции, бонусы и обратные записи лимитом не ограничены.
 - **Уровень** = число порогов `levels[]` (по возрастанию, первый = 0), не превышающих `xp_total`. Рост уровня → `game.level.reached.v1`. Уровень не понижается: XP списывается только обратной записью, а обратная запись уровень не трогает.
-- **Ступень героя** = число порогов `hero.stage_thresholds` (`[0, 5, 15]` по умолчанию), не превышающих `confirmed_skills`. Ступень не понижается. Рост → `game.hero.stage_reached.v1`. Ступень общая для всех героев ученика.
+- **Ступень героя** = число порогов `hero.stage_thresholds` (`[0, 5, 15]` по умолчанию), не превышающих `confirmed_skills`. `confirmed_skills` — навыки, подтверждённые в учёбе: переход в `demonstrated`/`retained` с `source` `lesson` или `retention`; отметка первичной диагностики в ступень не идёт, пока навык не подтверждён уроком или проверкой удержания. `MyHero.next_stage_at` — сколько навыков осталось до следующей ступени. Ступень не понижается. Рост → `game.hero.stage_reached.v1`. Ступень общая для всех героев ученика.
 - **Задания** обновляются в той же транзакции, что и начисление (§1.5). **Значки** — там же (§1.6).
 - **Порядок не важен.** Если событие ученика пришло раньше `user.profile.created.v1`, строка `learners` создаётся по умолчанию (аудитория по `age_band` из события-источника нет — `adults` до проекции); бонус регистрации всё равно придёт со своим событием.
 
@@ -214,7 +214,7 @@ Consumers — с inbox, дедупликацией по `event_id` и прове
 - **`status`:**
   - `pending` — ни одной операции, сессия свежая (< 2 мин): Mini App опрашивает каждые 1.5 с, до 8 раз;
   - `ready` — операции есть;
-  - `none` — наград не было (лимит, повторный урок без наград) или прошло 2 мин.
+  - `none` — наград не было (лимит, повторный урок без наград). Отсечка ожидания — на клиенте (1 + 8 запросов); Mini App опрашивает только сразу после завершения занятия, не для прошлых занятий из истории.
 - Только свои сессии (`user_id` из токена) — чужие дают `none`, без 403, чтобы не раскрывать существование.
 
 ### 1.9 Кошелёк ученика и история
@@ -236,7 +236,7 @@ Consumer `user.deletion.requested.v1` (только от identity-consent). Дл
 ### 1.11 Админ-API (`/internal/v1/admin/game/...`, вызывающий — admin-bff, права в домене)
 | Метод | Путь | Право | Примечание |
 |---|---|---|---|
-| GET | `/overview` | game.read | итоги 7 и 30 дней из `daily_stats`, активная версия правил, события |
+| GET | `/overview` | game.read или dashboard.read | итоги 7 и 30 дней из `daily_stats`, активная версия правил, события |
 | GET | `/rules` | game.read | список версий без `payload` |
 | GET | `/rules/{version}` | game.read | версия + diff с активной (`[{path, from, to}]`) |
 | PUT | `/rules/draft` | game.manage | создать или заменить черновик (`payload`, `comment`, `based_on`). If-Match по `updated_at` черновика → 409 `DRAFT_CONFLICT` |
@@ -249,6 +249,7 @@ Consumer `user.deletion.requested.v1` (только от identity-consent). Дл
 | POST | `/heroes/{code}/publish` | game.publish + step-up | |
 | POST | `/assets` | game.manage | тело — байты картинки (`Content-Type image/webp | image/png`), `?purpose=` → `{asset_id, sha256, width, height, size}`. Та же картинка (sha256) → существующий `asset_id`. 413 `ASSET_TOO_LARGE`, 422 `ASSET_INVALID` |
 | GET | `/assets/{id}` | game.read | метаданные |
+| GET | `/assets/{id}/content` | game.read | байты картинки, включая черновые (просмотр в админке) |
 | GET | `/shop/items` | game.read | |
 | POST | `/shop/items` | game.manage | Idempotency-Key; `status draft` |
 | PATCH | `/shop/items/{code}` | game.manage | цена и тексты — только у `draft`; у `published` — `available_until`, `order` |
@@ -258,7 +259,7 @@ Consumer `user.deletion.requested.v1` (только от identity-consent). Дл
 | POST | `/events/{id}/publish` | game.publish + step-up | 409 `EVENT_OVERLAP {event_id}` — пересечение периода, аудитории и пары действие/валюта с опубликованным; `starts_at` в прошлом → 422 |
 | POST | `/events/{id}/cancel` | game.publish + step-up | действовавшие начисления не пересчитываются |
 | GET | `/wallets/{user_id}` | game.read | кошелёк, уровень, герой, инвентарь, задания сегодня, значки, рефералы (счётчики) |
-| GET | `/wallets/{user_id}/ledger` | game.read | все поля, включая `actor` и `comment` |
+| GET | `/wallets/{user_id}/ledger` | game.read | все поля, включая `actor` и `comment`; `limit` 1..100, по умолчанию 30 |
 | POST | `/wallets/{user_id}/adjustments` | wallet.adjust + step-up | `{currency, amount, reason ≥ 10}`, Idempotency-Key. `amount` ±1..10000 (XP ±1..100000). Минус не ниже нуля → 409 `BALANCE_NEGATIVE` |
 | POST | `/wallets/{user_id}/ledger/{op_id}/reverse` | wallet.adjust + step-up | `{reason ≥ 10}`. Обратная запись: `reversal`, `amount = −исходная`, исходная → `reversed`. Повтор → 409 `ALREADY_REVERSED`. Обратная запись тилов или заморозок не уводит баланс в минус → 409 `BALANCE_NEGATIVE` |
 | POST | `/wallets/{user_id}/purchases/{id}/refund` | wallet.adjust + step-up | §1.7 |
@@ -268,6 +269,8 @@ Consumer `user.deletion.requested.v1` (только от identity-consent). Дл
 
 ### 1.12 Картинки для ученика
 - **`GET /internal/v1/game/assets/{asset_id}`** — байты картинки с `Content-Type`, `ETag = sha256`, `Cache-Control: public, max-age=31536000, immutable`. Только картинки, которые используются в опубликованных героях, предметах или значках; иначе 404.
+- **Картинки в ответах ученику** (`GameImage`): домен отдаёт готовый `url` вида `/v1/game/assets/{asset_id}/{sha256}` (путь telegram-bff) и размеры; BFF принимает только этот вид для того же `asset_id`.
+- **Пути ученика** (вызывающий — только telegram-bff): `GET /internal/v1/game/{summary|heroes|quests|badges|shop|history|rewards|settings}`, `PUT …/hero`, `PUT …/equipment`, `PATCH …/settings`, `POST …/purchases`, `GET …/assets/{asset_id}` (сервисный токен без ученика). История без `limit` — по 30.
 - telegram-bff выдаёт их без авторизации — это публичное содержимое — по пути `GET /v1/game/assets/{asset_id}/{sha256}`. Несовпадение sha → 404. Лимит `tg.game.assets`.
 
 ### 1.13 tick
@@ -298,6 +301,7 @@ Consumer `user.deletion.requested.v1` (только от identity-consent). Дл
   - тихие часы, частота и отписка — общие;
   - категория `game` отключается в настройках уведомлений ученика.
 - Шаблоны RU/UZ — в сиде (`streak_frozen`: «Серия спасена: заморозка закрыла пропуск {date}. Осталось заморозок: {left}»; `badge_earned`: «Новый значок: {badge}»; `hero_stage_reached`: «{hero} вырос: {stage}!»). Переменные — без текстов ученика.
+- **Категория `game` в спринте 6** — внутренняя категория notifications: отключается общим выключателем `reminders` (`GAME_CATEGORY_GATE=reminders`), в центре уведомлений показывается как `reminders`. Если выключатель выключен, запись не пропадает, а остаётся в центре без Telegram (`category_disabled_center`): «Серия спасена» ученик видит всегда. Отдельный переключатель «Игра» в настройках уведомлений — с полноценной категорией в контрактах (спринт 7). Управление учеником — `game_notifications` в настройках мотивации. Сводки для опекуна в сервисе нет: детские уведомления — в центре уведомлений детского профиля (`kid_summary`).
 - **`game_notifications`.** gamification не публикует `badge_earned` и `hero_stage_reached` для уведомлений, если `game_notifications = false`: в событии есть флаг `notify`, notifications его соблюдает. `streak_frozen` отправляется всегда — это информация о серии.
 
 ## 4. identity-consent
@@ -331,7 +335,7 @@ Consumer `user.deletion.requested.v1` (только от identity-consent). Дл
 - кодеки ответов строгие, как в спринтах 4–5;
 - step-up — для команд из §1.11;
 - загрузка картинки — сырое тело до 300 КБ, `Content-Type` из списка.
-- Блок обзора `Dashboard.game`: XP и тилы за 7 дней, заморозок за 7 дней, заданий выполнено, активное событие.
+- Блок обзора `Dashboard.game`: XP и тилы за 7 дней, заморозок за 7 дней, заданий выполнено, активное событие. Для периода `today` блок показывает 7 дней (итогов за день у gamification нет).
 
 ## 11. События
 | Событие | Издатель | Полезная нагрузка | Потребители |
@@ -345,4 +349,4 @@ Consumer `user.deletion.requested.v1` (только от identity-consent). Дл
 | `learning.activity.recorded.v1` | learning-plan | + `streak_days` (необязательное) | gamification |
 
 ## 12. Ошибки (новые коды)
-`INSUFFICIENT_TILS`, `ALREADY_OWNED`, `FREEZE_STOCK_FULL`, `ITEM_NOT_AVAILABLE`, `NOT_OWNED`, `HERO_NOT_AVAILABLE`, `HERO_IN_USE`, `RULES_INVALID`, `RULES_NOT_VALIDATED`, `DRAFT_CONFLICT`, `EVENT_OVERLAP`, `BALANCE_NEGATIVE`, `ALREADY_REVERSED`, `ASSET_TOO_LARGE`, `ASSET_INVALID`, `GAME_UNAVAILABLE`.
+`INSUFFICIENT_TILS`, `ALREADY_OWNED`, `HERO_DRAFT_MISSING`, `ITEM_STATE`, `ITEM_NOT_EDITABLE`, `ITEM_INVALID`, `ITEM_CODE_TAKEN`, `EVENT_STATE`, `EVENT_INVALID`, `EVENT_CODE_TAKEN`, `EVENT_STARTS_IN_PAST`, `RULES_STATE`, `RULES_DRAFT_NOT_FOUND`, `OPERATION_NOT_FOUND`, `OPERATION_NOT_REVERSIBLE` (покупка отменяется только возвратом), `PURCHASE_NOT_FOUND`, `STEP_UP_REQUIRED`, `FREEZE_STOCK_FULL`, `ITEM_NOT_AVAILABLE`, `NOT_OWNED`, `HERO_NOT_AVAILABLE`, `HERO_IN_USE`, `RULES_INVALID`, `RULES_NOT_VALIDATED`, `DRAFT_CONFLICT`, `EVENT_OVERLAP`, `BALANCE_NEGATIVE`, `ALREADY_REVERSED`, `ASSET_TOO_LARGE`, `ASSET_INVALID`, `GAME_UNAVAILABLE`.

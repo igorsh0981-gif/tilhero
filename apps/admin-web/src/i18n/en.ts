@@ -2,12 +2,14 @@ import type { MessageKey } from "./ru";
 import { enContent } from "./en.content";
 import { enAi } from "./en.ai";
 import { enMemory } from "./en.memory";
+import { enGame } from "./en.game";
 
 /** EN dictionary — the same keys as ru.ts (test). Plurals: "one|other" with {n}. */
 export const en: Record<MessageKey, string> = {
   ...enContent,
   ...enAi,
   ...enMemory,
+  ...enGame,
   /* account */
   "account.changePwd": "Change password",
   "account.idle": "Sign-out after {n} min of inactivity",

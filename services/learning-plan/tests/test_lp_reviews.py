@@ -49,7 +49,8 @@ async def test_review_becomes_activity_with_event(env, user) -> None:
     assert await activities(env, user) == [("review", 4, "2026-11-16", sid)]
     [ev] = await env.events(ACTIVITY, user)
     assert ev.payload == {"user_id": str(user), "activity_id": ev.payload["activity_id"], "local_date": "2026-11-16",
-                          "kind": "review", "minutes": 4, "recorded_at": "2026-11-16T10:00:00Z"}
+                          "kind": "review", "minutes": 4, "recorded_at": "2026-11-16T10:00:00Z",
+                          "streak_days": 1}
     t = await today(env, user, z(16, 12))
     assert t["done_today"] is True and t["minutes_today"] == 4 and t["streak_days"] == 1
     assert env.bus.dlq == []

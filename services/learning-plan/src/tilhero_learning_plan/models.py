@@ -1,4 +1,4 @@
-"""Модели learning-plan — зеркало миграций 0001–0005 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
+"""Модели learning-plan — зеркало миграций 0001–0006 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
 
 user_id везде — ученик (learner) из `sub` внутреннего токена; PII сервис не хранит.
 """
@@ -268,6 +268,23 @@ class LessonEvaluation(Base):
     passed: Mapped[bool | None] = mapped_column(Boolean())
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
+
+
+# ---------------------------------------------------------------- спринт 6: заморозка серии (INTERNAL_API §2)
+
+
+class FrozenDay(Base):
+    """День, закрытый заморозкой серии (`game.streak.frozen.v1`, издатель — только gamification): пропуск этого дня
+    не рвёт серию и цепочку пропусков, в неделе TodayPlan — `frozen` (missed остаётся true). Одна строка на день;
+    повтор события ничего не меняет. День с занятием важнее заморозки: для него строка ни на что не влияет.
+    op_id — операция списания заморозки в реестре gamification (ссылка для сверки, не PII)."""
+
+    __tablename__ = "frozen_days"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    local_date: Mapped[date] = mapped_column(Date(), primary_key=True)
+    op_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
 
 
 class DeletedUser(Base):

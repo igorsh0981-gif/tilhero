@@ -143,6 +143,8 @@ async def on_plan_updated(session: AsyncSession, payload: dict[str, Any], occurr
     """learning.plan.updated.v1 (полный снимок плана): пояс, пара, напоминания, язык. Запоздавшее событие не
     откатывает более новое; удалённый ученик не воскрешается."""
     user_id = uuid.UUID(str(payload["user_id"]))
+    # блокировка ученика ДО проверки удаления: иначе событие, ждавшее сагу, воскресит проекцию после её фиксации
+    await lock_user(session, user_id)
     if await session.get(DeletedUser, user_id) is not None:
         return
     at = occurred_at.astimezone(UTC)
@@ -202,6 +204,7 @@ async def on_lesson_completed(session: AsyncSession, payload: dict[str, Any], se
     if payload.get("status") != "completed":
         return
     user_id = uuid.UUID(str(payload["user_id"]))
+    await lock_user(session, user_id)  # до проверки удаления (сага держит ту же блокировку)
     if await session.get(DeletedUser, user_id) is not None:
         return
     finished = datetime.fromisoformat(str(payload["finished_at"]).replace("Z", "+00:00"))

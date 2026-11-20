@@ -1,7 +1,8 @@
-import type { AgeBand, Goal, LearningPlan, LevelSelf, PolicyDocument, Schedule } from "@tilhero/contracts/bff";
+import type { AgeBand, GameSummary, Goal, LearningPlan, LevelSelf, PolicyDocument, Schedule } from "@tilhero/contracts/bff";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../../api/errors";
 import { flag } from "../../config/experience";
+import { heroesForOnboarding, type HeroesResponse } from "../../domain/game";
 import { agesFor, consentIsCurrent, nextStep, obSteps, optionalAllowed, prevStep, stepForMissing, type ObStart, type ObStep, type Who } from "../../domain/onboarding";
 import { children, isChildBand } from "../../domain/people";
 import { DEFAULT_SCHEDULE, scheduleProblem } from "../../domain/schedule";
@@ -14,6 +15,8 @@ import { requestWriteAccess, shareToTelegram } from "../../tg";
 import { Icon } from "../../ui/Icon";
 import { Btn, Check, Chip, Field, HERO, Hero, NoBreakHyphens, Opt, Pill, Seg, TextInput, ToggleRow } from "../../ui/kit";
 import { Sheet, showToast } from "../../ui/overlays";
+import { HeroImg } from "../game/parts";
+import { HeroPicker } from "../game/HeroPicker";
 import { PinOffer } from "../profile/ParentCode";
 import { DaysPicker, DurationPicker, TimePicker, ZonePicker, daysText, timeError } from "../schedule/parts";
 import { ObFrame } from "./frame";
@@ -24,8 +27,9 @@ const REQUIRED = ["terms", "privacy", "learning"];
 
 /**
  * Onboarding (APP-ONB-01…03, AT-02…06): language → who and age → child profile | parent link → consents → goal →
- * level → days and time → duration, reminders and time zone → done. Each step is stored on the server when the user
- * continues, so a returning user resumes with the same answers (AT-01).
+ * level → days and time → duration, reminders and time zone → (sprint 6: the choice of a hero, skippable — only when the
+ * game answers and no hero is chosen yet) → done. Each step is stored on the server when the user continues, so a
+ * returning user resumes with the same answers (AT-01).
  */
 export function Onboarding({ onFinished }: { onFinished: (plan: LearningPlan) => void }) {
   const app = useApp();
@@ -39,6 +43,9 @@ export function Onboarding({ onFinished }: { onFinished: (plan: LearningPlan) =>
   const steps = useMemo(() => obSteps(start, { who, age }), [start, who, age]);
   const [step, setStep] = useState<ObStep>(() => steps[0]!);
   const [done, setDone] = useState<LearningPlan | null>(null);
+  // sprint 6: after the plan — the hero (skippable); the chosen one is shown on the done step
+  const [heroPick, setHeroPick] = useState<HeroesResponse | null>(null);
+  const [hero, setHero] = useState<GameSummary["hero"]>(null);
   const committed = { ageSet: session.account.age_band != null, childCreated: session.learner.kind === "child" };
   const kid = session.learner.kind === "child" || who === "child";
 
@@ -70,7 +77,20 @@ export function Onboarding({ onFinished }: { onFinished: (plan: LearningPlan) =>
   })();
   const frame = { n, m, onBack: back };
 
-  if (done) return <DoneStep plan={done} onOpen={() => onFinished(done)} />;
+  if (done && heroPick) {
+    return (
+      <HeroPicker
+        layout="onboarding"
+        initial={heroPick}
+        onDone={(s) => {
+          setHero(s.hero);
+          setHeroPick(null);
+        }}
+        onSkip={() => setHeroPick(null)}
+      />
+    );
+  }
+  if (done) return <DoneStep plan={done} hero={hero} onOpen={() => onFinished(done)} />;
 
   switch (step) {
     case "lang":
@@ -98,7 +118,10 @@ export function Onboarding({ onFinished }: { onFinished: (plan: LearningPlan) =>
           onChange={setSchedule}
           missed={missed}
           setMissed={setMissed}
-          onDone={setDone}
+          onDone={(p, heroes) => {
+            setHeroPick(heroes);
+            setDone(p);
+          }}
           onMissing={(s) => setStep(s)}
         />
       );
@@ -593,10 +616,10 @@ function MinutesStep(props: {
   onChange: (s: Schedule) => void;
   missed: boolean;
   setMissed: (v: boolean) => void;
-  onDone: (p: LearningPlan) => void;
+  onDone: (p: LearningPlan, heroes: HeroesResponse | null) => void;
   onMissing: (s: ObStep) => void;
 }) {
-  const { bff, setPlan, syncProfile, deviceTz } = useApp();
+  const { bff, setPlan, syncProfile, deviceTz, config } = useApp();
   const { t } = useI18n();
   const { value } = props;
   const save = useAction(async () => {
@@ -607,7 +630,9 @@ function MinutesStep(props: {
     try {
       const p = await bff.completeOnboarding();
       setPlan(p);
-      props.onDone(p);
+      // sprint 6: the hero step only if the game answers in time and no hero is chosen yet (never blocks the end)
+      const heroes = flag(config, "game") ? await heroesForOnboarding(() => bff.gameHeroes(true)) : null;
+      props.onDone(p, heroes);
     } catch (e) {
       if (e instanceof ApiError && e.code === "PLAN_INCOMPLETE") props.onMissing(stepForMissing(e.details.missing));
       throw e;
@@ -643,16 +668,20 @@ function MinutesStep(props: {
 }
 
 /* ---------------------------------------------------------------- done */
-function DoneStep({ plan, onOpen }: { plan: LearningPlan; onOpen: () => void }) {
+function DoneStep({ plan, hero, onOpen }: { plan: LearningPlan; hero: GameSummary["hero"]; onOpen: () => void }) {
   const { session } = useApp();
-  const { t } = useI18n();
+  const { t, l } = useI18n();
   const s = plan.schedule;
   const kid = session.learner.kind === "child";
   return (
     <main className="ob" data-testid="ob-done">
       <div className="ob-body">
         <div className="done-hero">
-          <Hero src={kid ? HERO.myatik : HERO.voltUp} alt={kid ? t("hero.myatik") : t("hero.volt")} />
+          {hero ? (
+            <HeroImg image={hero.image} code={hero.code} stage={hero.stage} alt={t("game.hero.alt", { name: l(hero.name), stage: l(hero.stage_name) })} />
+          ) : (
+            <Hero src={kid ? HERO.myatik : HERO.voltUp} alt={kid ? t("hero.myatik") : t("hero.volt")} />
+          )}
         </div>
         <h1 className="h1 center">{kid ? t("ob.done.titleChild", { name: session.learner.display_name }) : t("ob.done.title")}</h1>
         <p className="sub center">{t("ob.done.text")}</p>
@@ -662,6 +691,7 @@ function DoneStep({ plan, onOpen }: { plan: LearningPlan; onOpen: () => void }) 
           <div className="kv"><span>{t("sch.time")}</span><span>{s.preferred_time}</span></div>
           <div className="kv"><span>{t("sch.duration")}</span><span>{t("c.minutesN", { n: s.duration_min })}</span></div>
           <div className="kv"><span>{t("ob.done.reminders")}</span><span>{s.reminders_enabled ? t("c.on") : t("c.off")}</span></div>
+          {hero ? <div className="kv" data-testid="ob-done-hero"><span>{t("ob.done.hero")}</span><span>{l(hero.name)}</span></div> : null}
         </div>
       </div>
       <div className="ob-foot">

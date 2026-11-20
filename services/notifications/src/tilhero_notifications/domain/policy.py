@@ -5,7 +5,7 @@
 2. `notifications_enabled` выключен — только центр (in_app_only);
 3. тихие часы — отложить до их конца;
 4. дети 6–13 — окно 08:00–20:00 местного (иначе отложить до 08:00), адресат — опекун, шаблон *.kid;
-5. лимит ≤ 3 сообщений reminders+missed+social в местные сутки — проверяет вызывающий в транзакции
+5. лимит ≤ 3 сообщений reminders+missed+social (+game, спринт 6) в местные сутки — проверяет вызывающий в транзакции
    (`limit_applies` / `local_day`), сверх — in_app_only;
 6. дедупликация — UNIQUE(dedup_key) при приёме.
 
@@ -13,18 +13,28 @@
 (отклонённое приглашение, «Что нового») → in_app_only; устаревшее (напоминание > 3 ч после слота, пропуск после
 22:00 следующего дня) → in_app_only; нет адресата Telegram → in_app_only; пропуск ждёт `not_before`
 (слот следующего дня). Отложенное до момента позже `stale_after` сразу уходит только в центр.
+
+Спринт 6 (INTERNAL_API спринта 6 §3) — категория `game` (заморозка серии, значок, ступень героя):
+- выключатель категории — общий (шаг 1), но пока `game` нет в настройках ученика (bff.ts NotificationCategories,
+  identity-consent), она включается выключателем `reminders`: `Rules.category_gates` (настройка
+  GAME_CATEGORY_GATE, `reminders` | `game`);
+- выключатель выключен — запись остаётся в центре без Telegram (`Rules.center_when_disabled`), а не пропадает;
+- входит в лимит дня (частота — общая);
+- дети 6–13: опекуну только в сводке — запись в центре детского профиля (in_app_only, reason `kid_summary`),
+  без отдельного сообщения в Telegram (`Item.kid_in_app_only`).
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 ALWAYS_ON = frozenset({"support", "service"})
-LIMITED = frozenset({"reminders", "missed", "social"})
+LIMITED = frozenset({"reminders", "missed", "social", "game"})
 KID_BANDS = frozenset({"6-9", "10-13"})
 _HHMM = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
@@ -55,6 +65,12 @@ class Recipient:
 class Rules:
     default_tz: str = "Asia/Tashkent"
     kid_window: tuple[str, str] = ("08:00", "20:00")
+    # категория записи → категория настроек ученика, которая её включает (нет ключа — она сама); спринт 6:
+    # {"game": "reminders"}, пока game нет в настройках ученика
+    category_gates: Mapping[str, str] = field(default_factory=dict)
+    # категории, которые при выключенном выключателе не пропадают, а остаются в центре без Telegram (спринт 6: game —
+    # «Серия спасена» ученик видит в центре, даже если напоминания выключены; e2e спринта 6)
+    center_when_disabled: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -67,6 +83,8 @@ class Item:
     center_only: bool = False
     not_before: datetime | None = None
     stale_after: datetime | None = None
+    # спринт 6: детям 6–13 — только центр детского профиля (опекуну «в сводке», без сообщения в Telegram)
+    kid_in_app_only: bool = False
 
 
 def zone(name: str | None, default: str) -> ZoneInfo:
@@ -141,11 +159,16 @@ def decide(item: Item, who: Recipient, now: datetime, rules: Rules) -> Decision:
     bypass = item.transactional
     if who.status != "ACTIVE" and not bypass:
         return Decision("skip", reason="user_inactive")
-    # 1. категория
-    if item.gated and not bypass and item.category not in ALWAYS_ON and item.category not in who.categories:
+    # 1. категория (спринт 6: game — по выключателю из rules.category_gates)
+    gate = rules.category_gates.get(item.category, item.category)
+    if item.gated and not bypass and item.category not in ALWAYS_ON and gate not in who.categories:
+        if item.category in rules.center_when_disabled:
+            return Decision("in_app_only", reason="category_disabled_center")
         return Decision("skip", reason="category_disabled")
     if item.center_only:
         return Decision("in_app_only", reason="center_only")
+    if item.kid_in_app_only and who.is_kid and not bypass:
+        return Decision("in_app_only", reason="kid_summary")
     if item.stale_after is not None and now >= item.stale_after:
         return Decision("in_app_only", reason="stale")
     # 2. общий выключатель Telegram

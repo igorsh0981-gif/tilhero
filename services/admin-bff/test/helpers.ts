@@ -4,7 +4,7 @@
  * запоминает actor — как настоящие домены (verifyInternalToken из ts-common). Ответы доменов — полные по
  * контракту admin.ts (матрица маршрутов проверяет их строгим Ajv).
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
 import { verifyInternalToken, type Actor } from "@tilhero/ts-common";
 import type { LoginStep, Me, Permission, RoleCode } from "@tilhero/contracts/admin";
@@ -34,6 +34,7 @@ export const URLS = {
   lessons: "http://lessons.test",
   assessment: "http://assessment.test",
   memory: "http://memory.test",
+  gamification: "http://gamification.test",
 } as const;
 export type Service = keyof typeof URLS;
 export const AUD: Record<Service, string> = {
@@ -50,6 +51,7 @@ export const AUD: Record<Service, string> = {
   lessons: "lessons",
   assessment: "assessment",
   memory: "memory",
+  gamification: "gamification",
 };
 
 export function testConfig(env: Record<string, string> = {}): Config {
@@ -75,6 +77,7 @@ export function testConfig(env: Record<string, string> = {}): Config {
     LESSONS_URL: URLS.lessons,
     ASSESSMENT_URL: URLS.assessment,
     MEMORY_URL: URLS.memory,
+    GAMIFICATION_URL: URLS.gamification,
     UPSTREAM_RETRIES: "0",
     UPSTREAM_TIMEOUT_MS: "2000",
     DASHBOARD_TIMEOUT_MS: "500",
@@ -1236,6 +1239,230 @@ export function memoryStats(p: Record<string, unknown> = {}) {
   return { period: "today", review_sessions: 58, learners_reviewing: 41, median_minutes: 6.5, d30_pass_pct: 78.3, avg_due_per_learner: 9.2, ai_glosses_pending: 0, ...p };
 }
 
+// ---------------------------------------------------------------- спринт 6: игра и герои (gamification)
+
+export const GAME_STAFF_ID = "5f1a0b2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c";
+export const ASSET_ID = "6a2b1c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d";
+export const ASSET_ID_2 = "7b3c2d4e-5f6a-4b7c-8d8e-9f0a1b2c3d4e";
+export const ASSET_ID_3 = "8c4d3e5f-6a7b-4c8d-9e9f-0a1b2c3d4e5f";
+export const GAME_EVENT_ID = "9d5e4f6a-7b8c-4d9e-8f0a-1b2c3d4e5f60";
+export const OP_ID = "ae6f5a7b-8c9d-4e0f-9a1b-2c3d4e5f6071";
+export const OP_ID_2 = "bf7a6b8c-9d0e-4f1a-8b2c-3d4e5f607182";
+export const PURCHASE_ID = "c08b7c9d-0e1f-4a2b-9c3d-4e5f60718293";
+export const SHA = "ab".repeat(32);
+
+/** PNG: сигнатура + IHDR (ширина, высота) + хвост. */
+export function pngBytes(w = 380, h = 460, tail = 64): Buffer {
+  const b = Buffer.alloc(24 + tail, 7);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+  b.writeUInt32BE(13, 8);
+  b.write("IHDR", 12, "latin1");
+  b.writeUInt32BE(w, 16);
+  b.writeUInt32BE(h, 20);
+  return b;
+}
+
+/** WebP: RIFF/WEBP + чанк VP8 / VP8L / VP8X с размерами в заголовке. */
+export function webpBytes(chunk: "VP8 " | "VP8L" | "VP8X" = "VP8L", w = 380, h = 460, tail = 64): Buffer {
+  const b = Buffer.alloc(30 + tail, 0);
+  b.write("RIFF", 0, "latin1");
+  b.writeUInt32LE(b.length - 8, 4);
+  b.write("WEBP", 8, "latin1");
+  b.write(chunk, 12, "latin1");
+  b.writeUInt32LE(b.length - 20, 16);
+  if (chunk === "VP8 ") {
+    b[23] = 0x9d;
+    b[24] = 0x01;
+    b[25] = 0x2a;
+    b.writeUInt16LE(w, 26);
+    b.writeUInt16LE(h, 28);
+  } else if (chunk === "VP8L") {
+    b[20] = 0x2f;
+    b.writeUInt32LE(((w - 1) | ((h - 1) << 14)) >>> 0, 21);
+  } else {
+    b.writeUIntLE(w - 1, 24, 3);
+    b.writeUIntLE(h - 1, 27, 3);
+  }
+  return b;
+}
+export const PNG_BYTES = pngBytes();
+
+/** Метаданные картинки gamification (url BFF собирает сам). */
+export function imageMeta(p: Record<string, unknown> = {}) {
+  return { asset_id: ASSET_ID, sha256: SHA, width: 380, height: 460, size: 32_000, ...p };
+}
+
+/** Правила игры — payload версии 1 (INTERNAL_API спринта 6 §1.3). */
+export function gameRulesPayload(): Record<string, unknown> {
+  const tpl = (code: string, kind: string, target: number, xp: number, audiences = ["kids", "teens", "adults"], weight = 1) => ({
+    code, kind, target, reward: { xp, til: 5 }, audiences, weight,
+  });
+  return {
+    earn: {
+      lesson: { xp: 20, til: 5 }, lesson_passed_bonus: { xp: 10, til: 0 }, lesson_practice: { xp: 10, til: 2 },
+      scenario: { xp: 15, til: 4 }, media: { xp: 10, til: 3 }, reading: { xp: 10, til: 3 },
+      review: { min_cards: 5, xp_base: 10, xp_per_correct_cap: 20, til: 3 },
+      skill_demonstrated: { xp: 15, til: 5 }, skill_retained: { xp: 25, til: 10 }, skill_max_per_event: 10,
+    },
+    caps: { xp_per_day: 300, til_per_day: 60 },
+    levels: [0, 100, 250, 450, 700, 1000, 1350, 1750, 2200, 2700, 3250, 3850, 4500, 5200, 5950, 6750, 7600, 8500, 9450, 10450],
+    hero: { stage_thresholds: [0, 5, 15] },
+    freeze: { price_til: 40, max_stock: 5 },
+    bonuses: { registration_freeze: 2, referral_freeze: 2, referral_monthly_cap: 10 },
+    quests: {
+      per_day: 3,
+      all_done_bonus: { xp: 10, til: 10 },
+      templates: [
+        tpl("lesson_1", "lesson_complete", 1, 10, undefined, 3), tpl("review_10", "review_cards", 10, 10, undefined, 3),
+        tpl("reading_1", "reading_complete", 1, 10, undefined, 2), tpl("xp_50", "xp_earned", 50, 0, ["teens", "adults"], 2),
+        tpl("scenario_1", "scenario_complete", 1, 10, ["teens", "adults"]), tpl("media_1", "media_complete", 1, 10, ["teens", "adults"]),
+        tpl("skill_1", "skill_confirmed", 1, 15),
+      ],
+    },
+    badges: { streak: [7, 30, 100], skills: [10, 50], reviews_cards: [100, 1000], readings: [10] },
+  };
+}
+
+export function rulesSummaryDomain(p: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    status: "active",
+    comment: "Начальные правила",
+    based_on: null,
+    created_by: { staff_id: SEED_ACTOR_ID, name: "seed" },
+    created_at: "2026-11-20T00:00:00Z",
+    validated_at: "2026-11-20T00:00:00Z",
+    activated_by: { staff_id: SEED_ACTOR_ID, name: "seed" },
+    activated_at: "2026-11-20T00:00:00Z",
+    ...p,
+  };
+}
+
+export function rulesVersionDomain(p: Record<string, unknown> = {}) {
+  return { ...rulesSummaryDomain(), payload: gameRulesPayload(), diff: [], updated_at: "2026-11-20T00:00:00Z", ...p };
+}
+
+const heroText = (ru: string, uz: string) => ({ ru, uz });
+export function heroDomain(p: Record<string, unknown> = {}) {
+  const ids = [ASSET_ID, ASSET_ID_2, ASSET_ID_3];
+  return {
+    code: "pet_0",
+    line: "pet",
+    order: 3,
+    name: heroText("Дракончик Мятик", "Ajdarcha Yalpiz"),
+    tagline: heroText("Растёт вместе с тобой", "Sen bilan o'sadi"),
+    audiences: ["kids", "teens", "adults"],
+    stages: [1, 2, 3].map((stage) => ({ stage, name: heroText(["Яйцо", "Малыш", "Крылья"][stage - 1]!, ["Tuxum", "Chaqaloq", "Qanotlar"][stage - 1]!), asset_id: ids[stage - 1] })),
+    version: 1,
+    published_at: "2026-11-20T00:00:00Z",
+    published_by: { staff_id: SEED_ACTOR_ID, name: "seed" },
+    images: [1, 2, 3].map((stage) => ({ stage, image: imageMeta({ asset_id: ids[stage - 1] }) })),
+    draft: null,
+    learners: 12,
+    ...p,
+  };
+}
+
+export function shopItemDomain(p: Record<string, unknown> = {}) {
+  return {
+    code: "bg_sunset",
+    kind: "background",
+    title: heroText("Закат", "Quyosh botishi"),
+    description: heroText("Тёплый фон главной", "Iliq fon"),
+    image: imageMeta(),
+    theme: { bg: "--paper", accent: "--pen" },
+    price_til: 120,
+    audiences: ["kids", "teens", "adults"],
+    available_from: null,
+    available_until: null,
+    status: "draft",
+    order: 1,
+    owners: 0,
+    updated_at: "2026-11-20T09:00:00Z",
+    ...p,
+  };
+}
+
+export function walletDomain(p: Record<string, unknown> = {}) {
+  return {
+    user_id: LEARNER_USER_ID,
+    audience: "kids",
+    level: 3,
+    xp_total: 260,
+    til_balance: 45,
+    freeze_stock: 2,
+    hero: { code: "pet_0", stage: 2 },
+    confirmed_skills: 6,
+    owned_items: [{ code: "bg_sunset", kind: "background", purchased_at: "2026-11-19T12:00:00Z", purchase_id: PURCHASE_ID }],
+    quests_today: [{ code: "lesson_1", kind: "lesson_complete", target: 1, progress: 1, status: "completed" }],
+    badges: [{ code: "first_lesson", earned_at: "2026-11-18T10:00:00Z" }],
+    referrals: { pending: 1, rewarded: 0, capped: 0 },
+    settings: { auto_freeze: true, quests_hidden: false },
+    ...p,
+  };
+}
+
+export function ledgerOpDomain(p: Record<string, unknown> = {}) {
+  return {
+    op_id: OP_ID,
+    currency: "til",
+    amount: 5,
+    reason: "lesson",
+    source: { kind: "event", ref: "1d2e3f4a-5b6c-4d7e-8f90-a1b2c3d4e5f6" },
+    rules_version: 1,
+    multiplier: 1,
+    capped: false,
+    local_date: "2026-11-20",
+    status: "confirmed",
+    reversed_by: null,
+    reversal_of: null,
+    actor: "system",
+    comment: null,
+    created_at: "2026-11-20T08:00:00Z",
+    ...p,
+  };
+}
+
+export function gameEventDomain(p: Record<string, unknown> = {}) {
+  return {
+    event_id: GAME_EVENT_ID,
+    code: "reading_week",
+    title: heroText("Неделя чтения", "O'qish haftaligi"),
+    description: heroText("×2 XP за чтение", "O'qish uchun ×2 XP"),
+    starts_at: "2026-11-23T00:00:00+05:00",
+    ends_at: "2026-11-30T00:00:00+05:00",
+    audiences: ["kids", "teens", "adults"],
+    multipliers: [{ action: "reading", currency: "xp", factor: 2 }],
+    status: "draft",
+    created_by: { staff_id: GAME_STAFF_ID, name: "Имя из токена" },
+    published_by: null,
+    updated_at: "2026-11-20T09:00:00Z",
+    ...p,
+  };
+}
+
+export function gameOverview(p: Record<string, unknown> = {}) {
+  return {
+    period: "7d",
+    active_rules_version: 1,
+    earned: { xp: 12_000, til: 3_000 },
+    spent_til: 800,
+    freezes: { granted: 40, bought: 5, used: 12 },
+    quests_completed: 210,
+    badges_earned: 33,
+    purchases: 9,
+    by_audience: [
+      { audience: "kids", earned_xp: 4_000, earned_til: 1_000, quests_completed: 70 },
+      { audience: "adults", earned_xp: 8_000, earned_til: 2_000, quests_completed: 140 },
+    ],
+    active_events: [
+      { event_id: randomUUID(), title: heroText("Неделя навыков", "Ko'nikmalar haftaligi"), ends_at: "2026-11-29T00:00:00+05:00" },
+      { event_id: GAME_EVENT_ID, title: heroText("Неделя чтения", "O'qish haftaligi"), ends_at: "2026-11-25T00:00:00+05:00" },
+    ],
+    ...p,
+  };
+}
+
 export class FakeDomains {
   readonly calls: Call[] = [];
   readonly staff = new Map<string, FakeStaff>();
@@ -1319,7 +1546,8 @@ export class FakeDomains {
     }
     const query: Record<string, string> = {};
     url.searchParams.forEach((v, k) => (query[k] = v));
-    const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    // JSON — объект; сырое тело (картинка игры) — Buffer
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : init?.body instanceof Uint8Array ? Buffer.from(init.body) : undefined;
     const call: Call = { service, method: (init?.method ?? "GET").toUpperCase(), path: url.pathname, query, params: url.searchParams, body, actor, headers };
     this.calls.push(call);
     const o = this.overrides.get(`${service} ${call.method} ${call.path}`);
@@ -1380,6 +1608,87 @@ export class FakeDomains {
         return this.assessment(c, key);
       case "memory":
         return this.memory(c, key);
+      case "gamification":
+        return this.gamification(c, key);
+    }
+    return domainError(404, "NOT_FOUND");
+  }
+
+  /** gamification `/internal/v1/admin/game/*` (спринт 6): StaffRef — {staff_id, name} из actor-токена. */
+  private gamification(c: Call, key: string): Response {
+    const B = "/internal/v1/admin/game";
+    const by = { staff_id: c.actor?.id ?? GAME_STAFF_ID, name: c.actor?.name ?? "Имя из токена" };
+    const now = "2026-11-20T10:00:00Z";
+    if (key === `GET ${B}/overview`) return json(200, gameOverview({ period: c.query.period ?? "7d" }));
+    if (key === `GET ${B}/rules`) {
+      return json(200, { items: [rulesSummaryDomain({ version: 2, status: "draft", activated_by: null, activated_at: null, validated_at: null }), rulesSummaryDomain()] });
+    }
+    if (key === `PUT ${B}/rules/draft`) {
+      return json(200, rulesVersionDomain({ version: 2, status: "draft", payload: c.body.payload, comment: c.body.comment, based_on: c.body.based_on, created_by: by, validated_at: null, activated_by: null, activated_at: null }));
+    }
+    if (key === `DELETE ${B}/rules/draft`) return new Response(null, { status: 204 });
+    if (key === `POST ${B}/rules/draft/validate`) return json(200, { ok: true, errors: [], warnings: [{ path: "hero.stage_thresholds[1]", code: "STAGE2_HIGH" }] });
+    if (key === `POST ${B}/rules/draft/activate`) {
+      return json(200, rulesVersionDomain({ version: 2, status: "active", comment: c.body.comment, based_on: 1, activated_by: by, activated_at: now }));
+    }
+    const rv = /^\/internal\/v1\/admin\/game\/rules\/(\d+)(\/rollback)?$/.exec(c.path);
+    if (rv && c.method === "GET" && !rv[2]) return json(200, rulesVersionDomain({ version: Number(rv[1]) }));
+    if (rv && c.method === "POST" && rv[2]) {
+      return json(200, rulesVersionDomain({ version: 3, status: "active", based_on: Number(rv[1]), comment: c.body.comment, created_by: by, activated_by: by, activated_at: now }));
+    }
+    if (key === `GET ${B}/heroes`) {
+      return json(200, { items: [heroDomain(), heroDomain({ code: "robot_0", line: "robot", order: 0, name: { ru: "Робот Вольт", uz: "Robot Volt" }, learners: 0, published_by: null })] });
+    }
+    const hd = /^\/internal\/v1\/admin\/game\/heroes\/([a-z0-9_]+)\/(draft|publish)$/.exec(c.path);
+    if (hd && c.method === "PUT" && hd[2] === "draft") {
+      const images = (c.body.stages as Array<{ stage: number; asset_id: string }>).map((st) => ({ stage: st.stage, image: imageMeta({ asset_id: st.asset_id }) }));
+      return json(200, heroDomain({ code: hd[1], draft: { ...c.body, images, updated_at: now } }));
+    }
+    if (hd && c.method === "POST" && hd[2] === "publish") return json(200, heroDomain({ code: hd[1], version: 2, published_at: now, published_by: by }));
+    if (key === `POST ${B}/assets`) {
+      const bytes = c.body as Buffer;
+      return json(201, imageMeta({ asset_id: ASSET_ID_2, sha256: createHash("sha256").update(bytes).digest("hex"), size: bytes.length, url: "https://evil.example/x.png" }));
+    }
+    const ac = /^\/internal\/v1\/admin\/game\/assets\/([^/]+)\/content$/.exec(c.path);
+    if (ac && c.method === "GET") return new Response(new Uint8Array(PNG_BYTES), { status: 200, headers: { "content-type": "image/png", etag: `"${SHA}"` } });
+    if (key === `GET ${B}/shop/items`) {
+      return json(200, { items: [shopItemDomain(), shopItemDomain({ code: "streak_freeze", kind: "streak_freeze", image: null, theme: null, price_til: 40, status: "published", owners: 30 })] });
+    }
+    if (key === `POST ${B}/shop/items`) {
+      const { asset_id, ...rest } = c.body;
+      return json(201, shopItemDomain({ ...rest, image: asset_id ? imageMeta({ asset_id }) : null, status: "draft", owners: 0 }));
+    }
+    const si = /^\/internal\/v1\/admin\/game\/shop\/items\/([a-z0-9_]+)(\/publish|\/retire)?$/.exec(c.path);
+    if (si && c.method === "PATCH" && !si[2]) {
+      const { asset_id, ...rest } = c.body;
+      return json(200, shopItemDomain({ code: si[1], ...rest, ...(asset_id !== undefined ? { image: asset_id ? imageMeta({ asset_id }) : null } : {}) }));
+    }
+    if (si && c.method === "POST" && si[2]) return json(200, shopItemDomain({ code: si[1], status: si[2] === "/publish" ? "published" : "retired" }));
+    if (key === `GET ${B}/events`) return json(200, { items: [gameEventDomain(), gameEventDomain({ event_id: randomUUID(), code: "skills_week", status: "published", published_by: { staff_id: SEED_ACTOR_ID, name: "seed" } })] });
+    if (key === `POST ${B}/events`) return json(201, gameEventDomain({ ...c.body, created_by: by }));
+    const ev = /^\/internal\/v1\/admin\/game\/events\/([^/]+)(\/publish|\/cancel)?$/.exec(c.path);
+    if (ev && c.method === "PATCH" && !ev[2]) return json(200, gameEventDomain({ event_id: ev[1], ...c.body }));
+    if (ev && c.method === "POST" && ev[2]) {
+      return json(200, gameEventDomain({ event_id: ev[1], status: ev[2] === "/publish" ? "published" : "cancelled", published_by: ev[2] === "/publish" ? by : null }));
+    }
+    const w = /^\/internal\/v1\/admin\/game\/wallets\/([^/]+)(?:\/(ledger|adjustments|purchases)(?:\/([^/]+)\/(reverse|refund))?)?$/.exec(c.path);
+    const staffOp = { reason: "manual", source: { kind: "staff", ref: randomUUID() }, rules_version: null, actor: `staff:${c.actor?.id}` };
+    if (w && c.method === "GET" && !w[2]) return json(200, walletDomain({ user_id: w[1] }));
+    if (w && c.method === "GET" && w[2] === "ledger" && !w[3]) {
+      return json(200, { items: [ledgerOpDomain(), ledgerOpDomain({ op_id: OP_ID_2, currency: "til", amount: 50, ...staffOp, actor: `staff:${GAME_STAFF_ID}`, comment: "Компенсация за сбой урока" })], next_cursor: "c2" });
+    }
+    if (w && c.method === "POST" && w[2] === "adjustments") {
+      return json(201, ledgerOpDomain({ op_id: randomUUID(), currency: c.body.currency, amount: c.body.amount, ...staffOp, comment: c.body.reason }));
+    }
+    if (w && c.method === "POST" && w[4] === "reverse") {
+      return json(200, ledgerOpDomain({ op_id: randomUUID(), amount: -5, ...staffOp, reason: "reversal", reversal_of: w[3], comment: c.body.reason }));
+    }
+    if (w && c.method === "POST" && w[4] === "refund") {
+      return json(200, {
+        operations: [
+          ledgerOpDomain({ op_id: randomUUID(), amount: 120, ...staffOp, reason: "reversal", reversal_of: OP_ID_2, comment: c.body.reason }),
+        ],
+      });
     }
     return domainError(404, "NOT_FOUND");
   }

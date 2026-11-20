@@ -27,6 +27,8 @@ export interface BffContext {
   audio: AudioCache;
   /** Release 4.1: tts (озвучка фраз, байты MP3); null — TTS_URL не задан, POST /v1/speech → 503 SPEECH_UNAVAILABLE. */
   tts: RawClient | null;
+  /** Спринт 6: gamification (игра ученика, картинки); null — GAMIFICATION_URL не задан, /v1/game/* → 503 GAME_UNAVAILABLE. */
+  game: RawClient | null;
   log: FastifyBaseLogger;
   /** Вызов хранилища сессий/лимитов: сбой Redis → 503 (fail-closed), без деталей наружу. */
   store<T>(fn: () => Promise<T>): Promise<T>;

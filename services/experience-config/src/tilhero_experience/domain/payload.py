@@ -32,10 +32,16 @@ TokenName = Annotated[str, StringConstraints(max_length=64)]
 # Разделы меню админки TilHero (прототип Admin.dc.html, NAV) — порядок и видимость; права проверяет admin-bff
 # Спринт 5: + memory («Память»). Действующая версия 1.0.0 его не перечисляет — admin-web добавляет раздел после
 # перечисленных; в новой версии конфигурации его можно поставить на место или выключить.
+# Спринт 6 (INTERNAL_API спринта 6 §8): раздел «Игра» — heroes («Герои»), game («Геймификация»: правила, магазин,
+# кошельки) и game_events («События и сезоны»). heroes и game были в прототипе; game_events — новый id раздела событий,
+# events — его прежний id из прототипа (сид 1.0.0): admin-web понимает оба (MENU_ALIASES), в одной версии — только
+# один из них (иначе раздел дважды → duplicate).
 ADMIN_MENU: Final[tuple[str, ...]] = (
     "overview", "users", "content", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config",
-    "langs", "roles", "audit", "memory",
+    "langs", "roles", "audit", "memory", "game_events",
 )
+# id прототипа → id раздела (для проверки дублей)
+MENU_ALIASES: Final[dict[str, str]] = {"events": "game_events"}
 _STRICT = ConfigDict(extra="forbid", strict=True)
 
 
@@ -194,7 +200,9 @@ def validate_payload(app: str, raw: Any) -> dict[str, Any]:
         errors += _duplicates([s.type for s in model.home.sections], "payload.home.sections[{i}].type")
         errors += _duplicates([s.key for s in model.home.sections], "payload.home.sections[{i}].key")
     elif isinstance(model, AdminPayload):
-        errors += _duplicates([m.id for m in model.layout.menu], "payload.layout.menu[{i}].id")
+        # один раздел — один пункт: id прототипа (events) и новый id (game_events) — тот же раздел
+        errors += _duplicates([MENU_ALIASES.get(m.id, m.id) for m in model.layout.menu],
+                              "payload.layout.menu[{i}].id")
     if errors:
         raise ConfigInvalid(errors)
     return model.model_dump(mode="json")

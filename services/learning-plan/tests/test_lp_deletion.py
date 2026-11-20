@@ -24,7 +24,7 @@ def requested(user: uuid.UUID, request_id: uuid.UUID, attempt: int | None = None
 
 
 TABLES = ("plans", "activities", "slot_marks", "trajectories", "learner_diagnostics", "skill_states",
-          "learner_audience", "completed_lessons", "lesson_evaluations")
+          "learner_audience", "completed_lessons", "lesson_evaluations", "frozen_days")
 EMPTY = dict.fromkeys(TABLES, 0)
 
 
@@ -56,6 +56,10 @@ async def seed(env, user: uuid.UUID) -> None:
         "skill_outcomes": [], "passed": True, "practice_only": False, "supersedes": None,
         "created_at": "2026-11-16T05:30:00Z"}, producer="assessment")
     await env.trajectory(user)
+    # спринт 6: пропуск вт (tick выше) закрыт заморозкой серии
+    await env.publish("game.streak.frozen.v1", {
+        "user_id": str(user), "local_date": "2026-11-17", "op_id": str(uuid.uuid4()), "freeze_left": 1,
+        "frozen_at": "2026-11-17T19:05:00Z"}, producer="gamification")
     assert all(v > 0 for v in (await rows(env, user)).values())
 
 

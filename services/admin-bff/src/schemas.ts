@@ -497,3 +497,132 @@ export const CARD_ACTION = obj(
 export const CARD_STATUS = enumOf(CARD_STATUSES);
 export const CARD_KIND = enumOf(CARD_KINDS);
 export const ANALYTICS_PERIOD = enumOf(ANALYTICS_PERIODS);
+
+// ---------------------------------------------------------------- игра и герои (спринт 6, admin.ts «Игра и герои»)
+
+export const GAME_AUDIENCES = ["kids", "teens", "adults"] as const;
+export const GAME_CURRENCIES = ["xp", "til", "freeze"] as const;
+export const GAME_REASONS = [
+  "lesson", "scenario", "media", "reading", "review", "skill_demonstrated", "skill_retained", "quest", "quest_bonus",
+  "registration_bonus", "referral_bonus", "streak_freeze", "shop", "manual", "reversal", "purchase",
+] as const;
+export const HERO_LINES = ["robot", "pet", "human"] as const;
+export const HERO_STAGES = [1, 2, 3] as const;
+export const QUEST_KINDS = [
+  "lesson_complete", "review_cards", "reading_complete", "scenario_complete", "media_complete", "xp_earned", "skill_confirmed",
+] as const;
+export const GAME_ACTIONS = ["lesson", "scenario", "media", "reading", "review", "skill", "quest"] as const;
+export const SHOP_ITEM_KINDS = ["background", "hero_frame", "streak_freeze"] as const;
+export const SHOP_ITEM_STATUSES = ["draft", "published", "retired"] as const;
+export const RULES_STATUSES = ["draft", "active", "archived"] as const;
+export const GAME_EVENT_STATUSES = ["draft", "published", "cancelled", "finished"] as const;
+export const LEDGER_STATUSES = ["confirmed", "reversed"] as const;
+export const LEDGER_SOURCE_KINDS = ["event", "command", "staff"] as const;
+export const ASSET_PURPOSES = ["hero_stage", "shop_item", "badge"] as const;
+export const ASSET_TYPES = ["image/webp", "image/png"] as const;
+export const OVERVIEW_PERIODS = ["7d", "30d"] as const;
+export const EVENT_FACTORS = [1.5, 2, 3] as const;
+/** Картинка игры ≤ 300 КБ (gamification assets), ≤ 1024×1024 px. */
+export const ASSET_MAX_BYTES = 300 * 1024;
+export const ASSET_MAX_SIDE = 1024;
+
+/** Код героя: robot_0 … human_2 (новые — тем же видом). */
+export const HERO_CODE = str(2, 40, { pattern: "^[a-z][a-z0-9_]{1,39}$" });
+/** Код предмета магазина и события недели: [a-z0-9_]{3,40} (admin.ts). */
+export const GAME_ITEM_CODE = str(3, 40, { pattern: "^[a-z0-9_]{3,40}$" });
+/** Номер версии правил в пути. */
+export const RULES_VERSION_NO = str(1, 9, { pattern: "^[1-9][0-9]{0,8}$" });
+/** Ключ токена темы (не CSS): `pen`, `--pen-soft`, `bg.surface` — никаких значений цвета, url() и `;`. */
+export const THEME_TOKEN = str(1, 64, { pattern: "^(?:--)?[a-z][a-z0-9_.-]{0,61}$" });
+
+const gameLocalized = (max: number): Schema => obj({ ru: str(1, max), uz: str(1, max) }, ["ru", "uz"]);
+const AUDIENCES = (min: number) => arrayOf(enumOf(GAME_AUDIENCES), min, 3, { uniqueItems: true });
+/** Комментарий команды публикации / снятия / отмены (аудит). Активация и откат правил — ≥ 10 (admin.ts). */
+export const GAME_COMMENT = obj({ comment: str(3, 300) }, ["comment"]);
+export const RULES_COMMENT = obj({ comment: str(10, 300) }, ["comment"]);
+/** Причина операции с кошельком: ≥ 10 (PLAN спринта 6 «wallet.adjust»), ≤ 300 (ledger.comment). */
+export const WALLET_REASON = obj({ reason: str(10, 300) }, ["reason"]);
+
+/**
+ * RulesDraftRequest: `payload` — JSON-объект как есть; схему и смысл правил (лишние ключи, пороги, лимиты) проверяет
+ * gamification — 422 RULES_INVALID {errors: [{path, code}]} с путями полей для формы admin-web.
+ */
+export const RULES_DRAFT = obj(
+  { payload: { type: "object" }, comment: nullable(str(0, 300)), based_on: nullable(integer(1, 2_147_483_647)) },
+  ["payload", "comment", "based_on"],
+);
+
+/** AdminHeroFields: аудитории можно опустошить (скрыть из выбора), ступеней ровно три. */
+export const HERO_FIELDS = obj(
+  {
+    name: gameLocalized(80),
+    tagline: gameLocalized(80),
+    audiences: AUDIENCES(0),
+    stages: arrayOf(
+      obj({ stage: { type: "integer", enum: [...HERO_STAGES] }, name: gameLocalized(80), asset_id: UUID }, ["stage", "name", "asset_id"]),
+      3,
+      3,
+    ),
+  },
+  ["name", "tagline", "audiences", "stages"],
+);
+
+const SHOP_PROPS = {
+  code: GAME_ITEM_CODE,
+  kind: enumOf(["background", "hero_frame"]),
+  title: gameLocalized(80),
+  description: gameLocalized(200),
+  asset_id: nullable(UUID),
+  theme: nullable(obj({ bg: THEME_TOKEN, accent: THEME_TOKEN }, ["bg", "accent"])),
+  price_til: integer(1, 10_000),
+  audiences: AUDIENCES(0),
+  available_from: nullable(DATETIME),
+  available_until: nullable(DATETIME),
+  order: integer(0, 100_000),
+};
+/** ShopItemCreate (admin.ts) — все ключи обязательны; заморозку (streak_freeze) создать нельзя. */
+export const SHOP_ITEM_CREATE = obj(SHOP_PROPS, Object.keys(SHOP_PROPS));
+/** Partial<ShopItemCreate>: хотя бы одно поле; что можно менять у published — решает gamification. */
+export const SHOP_ITEM_PATCH = obj(SHOP_PROPS, [], { minProperties: 1 });
+
+const EVENT_PROPS = {
+  code: GAME_ITEM_CODE,
+  title: gameLocalized(120),
+  description: gameLocalized(300),
+  starts_at: DATETIME,
+  ends_at: DATETIME,
+  audiences: AUDIENCES(1),
+  multipliers: arrayOf(
+    obj(
+      { action: enumOf(GAME_ACTIONS), currency: enumOf(["xp", "til"]), factor: { type: "number", enum: [...EVENT_FACTORS] } },
+      ["action", "currency", "factor"],
+    ),
+    1,
+    5,
+  ),
+};
+/** GameEventFields (admin.ts); период ≤ 14 дней, starts_at не в прошлом, пересечения — проверяет gamification. */
+export const GAME_EVENT_CREATE = obj(EVENT_PROPS, Object.keys(EVENT_PROPS));
+export const GAME_EVENT_PATCH = obj(EVENT_PROPS, [], { minProperties: 1 });
+
+/**
+ * WalletAdjustment (admin.ts): amount ≠ 0, тилы и заморозки ±1..10000, XP ±1..100000; причина ≥ 10.
+ * «Не ниже нуля» (409 BALANCE_NEGATIVE) — в gamification под блокировкой кошелька.
+ */
+export const WALLET_ADJUSTMENT = obj(
+  {
+    currency: enumOf(GAME_CURRENCIES),
+    amount: { type: "integer", minimum: -100_000, maximum: 100_000, not: { const: 0 } },
+    reason: str(10, 300),
+  },
+  ["currency", "amount", "reason"],
+  {
+    if: { properties: { currency: { enum: ["til", "freeze"] } } },
+    then: { properties: { amount: { type: "integer", minimum: -10_000, maximum: 10_000 } } },
+  },
+);
+
+export const OVERVIEW_PERIOD = enumOf(OVERVIEW_PERIODS);
+export const GAME_EVENT_STATUS = enumOf(GAME_EVENT_STATUSES);
+export const GAME_CURRENCY = enumOf(GAME_CURRENCIES);
+export const ASSET_PURPOSE = enumOf(ASSET_PURPOSES);

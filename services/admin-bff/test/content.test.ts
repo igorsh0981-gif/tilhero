@@ -144,8 +144,8 @@ describe("права и step-up (PLAN спринта 3)", () => {
     h = await makeHarness({ ENV: "dev", NODE_ENV: "development" });
     const { s } = await loginAs(h, "super_admin");
     const imp = await h.app.inject({ method: "POST", url: "/admin/v1/dev/impersonate", headers: browser(s), payload: { role: "content_manager" } });
-    // спринт 5: + glossary.manage (словарь курса)
-    expect(imp.json().permissions).toEqual(["content.edit", "content.read", "dashboard.read", "glossary.manage", "media.rights"]);
+    // спринт 5: + glossary.manage (словарь курса); спринт 6: + game.read, game.manage (герои, магазин, события)
+    expect(imp.json().permissions).toEqual(["content.edit", "content.read", "dashboard.read", "game.manage", "game.read", "glossary.manage", "media.rights"]);
     await stepUp(h, s);
     expect((await send(s, "POST", "/admin/v1/content/lesson/l-1/versions/1/publish", { reason: "релиз" })).statusCode).toBe(403);
     expect((await send(s, "POST", "/admin/v1/content/media_asset/m-own/versions/1/rights-approve", { note: "Своя запись" })).statusCode).toBe(200);

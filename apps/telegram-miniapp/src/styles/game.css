@@ -1,0 +1,151 @@
+/* ==========================================================================
+   Sprint 6 screens in the notebook language: the game block of Home (hero, level, tils, freezes, quests), the week day
+   closed by a freeze, the hero picker (tiles and stages), the shop, the history of the ledger, badges, the rewards after a
+   session. Tokens only, no colour literals; a state is never shown by colour alone (a snowflake and a dashed frame for a
+   frozen day, a check and a word for a done quest, «Куплено» / «Надето» words, signs on amounts, a progress text next to
+   every bar). Cosmetics of the shop set only --game-bg / --game-accent to var(--<token>) of the allowlist.
+   Same layer as content.css / lessons.css / memory.css (request to move into ui-tokens — README).
+   ========================================================================== */
+@layer layout {
+  /* ---------- the game block of Home ---------- */
+  .game-card { background: var(--game-bg, var(--card)); display: flex; flex-direction: column; gap: 12px; }
+  .game-top { display: flex; gap: 12px; align-items: center; }
+  .game-hero {
+    flex-shrink: 0; width: 92px; height: 104px; display: grid; place-items: end center; border-radius: var(--r-card);
+    border: 3px solid transparent; background: var(--card);
+  }
+  .game-hero.framed { border-color: var(--game-accent, var(--pen)); }
+  .game-hero .hero { height: 98px; width: auto; max-width: 86px; }
+  .game-top .grow { display: flex; flex-direction: column; gap: 3px; }
+  .game-top .h3 { font-size: 16px; }
+  .lvl { display: flex; flex-direction: column; gap: 6px; }
+  .lvl .prog { height: 10px; border-radius: 5px; }
+  .lvl .prog > div { border-radius: 5px; }
+  .game-stats { display: flex; gap: 8px; flex-wrap: wrap; }
+  .game-stats .stt { min-height: 36px; font-size: 13.5px; }
+  .stt .coin { color: var(--warn); }
+  .stt .snow { color: var(--pen); }
+  .game-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .game-link {
+    min-height: var(--tap); border: 1.5px solid var(--line); border-radius: var(--r-btn); background: var(--card); color: var(--ink);
+    font: 600 13px var(--font-body); display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; padding: 0 6px;
+  }
+  .game-link svg { color: var(--pen); flex-shrink: 0; }
+  .game-invite { display: flex; gap: 12px; align-items: center; }
+  .game-invite .hero { height: 96px; width: auto; flex-shrink: 0; }
+  .game-events { display: flex; flex-direction: column; gap: 6px; }
+
+  /* ---------- the week: a day closed by a freeze (a snowflake and a dashed frame, not colour only) ---------- */
+  .wd.frz { background: var(--pen-soft); color: var(--pen); border: 1.5px solid var(--pen); }
+  .wd .wd-ic { display: grid; place-items: center; height: 14px; }
+  .frz-legend { display: flex; gap: 6px; align-items: flex-start; }
+  .frz-legend svg { color: var(--pen); flex-shrink: 0; margin-top: 1px; }
+
+  /* ---------- quests of the day ---------- */
+  .quests { display: flex; flex-direction: column; gap: 10px; }
+  .q-row { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .q-row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .q-head { display: flex; align-items: flex-start; gap: 10px; }
+  .q-head .t { flex: 1; min-width: 0; font-weight: 600; font-size: 14.5px; line-height: 1.35; }
+  .q-mk {
+    width: 22px; height: 22px; border-radius: 11px; border: 1.5px solid var(--ink2); flex-shrink: 0; display: grid; place-items: center;
+    background: var(--card);
+  }
+  .q-row.done .q-mk { background: var(--ok); border-color: var(--ok); color: var(--card); }
+  .q-meta { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-sm); color: var(--ink2); padding-left: 32px; }
+  .q-row .prog { margin-left: 32px; height: 6px; }
+  .q-bonus { display: flex; gap: 8px; align-items: center; }
+  .q-bonus svg { color: var(--warn); flex-shrink: 0; }
+
+  /* ---------- the hero picker ---------- */
+  .hero-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .hero-tile {
+    position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; min-height: 132px;
+    padding: 8px 4px 10px; border: 1.5px solid var(--line); border-radius: var(--r-card); background: var(--card); color: var(--ink);
+    font: 600 12.5px var(--font-body); text-align: center; cursor: pointer; line-height: 1.2;
+  }
+  .hero-tile .hero { height: 84px; width: auto; max-width: 100%; }
+  .hero-tile[aria-pressed="true"] { border: 2.5px solid var(--pen); background: var(--pen-soft); }
+  .hero-tile .tick {
+    position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 11px; background: var(--pen); color: var(--pen-ink);
+    display: grid; place-items: center;
+  }
+  .hero-tile .mine {
+    position: absolute; top: 6px; left: 6px; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 8px; background: var(--ok-soft);
+    color: var(--ok);
+  }
+  .stage-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .stage {
+    display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 12px; border: 1.5px solid var(--line);
+    background: var(--card); text-align: center; font-size: var(--fs-sm);
+  }
+  .stage .hero { height: 72px; width: auto; max-width: 100%; }
+  .stage b { font-size: 13px; }
+  .stage.cur { border: 2.5px solid var(--pen); }
+  .stage .pill { min-height: 20px; }
+  .ob-body.hero-ob { padding-left: 0; padding-right: 0; padding-bottom: 12px; }
+  .grow-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-md); list-style: disc; }
+  .grow-list li { display: list-item; }
+
+  /* ---------- the shop ---------- */
+  .shop-item { display: flex; gap: 12px; align-items: flex-start; }
+  .shop-vis {
+    width: 64px; height: 64px; flex-shrink: 0; border-radius: 12px; display: grid; place-items: center; overflow: hidden;
+    background: var(--game-bg, var(--pen-soft)); border: 3px solid var(--game-accent, var(--line)); color: var(--pen);
+  }
+  .shop-vis img { width: 100%; height: 100%; object-fit: cover; }
+  .shop-item .grow { display: flex; flex-direction: column; gap: 6px; }
+  .shop-acts { display: flex; flex-direction: column; gap: 6px; }
+  .shop-acts .btn, .shop-acts .btn2 { min-height: 44px; font-size: 14px; }
+  .bal { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .bal-h { display: flex; gap: 8px; align-items: center; }
+  .bal-h svg { color: var(--warn); flex-shrink: 0; }
+
+  /* ---------- the history of the ledger ---------- */
+  .hist-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--card); }
+  .hist-row:last-child { border-bottom: 0; }
+  .hist-row .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .hist-row .t b { font-weight: 600; font-size: 14.5px; }
+  .amt { font-weight: 700; font-size: 15px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .amt.rev { text-decoration: line-through; color: var(--ink2); }
+
+  /* ---------- badges ---------- */
+  .badge-row { display: flex; gap: 12px; align-items: flex-start; }
+  .badge-ic {
+    width: 52px; height: 52px; border-radius: 26px; flex-shrink: 0; display: grid; place-items: center; overflow: hidden;
+    background: var(--ok-soft); color: var(--ok); border: 2px solid var(--ok);
+  }
+  .badge-ic img { width: 100%; height: 100%; object-fit: cover; }
+  .badge-ic.open { background: var(--card); color: var(--ink2); border: 2px dashed var(--ink2); }
+  .badge-row .grow { display: flex; flex-direction: column; gap: 4px; }
+  .badge-row .prog { height: 6px; }
+
+  /* ---------- rewards after a session ---------- */
+  .rw-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 10px; }
+  .rw-sum { display: flex; flex-wrap: wrap; gap: 8px; }
+  .rw-sum .stt { min-height: 36px; }
+  .rw-sum .stt svg { color: var(--pen); }
+  .rw-sum .stt .coin { color: var(--warn); }
+  .rw-line { display: flex; gap: 8px; align-items: flex-start; }
+  .rw-line svg { flex-shrink: 0; color: var(--pen); margin-top: 1px; }
+  .rw-hero { display: flex; gap: 10px; align-items: center; }
+  .rw-hero .hero { height: 72px; width: auto; }
+  .rw-card.celebrate { animation: rwPop .45s var(--ease) both; }
+  .rw-confetti { position: absolute; inset: 0; pointer-events: none; }
+  .rw-confetti i {
+    position: absolute; top: -8px; width: 7px; height: 11px; border-radius: 2px; opacity: 0; animation: rwFall 1.4s var(--ease) .1s 1 both;
+  }
+  .rw-confetti i:nth-child(3n) { background: var(--pen); }
+  .rw-confetti i:nth-child(3n + 1) { background: var(--mark); }
+  .rw-confetti i:nth-child(3n + 2) { background: var(--ok); }
+  @keyframes rwPop { from { transform: scale(.94); opacity: 0; } 60% { transform: scale(1.02); opacity: 1; } to { transform: none; opacity: 1; } }
+  @keyframes rwFall { 0% { opacity: 1; transform: translateY(0) rotate(0); } 100% { opacity: 0; transform: translateY(150px) rotate(220deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .rw-card.celebrate { animation: none; }
+    .rw-confetti { display: none; }
+  }
+
+  /* ---------- children: bigger targets ---------- */
+  .app[data-learner="child"] .hero-tile { min-height: 140px; font-size: 13.5px; }
+  .app[data-learner="child"] .q-head .t { font-size: 15.5px; }
+}

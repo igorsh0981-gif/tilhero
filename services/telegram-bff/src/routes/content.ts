@@ -124,7 +124,7 @@ export async function readAudio(resp: Response): Promise<Omit<AudioEntry, "etag"
   return { contentType, bytes: Buffer.concat(chunks), etag: resp.headers.get("etag") };
 }
 
-const etagMatches = (header: string | undefined, etag: string): boolean =>
+export const etagMatches = (header: string | undefined, etag: string): boolean =>
   !!header && header.split(",").some((t) => t.trim().replace(/^W\//, "") === etag || t.trim() === "*");
 
 export function contentRoutes(app: App, ctx: BffContext): void {

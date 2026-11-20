@@ -2,11 +2,12 @@
  * Матрица по всем маршрутам /v1 (перечень — из OpenAPI приложения, новые маршруты обязаны попасть в SAMPLES):
  *  - защищённые маршруты без токена → 401 UNAUTHORIZED, с мусором → 401 TOKEN_INVALID, домены не вызываются;
  *  - 4xx домена пробрасывается клиенту как ErrorBody {code, message, trace_id = X-Trace-Id запроса, details};
- *  - 5xx домена → 503 UPSTREAM_UNAVAILABLE {service}.
+ *  - 5xx домена → 503 UPSTREAM_UNAVAILABLE {service}; игра (спринт 6) — 503 GAME_UNAVAILABLE {service: gamification},
+ *    картинки игры: 4xx домена → 404 ASSET_NOT_FOUND.
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { bearer, closeRedis, initDataFor, login, makeHarness, type Harness, type LoggedIn } from "./helpers.js";
+import { bearer, closeRedis, initDataFor, login, makeHarness, type Harness, type LoggedIn, type Service } from "./helpers.js";
 import { makeWav } from "./wavFixture.js";
 
 let h: Harness;
@@ -39,6 +40,9 @@ type Sample = {
   /** спринт 5: тело не JSON (audio/wav) и строка запроса */
   raw?: { body: Buffer; contentType: string };
   query?: string;
+  /** спринт 6: маршрут игры (сбой gamification → 503 GAME_UNAVAILABLE); asset — публичная картинка (4xx домена → 404) */
+  game?: boolean;
+  asset?: boolean;
 };
 
 /** Пример корректного запроса для каждого маршрута: ключ — "METHOD /openapi/path". */
@@ -165,6 +169,20 @@ const SAMPLES: Record<string, Sample> = {
   "get /v1/practice/readings/{id}": { params: { id: "r-a1-coffee-shop" } },
   "post /v1/practice/readings/{id}/sessions": { params: { id: "r-a1-coffee-shop" }, idem: true },
   "put /v1/learners/{learner_id}/voice-consent": { params: { learner_id: ID }, payload: { granted: true } },
+  // спринт 6
+  "get /v1/game/summary": { game: true },
+  "get /v1/game/heroes": { game: true },
+  "get /v1/game/quests": { game: true },
+  "get /v1/game/badges": { game: true },
+  "get /v1/game/shop": { game: true },
+  "get /v1/game/history": { game: true },
+  "get /v1/game/rewards": { game: true, query: `source_session_id=${ID}` },
+  "get /v1/game/settings": { game: true },
+  "put /v1/game/hero": { game: true, payload: { hero_code: "robot_0" } },
+  "put /v1/game/equipment": { game: true, payload: { background_code: null, frame_code: null } },
+  "patch /v1/game/settings": { game: true, payload: { auto_freeze: false } },
+  "post /v1/game/shop/purchases": { game: true, payload: { item_code: "streak_freeze" }, idem: true },
+  "get /v1/game/assets/{asset_id}/{sha256}": { game: true, asset: true, params: { asset_id: "a-robot_0-1", sha256: "a".repeat(64) } },
 };
 
 interface Op {
@@ -210,6 +228,7 @@ describe("матрица маршрутов /v1", () => {
     expect(ops.filter((o) => !o.secured).map((o) => o.key).sort()).toEqual(
       [
         "get /v1/experience/config",
+        "get /v1/game/assets/{asset_id}/{sha256}",
         "get /v1/guardian-consents/{token}",
         "get /v1/legal/policy",
         "post /v1/session/refresh",
@@ -236,7 +255,8 @@ describe("матрица маршрутов /v1", () => {
       if (sample.noDomain) continue;
       // refresh без живой сессии не дойдёт до домена — свежая сессия на каждый маршрут
       s = await login(h);
-      h.fake.failAll = { status: 409, code: "DOMAIN_SAYS_NO", except: new Set() };
+      // игра: ошибку отвечает gamification (identity — для полосы ученика — работает)
+      h.fake.failAll = { status: 409, code: "DOMAIN_SAYS_NO", except: new Set<Service>(sample.game ? ["identity"] : []) };
       const res = await call(op, bearer(s.access));
       h.fake.failAll = null;
       if (op.key === "post /v1/session/telegram") {
@@ -246,6 +266,10 @@ describe("матрица маршрутов /v1", () => {
       }
       if (sample.speech) {
         expect([res.statusCode, res.json().code, res.json().details], op.key).toEqual([503, "SPEECH_UNAVAILABLE", { service: "tts" }]);
+        continue;
+      }
+      if (sample.asset) {
+        expect([res.statusCode, res.json().code], op.key).toEqual([404, "ASSET_NOT_FOUND"]);
         continue;
       }
       expect(res.statusCode, `${op.key}: ${res.body}`).toBe(409);
@@ -263,11 +287,12 @@ describe("матрица маршрутов /v1", () => {
       const sample = SAMPLES[op.key]!;
       if (sample.noDomain) continue;
       s = await login(h);
-      h.fake.failAll = { status: 500, code: "BOOM", except: new Set() };
+      h.fake.failAll = { status: 500, code: "BOOM", except: new Set<Service>(sample.game ? ["identity"] : []) };
       const res = await call(op, bearer(s.access));
       h.fake.failAll = null;
       expect(res.statusCode, `${op.key}: ${res.body}`).toBe(503);
-      expect(res.json().code, op.key).toBe(sample.speech ? "SPEECH_UNAVAILABLE" : "UPSTREAM_UNAVAILABLE");
+      expect(res.json().code, op.key).toBe(sample.speech ? "SPEECH_UNAVAILABLE" : sample.game ? "GAME_UNAVAILABLE" : "UPSTREAM_UNAVAILABLE");
+      if (sample.game) expect(res.json().details, op.key).toEqual({ service: "gamification" });
       expect(typeof res.json().details.service, op.key).toBe("string");
       expect(res.body, op.key).not.toContain("BOOM");
     }

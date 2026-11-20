@@ -33,10 +33,14 @@ PARAMS: dict[str, dict] = {
                               "linked_asset_id": None},
     "appeal_decided": {"appeal_id": INVITE, "evaluation_id": INVITE, "decision": "corrected"},
     "reviews_due": {"local_date": "2026-11-20", "due_count": 12},
+    "streak_frozen": {"local_date": "2026-11-19", "freeze_left": 1},
+    "badge_earned": {"badge_code": "streak_7"},
+    "hero_stage_reached": {"hero_code": "human_0", "stage": 2},
     "pin.reset_code": {"code": "482913", "ttl_minutes": 10},
     "pin.reset_scheduled": {"effective_at": "2026-11-19T05:30:00.000Z"},
 }
-for base in ("lesson.reminder", "lesson.missed", "lesson.comeback", "appeal_decided", "reviews_due"):
+for base in ("lesson.reminder", "lesson.missed", "lesson.comeback", "appeal_decided", "reviews_due", "streak_frozen",
+             "badge_earned", "hero_stage_reached"):
     PARAMS[base + ".kid"] = PARAMS[base]
 
 # Детям и о детях — без давления: ни «потери серии», ни «провала» (CONVENTIONS §8). Список — в коде: им же
@@ -56,13 +60,17 @@ STARTAPP = {
     "media_request.decided": "route_media_requests",
     "appeal_decided": "route_lessons",
     "reviews_due": "route_review",
+    "streak_frozen": "route_home",
+    "badge_earned": "route_progress",
+    "hero_stage_reached": "route_home",
 }
 
 
 def test_every_template_has_params_fixture() -> None:
     assert set(PARAMS) == set(TEMPLATES)
     assert KID_TEMPLATES == {"lesson.reminder.kid", "lesson.missed.kid", "lesson.comeback.kid",
-                             "appeal_decided.kid", "reviews_due.kid"}
+                             "appeal_decided.kid", "reviews_due.kid", "streak_frozen.kid", "badge_earned.kid",
+                             "hero_stage_reached.kid"}
 
 
 @pytest.mark.parametrize("name", sorted(TEMPLATES))
@@ -178,4 +186,8 @@ def test_registry_flags() -> None:
     assert TEMPLATES["pin.reset_code"].direct_only and not TEMPLATES["pin.reset_code"].in_app
     assert not TEMPLATES["invite.declined"].gated
     categories = {s.category for s in TEMPLATES.values()}
-    assert categories == {"reminders", "missed", "social", "support", "product", "service"}
+    assert categories == {"reminders", "missed", "social", "support", "product", "service", "game"}
+    # спринт 6: детям — только центр у шаблонов игры, и только у них
+    assert {n for n, s in TEMPLATES.items() if s.kid_in_app_only} == {
+        "streak_frozen", "streak_frozen.kid", "badge_earned", "badge_earned.kid", "hero_stage_reached",
+        "hero_stage_reached.kid"}

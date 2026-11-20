@@ -34,7 +34,7 @@ export interface NavItem {
   /** visible when the staff member has ANY of these permissions (Me.permissions) */
   perms: readonly Permission[];
   /** section of a later sprint: honest «soon» screen with the sprint number */
-  soon?: 6;
+  soon?: number;
 }
 
 /** Default order and grouping (prototype NAV). */
@@ -50,9 +50,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: "agents", group: "ai", icon: "cpu", perms: ["ai.read"] },
   { id: "qa", group: "ai", icon: "clipboardCheck", perms: ["qa.read"] },
   { id: "costs", group: "ai", icon: "gauge", perms: ["costs.read"] },
-  { id: "heroes", group: "game", icon: "hero", perms: ["dashboard.read"], soon: 6 },
-  { id: "game", group: "game", icon: "trophy", perms: ["dashboard.read"], soon: 6 },
-  { id: "events", group: "game", icon: "calendar", perms: ["dashboard.read"], soon: 6 },
+  // sprint 6: «Герои», «Геймификация» (rules, shop, wallets, overview), «События и сезоны» — game.read; commands need
+  // game.manage / game.publish / wallet.adjust (buttons hidden without them, the domain re-checks)
+  { id: "heroes", group: "game", icon: "hero", perms: ["game.read"] },
+  { id: "game", group: "game", icon: "trophy", perms: ["game.read"] },
+  { id: "events", group: "game", icon: "calendar", perms: ["game.read"] },
   // «Новости и „Что нового“» of the prototype: release notes + notification templates + campaigns (tabs by right)
   { id: "news", group: "comms", icon: "sparkles", perms: ["whatsnew.manage", "notif.templates.manage", "notif.campaigns.manage"] },
   { id: "support", group: "comms", icon: "support", perms: ["support.read"] },
@@ -66,6 +68,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
 export const PAGE_IDS: readonly PageId[] = NAV_ITEMS.map((i) => i.id);
 export const GROUPS: readonly NavGroup[] = ["product", "ai", "game", "comms", "manage"];
 export const navItem = (id: string): NavItem | undefined => NAV_ITEMS.find((i) => i.id === id);
+/**
+ * Ids of the experience-config menu that name a section of admin-web by another id: INTERNAL_API sprint 6 §8 calls the
+ * events section `game_events` (the 1.0.0 seed says `events`) — either one places and switches «События и сезоны».
+ */
+export const MENU_ALIASES: Readonly<Record<string, PageId>> = { game_events: "events" };
+const menuItem = (id: string): NavItem | undefined => navItem(MENU_ALIASES[id] ?? id);
 export const GROUP_OF: Readonly<Record<PageId, NavGroup>> = Object.fromEntries(NAV_ITEMS.map((i) => [i.id, i.group])) as Record<PageId, NavGroup>;
 
 export const allowed = (item: NavItem, perms: ReadonlySet<Permission>) => item.perms.some((p) => perms.has(p));
@@ -82,7 +90,7 @@ export function orderedItems(menu: readonly MenuEntry[] | null | undefined): Nav
   const seen = new Set<string>();
   const out: NavItem[] = [];
   for (const m of menu) {
-    const it = navItem(m.id);
+    const it = menuItem(m.id);
     if (!it || seen.has(it.id)) continue;
     seen.add(it.id);
     if (m.enabled) out.push(it);

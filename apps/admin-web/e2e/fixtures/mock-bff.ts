@@ -29,6 +29,7 @@ import * as F from "./data";
 import { ContentStore } from "./content-bff";
 import { AiStore, type AiScenario } from "./ai-bff";
 import { MemoryStore, type MemoryScenario } from "./memory-bff";
+import { GameStore, type GameScenario } from "./game-bff";
 import * as CD from "./content-data";
 
 export interface Scenario {
@@ -46,11 +47,13 @@ export interface Scenario {
   /** replace the permissions of a role */
   matrix?: Partial<Record<RoleCode, Permission[]>>;
   /** dashboard blocks whose source is down (available=false) */
-  dashOff?: Array<"learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai" | "memory">;
+  dashOff?: Array<"learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai" | "memory" | "game">;
   /** sprint 4: AI spend, emergency stop, provider key, domains down in the session card */
   ai?: AiScenario;
   /** sprint 5: memory and the course dictionary (stats down, AI queue unknown, analytics down) */
   memory?: MemoryScenario;
+  /** sprint 6: the game (hero in use, a draft conflict, the stats down, the ledger page size) */
+  game?: GameScenario;
   /** the audit log cannot be written: reveal → 503 AUDIT_UNAVAILABLE */
   auditDown?: boolean;
   /** no ADMIN_TEST_CHAT_IDS in notifications */
@@ -154,6 +157,7 @@ export class MockBff {
   content = new ContentStore();
   ai: AiStore;
   memory: MemoryStore;
+  game: GameStore;
   session: Session | null = null;
   versions: Record<ConfigApp, ConfigVersion[]>;
   activations: Record<ConfigApp, ConfigActivation[]>;
@@ -171,6 +175,7 @@ export class MockBff {
     this.tickets = F.tickets(this.learners);
     this.ai = new AiStore(sc.ai ?? {});
     this.memory = new MemoryStore(sc.memory ?? {});
+    this.game = new GameStore(sc.game ?? {});
     if (sc.singleSuperAdmin) this.accounts = this.accounts.filter((a) => a.staff.staff_id !== F.ID.admin2);
     if (sc.stalled) {
       const c = this.campaigns.find((x) => x.campaign_id === "e1000000-0000-4000-8000-000000000002")!;
@@ -338,7 +343,7 @@ export class MockBff {
 
   private dashboard(period: Dashboard["period"]): Dashboard {
     const off = new Set(this.sc.dashOff ?? []);
-    const blk = <T,>(k: "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai" | "memory", svc: string, data: T) => (off.has(k) ? { available: false, data: null, service: svc } : { available: true, data });
+    const blk = <T,>(k: "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai" | "memory" | "game", svc: string, data: T) => (off.has(k) ? { available: false, data: null, service: svc } : { available: true, data });
     const ls = this.learners;
     const accounts = ls.filter((x) => x.kind === "account").length;
     const kids = ls.filter((x) => x.kind === "child").length;
@@ -387,6 +392,8 @@ export class MockBff {
       ai: blk("ai", "ai-gateway", this.ai.summary("month")),
       // sprint 5: memory stats + the AI translation queue of catalog (null — catalog did not answer)
       memory: this.sc.memory?.statsDown ? { available: false, data: null, service: "memory" } : blk("memory", "memory", this.memory.stats(period)),
+      // sprint 6: the game block (gamification); its failure never breaks the overview
+      game: ((st) => (st ? blk("game", "gamification", st) : { available: false, data: null, service: "gamification" }))(this.game.stats(period)),
     };
   }
 
@@ -1109,6 +1116,7 @@ export class MockBff {
           err: (st: number, code: string, details?: Record<string, unknown>) => err(st, code, details),
           binary: (st: number, buf: Buffer, ct: string) => route.fulfill({ status: st, contentType: ct, body: buf, headers: { "Cache-Control": "private, max-age=3600" } }),
         };
+        if (await this.game.handle(method, path, body, q, idemKey, req.postDataBuffer(), headers, ctx)) return;
         if (await this.ai.handle(method, path, body, q, idemKey, headers, ctx)) return;
         if (await this.memory.handle(method, path, body, q, headers, ctx)) return;
         const done = await this.content.handle(method, path, body, q, idemKey, {

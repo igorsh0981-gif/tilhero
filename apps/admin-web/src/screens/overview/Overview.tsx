@@ -6,7 +6,7 @@
  * the others keep working (admin.ts Dashboard, always 200; a block missing in an older admin-bff counts as down).
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { AiUsageSummary, ContentSummary, Dashboard, DashboardBlock, DashboardCampaigns, DashboardLearners, DashboardWhatsNew, DiagnosticStats, LessonStats, MemoryStats, SupportStats } from "@tilhero/contracts/admin";
+import type { AiUsageSummary, ContentSummary, Dashboard, DashboardBlock, DashboardCampaigns, DashboardLearners, DashboardWhatsNew, DiagnosticStats, GameStats, LessonStats, MemoryStats, SupportStats } from "@tilhero/contracts/admin";
 import type { ContentKind } from "@tilhero/contracts/content";
 import { DashboardApi, type Period } from "../../api/endpoints";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -17,9 +17,10 @@ import { LoadError } from "../../ui/LoadError";
 import { Btn, Callout, cx, Seg, Spinner } from "../../ui/kit";
 import { setAiEnabled } from "../ai/aiState";
 import { budgetLevel, usd } from "../ai/model";
+import { zoneDateTime } from "../game/model";
 
 const PERIODS: readonly Period[] = ["today", "7d", "30d"];
-type BlockKey = "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai" | "memory";
+type BlockKey = "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai" | "memory" | "game";
 const SESSION_KINDS = ["lesson", "scenario", "media", "review", "reading"] as const;
 const OFF = (service: string) => ({ available: false, data: null, service });
 const DX_AREAS = ["vocabulary", "grammar", "reading", "listening"] as const;
@@ -102,6 +103,10 @@ export function Overview() {
             {/* sprint 5: memory and reviews; a failure of this block never breaks the overview */}
             <Block<MemoryStats> k="memory" icon="trendDown" block={data.memory ?? OFF("memory")} empty={(x) => x.review_sessions === 0 && x.learners_reviewing === 0 && !x.ai_glosses_pending}>
               {(x) => <MemoryBody x={x} period={periodLabel} />}
+            </Block>
+            {/* sprint 6: the game (gamification); a failure of this block never breaks the overview */}
+            <Block<GameStats> k="game" icon="trophy" block={data.game ?? OFF("gamification")} empty={(x) => x.earned_xp === 0 && x.earned_til === 0 && x.freezes_used === 0 && x.quests_completed === 0 && !x.active_event}>
+              {(x) => <GameBody x={x} asked={period} />}
             </Block>
           </div>
         </>
@@ -560,6 +565,50 @@ function MemoryBody({ x, period }: { x: MemoryStats; period: string }) {
         <Btn size="sm" icon="trendDown" label={t("dmem.open")} onClick={() => navigate("memory", "analytics")} testId="dmem-open" />
         {can("content.read") && <Btn size="sm" icon="layers" label={t("dmem.queue")} onClick={() => navigate("content", "glossary/queue")} testId="dmem-queue" />}
       </div>
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------- sprint 6: the game */
+
+/** The block names the period of its own data: gamification has no daily totals — for «today» it answers 7 days. */
+function GameBody({ x, asked }: { x: GameStats; asked: Period }) {
+  const { t, fmt } = useI18n();
+  const { can } = useSession();
+  const { navigate } = useNav();
+  const period = t(`dash.period.${x.period}`);
+  return (
+    <>
+      {x.period !== asked && (
+        <p className="xs muted" data-testid="dgm-period-note">
+          {t("dgm.periodNote", { p: period })}
+        </p>
+      )}
+      <Row k={t("dgm.xp", { p: period })} v={fmt.num(x.earned_xp)} testId="dgm-xp" />
+      <Row k={t("dgm.til", { p: period })} v={fmt.num(x.earned_til)} testId="dgm-til" />
+      <Row k={t("dgm.freezes", { p: period })} v={fmt.num(x.freezes_used)} testId="dgm-freezes" />
+      <Row k={t("dgm.quests", { p: period })} v={fmt.num(x.quests_completed)} testId="dgm-quests" />
+      <Row
+        k={t("dgm.event")}
+        testId="dgm-event"
+        v={
+          x.active_event ? (
+            <span className="wrap-any" lang="ru">
+              {x.active_event.title.ru}
+              <span className="xs muted block">{t("dgm.until", { t: zoneDateTime(fmt.locale, x.active_event.ends_at) })}</span>
+            </span>
+          ) : (
+            <span className="muted">{t("dgm.noEvent")}</span>
+          )
+        }
+      />
+      <p className="xs muted">{t("dgm.note")}</p>
+      {can("game.read") && (
+        <div className="acts">
+          <Btn size="sm" icon="trophy" label={t("dgm.open")} onClick={() => navigate("game", "overview")} testId="dgm-open" />
+          <Btn size="sm" icon="calendar" label={t("dgm.events")} onClick={() => navigate("events")} testId="dgm-events" />
+        </div>
+      )}
     </>
   );
 }

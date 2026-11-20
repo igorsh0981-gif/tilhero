@@ -74,7 +74,8 @@ class Dispatcher:
     @property
     def rules(self) -> Rules:
         s = self.settings
-        return Rules(default_tz=s.default_timezone, kid_window=(s.kid_window_start, s.kid_window_end))
+        return Rules(default_tz=s.default_timezone, kid_window=(s.kid_window_start, s.kid_window_end),
+                     category_gates={"game": s.game_category_gate}, center_when_disabled=frozenset({"game"}))
 
     def wake(self) -> None:
         self._wake.set()
@@ -273,6 +274,7 @@ class Dispatcher:
             center_only=c.center_only,
             not_before=c.not_before,
             stale_after=c.stale_after,
+            kid_in_app_only=spec.kid_in_app_only,
         )
         decision = decide(item, delivery.recipient(), now, self.rules)
         async with self.rt.transaction() as session:
@@ -298,7 +300,7 @@ class Dispatcher:
                 assert decision.at is not None
                 await store.mark_deferred(session, c, at=decision.at, reason=decision.reason or "deferred", now=now)
                 return "scheduled"
-            # 5. лимит местных суток (reminders + missed + social); сама запись (повтор) не считается
+            # 5. лимит местных суток (reminders + missed + social + game); сама запись (повтор) не считается
             if limit_applies(c.category):
                 day = local_day(now, zone(delivery.timezone, s.default_timezone))
                 used = await store.count_limit(session, c.user_id, day, exclude=c.notification_id)

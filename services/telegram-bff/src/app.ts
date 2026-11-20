@@ -17,6 +17,7 @@ import { schemaErrors, type App } from "./http.js";
 import { EXTRA_REDACT_PATHS, scrub, type LogSink } from "./logging.js";
 import { createLimiter } from "./rateLimit.js";
 import { familyRoutes } from "./routes/family.js";
+import { gameRoutes } from "./routes/game.js";
 import { lessonsRoutes } from "./routes/lessons.js";
 import { memoryRoutes } from "./routes/memory.js";
 import { pronunciationRoutes } from "./routes/pronunciation.js";
@@ -32,7 +33,7 @@ import { supportRoutes } from "./routes/support.js";
 import { whatsNewRoutes } from "./routes/whatsNew.js";
 import { SessionStore } from "./sessions.js";
 import { AccessTokens } from "./tokens.js";
-import { SERVICE_NAME, createDomains, createTts } from "./upstream.js";
+import { SERVICE_NAME, createDomains, createGame, createTts } from "./upstream.js";
 
 export interface AppDeps {
   /** Внешний Redis (тесты); иначе создаётся по REDIS_URL и закрывается вместе с приложением. */
@@ -182,6 +183,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
           { name: "speech" },
           { name: "memory" },
           { name: "reading" },
+          { name: "game" },
         ],
       },
       hideUntagged: true,
@@ -234,11 +236,22 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
       onFailure: (info) =>
         log.warn({ upstream: info.service, upstream_status: info.status, upstream_code: info.code }, "domain unavailable"),
     }),
+    game: createGame({
+      url: config.gamificationUrl,
+      key: keyRing,
+      timeoutMs: config.upstreamTimeoutMs,
+      retries: config.upstreamRetries,
+      ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+      onFailure: (info) =>
+        log.warn({ upstream: info.service, upstream_status: info.status, upstream_code: info.code }, "domain unavailable"),
+    }),
     log,
     store: makeStoreGuard(log),
   };
   // tts необязателен (BFF выкладывается раньше него): одно предупреждение при старте, маршрут отвечает 503
   if (!ctx.tts) log.warn({ upstream: "tts" }, "TTS_URL is not set: POST /v1/speech answers 503 SPEECH_UNAVAILABLE");
+  // gamification необязателен (спринт 6): без адреса игровой блок Mini App скрыт, учёба работает
+  if (!ctx.game) log.warn({ upstream: "gamification" }, "GAMIFICATION_URL is not set: /v1/game/* answer 503 GAME_UNAVAILABLE");
 
   registerAuth(app, ctx);
 
@@ -277,6 +290,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   memoryRoutes(app, ctx);
   readingRoutes(app, ctx);
   await pronunciationRoutes(app, ctx);
+  gameRoutes(app, ctx);
 
   if (!config.isSecure) {
     app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());

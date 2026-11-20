@@ -28,17 +28,18 @@ export const ALL_PERMS: Permission[] = [...PERMISSIONS];
 /** Default matrix (PLAN.md «Роли и права»; super_admin — all; users.sensitive.read, staff.manage, roles.manage — only super_admin). */
 export const MATRIX: Record<RoleCode, Permission[]> = {
   super_admin: [...ALL_PERMS],
-  // sprint 5: + memory.read, memory.manage (step-up)
-  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read", "memory.manage"],
+  // sprint 5: + memory.read, memory.manage (step-up); sprint 6: + game.read, game.manage, game.publish, wallet.adjust
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read", "memory.manage", "game.read", "game.manage", "game.publish", "wallet.adjust"],
   communications: ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"],
-  support: ["dashboard.read", "users.read", "support.read", "support.reply"],
+  // sprint 6: + game.read (the wallet of a learner from a ticket)
+  support: ["dashboard.read", "users.read", "support.read", "support.reply", "game.read"],
   // sprint 3 (PLAN «Права и роли»)
   // sprint 4: + agents, dialogue QA, costs; sprint 5: + memory.read, glossary.manage
-  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish", "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "memory.read", "glossary.manage"],
-  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage"],
+  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish", "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "memory.read", "glossary.manage", "game.read"],
+  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage", "game.read", "game.manage"],
   qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts", "memory.read"],
-  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read"],
-  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read"],
+  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
   read_only: ["dashboard.read"],
 };
 

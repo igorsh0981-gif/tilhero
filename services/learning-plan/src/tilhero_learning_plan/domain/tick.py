@@ -19,7 +19,8 @@
 - reminder: момент слота попал в окно, напоминания включены, в местную дату слота занятий нет;
 - missed: в окне закончился местный день слота (00:00 следующей даты), занятий в эту дату нет; выпускается и без
   reminders_enabled (решение — в notifications по категории missed). consecutive_missed = 1 + выпущенные пропуски
-  после последнего дня с занятием; next_slot_date — следующая дата графика.
+  после последнего дня с занятием или с заморозкой серии (спринт 6, `frozen_days`); next_slot_date — следующая
+  дата графика.
 Серия (streak_days) и consecutive_missed считаются после вставки всех отметок пачки: пропуск, выпущенный в том же
 проходе за более раннюю дату (окно до 24 ч), уже учтён.
 Слоты раньше effective_from (завершение онбординга, последняя смена времени/дней/зоны) не учитываются: новый график
@@ -80,7 +81,7 @@ _INSERT_MARKS = text("""
 """)
 
 # серия на дату слота — как streak_days (domain/plans.py): дни с занятием после последнего выпущенного пропуска
-# без занятия, не позже даты слота
+# без занятия и без заморозки (спринт 6), не позже даты слота
 _STREAKS = text("""
     SELECT c.user_id, c.d, (
         SELECT count(DISTINCT a.local_date) FROM activities a
@@ -90,18 +91,22 @@ _STREAKS = text("""
               WHERE m.user_id = c.user_id AND m.kind = 'missed' AND m.local_date < c.d
                 AND NOT EXISTS (SELECT 1 FROM activities x
                                 WHERE x.user_id = m.user_id AND x.local_date = m.local_date)
+                AND NOT EXISTS (SELECT 1 FROM frozen_days f
+                                WHERE f.user_id = m.user_id AND f.local_date = m.local_date)
           ), '-infinity'::date)
     ) AS n
     FROM unnest(CAST(:uids AS uuid[]), CAST(:dates AS date[])) AS c(user_id, d)
 """)
 
-# consecutive_missed = 1 + выпущенные пропуски раньше даты, после последнего дня с занятием
+# consecutive_missed = 1 + выпущенные пропуски раньше даты, после последнего дня с занятием или с заморозкой
+# (спринт 6: замороженный день разрывает цепочку пропусков и сам в неё не входит)
 _CONSECUTIVE = text("""
     SELECT c.user_id, c.d, 1 + (
         SELECT count(*) FROM slot_marks m
         WHERE m.user_id = c.user_id AND m.kind = 'missed' AND m.local_date < c.d
-          AND m.local_date > COALESCE((
-              SELECT max(a.local_date) FROM activities a WHERE a.user_id = c.user_id AND a.local_date < c.d
+          AND m.local_date > COALESCE(GREATEST(
+              (SELECT max(a.local_date) FROM activities a WHERE a.user_id = c.user_id AND a.local_date < c.d),
+              (SELECT max(f.local_date) FROM frozen_days f WHERE f.user_id = c.user_id AND f.local_date < c.d)
           ), '-infinity'::date)
     ) AS n
     FROM unnest(CAST(:uids AS uuid[]), CAST(:dates AS date[])) AS c(user_id, d)

@@ -13,7 +13,9 @@ seed/
   0003/golden/independent_evaluator.json      накладка 0003: новые кейсы (ie-19-kids-refused)
   0004/agents/teaching_coach.v2.json          накладка 0004 (спринт 5): v2 коуча — ЧЕРНОВИК (+ gloss_word, схема anyOf)
   0004/golden/teaching_coach.json             накладка 0004: 8 кейсов gloss_word (6 обязательных)
-  check_seed.py               самопроверка сида (база + накладки)
+  check_seed.py               самопроверка сида (база + накладки) и реестра агентов (спринт 6: domain/registry.py ↔
+                              ai.ts AgentId; code-агенты — с implemented_in и без файлов сида, gameplay_director →
+                              gamification)
   README.md
 ```
 

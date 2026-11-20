@@ -53,10 +53,10 @@ async def _cancel_open(db: AsyncSession, user_id: uuid.UUID, pair_id: str, skill
 async def on_skills_changed(db: AsyncSession, payload: dict[str, Any], occurred_at: datetime, now: datetime) -> None:
     user_id = uuid.UUID(str(payload["user_id"]))
     pair_id = str(payload["pair_id"])[:16]
+    await lock_user(db, user_id)  # до проверки удаления: сага держит ту же блокировку
     if await db.get(DeletedUser, user_id) is not None:
         return
     at = occurred_at.astimezone(UTC)
-    await lock_user(db, user_id)
     for ch in payload.get("changes") or []:
         if not isinstance(ch, dict) or not isinstance(ch.get("skill_id"), str):
             continue

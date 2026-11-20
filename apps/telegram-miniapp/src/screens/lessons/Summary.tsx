@@ -7,6 +7,7 @@ import { useLoad } from "../../state/hooks";
 import { Icon } from "../../ui/Icon";
 import { Btn, cx, ErrorLine, Margin, NoBreakHyphens, Pill, Skeleton } from "../../ui/kit";
 import { Bar } from "../../ui/shell";
+import { SessionRewardsCard } from "../game/Rewards";
 import { StateChip } from "../skills/SkillMap";
 import { useStartSession } from "./startSession";
 
@@ -24,9 +25,11 @@ async function actualEvaluation(read: (id: string) => Promise<EvaluationView>, i
  * answer (only where wrong), the skill changes, the words of the lesson, the next lesson, «Повторить упражнения»,
  * «Оспорить оценку» (within 14 days of the evaluation, then a short note) and the state of the appeal; «оценка появится
  * позже» when there is no evaluation yet — while the screen is open it is re-read on a schedule (6 attempts, ~2 min),
- * «Проверить оценку» re-reads it at once. Not a CEFR certificate — as in the placement test.
+ * «Проверить оценку» re-reads it at once. Not a CEFR certificate — as in the placement test. Sprint 6: the rewards of the
+ * game for this session (SessionRewardsCard), only when it was just finished in the player (`fresh`) — the same screen
+ * serves lessons, scenarios, media and reading.
  */
-export function LessonSummaryScreen({ sessionId, initial }: { sessionId: string; initial?: LessonSummary }) {
+export function LessonSummaryScreen({ sessionId, initial, fresh: justFinished = false }: { sessionId: string; initial?: LessonSummary; /** just finished in the player */ fresh?: boolean }) {
   const { bff, nav, session } = useApp();
   const { t, l } = useI18n();
   const kid = session.learner.kind === "child";
@@ -77,6 +80,10 @@ export function LessonSummaryScreen({ sessionId, initial }: { sessionId: string;
                 <Pill tone="mute">{t("sm.minutes", { n: s.minutes })}</Pill>
               </div>
             </div>
+
+            {/* sprint 6: XP, tils, a level, badges, the hero's growth of this session (credited by events — polled) — only
+                right after the player; a past session opened from the history shows no rewards and asks nothing */}
+            {justFinished && s.status === "completed" ? <SessionRewardsCard sessionId={s.session_id} /> : null}
 
             {/* a re-evaluation by appeal is told once, in the appeal card; a QA re-evaluation — by its own note */}
             {ev.data?.corrected && !appeal ? (

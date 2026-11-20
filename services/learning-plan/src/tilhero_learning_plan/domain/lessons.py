@@ -43,7 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tilhero_common.messaging import emit
 from tilhero_learning_plan.domain import schedule as sch
-from tilhero_learning_plan.domain.plans import ACTIVITY_RECORDED, lock_user
+from tilhero_learning_plan.domain.plans import ACTIVITY_RECORDED, lock_user, streak_after_activity
 from tilhero_learning_plan.models import Activity, CompletedLesson, DeletedUser, LessonEvaluation, Plan
 
 # kind сессии lessons → kind занятия (bff.ts SessionKind; review — повтор ошибок без влияния на освоение;
@@ -121,6 +121,7 @@ async def _insert_activity(session: AsyncSession, *, user_id: uuid.UUID, local: 
         "kind": kind,
         "minutes": minutes,
         "recorded_at": iso(at),
+        "streak_days": await streak_after_activity(session, user_id),  # спринт 6: значки серии gamification
     }, producer=producer)
     return True
 

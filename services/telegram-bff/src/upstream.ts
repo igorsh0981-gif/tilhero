@@ -248,7 +248,31 @@ export function createTts(o: {
   });
 }
 
-export type RawMethod = "GET" | "POST" | "PUT" | "DELETE";
+/** aud внутреннего JWT к gamification (спринт 6). Не в DOMAIN: адрес необязателен (config.gamificationUrl). */
+export const GAME_SERVICE = "gamification";
+
+/** Клиент gamification (RawClient: claims `lrn`/`age_band`, байты картинок); нет адреса — null (игра недоступна). */
+export function createGame(o: {
+  url: string | undefined;
+  key: InternalKey;
+  timeoutMs: number;
+  retries: number;
+  fetchImpl?: typeof fetch;
+  onFailure?: UpstreamLogger;
+}): RawClient | null {
+  if (!o.url) return null;
+  return new RawClient({
+    target: GAME_SERVICE,
+    baseUrl: o.url,
+    key: o.key,
+    timeoutMs: o.timeoutMs,
+    retries: o.retries,
+    fetchImpl: o.fetchImpl ?? ((...a) => fetch(...a)),
+    ...(o.onFailure ? { onFailure: o.onFailure } : {}),
+  });
+}
+
+export type RawMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export interface RawRequest {
   subject?: string | undefined;

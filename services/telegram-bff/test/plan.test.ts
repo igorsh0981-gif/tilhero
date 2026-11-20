@@ -169,6 +169,29 @@ describe("GET /v1/plan/today, POST /v1/plan/activity", () => {
     const back = await switchTo(h, c, s.userId);
     expect((await get("/v1/plan/today", back.access)).json().minutes_today).toBe(0);
   });
+
+  it("спринт 6: week[].frozen — как у learning-plan; без поля (learning-plan до спринта 6) — false, и в ответе на занятие", async () => {
+    const week = [
+      { local_date: "2026-11-16", scheduled: true, done: false, missed: true, frozen: true },
+      { local_date: "2026-11-17", scheduled: true, done: true, missed: false },
+      { local_date: "2026-11-18", scheduled: false, done: false, missed: false, frozen: "yes" },
+    ];
+    const today = { local_date: "2026-11-18", is_scheduled_today: false, slot_time: null, duration_min: 20, minutes_today: 0, done_today: false, next_slot: null, streak_days: 2, week };
+    const reply = () => new Response(JSON.stringify(today), { status: 200, headers: { "content-type": "application/json" } });
+    h.fake.override("learningPlan", "GET", "/internal/v1/me/plan/today", reply);
+    h.fake.override("learningPlan", "POST", "/internal/v1/me/activities", reply);
+    const expected = [
+      { local_date: "2026-11-16", scheduled: true, done: false, missed: true, frozen: true },
+      { local_date: "2026-11-17", scheduled: true, done: true, missed: false, frozen: false },
+      { local_date: "2026-11-18", scheduled: false, done: false, missed: false, frozen: false },
+    ];
+    const t = await get("/v1/plan/today");
+    expect(t.statusCode).toBe(200);
+    expect(Value.Check(TodayPlanSchema, t.json())).toBe(true);
+    expect(t.json().week).toEqual(expected);
+    const a = await send("POST", "/v1/plan/activity", { kind: "practice", minutes: 5 }, { "idempotency-key": randomUUID() });
+    expect(a.json().week).toEqual(expected);
+  });
 });
 
 describe("справочники", () => {

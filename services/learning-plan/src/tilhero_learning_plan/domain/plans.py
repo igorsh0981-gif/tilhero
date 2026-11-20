@@ -23,6 +23,7 @@ from tilhero_learning_plan.models import (
     Activity,
     CompletedLesson,
     DeletedUser,
+    FrozenDay,
     LearnerAudience,
     LearnerDiagnostic,
     LessonEvaluation,
@@ -278,10 +279,12 @@ async def complete_onboarding(session: AsyncSession, user_id: uuid.UUID, *, defa
 
 
 async def streak_days(session: AsyncSession, user_id: uuid.UUID, today: date) -> int:
-    """Серия: дни с занятием после последнего выпущенного пропуска без занятия. Дни вне графика серию не рвут
-    (по ним пропуск не выпускается), сегодняшний несделанный слот — тоже (день не закончился)."""
+    """Серия: дни с занятием после последнего выпущенного пропуска без занятия и без заморозки (спринт 6). Дни вне
+    графика серию не рвут (по ним пропуск не выпускается), сегодняшний несделанный слот — тоже (день не закончился).
+    Замороженный день серию сохраняет, но занятием не считается (PLAN спринта 6 «Заморозка серии»)."""
     act = Activity.__table__.c
     marks = SlotMark.__table__.c
+    frozen = FrozenDay.__table__.c
     last_break = (
         await session.execute(
             select(func.max(marks.local_date)).where(
@@ -289,6 +292,7 @@ async def streak_days(session: AsyncSession, user_id: uuid.UUID, today: date) ->
                 marks.kind == "missed",
                 marks.local_date < today,
                 ~exists().where(and_(act.user_id == user_id, act.local_date == marks.local_date)),
+                ~exists().where(and_(frozen.user_id == user_id, frozen.local_date == marks.local_date)),
             )
         )
     ).scalar_one()
@@ -296,6 +300,17 @@ async def streak_days(session: AsyncSession, user_id: uuid.UUID, today: date) ->
     if last_break is not None:
         stmt = stmt.where(act.local_date > last_break)
     return int((await session.execute(stmt)).scalar_one())
+
+
+async def streak_after_activity(session: AsyncSession, user_id: uuid.UUID) -> int:
+    """`streak_days` для `learning.activity.recorded.v1` (спринт 6): серия на последний день с занятием, с учётом
+    только что записанного. Для занятия сегодня — то же, что TodayPlan; занятие задним числом за пропущенный день
+    восстанавливает серию — событие несёт восстановленную. Без часов сервиса: детерминировано и у потребителей."""
+    act = Activity.__table__.c
+    last = (await session.execute(select(func.max(act.local_date)).where(act.user_id == user_id))).scalar_one()
+    if last is None:
+        return 0
+    return await streak_days(session, user_id, last)
 
 
 async def day_facts(session: AsyncSession, user_id: uuid.UUID, start: date, end: date) -> sch.DayFacts:
@@ -314,7 +329,13 @@ async def day_facts(session: AsyncSession, user_id: uuid.UUID, start: date, end:
                                            marks.local_date >= start, marks.local_date <= end)
         )
     ).scalars().all()
-    return sch.DayFacts({d: int(m or 0) for d, m in rows}, frozenset(missed))
+    fr = FrozenDay.__table__.c
+    frozen = (
+        await session.execute(
+            select(fr.local_date).where(fr.user_id == user_id, fr.local_date >= start, fr.local_date <= end)
+        )
+    ).scalars().all()
+    return sch.DayFacts({d: int(m or 0) for d, m in rows}, frozenset(missed), frozenset(frozen))
 
 
 async def today_for(session: AsyncSession, p: Plan, now: datetime) -> dict[str, Any]:
@@ -366,8 +387,26 @@ async def record_activity(session: AsyncSession, user_id: uuid.UUID, body: Activ
         "kind": activity.kind,
         "minutes": activity.minutes,
         "recorded_at": occurred.isoformat().replace("+00:00", "Z"),
+        "streak_days": await streak_after_activity(session, user_id),
     }, producer=producer)
     return p, False
+
+
+# ---------------------------------------------------------------- заморозка серии (спринт 6)
+
+
+async def record_frozen_day(session: AsyncSession, user_id: uuid.UUID, local_date: date, op_id: uuid.UUID) -> bool:
+    """game.streak.frozen.v1 → день закрыт заморозкой. Повтор (и повторная публикация с новым event_id) ничего не
+    меняет; после удаления ученика (сага) строка не появляется — под той же блокировкой ученика. → новая строка.
+    День с занятием важнее: строка хранится, но такой день — `done`, на серию и неделю она не влияет."""
+    await lock_user(session, user_id)
+    if await session.get(DeletedUser, user_id) is not None:
+        return False
+    inserted = (await session.execute(
+        insert(FrozenDay).values(user_id=user_id, local_date=local_date, op_id=op_id)
+        .on_conflict_do_nothing(index_elements=["user_id", "local_date"]).returning(FrozenDay.local_date)
+    )).scalar_one_or_none()
+    return inserted is not None
 
 
 # ---------------------------------------------------------------- сага удаления
@@ -375,8 +414,8 @@ async def record_activity(session: AsyncSession, user_id: uuid.UUID, body: Activ
 
 async def delete_user_data(session: AsyncSession, user_id: uuid.UUID, request_id: uuid.UUID,
                            causation_id: str | None, producer: str) -> None:
-    """Физическое удаление плана, занятий, отметок, траекторий, проекций, пройденных уроков и их оценок
-    (TG-FR-006) + ACK саге. Повтор снова подтверждает удаление.
+    """Физическое удаление плана, занятий, отметок, траекторий, проекций, пройденных уроков и их оценок, дней с
+    заморозкой (TG-FR-006) + ACK саге. Повтор снова подтверждает удаление.
 
     План удаляется первым: DELETE ждёт tick, который держит план FOR KEY SHARE, — после этого удаление отметок
     видит и отметку, которую tick успел записать (READ COMMITTED), сирот не остаётся."""
@@ -392,6 +431,8 @@ async def delete_user_data(session: AsyncSession, user_id: uuid.UUID, request_id
     # спринт 4: пройденные уроки и проекция их оценок (занятия из событий уроков — в activities, удалены выше)
     await session.execute(delete(CompletedLesson).where(CompletedLesson.user_id == user_id))
     await session.execute(delete(LessonEvaluation).where(LessonEvaluation.user_id == user_id))
+    # спринт 6: дни, закрытые заморозкой серии
+    await session.execute(delete(FrozenDay).where(FrozenDay.user_id == user_id))
     await session.execute(
         insert(DeletedUser).values(user_id=user_id, request_id=request_id).on_conflict_do_nothing(
             index_elements=["user_id"])

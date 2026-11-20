@@ -4,13 +4,14 @@ import { useApp } from "../../state/app";
 import { Icon } from "../../ui/Icon";
 import { Btn, cx, HERO, Hero, Pill } from "../../ui/kit";
 import { Bar } from "../../ui/shell";
+import { SessionRewardsCard } from "../game/Rewards";
 
 /**
  * Итоги «Повторения дня» (AT-54, AT-56): what was reviewed, right from the first time, new words, the retention checks
  * (a d30 check passed — the skill is «закреплён»), when the next review is. Children: what went well, no counters of
  * misses and no comparisons.
  */
-export function ReviewSummaryScreen({ summary: s }: { summary: ReviewSummary }) {
+export function ReviewSummaryScreen({ summary: s, fresh = false }: { summary: ReviewSummary; /** just finished in the player */ fresh?: boolean }) {
   const { nav, session } = useApp();
   const { t, l, fmt } = useI18n();
   const kid = session.learner.kind === "child";
@@ -32,6 +33,9 @@ export function ReviewSummaryScreen({ summary: s }: { summary: ReviewSummary }) 
             <div className="count"><Icon name="plus" size={20} /><b data-testid="rv-sum-new">{s.new_learned}</b><span className="sub small">{t("rv.sum.new")}</span></div>
             {!kid ? <div className="count"><Icon name="route" size={20} /><b data-testid="rv-sum-again">{s.again}</b><span className="sub small">{t("rv.sum.again")}</span></div> : null}
           </div>
+
+          {/* sprint 6: the rewards of the game for this review (credited by memory.review.completed — polled) */}
+          {fresh && done ? <SessionRewardsCard sessionId={s.session_id} inset /> : null}
 
           {s.checks.length ? (
             <section className="stack tight" aria-labelledby="rv-sum-checks" data-testid="rv-sum-checks">

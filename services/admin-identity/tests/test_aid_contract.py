@@ -1,9 +1,9 @@
-"""Контрактный тест матрицы TilHero: сид миграций 0001 + 0003 + 0004 + 0005 и каталог = packages/contracts/src/admin.ts
-(`PERMISSIONS`, `RoleCode`, `PRIVILEGED_ROLES`), таблица docs/sprint2/PLAN.md §«Роли и права» и дополнения
-docs/sprint3/PLAN.md §«Права и роли» (права контента, роль content_manager), docs/sprint4/PLAN.md §«Права и роли»
-(права ИИ, контроля диалогов и затрат, роль qa_analyst) и docs/sprint5/PLAN.md §«Права и роли» (память и словарь
-курса); формы ответов Staff API = интерфейсы admin.ts (Staff, Role, Approval). admin.ts и PLAN.md спринтов 2–5
-разбираются регулярками."""
+"""Контрактный тест матрицы TilHero: сид миграций 0001 + 0003 + 0004 + 0005 + 0006 и каталог =
+packages/contracts/src/admin.ts (`PERMISSIONS`, `RoleCode`, `PRIVILEGED_ROLES`), таблица docs/sprint2/PLAN.md §«Роли и
+права» и дополнения docs/sprint3/PLAN.md §«Права и роли» (права контента, роль content_manager), docs/sprint4/PLAN.md
+§«Права и роли» (права ИИ, контроля диалогов и затрат, роль qa_analyst), docs/sprint5/PLAN.md §«Права и роли» (память
+и словарь курса) и docs/sprint6/PLAN.md §«Права и роли» (игра и кошельки учеников); формы ответов Staff API =
+интерфейсы admin.ts (Staff, Role, Approval). admin.ts и PLAN.md спринтов 2–6 разбираются регулярками."""
 
 from __future__ import annotations
 
@@ -28,10 +28,12 @@ PLAN_MD = ROOT / "docs" / "sprint2" / "PLAN.md"
 PLAN3_MD = ROOT / "docs" / "sprint3" / "PLAN.md"
 PLAN4_MD = ROOT / "docs" / "sprint4" / "PLAN.md"
 PLAN5_MD = ROOT / "docs" / "sprint5" / "PLAN.md"
+PLAN6_MD = ROOT / "docs" / "sprint6" / "PLAN.md"
 MIGRATION = Path(SERVICE_DIR) / "migrations" / "versions" / "0001_initial.py"
 MIGRATION3 = Path(SERVICE_DIR) / "migrations" / "versions" / "0003_content_permissions.py"
 MIGRATION4 = Path(SERVICE_DIR) / "migrations" / "versions" / "0004_ai_qa_permissions.py"
 MIGRATION5 = Path(SERVICE_DIR) / "migrations" / "versions" / "0005_memory_permissions.py"
+MIGRATION6 = Path(SERVICE_DIR) / "migrations" / "versions" / "0006_game_permissions.py"
 EXCLUSIVE = {"users.sensitive.read", "staff.manage", "roles.manage"}  # PLAN: только super_admin
 SPRINT3_PERMISSIONS = ["content.read", "content.edit", "content.review", "content.publish", "media.rights",
                        "lang.manage"]
@@ -41,6 +43,8 @@ SPRINT4_PERMISSIONS = ["ai.read", "ai.manage", "ai.publish", "qa.read", "qa.tran
 STEP_UP_SPRINT4 = {"ai.publish", "qa.review", "costs.manage"}  # PLAN спринта 4: step-up
 SPRINT5_PERMISSIONS = ["memory.read", "memory.manage", "glossary.manage"]
 STEP_UP_SPRINT5 = {"memory.manage"}  # PLAN спринта 5: step-up (glossary.manage — без step-up)
+SPRINT6_PERMISSIONS = ["game.read", "game.manage", "game.publish", "wallet.adjust"]
+STEP_UP_SPRINT6 = {"game.publish", "wallet.adjust"}  # PLAN спринта 6: step-up (game.read, game.manage — без step-up)
 # привилегированные роли матрицы по умолчанию: PRIVILEGED_ROLES + права со step-up (methodist — content.publish,
 # ai.publish, qa.review; content_manager — media.rights); qa_analyst — только чтение и реплики с причиной
 PRIVILEGED_BY_RIGHTS = {"methodist", "content_manager"}
@@ -121,10 +125,11 @@ def _plan4_additions() -> tuple[list[str], dict[str, list[str]], set[str]]:
     return _plan_additions(PLAN4_MD)
 
 
-def _plan5_additions() -> tuple[list[str], dict[str, list[str]], set[str]]:
-    """(новые права, {роль: добавленные права}, права со step-up) из §«Права и роли» PLAN спринта 5 (формат —
-    вложенные списки: «**Новые права:**» — `право` — описание; «**Роли:**» — `роль`, `роль` — + права)."""
-    section = _plan_section(PLAN5_MD)
+def _plan_nested_additions(path: Path) -> tuple[list[str], dict[str, list[str]], set[str]]:
+    """(новые права, {роль: добавленные права}, права со step-up) из §«Права и роли» PLAN спринтов 5–6 (формат —
+    вложенные списки: «**Новые права:**» — `право` — описание; «**Роли:**» — `роль`, `роль` — + права; спринт 6 —
+    ещё «`право` — только super_admin и роль»)."""
+    section = _plan_section(path)
     new_block = section.split("**Новые права:**", 1)[1].split("\n- **", 1)[0]
     lines = re.findall(r"^\s*- `([a-z]+\.[a-z.]+)` — (.*)$", new_block, re.M)
     new_perms = [perm for perm, _ in lines]
@@ -134,12 +139,23 @@ def _plan5_additions() -> tuple[list[str], dict[str, list[str]], set[str]]:
     for roles, perms in re.findall(r"^\s*- ((?:`[a-z_]+`(?:, )?)+) — \+ (.*?);?$", roles_block, re.M):
         for role in re.findall(r"`([a-z_]+)`", roles):
             adds.setdefault(role, []).extend(re.findall(_PERM_RE, perms))
+    for perm, holders in re.findall(r"^\s*- `([a-z]+\.[a-z.]+)` — только (.*?)\.?$", roles_block, re.M):
+        for role in (c for c in ROLE_CODES if re.search(rf"\b{c}\b", holders) and c != "super_admin"):
+            adds.setdefault(role, []).append(perm)
     assert "super_admin — все" in roles_block
     return new_perms, adds, step_up
 
 
+def _plan5_additions() -> tuple[list[str], dict[str, list[str]], set[str]]:
+    return _plan_nested_additions(PLAN5_MD)
+
+
+def _plan6_additions() -> tuple[list[str], dict[str, list[str]], set[str]]:
+    return _plan_nested_additions(PLAN6_MD)
+
+
 def _plan_matrix() -> tuple[dict[str, list[str]], dict[str, bool]]:
-    """Действующая матрица по умолчанию: спринты 2–5. {роль: права}, {роль: MFA обязательна}.
+    """Действующая матрица по умолчанию: спринты 2–6. {роль: права}, {роль: MFA обязательна}.
     MFA обязательна для PRIVILEGED_ROLES (таблица спринта 2) и для ролей с правами со step-up (правило спринта 2;
     PLAN спринта 3: «роли с content.publish / media.rights / lang.manage — привилегированные»; PLAN спринта 4: «роли с
     ai.publish / qa.review / costs.manage — привилегированные»)."""
@@ -147,11 +163,12 @@ def _plan_matrix() -> tuple[dict[str, list[str]], dict[str, bool]]:
     _, adds3, _ = _plan3_additions()
     _, adds4, _ = _plan4_additions()
     _, adds5, _ = _plan5_additions()
+    _, adds6, _ = _plan6_additions()
     matrix: dict[str, list[str]] = {}
     for role in ROLE_CODES:
         base = matrix2.get(role, [])
         perms = list(PERMISSIONS) if base == ["*"] else [*base, *adds3.get(role, []), *adds4.get(role, []),
-                                                          *adds5.get(role, [])]
+                                                          *adds5.get(role, []), *adds6.get(role, [])]
         matrix[role] = list(dict.fromkeys(perms))
     mfa = {role: mfa2.get(role, False) or privileged_by(role, perms) for role, perms in matrix.items()}
     return matrix, mfa
@@ -181,11 +198,15 @@ def _migration5() -> ModuleType:
     return _load(MIGRATION5, "aid_migration_0005")
 
 
+def _migration6() -> ModuleType:
+    return _load(MIGRATION6, "aid_migration_0006")
+
+
 def _seeded_matrix() -> dict[str, list[str]]:
-    """Матрица после цепочки миграций: сид 0001 + новые роли и права 0003, 0004 и 0005."""
+    """Матрица после цепочки миграций: сид 0001 + новые роли и права 0003, 0004, 0005 и 0006."""
     m1 = _migration()
     seeded = {code: list(perms) for code, _, _, perms in m1.ROLES}
-    for m in (_migration3(), _migration4(), _migration5()):
+    for m in (_migration3(), _migration4(), _migration5(), _migration6()):
         for code, _, _ in m.NEW_ROLES:
             seeded.setdefault(code, [])
         for code, perms in m.GRANTS.items():
@@ -194,10 +215,11 @@ def _seeded_matrix() -> dict[str, list[str]]:
 
 
 def _seeded_roles() -> list[str]:
-    """Порядок ролей каталога: 0001 + новые роли 0003 и 0004 (0005 ролей не добавляет) на своих местах в RoleCode."""
-    m1, m3, m4, m5 = _migration(), _migration3(), _migration4(), _migration5()
+    """Порядок ролей каталога: 0001 + новые роли 0003 и 0004 (0005 и 0006 ролей не добавляют) на своих местах в
+    RoleCode."""
+    m1, m3, m4, m5, m6 = _migration(), _migration3(), _migration4(), _migration5(), _migration6()
     codes = ([code for code, *_ in m1.ROLES] + [code for code, *_ in m3.NEW_ROLES] + [c for c, *_ in m4.NEW_ROLES]
-             + [c for c, *_ in m5.NEW_ROLES])
+             + [c for c, *_ in m5.NEW_ROLES] + [c for c, *_ in m6.NEW_ROLES])
     return sorted(codes, key=list(ROLE_CODES).index)
 
 
@@ -216,10 +238,11 @@ def _expected_privileged() -> set[str]:
 def test_catalog_mirrors_admin_ts() -> None:
     src = _ts_source()
     assert list(PERMISSIONS) == _ts_union(src, "Permission") == _ts_const_list(src, "PERMISSIONS")
-    assert len(PERMISSIONS) == 34
-    assert list(PERMISSIONS)[-17:-11] == SPRINT3_PERMISSIONS
-    assert list(PERMISSIONS)[-11:-3] == SPRINT4_PERMISSIONS
-    assert list(PERMISSIONS)[-3:] == SPRINT5_PERMISSIONS
+    assert len(PERMISSIONS) == 38
+    assert list(PERMISSIONS)[-21:-15] == SPRINT3_PERMISSIONS
+    assert list(PERMISSIONS)[-15:-7] == SPRINT4_PERMISSIONS
+    assert list(PERMISSIONS)[-7:-4] == SPRINT5_PERMISSIONS
+    assert list(PERMISSIONS)[-4:] == SPRINT6_PERMISSIONS
     assert list(ROLE_CODES) == _ts_union(src, "RoleCode")
     assert {"content_manager", "qa_analyst"} <= set(ROLE_CODES) and len(ROLE_CODES) == 10
     assert set(PRIVILEGED_ROLES) == set(_ts_const_list(src, "PRIVILEGED_ROLES"))
@@ -270,6 +293,20 @@ def test_plan5_parsed() -> None:
     }
 
 
+def test_plan6_parsed() -> None:
+    """Разбор дополнения PLAN спринта 6 — не пустой и совпадает с ожидаемым (страховка регулярок); wallet.adjust —
+    из строки «только super_admin и operations»."""
+    new_perms, adds, step_up = _plan6_additions()
+    assert new_perms == SPRINT6_PERMISSIONS
+    assert step_up == STEP_UP_SPRINT6
+    assert {r: sorted(p) for r, p in adds.items()} == {
+        "content_manager": sorted(["game.read", "game.manage"]),
+        "methodist": ["game.read"],
+        "operations": sorted(["game.read", "game.manage", "game.publish", "wallet.adjust"]),
+        "support": ["game.read"], "analyst": ["game.read"], "auditor": ["game.read"],
+    }
+
+
 def test_approval_kinds_equal_admin_ts() -> None:
     from typing import get_args
 
@@ -286,11 +323,14 @@ def test_approval_kinds_equal_admin_ts() -> None:
 
 def test_migration_seed_equals_contract() -> None:
     src, m1, m3, m4, m5 = _ts_source(), _migration(), _migration3(), _migration4(), _migration5()
+    m6 = _migration6()
     seeded = _seeded_matrix()
     assert {p for perms in seeded.values() for p in perms} == set(_ts_const_list(src, "PERMISSIONS"))
-    # 0001 зафиксирован как каталог спринта 2, 0003–0005 добавляют ровно права спринтов 3–5
-    assert (m1.ALL_PERMISSIONS + m3.NEW_PERMISSIONS + m4.NEW_PERMISSIONS + m5.NEW_PERMISSIONS
+    # 0001 зафиксирован как каталог спринта 2, 0003–0006 добавляют ровно права спринтов 3–6
+    assert (m1.ALL_PERMISSIONS + m3.NEW_PERMISSIONS + m4.NEW_PERMISSIONS + m5.NEW_PERMISSIONS + m6.NEW_PERMISSIONS
             == _ts_const_list(src, "PERMISSIONS"))
+    assert m6.NEW_PERMISSIONS == SPRINT6_PERMISSIONS
+    assert sorted(m6.GRANTS["super_admin"]) == sorted(SPRINT6_PERMISSIONS)
     assert m3.NEW_PERMISSIONS == SPRINT3_PERMISSIONS
     assert m4.NEW_PERMISSIONS == SPRINT4_PERMISSIONS
     assert m5.NEW_PERMISSIONS == SPRINT5_PERMISSIONS
@@ -299,23 +339,25 @@ def test_migration_seed_equals_contract() -> None:
     assert sorted(m5.GRANTS["super_admin"]) == sorted(SPRINT5_PERMISSIONS)
     assert _seeded_roles() == _ts_union(src, "RoleCode")
     assert (set(m1.PRIVILEGED_ROLES) == set(m3.PRIVILEGED_ROLES) == set(m4.PRIVILEGED_ROLES)
-            == set(m5.PRIVILEGED_ROLES) == set(_ts_const_list(src, "PRIVILEGED_ROLES")))
+            == set(m5.PRIVILEGED_ROLES) == set(m6.PRIVILEGED_ROLES) == set(_ts_const_list(src, "PRIVILEGED_ROLES")))
     assert set(m1.PRIVILEGED_PERMISSIONS) == set(m3.PRIVILEGED_PERMISSIONS_V2)
     assert set(m3.PRIVILEGED_PERMISSIONS) == set(m4.PRIVILEGED_PERMISSIONS_V3)
     assert set(m4.PRIVILEGED_PERMISSIONS) == set(m5.PRIVILEGED_PERMISSIONS_V4)
-    assert set(m5.PRIVILEGED_PERMISSIONS) == PRIVILEGED_PERMISSIONS
+    assert set(m5.PRIVILEGED_PERMISSIONS) == set(m6.PRIVILEGED_PERMISSIONS_V5)
+    assert set(m6.PRIVILEGED_PERMISSIONS) == PRIVILEGED_PERMISSIONS
     assert set(m4.PRIVILEGED_PERMISSIONS) - set(m3.PRIVILEGED_PERMISSIONS) == STEP_UP_SPRINT4
     assert set(m5.PRIVILEGED_PERMISSIONS) - set(m4.PRIVILEGED_PERMISSIONS) == STEP_UP_SPRINT5
-    assert m5.NEW_ROLES == []
+    assert set(m6.PRIVILEGED_PERMISSIONS) - set(m5.PRIVILEGED_PERMISSIONS) == STEP_UP_SPRINT6
+    assert m5.NEW_ROLES == [] and m6.NEW_ROLES == []
     for code, ru, en, perms in m1.ROLES:
         assert len(perms) == len(set(perms)) and ru.strip() and en.strip(), code
     assert m3.NEW_ROLES == [("content_manager", "Контент-менеджер", "Content manager")]
     assert m4.NEW_ROLES == [("qa_analyst", "QA-аналитик", "QA analyst")]
-    for m in (m3, m4, m5):
+    for m in (m3, m4, m5, m6):
         for code, perms in m.GRANTS.items():
             assert len(perms) == len(set(perms)), code
-    privileged = {code for code, perms in seeded.items() if code in m5.PRIVILEGED_ROLES
-                  or set(perms) & set(m5.PRIVILEGED_PERMISSIONS)}
+    privileged = {code for code, perms in seeded.items() if code in m6.PRIVILEGED_ROLES
+                  or set(perms) & set(m6.PRIVILEGED_PERMISSIONS)}
     assert privileged == _expected_privileged() == set(PRIVILEGED_ROLES) | PRIVILEGED_BY_RIGHTS
     assert "qa_analyst" not in privileged
 
@@ -355,6 +397,16 @@ def test_migration_seed_equals_plan_matrix() -> None:
         ["content_manager", "methodist", "super_admin"])
     assert sorted(c for c, p in seeded.items() if "memory.read" in p) == sorted(
         ["super_admin", "operations", "methodist", "qa_analyst", "analyst", "auditor"])
+    # PLAN спринта 6: кошельки (ручные операции, обратная запись, возврат) и публикация игры — только операции;
+    # черновики игры — операции и контент-менеджер; чтение — все, кто разбирает учёбу и обращения
+    assert sorted(c for c, p in seeded.items() if "wallet.adjust" in p) == ["operations", "super_admin"]
+    assert sorted(c for c, p in seeded.items() if "game.publish" in p) == ["operations", "super_admin"]
+    assert sorted(c for c, p in seeded.items() if "game.manage" in p) == sorted(
+        ["content_manager", "operations", "super_admin"])
+    assert sorted(c for c, p in seeded.items() if "game.read" in p) == sorted(
+        ["super_admin", "operations", "support", "methodist", "content_manager", "analyst", "auditor"])
+    for code in ("communications", "qa_analyst", "read_only"):
+        assert not {p for p in seeded[code] if p.startswith(("game.", "wallet."))}, code
 
 
 def test_privileged_permissions_are_step_up_rights() -> None:
@@ -362,17 +414,18 @@ def test_privileged_permissions_are_step_up_rights() -> None:
     повторный TOTP невозможен. Чтение, черновики и просмотр реплик с причиной — нет."""
     assert PRIVILEGED_PERMISSIONS == {"users.sensitive.read", "staff.manage", "roles.manage", "config.publish",
                                       "whatsnew.publish", "notif.templates.manage", "notif.campaigns.send",
-                                      *STEP_UP_SPRINT3, *STEP_UP_SPRINT4, *STEP_UP_SPRINT5}
+                                      *STEP_UP_SPRINT3, *STEP_UP_SPRINT4, *STEP_UP_SPRINT5, *STEP_UP_SPRINT6}
     _, _, step_up3 = _plan3_additions()
     _, _, step_up4 = _plan4_additions()
     _, _, step_up5 = _plan5_additions()
-    assert step_up3 | step_up4 | step_up5 <= PRIVILEGED_PERMISSIONS
+    _, _, step_up6 = _plan6_additions()
+    assert step_up3 | step_up4 | step_up5 | step_up6 <= PRIVILEGED_PERMISSIONS
     for perm in PRIVILEGED_PERMISSIONS:
         assert privileged_by("read_only", ["dashboard.read", perm]) is True, perm
     for perm in set(PERMISSIONS) - PRIVILEGED_PERMISSIONS:
         assert privileged_by("analyst", [perm]) is False, perm
     for perm in ("content.read", "content.edit", "content.review", "ai.read", "ai.manage", "qa.read",
-                 "qa.transcripts", "costs.read", "memory.read", "glossary.manage"):
+                 "qa.transcripts", "costs.read", "memory.read", "glossary.manage", "game.read", "game.manage"):
         # чтение, черновики, проверка, реплики с причиной, словарь курса — без step-up
         assert perm not in PRIVILEGED_PERMISSIONS
     for code in PRIVILEGED_ROLES:

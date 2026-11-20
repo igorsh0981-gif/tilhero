@@ -58,6 +58,11 @@ import { ReviewPlayer } from "./screens/memory/ReviewPlayer";
 import { ReviewSummaryScreen } from "./screens/memory/ReviewSummary";
 import { ReadingScreen } from "./screens/reading/ReadingScreen";
 import { VoiceConsent } from "./screens/profile/VoiceConsent";
+import { BadgesScreen } from "./screens/game/Badges";
+import { GameHistoryScreen } from "./screens/game/History";
+import { GameSettingsScreen } from "./screens/game/GameSettings";
+import { HeroesScreen } from "./screens/game/HeroPicker";
+import { ShopScreen } from "./screens/game/Shop";
 
 type Phase =
   | { kind: "boot" }
@@ -532,18 +537,29 @@ function PushedScreen({ p }: { p: Pushed }) {
     case "player":
       return <LessonPlayer key={p.sessionId} sessionId={p.sessionId} />;
     case "lessonSummary":
-      return <LessonSummaryScreen key={p.sessionId} sessionId={p.sessionId} initial={p.summary} />;
+      return <LessonSummaryScreen key={p.sessionId} sessionId={p.sessionId} initial={p.summary} fresh={!!p.fresh} />;
     case "appeal":
       return <AppealScreen evaluationId={p.evaluationId} title={p.title} />;
     case "review":
       return <ReviewPlayer autostart={p.autostart} />;
     case "reviewSummary":
-      return <ReviewSummaryScreen key={p.sessionId} summary={p.summary} />;
+      return <ReviewSummaryScreen key={p.sessionId} summary={p.summary} fresh={!!p.fresh} />;
     case "card":
       return <CardScreen key={p.id} id={p.id} />;
     case "reading":
       return <ReadingScreen key={p.id} id={p.id} />;
     case "voiceConsent":
       return <VoiceConsent />;
+    // sprint 6: the game
+    case "heroes":
+      return <HeroesScreen />;
+    case "shop":
+      return <ShopScreen />;
+    case "gameHistory":
+      return <GameHistoryScreen />;
+    case "badges":
+      return <BadgesScreen />;
+    case "gameSettings":
+      return <GameSettingsScreen />;
   }
 }

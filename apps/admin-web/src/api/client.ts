@@ -30,6 +30,11 @@ export interface RequestOptions {
   /** extra request headers (If-Match of the agent version draft); never secrets */
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  /**
+   * Sprint 6: the body is raw bytes, not JSON (a hero / shop picture: POST /game/assets with Content-Type
+   * image/webp | image/png). Sent as a Blob of that type; `body` is ignored.
+   */
+  rawBody?: { data: Uint8Array; type: string };
 }
 
 /**
@@ -81,6 +86,10 @@ export class AdminApi {
   del<T>(path: string, body?: unknown, opts: RequestOptions = {}): Promise<T> {
     return this.request<T>("DELETE", path, { ...opts, body });
   }
+  /** POST of raw bytes of the given type (pictures of the game: image/webp | image/png) */
+  upload<T>(path: string, data: Uint8Array, type: string, opts: RequestOptions = {}): Promise<T> {
+    return this.request<T>("POST", path, { ...opts, body: undefined, rawBody: { data, type } });
+  }
 
   async request<T>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
     const key = opts.idempotencyKey === true ? uuid() : opts.idempotencyKey;
@@ -126,7 +135,8 @@ export class AdminApi {
     idemKey: string | undefined,
   ): Promise<{ ok: true; data: unknown } | { ok: false; error: ApiError }> {
     const headers: Record<string, string> = { ...(opts.headers ?? {}), Accept: "application/json" };
-    if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+    if (opts.rawBody) headers["Content-Type"] = opts.rawBody.type;
+    else if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (method !== "GET" && method !== "HEAD" && this.csrf) headers["X-CSRF-Token"] = this.csrf;
     if (idemKey) headers["Idempotency-Key"] = idemKey;
     if (opts.background) headers["X-Background"] = "1";
@@ -137,7 +147,7 @@ export class AdminApi {
         headers,
         credentials: "same-origin",
         cache: "no-store",
-        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+        body: opts.rawBody ? new Blob([opts.rawBody.data as Uint8Array<ArrayBuffer>], { type: opts.rawBody.type }) : opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
         signal: opts.signal,
       });
     } catch (e) {

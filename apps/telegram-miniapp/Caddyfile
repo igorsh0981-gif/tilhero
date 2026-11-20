@@ -1,7 +1,7 @@
 # TilHero Telegram Mini App — статика Vite за Caddy.
 # TLS терминирует платформа (Railway edge), поэтому здесь только HTTP на {$PORT}.
-# Env: PORT (по умолчанию 8080), BFF_ORIGIN (origin BFF для CSP connect-src; в образе = VITE_BFF_URL).
-#      Картинки (герои) — только свои (/heroes/*.webp).
+# Env: PORT (по умолчанию 8080), BFF_ORIGIN (origin BFF для CSP connect-src и img-src; в образе = VITE_BFF_URL).
+#      Картинки: свои (/heroes/*.webp — запасные) и картинки игры с BFF (/v1/game/assets/{id}/{sha256}, спринт 6).
 {
 	admin off
 	persist_config off
@@ -16,9 +16,9 @@
 	# разрешённые родители задаёт frame-ancestors. Скрипты — только свои и telegram-web-app.js,
 	# никаких inline/eval; стили — свои + Google Fonts ('unsafe-inline' для style нужен CSSOM-мосту
 	# themeParams/safe-area, токенам Remote Experience Config и скрипту Telegram); сеть — только свой origin и BFF;
-	# картинки — только свои.
+	# картинки — свои и с BFF (герои, предметы и значки игры заменяются в админке без релиза).
 	header {
-		Content-Security-Policy "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' {$BFF_ORIGIN}; frame-ancestors https://web.telegram.org https://*.telegram.org; base-uri 'none'; form-action 'none'; object-src 'none'; manifest-src 'self'; worker-src 'none'"
+		Content-Security-Policy "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: {$BFF_ORIGIN}; connect-src 'self' {$BFF_ORIGIN}; frame-ancestors https://web.telegram.org https://*.telegram.org; base-uri 'none'; form-action 'none'; object-src 'none'; manifest-src 'self'; worker-src 'none'"
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"

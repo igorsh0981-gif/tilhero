@@ -30,7 +30,8 @@ import { releaseNoteRoutes } from "./routes/releaseNotes.js";
 import { staffRoutes } from "./routes/staff.js";
 import { supportRoutes } from "./routes/support.js";
 import { SessionStore } from "./sessions.js";
-import { SERVICE_NAME, createDomains } from "./upstream.js";
+import { gameRoutes, registerAssetParser } from "./routes/game.js";
+import { DomainClient, GAME_SERVICE, SERVICE_NAME, createDomains } from "./upstream.js";
 
 export interface AppDeps {
   redis?: Redis;
@@ -183,15 +184,29 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   });
 
   const store = makeStoreGuard(log);
+  const onFailure = (info: { service: string; status: number; code: string }) =>
+    log.warn({ upstream: info.service, upstream_status: info.status, upstream_code: info.code }, "domain unavailable");
   const domains = createDomains({
     key: keyRing,
     urls: config.urls,
     timeoutMs: config.upstreamTimeoutMs,
     retries: config.upstreamRetries,
     ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
-    onFailure: (info) =>
-      log.warn({ upstream: info.service, upstream_status: info.status, upstream_code: info.code }, "domain unavailable"),
+    onFailure,
   });
+  // спринт 6: gamification необязателен — без GAMIFICATION_URL маршруты игры отвечают 503, обзор — блок недоступен
+  const gamification = config.gamificationUrl
+    ? new DomainClient({
+        target: GAME_SERVICE,
+        baseUrl: config.gamificationUrl,
+        key: keyRing,
+        timeoutMs: config.upstreamTimeoutMs,
+        retries: config.upstreamRetries,
+        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+        onFailure,
+      })
+    : null;
+  if (!gamification) log.warn({ upstream: GAME_SERVICE }, "GAMIFICATION_URL is not set: game routes respond 503");
   const ctx: BffContext = {
     config,
     redis,
@@ -201,6 +216,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
     }),
     limiter: createLimiter(redis, config, log),
     domains,
+    gamification,
     principals: new PrincipalCache(redis, config.redisKeyPrefix, config.session.principalCacheSeconds, domains.adminIdentity, store),
     names: new StaffNames(domains.adminIdentity, log),
     log,
@@ -261,6 +277,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   // спринт 5: словарь курса (catalog), память ученика и аналитика забывания (memory)
   glossaryRoutes(app, ctx);
   memoryRoutes(app, ctx);
+  // спринт 6: игра и герои (gamification); сырое тело картинки — только на маршруте загрузки
+  registerAssetParser(app);
+  gameRoutes(app, ctx);
 
   app.addHook("onClose", async () => {
     redis.off("error", onRedisError);

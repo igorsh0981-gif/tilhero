@@ -26,8 +26,7 @@
     },
     "freeze_left": {
       "type": "integer",
-      "minimum": 0,
-      "maximum": 30
+      "minimum": 0
     },
     "frozen_at": {
       "type": "string",

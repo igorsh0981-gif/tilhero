@@ -103,7 +103,8 @@ async def test_lesson_session_becomes_activity_with_event(env, user) -> None:
     assert [tuple(r) for r in rows] == [("lesson", 18, "2026-11-16", sid)]
     [ev] = await env.events(ACTIVITY, user)
     assert ev.payload == {"user_id": str(user), "activity_id": ev.payload["activity_id"], "local_date": "2026-11-16",
-                          "kind": "lesson", "minutes": 18, "recorded_at": "2026-11-16T10:00:00Z"}
+                          "kind": "lesson", "minutes": 18, "recorded_at": "2026-11-16T10:00:00Z",
+                          "streak_days": 1}
     env.now = z(16, 12)
     today = (await env.c.get("/internal/v1/me/plan/today", headers=env.h(user))).json()
     assert today["done_today"] is True and today["minutes_today"] == 18 and today["streak_days"] == 1
@@ -230,7 +231,8 @@ async def test_late_lesson_event_for_missed_day_restores_week(env, user) -> None
     env.now = z(17, 8)
     today = (await env.c.get("/internal/v1/me/plan/today", headers=env.h(user))).json()
     week = {d["local_date"]: d for d in today["week"]}
-    assert week["2026-11-16"] == {"local_date": "2026-11-16", "scheduled": True, "done": True, "missed": False}
+    assert week["2026-11-16"] == {"local_date": "2026-11-16", "scheduled": True, "done": True, "missed": False,
+                                  "frozen": False}
     assert today["streak_days"] == 1
 
 

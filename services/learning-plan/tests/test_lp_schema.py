@@ -26,7 +26,7 @@ async def test_models_match_migrations_and_runtime_role() -> None:
         assert await schema_drift(roles.runtime_url, roles.schema, [Base.metadata, messaging_metadata]) == []
         for table in ("plans", "activities", "slot_marks", "tick_state", "deleted_users", "outbox", "trajectories",
                       "course_snapshots", "learner_diagnostics", "skill_states", "learner_audience",
-                      "completed_lessons", "lesson_evaluations"):
+                      "completed_lessons", "lesson_evaluations", "frozen_days"):
             assert await ddl_allowed_for(roles.runtime_url, roles.schema, table) == [], table
         bus = InMemoryBus()
         runtime = Runtime(settings, bus=bus)

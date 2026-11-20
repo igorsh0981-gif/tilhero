@@ -25,6 +25,7 @@ import * as AI from "../src/screens/ai/model";
 import { READING_QUESTION_TYPES, VOICES } from "../src/screens/content/model";
 import { GLOSSARY_ACTIONS, GLOSSARY_SOURCES, GLOSSARY_STATUSES, PARTS_OF_SPEECH } from "../src/screens/content/glossary";
 import * as MEM from "../src/screens/memory/model";
+import * as GM from "../src/screens/game/model";
 
 const placeholders = (s: string) => [...new Set([...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort();
 const CYR = /[Ѐ-ӿ]/;
@@ -218,6 +219,37 @@ describe("i18n dictionaries", () => {
       ...MEM.GRADES.map((x) => `grade.${x}`),
       ...["lesson", "media", "reading", "scenario", "evaluation", "manual"].map((x) => `msrc.${x}`),
       ...["30d", "90d"].map((x) => `fa.p.${x}`),
+      // sprint 6: the game — heroes, rules, shop, wallets, events, the overview block
+      ...["game"].flatMap((b) => [`dash.b.${b}`, `dash.empty.${b}`, `dash.svc.${b}`]),
+      ...GM.GAME_TABS.map((x) => `gtab.${x}`),
+      ...GM.AUDIENCES.flatMap((x) => [`gm.aud.${x}`, `ageseg.${x}`]),
+      ...GM.CURRENCIES.map((x) => `gm.cur.${x}`),
+      ...GM.QUEST_KINDS.map((x) => `gq.${x}`),
+      ...GM.GAME_ACTIONS.map((x) => `gact.${x}`),
+      ...GM.REASONS.map((x) => `grsn.${x}`),
+      ...GM.SHOP_KINDS.map((x) => `shk.${x}`),
+      ...GM.SHOP_STATUSES.map((x) => `shs.${x}`),
+      ...GM.EVENT_STATUSES.map((x) => `evs.${x}`),
+      ...GM.RULES_STATUSES.map((x) => `gst.${x}`),
+      ...GM.HERO_LINES.flatMap((x) => [`hr.line.${x}`, `hr.stages.${x}`]),
+      ...GM.EARN_ROWS.flatMap((x) => [`grp.${x}`, `gr.h.${x}`]),
+      ...["no_draft", "unsaved", "invalid", "not_validated"].map((x) => `gr.gate.${x}`),
+      ...["no_draft", "unsaved", "invalid"].map((x) => `hr.gate.${x}`),
+      ...["published", "finished", "cancelled"].map((x) => `ev.ro.${x}`),
+      ...["confirmed", "reversed"].map((x) => `wlst.${x}`),
+      ...["event", "command", "staff"].map((x) => `wlsrc.${x}`),
+      ...["system", "learner", "staff", "other"].map((x) => `wlact.${x}`),
+      ...["active", "completed", "expired"].map((x) => `wlq.${x}`),
+      ...["type", "size", "empty", "signature", "dims"].map((x) => `gm.imgErr.${x}`),
+      ...["first_lesson", "streak", "skills", "skill_retained", "reviews", "readings", "first_freeze"].map((x) => `gb.${x}`),
+      ...[
+        "required", "too_long", "uz_script", "code_format", "price_range", "audiences_empty", "token", "date", "until_before_from", "order_range",
+        "ends_before_starts", "too_long_period", "starts_past", "multipliers_empty", "multipliers_many", "duplicate", "factor", "amount_range",
+        "below_zero", "reason_short", "reason_long", "not_integer", "negative", "range", "length", "first_zero", "not_increasing",
+        "caps_below_reward", "per_audience_kids", "per_audience_teens", "per_audience_adults", "unknown_kind", "reward_growth", "stage2_high",
+        "token_bg", "token_accent",
+      ].map((x) => `gi.${x}`),
+      ...["earn", "caps", "levels", "hero", "stage_thresholds", "freeze", "bonuses", "quests", "templates", "badges", "streak", "skills", "reviews_cards", "readings", "index"].map((x) => `grp.${x}`),
     ];
     expect(want.filter((k) => !has(k))).toEqual([]);
     void OBJECT_TYPES;
@@ -245,8 +277,29 @@ describe("i18n dictionaries", () => {
       // sprint 5 (catalog glossary, memory, ai-gateway speech price)
       "FORM_TAKEN", "NOT_PENDING", "ENTRY_ARCHIVED", "COURSE_ENTRY_LOCKED", "OVERRIDE_COURSE_ONLY", "ARCHIVE_NOT_ALLOWED", "GLOSSARY_ENTRY_NOT_FOUND",
       "GLOSSARY_INVALID", "CARD_STATE", "DUE_AT_RANGE", "MEMORY_LEARNER_NOT_FOUND", "CARD_NOT_FOUND", "PRICE_NOT_APPLICABLE",
+      // sprint 6 (gamification via admin-bff; admin.ts «Игра и герои», INTERNAL_API §12)
+      "INSUFFICIENT_TILS", "ALREADY_OWNED", "FREEZE_STOCK_FULL", "ITEM_NOT_AVAILABLE", "NOT_OWNED", "HERO_NOT_AVAILABLE", "HERO_IN_USE", "RULES_INVALID",
+      "RULES_NOT_VALIDATED", "DRAFT_CONFLICT", "EVENT_OVERLAP", "BALANCE_NEGATIVE", "ALREADY_REVERSED", "ASSET_TOO_LARGE", "ASSET_INVALID", "GAME_UNAVAILABLE",
+      "RULES_VERSION_NOT_FOUND", "HERO_NOT_FOUND", "ITEM_NOT_FOUND", "EVENT_NOT_FOUND", "WALLET_NOT_FOUND", "ASSET_NOT_FOUND",
     ];
     expect(codes.filter((c) => !has(`err.${c}`))).toEqual([]);
+  });
+
+  it("every error code of INTERNAL_API §12 (sprint 6) has a text in RU and EN", () => {
+    const doc = readFileSync(join(__dirname, "..", "..", "..", "docs", "sprint6", "INTERNAL_API.md"), "utf8");
+    const from = doc.search(/^## 12\./m);
+    expect(from).toBeGreaterThan(0);
+    const rest = doc.slice(from + 6);
+    const next = rest.search(/^## /m);
+    const sec = next < 0 ? rest : rest.slice(0, next);
+    const codes = [...new Set([...sec.matchAll(/`([A-Z][A-Z0-9_]+)`/g)].map((m) => m[1]!))];
+    expect(codes.length).toBeGreaterThan(25);
+    for (const c of ["ITEM_CODE_TAKEN", "EVENT_CODE_TAKEN", "OPERATION_NOT_REVERSIBLE", "RULES_STATE", "EVENT_STARTS_IN_PAST", "HERO_DRAFT_MISSING"]) expect(codes).toContain(c);
+    expect(codes.filter((c) => !has(`err.${c}`))).toEqual([]);
+    expect(codes.filter((c) => !(`err.${c}` in en))).toEqual([]);
+    // the hints the review asked for
+    expect(translate("ru", "err.OPERATION_NOT_REVERSIBLE")).toMatch(/покупку отменяют возвратом/);
+    expect(translate("ru", "err.RULES_STATE")).toMatch(/сначала удалите черновик/);
   });
 
   it("no interface text is hard-coded outside the dictionaries (Cyrillic only in src/i18n)", () => {

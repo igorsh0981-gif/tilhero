@@ -45,6 +45,12 @@ import {
   CARD_ID,
   GLOSSARY_ENTRY_ID,
   LEARNER_USER_ID,
+  ASSET_ID,
+  GAME_EVENT_ID,
+  OP_ID,
+  PURCHASE_ID,
+  PNG_BYTES,
+  gameRulesPayload,
   type Harness,
   type Service,
 } from "./helpers.js";
@@ -76,6 +82,42 @@ const STAFF_ID = "7d0c2f43-58b5-4d0e-9f7e-2a8c7c1b9e11";
 const AG = "/admin/v1/ai/agents/conversation_partner";
 
 const IK = (k: string) => ({ "idempotency-key": `matrix-${k}-0001` });
+
+const GM = "/admin/v1/game";
+const GI = "/internal/v1/admin/game";
+const L = (ru: string, uz: string) => ({ ru, uz });
+const HERO_DRAFT_BODY = {
+  name: L("Дракончик Мятик", "Ajdarcha Yalpiz"),
+  tagline: L("Растёт вместе с тобой", "Sen bilan o'sadi"),
+  audiences: ["kids", "teens", "adults"],
+  stages: [
+    { stage: 1, name: L("Яйцо", "Tuxum"), asset_id: ASSET_ID },
+    { stage: 2, name: L("Малыш", "Chaqaloq"), asset_id: ASSET_ID },
+    { stage: 3, name: L("Крылья", "Qanotlar"), asset_id: ASSET_ID },
+  ],
+};
+const SHOP_ITEM_BODY = {
+  code: "bg_sunset",
+  kind: "background",
+  title: L("Закат", "Quyosh botishi"),
+  description: L("Тёплый фон главной", "Iliq fon"),
+  asset_id: ASSET_ID,
+  theme: { bg: "--paper", accent: "--pen" },
+  price_til: 120,
+  audiences: ["kids", "teens", "adults"],
+  available_from: null,
+  available_until: "2026-12-31T23:59:59+05:00",
+  order: 1,
+};
+const GAME_EVENT_BODY = {
+  code: "reading_week",
+  title: L("Неделя чтения", "O'qish haftaligi"),
+  description: L("×2 XP за чтение", "O'qish uchun ×2 XP"),
+  starts_at: "2026-11-23T00:00:00+05:00",
+  ends_at: "2026-11-30T00:00:00+05:00",
+  audiences: ["teens", "adults"],
+  multipliers: [{ action: "reading", currency: "xp", factor: 2 }],
+};
 
 interface Case {
   /** URL с подставленными параметрами */
@@ -686,6 +728,129 @@ const CASES: Record<string, Case> = {
   },
   "GET /admin/v1/memory/analytics": { url: "/admin/v1/memory/analytics?pair_id=ru-en&period=90d", status: 200, domain: ["memory", "GET", "/admin/v1/memory/analytics"] },
   "GET /admin/v1/memory/stats": { url: "/admin/v1/memory/stats?period=7d", status: 200, domain: ["memory", "GET", "/admin/v1/memory/stats"] },
+  // ---------- спринт 6: игра и герои (gamification /internal/v1/admin/game/*)
+  "GET /admin/v1/game/overview": { url: `${GM}/overview?period=30d`, status: 200, domain: ["gamification", "GET", `${GI}/overview`] },
+  "GET /admin/v1/game/rules": { url: `${GM}/rules`, status: 200, domain: ["gamification", "GET", `${GI}/rules`] },
+  "GET /admin/v1/game/rules/:version": { url: `${GM}/rules/1`, status: 200, domain: ["gamification", "GET", `${GI}/rules/1`] },
+  "PUT /admin/v1/game/rules/draft": {
+    url: `${GM}/rules/draft`,
+    payload: { payload: gameRulesPayload(), comment: "Поднимаем лимит тилов", based_on: 1 },
+    headers: { "if-match": "2026-11-20T09:00:00.000Z" },
+    status: 200,
+    domain: ["gamification", "PUT", `${GI}/rules/draft`],
+  },
+  "DELETE /admin/v1/game/rules/draft": { url: `${GM}/rules/draft`, status: 204, domain: ["gamification", "DELETE", `${GI}/rules/draft`] },
+  "POST /admin/v1/game/rules/draft/validate": { url: `${GM}/rules/draft/validate`, status: 200, domain: ["gamification", "POST", `${GI}/rules/draft/validate`] },
+  "POST /admin/v1/game/rules/draft/activate": {
+    url: `${GM}/rules/draft/activate`,
+    payload: { comment: "Лимит тилов 80 в день" },
+    status: 200,
+    domain: ["gamification", "POST", `${GI}/rules/draft/activate`],
+  },
+  "POST /admin/v1/game/rules/:version/rollback": {
+    url: `${GM}/rules/1/rollback`,
+    payload: { comment: "Возврат к версии 1" },
+    status: 200,
+    domain: ["gamification", "POST", `${GI}/rules/1/rollback`],
+  },
+  "GET /admin/v1/game/heroes": { url: `${GM}/heroes`, status: 200, domain: ["gamification", "GET", `${GI}/heroes`] },
+  "PUT /admin/v1/game/heroes/:code/draft": {
+    url: `${GM}/heroes/pet_0/draft`,
+    payload: HERO_DRAFT_BODY,
+    status: 200,
+    domain: ["gamification", "PUT", `${GI}/heroes/pet_0/draft`],
+  },
+  "POST /admin/v1/game/heroes/:code/publish": {
+    url: `${GM}/heroes/pet_0/publish`,
+    payload: { comment: "Новая картинка ступени" },
+    status: 200,
+    domain: ["gamification", "POST", `${GI}/heroes/pet_0/publish`],
+  },
+  "POST /admin/v1/game/assets": {
+    url: `${GM}/assets?purpose=hero_stage`,
+    payload: PNG_BYTES,
+    headers: { "content-type": "image/png" },
+    status: 201,
+    domain: ["gamification", "POST", `${GI}/assets`],
+  },
+  "GET /admin/v1/game/assets/:assetId/content": { url: `${GM}/assets/${ASSET_ID}/content`, status: 200, domain: ["gamification", "GET", `${GI}/assets/${ASSET_ID}/content`] },
+  "GET /admin/v1/game/shop/items": { url: `${GM}/shop/items`, status: 200, domain: ["gamification", "GET", `${GI}/shop/items`] },
+  "POST /admin/v1/game/shop/items": {
+    url: `${GM}/shop/items`,
+    payload: SHOP_ITEM_BODY,
+    headers: IK("shopitem"),
+    status: 201,
+    domain: ["gamification", "POST", `${GI}/shop/items`],
+  },
+  "PATCH /admin/v1/game/shop/items/:code": {
+    url: `${GM}/shop/items/bg_sunset`,
+    payload: { price_til: 150, order: 2 },
+    status: 200,
+    domain: ["gamification", "PATCH", `${GI}/shop/items/bg_sunset`],
+  },
+  "POST /admin/v1/game/shop/items/:code/publish": {
+    url: `${GM}/shop/items/bg_sunset/publish`,
+    payload: { comment: "В продажу" },
+    status: 200,
+    domain: ["gamification", "POST", `${GI}/shop/items/bg_sunset/publish`],
+  },
+  "POST /admin/v1/game/shop/items/:code/retire": {
+    url: `${GM}/shop/items/bg_sunset/retire`,
+    payload: { comment: "Конец сезона" },
+    status: 200,
+    domain: ["gamification", "POST", `${GI}/shop/items/bg_sunset/retire`],
+  },
+  "GET /admin/v1/game/events": { url: `${GM}/events?status=published`, status: 200, domain: ["gamification", "GET", `${GI}/events`] },
+  "POST /admin/v1/game/events": {
+    url: `${GM}/events`,
+    payload: GAME_EVENT_BODY,
+    headers: IK("gameevent"),
+    status: 201,
+    domain: ["gamification", "POST", `${GI}/events`],
+  },
+  "PATCH /admin/v1/game/events/:id": {
+    url: `${GM}/events/${GAME_EVENT_ID}`,
+    payload: { multipliers: [{ action: "reading", currency: "til", factor: 1.5 }] },
+    status: 200,
+    domain: ["gamification", "PATCH", `${GI}/events/${GAME_EVENT_ID}`],
+  },
+  "POST /admin/v1/game/events/:id/publish": {
+    url: `${GM}/events/${GAME_EVENT_ID}/publish`,
+    payload: { comment: "Запуск недели чтения" },
+    status: 200,
+    domain: ["gamification", "POST", `${GI}/events/${GAME_EVENT_ID}/publish`],
+  },
+  "POST /admin/v1/game/events/:id/cancel": {
+    url: `${GM}/events/${GAME_EVENT_ID}/cancel`,
+    payload: { comment: "Перенос на декабрь" },
+    status: 200,
+    domain: ["gamification", "POST", `${GI}/events/${GAME_EVENT_ID}/cancel`],
+  },
+  "GET /admin/v1/game/wallets/:userId": { url: `${GM}/wallets/${LEARNER_USER_ID}`, status: 200, domain: ["gamification", "GET", `${GI}/wallets/${LEARNER_USER_ID}`] },
+  "GET /admin/v1/game/wallets/:userId/ledger": {
+    url: `${GM}/wallets/${LEARNER_USER_ID}/ledger?currency=til&cursor=c1&limit=50`,
+    status: 200,
+    domain: ["gamification", "GET", `${GI}/wallets/${LEARNER_USER_ID}/ledger`],
+  },
+  "POST /admin/v1/game/wallets/:userId/adjustments": {
+    url: `${GM}/wallets/${LEARNER_USER_ID}/adjustments`,
+    payload: { currency: "til", amount: 50, reason: "Компенсация за сбой урока" },
+    headers: IK("adjust"),
+    status: 201,
+    domain: ["gamification", "POST", `${GI}/wallets/${LEARNER_USER_ID}/adjustments`],
+  },
+  "POST /admin/v1/game/wallets/:userId/ledger/:opId/reverse": {
+    url: `${GM}/wallets/${LEARNER_USER_ID}/ledger/${OP_ID}/reverse`,
+    payload: { reason: "Ошибочное начисление" },
+    status: 200,
+    domain: ["gamification", "POST", `${GI}/wallets/${LEARNER_USER_ID}/ledger/${OP_ID}/reverse`],
+  },
+  "POST /admin/v1/game/wallets/:userId/purchases/:purchaseId/refund": {
+    url: `${GM}/wallets/${LEARNER_USER_ID}/purchases/${PURCHASE_ID}/refund`,
+    payload: { reason: "Покупка по ошибке ребёнка" },
+    status: 200,
+    domain: ["gamification", "POST", `${GI}/wallets/${LEARNER_USER_ID}/purchases/${PURCHASE_ID}/refund`],
+  },
 };
 
 let h: Harness;

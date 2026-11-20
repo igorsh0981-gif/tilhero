@@ -42,7 +42,7 @@ VALID_PIN6 = "402913"
 REQUIRED = ["terms", "privacy", "learning"]
 ALL_PURPOSES = [*REQUIRED, "voice_recording", "social", "product_news"]
 DOMAINS = ["learning-plan", "social", "notifications", "support", "experience-config", "catalog", "diagnostics",
-           "lessons", "assessment", "ai-gateway", "memory"]
+           "lessons", "assessment", "ai-gateway", "memory", "gamification"]
 
 
 def make_settings(schema: str, **kw: Any) -> Settings:

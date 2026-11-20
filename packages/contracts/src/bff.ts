@@ -1316,7 +1316,8 @@ export type QuestKind =
 export type GameAction = "lesson" | "scenario" | "media" | "reading" | "review" | "skill" | "quest";
 export type ShopItemKind = "background" | "hero_frame" | "streak_freeze";
 
-/** Картинка: url — GET /v1/game/assets/{asset_id}/{sha256} (без авторизации, неизменяемая) */
+/** Картинка: url — GET /v1/game/assets/{asset_id}/{sha256} (без авторизации, неизменяемая; 304 по If-None-Match;
+ *  404 ASSET_NOT_FOUND — нет картинки или sha не совпал) */
 export interface GameImage {
   asset_id: string;
   url: string;
@@ -1420,8 +1421,12 @@ export interface ShopItemRef {
   theme: { bg: string; accent: string } | null;
 }
 
-/** GET /v1/game/heroes → {items: HeroView[], selected: string | null, stage: HeroStage}
- *  (детям первыми — дракончики) */
+/** GET /v1/game/heroes → HeroesResponse (детям первыми — дракончики) */
+export interface HeroesResponse {
+  items: HeroView[];
+  selected: string | null;
+  stage: HeroStage;
+}
 /** PUT /v1/game/hero {hero_code} → GameSummary. Смена бесплатна, XP и ступень сохраняются. */
 export interface SelectHeroRequest {
   hero_code: string;
@@ -1439,7 +1444,10 @@ export interface BadgeView {
   basis: { metric: "lessons" | "streak" | "skills" | "skill_retained" | "reviews_cards" | "readings" | "freeze";
     value: number; threshold: number };
 }
-/** GET /v1/game/badges → {items: BadgeView[]} (выданные первыми) */
+/** GET /v1/game/badges → BadgesResponse (выданные первыми) */
+export interface BadgesResponse {
+  items: BadgeView[];
+}
 
 export interface ShopItemView extends ShopItemRef {
   description: Localized;
@@ -1451,7 +1459,13 @@ export interface ShopItemView extends ShopItemRef {
   reason_unavailable: "owned" | "freeze_full" | "not_enough_tils" | null;
   available_until: string | null;
 }
-/** GET /v1/game/shop → {items: ShopItemView[], til_balance: number, freeze_stock: number, freeze_max: number} */
+/** GET /v1/game/shop → ShopResponse */
+export interface ShopResponse {
+  items: ShopItemView[];
+  til_balance: number;
+  freeze_stock: number;
+  freeze_max: number;
+}
 
 /** POST /v1/game/shop/purchases (Idempotency-Key обязателен) → PurchaseResult. Повтор ключа — тот же ответ. */
 export interface PurchaseRequest {
