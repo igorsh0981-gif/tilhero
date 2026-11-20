@@ -176,7 +176,8 @@ describe("права и step-up (PLAN спринта 4)", () => {
     denied(await send(s, "POST", `/admin/v1/qa/evaluations/${EVALUATION_ID}/reevaluate`, REEVALUATION_BODY), "qa.review");
     denied(await get(s, "/admin/v1/ai/budget"), "costs.read");
     const actor = h.fake.callsTo("lessons", "POST").at(-1)!.actor!;
-    expect(actor.permissions).toEqual(["ai.read", "content.read", "dashboard.read", "qa.read", "qa.transcripts"]);
+    // спринт 5: + memory.read
+    expect(actor.permissions).toEqual(["ai.read", "content.read", "dashboard.read", "memory.read", "qa.read", "qa.transcripts"]);
   });
 });
 
@@ -359,7 +360,13 @@ describe("ключ провайдера ИИ никогда не уходит и
     const { s } = await loginAs(h, "super_admin");
     await stepUp(h, s);
     const provider = await get(s, "/admin/v1/ai/provider");
-    expect(provider.json()).toEqual({ provider: "fake", key_configured: false, last_error: null, ai_enabled: true });
+    expect(provider.json()).toEqual({
+      provider: "fake",
+      key_configured: false,
+      last_error: null,
+      ai_enabled: true,
+      speech: { provider: "fake_speech", key_configured: false, region: null, last_error: null },
+    });
 
     const leaks: Array<[string, string, () => Response, () => Promise<{ statusCode: number; body: string; json(): any }>]> = [ // eslint-disable-line @typescript-eslint/no-explicit-any
       ["GET", "/admin/v1/ai/provider", () => json(200, { provider: "anthropic", key_configured: true, ai_enabled: true, last_error: null, api_key: KEY }), () => get(s, "/admin/v1/ai/provider")],
@@ -704,7 +711,13 @@ describe("контроль диалогов: реплики, переоценк�
 describe("затраты, модели и обзор", () => {
   it("модели и цены, бюджет, сводка затрат (period по умолчанию month), вызовы — без user_id ученика", async () => {
     const { s } = await loginAs(h, "super_admin");
-    expect((await get(s, "/admin/v1/ai/models")).json().items.map((m: { model_id: string }) => m.model_id)).toEqual(["claude-haiku-5-5", "claude-sonnet-5-5", "fake"]);
+    expect((await get(s, "/admin/v1/ai/models")).json().items.map((m: { model_id: string }) => m.model_id)).toEqual([
+      "claude-haiku-5-5",
+      "claude-sonnet-5-5",
+      "fake",
+      "azure-speech-pa",
+      "fake-speech",
+    ]);
     const sum = await get(s, "/admin/v1/ai/usage/summary");
     expect(sum.json()).toMatchObject({ period: "month", spent_usd: 3.25, monthly_cap_usd: 20, ai_enabled: true });
     expect(h.fake.callsTo("aiGateway", "GET", "/admin/v1/ai/usage/summary")[0]!.query).toEqual({ period: "month" });
@@ -724,7 +737,7 @@ describe("затраты, модели и обзор", () => {
     const d = (await get(s, "/admin/v1/dashboard?period=7d")).json() as Dashboard;
     expect(d.lessons).toEqual({
       available: true,
-      data: { period: "7d", started: 40, completed: 31, completion_pct: 77.5, median_minutes: 19, by_kind: { lesson: 30, scenario: 6, media: 3, review: 1 }, ai_degraded_pct: 4.2, appeals_open: 2, human_review_open: 1 },
+      data: { period: "7d", started: 40, completed: 31, completion_pct: 77.5, median_minutes: 19, by_kind: { lesson: 30, scenario: 6, media: 3, review: 1, reading: 2 }, ai_degraded_pct: 4.2, appeals_open: 2, human_review_open: 1 },
     });
     expect(d.ai.data).toMatchObject({ period: "month", spent_usd: 3.25, cap_used_pct: 16.3, unavailable_pct: 1.5, p95_latency_ms: 2300 });
     expect(h.fake.callsTo("lessons", "GET", "/admin/v1/lesson-sessions/stats")[0]!.query).toEqual({ period: "7d" });

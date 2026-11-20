@@ -31,7 +31,7 @@ export function privilegedOf(roles: readonly Pick<Role, "code" | "privileged">[]
 
 /** Matrix rows: section access first, then commands (admin.ts Permission catalogue). */
 export const PERM_GROUPS: ReadonlyArray<{ id: "sections" | "actions"; perms: readonly Permission[] }> = [
-  { id: "sections", perms: ["dashboard.read", "users.read", "support.read", "whatsnew.manage", "notif.templates.manage", "notif.campaigns.manage", "config.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read"] },
+  { id: "sections", perms: ["dashboard.read", "users.read", "support.read", "whatsnew.manage", "notif.templates.manage", "notif.campaigns.manage", "config.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read"] },
   {
     id: "actions",
     perms: [
@@ -57,6 +57,9 @@ export const PERM_GROUPS: ReadonlyArray<{ id: "sections" | "actions"; perms: rea
       "qa.transcripts",
       "qa.review",
       "costs.manage",
+      // sprint 5: manual adjustment of one memory card (step-up, reason, audit), the course dictionary and AI translations
+      "memory.manage",
+      "glossary.manage",
     ],
   },
 ]

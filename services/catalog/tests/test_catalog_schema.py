@@ -22,7 +22,7 @@ from sqlalchemy.engine import make_url
 
 from tilhero_catalog.content import KEY_FIELDS
 from tilhero_catalog.domain.common import SEED_ACTOR_ID
-from tilhero_catalog.domain.seed import SeedInvalid, apply_seed, load_seed_dir
+from tilhero_catalog.domain.seed import SeedInvalid, apply_seed, load_readings, load_seed_dir
 from tilhero_catalog.main import build_app
 from tilhero_catalog.models import Base
 from tilhero_common.app import Runtime
@@ -38,7 +38,8 @@ from tilhero_common.testing import (
 )
 
 TABLES = ("languages", "language_pairs", "content_versions", "content_pointers", "scenario_test_runs", "media_blobs",
-          "media_requests", "deleted_users", "outbox", "inbox")
+          "media_requests", "deleted_users", "glossary_entries", "glossary_forms", "glossary_history", "outbox",
+          "inbox")
 REAL_SEED = Path(SERVICE_DIR) / "migrations" / "seed"
 NOW = datetime(2026, 11, 19, 6, tzinfo=UTC)
 
@@ -84,7 +85,7 @@ async def test_real_seed_loaded_as_published(roles_env) -> None:
     """Сид методистов: все записи — опубликованные v1 автора seed, локализации «проверено: сид», права медиа
     подтверждены, у сценариев зелёный прогон; аудит content.published от system и события — в outbox."""
     _, roles = roles_env
-    entries = load_seed_dir(REAL_SEED)
+    entries = load_seed_dir(REAL_SEED) + load_readings(REAL_SEED)  # тексты для чтения — миграция 0005
     expected = Counter(kind for kind, _ in entries)
     assert expected["course"] == 1 and expected["scenario"] >= 20 and expected["media_asset"] >= 1
     rows = await _fetch(roles.runtime_url, roles.schema,
@@ -211,7 +212,7 @@ async def test_seed_migration_is_reversible_and_idempotent(roles_env) -> None:
     assert left[0]["n"] == 0
     await migrate(SERVICE_DIR, owner)
     again = await _fetch(roles.owner_url, roles.schema, "SELECT count(*) AS n FROM content_versions")
-    assert again[0]["n"] == len(load_seed_dir(REAL_SEED))
+    assert again[0]["n"] == len(load_seed_dir(REAL_SEED)) + len(load_readings(REAL_SEED))
     # повтор загрузки того же сида — без изменений
     engine = make_engine(roles.owner_url, roles.schema, pool_size=1)
     try:
@@ -232,3 +233,115 @@ async def test_seed_migration_is_reversible_and_idempotent(roles_env) -> None:
         assert "NO_CONTROL_ITEMS" in str(exc.value)
     finally:
         await engine.dispose()
+
+
+async def test_real_seed_glossary_built_and_readings_served(roles_env) -> None:
+    """Миграции 0004/0005 на сиде методистов: статьи course из ключевых слов уроков, фраз медиа и глоссариев текстов,
+    формы уникальны в паре, у каждой статьи course есть место в контенте; событий словаря миграция не публикует;
+    тексты для чтения (если сид G уже есть) видны ученику по аудитории."""
+    settings, roles = roles_env
+    stats = await _fetch(roles.runtime_url, roles.schema,
+                         "SELECT source, count(*) AS n, min(jsonb_array_length(refs)) AS min_refs "
+                         "FROM glossary_entries GROUP BY source")
+    assert [(r["source"], r["min_refs"] >= 1) for r in stats] == [("course", True)]
+    assert stats[0]["n"] >= 200
+    forms = await _fetch(roles.runtime_url, roles.schema,
+                         "SELECT count(*) AS n, count(DISTINCT (pair_id, form_key)) AS d FROM glossary_forms")
+    assert forms[0]["n"] == forms[0]["d"] > stats[0]["n"] - 1
+    kinds = await _fetch(roles.runtime_url, roles.schema,
+                         "SELECT DISTINCT r->>'kind' AS kind FROM glossary_entries, jsonb_array_elements(refs) r")
+    readings = load_readings(REAL_SEED)
+    assert {r["kind"] for r in kinds} == {"lesson", "media_asset"} | ({"reading"} if readings else set())
+    outbox = await _fetch(roles.runtime_url, roles.schema,
+                          "SELECT count(*) AS n FROM outbox WHERE event_type = 'catalog.glossary.changed.v1'")
+    assert outbox[0]["n"] == 0
+    history = await _fetch(roles.runtime_url, roles.schema,
+                           "SELECT count(*) AS n FROM glossary_history WHERE action = 'created' AND by IS NULL")
+    assert history[0]["n"] == stats[0]["n"]
+    if not readings:
+        return
+    app = build_app(settings, Runtime(settings, bus=InMemoryBus()))
+    async with app.router.lifespan_context(app), httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://catalog") as c:
+        tb = internal_headers(settings, issuer="telegram-bff", subject=str(uuid.uuid4()))
+        for audience in ("adults", "kids"):
+            r = await c.get("/internal/v1/readings", params={"audience": audience, "limit": 100}, headers=tb)
+            expected = {p["reading_id"] for _, p in readings if audience in p["audience"]}
+            assert {i["reading_id"] for i in r.json()["items"]} == expected
+        first = readings[0][1]
+        sentence = first["paragraphs"][0]["sentences"][0]
+        word = first["glossary"][0]["en"]
+        mem = internal_headers(settings, issuer="memory", subject=str(uuid.uuid4()))
+        r = await c.post("/internal/v1/glossary/lookup", json={
+            "pair_id": "ru-en", "text": word,
+            "content_ref": {"kind": "reading", "key": first["reading_id"], "version": 1}}, headers=mem)
+        assert r.status_code == 200, r.text
+        assert r.json()["entry"] is not None and sentence["s_id"]
+
+
+async def test_readings_seed_migration_downgrade(roles_env) -> None:
+    """Откат 0005: тексты сида и статьи словаря, построенные только из них, удаляются; статьи уроков и медиа
+    остаются (ссылки на тексты сняты); повторный подъём восстанавливает то же."""
+    _, roles = roles_env
+    if not load_readings(REAL_SEED):
+        pytest.skip("migrations/seed/readings.json ещё нет")
+    owner = make_settings(database_url=roles.owner_url, db_schema=roles.schema, seed_dir=None)
+    cfg = Config(str(Path(SERVICE_DIR) / "alembic.ini"))
+    cfg.set_main_option("script_location", str(Path(SERVICE_DIR) / "migrations"))
+    cfg.attributes["settings"] = owner
+    count_sql = ("SELECT (SELECT count(*) FROM glossary_entries) AS entries, "
+                 "(SELECT count(*) FROM glossary_forms) AS forms, "
+                 "(SELECT count(*) FROM content_versions WHERE kind = 'reading') AS readings, "
+                 "(SELECT count(*) FROM glossary_entries WHERE refs @> '[{\"kind\": \"reading\"}]') AS with_reading")
+    before = (await _fetch(roles.owner_url, roles.schema, count_sql))[0]
+    assert before["readings"] == len(load_readings(REAL_SEED)) and before["with_reading"] > 0
+    await asyncio.to_thread(command.downgrade, cfg, "0004")
+    down = (await _fetch(roles.owner_url, roles.schema, count_sql))[0]
+    assert down["readings"] == 0 and down["with_reading"] == 0 and down["entries"] < before["entries"]
+    await migrate(SERVICE_DIR, owner)
+    again = (await _fetch(roles.owner_url, roles.schema, count_sql))[0]
+    assert dict(again) == dict(before)
+
+
+async def test_runtime_role_glossary_flows(roles_env) -> None:
+    """Под ролью сервиса: статья методиста, перевод ИИ, публикация урока со статьями course (идентификаторы seq,
+    история); история словаря неизменяема и для владельца схемы."""
+    from catalog_kit import GLOSSARIST, lesson
+
+    settings, roles = roles_env
+    app = build_app(settings, Runtime(settings, bus=InMemoryBus()))
+    async with app.router.lifespan_context(app), httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://catalog") as c:
+        def staff(actor):
+            return internal_headers(settings, issuer="admin-bff", actor=actor)
+
+        gloss = {"ru": "закладка", "uz": "xatcho‘p"}
+        r = await c.post("/admin/v1/glossary", json={"pair_id": "ru-en", "lemma": "bookmark", "forms": ["bookmark"],
+                                                     "part_of_speech": "noun", "gloss": gloss, "example_en": None,
+                                                     "reason": None}, headers=staff(GLOSSARIST))
+        assert r.status_code == 422  # ‘ вместо ʻ — LOCALE_SCRIPT
+        gloss["uz"] = "xatchoʻp"
+        r = await c.post("/admin/v1/glossary", json={"pair_id": "ru-en", "lemma": "bookmark", "forms": ["bookmark"],
+                                                     "part_of_speech": "noun", "gloss": gloss, "example_en": None,
+                                                     "reason": None}, headers=staff(GLOSSARIST))
+        assert r.status_code == 201, r.text
+        p = lesson("l-roles-glossary")
+        p["key_words"][0] = {"en": "bookmark", "gloss": gloss, "example_en": "A bookmark, please."}
+        p["key_words"][1] = {"en": "notebook", "gloss": {"ru": "тетрадь", "uz": "daftar"},
+                             "example_en": "My notebook is blue."}
+        r = await c.post("/admin/v1/content/lesson", json={"payload": p}, headers=staff(CONTENT_MANAGER))
+        assert r.status_code == 201, r.text
+        base = "/admin/v1/content/lesson/l-roles-glossary/versions/1"
+        assert (await c.post(f"{base}/submit", headers=staff(CONTENT_MANAGER))).status_code == 200
+        review = {"decision": "approve", "note": "Проверено", "locale_checks": {"ru": "checked", "uz": "checked"}}
+        assert (await c.post(f"{base}/review", json=review, headers=staff(REVIEWER))).status_code == 200
+        r = await c.post(f"{base}/publish", json={"reason": "Урок"}, headers=staff(PUBLISHER))
+        assert r.status_code == 200, r.text
+    rows = await _fetch(roles.runtime_url, roles.schema,
+                        "SELECT source, refs FROM glossary_entries WHERE forms @> '[\"notebook\"]' "
+                        "OR forms @> '[\"bookmark\"]' ORDER BY source")
+    assert [r["source"] for r in rows] == ["course", "methodist"]
+    for stmt in ("UPDATE glossary_history SET reason = 'x'", "DELETE FROM glossary_history"):
+        for url in (roles.runtime_url, roles.owner_url):
+            with pytest.raises(asyncpg.PostgresError):
+                await _execute(url, roles.schema, stmt)

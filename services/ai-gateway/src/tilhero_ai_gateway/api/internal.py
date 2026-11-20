@@ -1,5 +1,11 @@
-"""Вызов агента для доменов: `POST /internal/v1/agents/{agent_id}/invoke` (lessons, assessment; INTERNAL_API §1.2);
-`GET /internal/v1/status` — доступен ли ИИ (аварийная остановка, готовность провайдера).
+"""Вызов агента для доменов: `POST /internal/v1/agents/{agent_id}/invoke` (lessons, assessment, memory; INTERNAL_API
+§1.2, спринт 5 §1.7); `GET /internal/v1/status` — доступны ли ИИ и оценка произношения (аварийная остановка,
+готовность провайдеров, для речи — ещё месячный потолок).
+
+Вызывающий и вид запроса (защита в глубину, спринт 5): memory — только `teaching_coach` с `request: gloss_word`
+(перевод слова, которое memory проверила в опубликованном контенте через catalog); lessons и assessment — все
+LLM-агенты, кроме `gloss_word` (иначе в «перевод слова» мог бы попасть произвольный текст ученика, а gloss_word
+разрешён детям). Нарушение → 403 CALLER_NOT_ALLOWED {agent_id, request}.
 
 Ответ всегда AgentInvokeResult со статусом 200 (`ok | unavailable | refused`) — вызывающий продолжает без ИИ при
 unavailable/refused. 404 — агент не найден или не `llm`+`active`; 422 — контекст не по ai.ts; 401 — в токене нет
@@ -28,10 +34,19 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from redis.exceptions import RedisError
 
-from tilhero_ai_gateway.api.common import InvokeCache, deps_of, invoke_auth, is_child_token, settings_of
-from tilhero_ai_gateway.contracts import AudienceSegment, SessionKind, validate_context
+from tilhero_ai_gateway.api.common import (
+    InvokeCache,
+    check_user,
+    deps_of,
+    invoke_auth,
+    is_child_token,
+    settings_of,
+    speech_deps_of,
+)
+from tilhero_ai_gateway.contracts import AiSessionKind, AudienceSegment, request_kind, validate_context
 from tilhero_ai_gateway.domain import costs
 from tilhero_ai_gateway.domain.invoke import InvokeRequest, invoke
+from tilhero_ai_gateway.domain.speech import speech_available
 from tilhero_ai_gateway.models import AgentRow
 from tilhero_common.errors import forbidden, not_found, unprocessable
 from tilhero_common.internal_auth import Principal
@@ -51,7 +66,7 @@ class InvokeIn(BaseModel):
 
     request_id: uuid.UUID
     session_id: uuid.UUID
-    session_kind: SessionKind
+    session_kind: AiSessionKind
     user_id: uuid.UUID
     audience: AudienceSegment
     locale: Literal["ru", "uz"]
@@ -60,14 +75,16 @@ class InvokeIn(BaseModel):
     deadline_ms: int | None = Field(default=None, ge=1000, le=60_000)
 
 
-def _check_user(principal: Principal, user_id: uuid.UUID) -> None:
-    """user_id тела — ученик из токена вызывающего (`sub`, либо `lrn`, если токен его несёт): IDOR, защита в глубину.
-    Токена без `sub` у вызова ученика не бывает → 401 USER_CONTEXT_REQUIRED (ревью R1-07: раньше такой токен
-    пропускал проверку целиком)."""
-    subject = principal.user_id  # нет sub → 401 USER_CONTEXT_REQUIRED
-    allowed = {v for v in (subject, principal.claims.get("lrn")) if isinstance(v, str) and v}
-    if str(user_id) not in allowed:
-        raise forbidden("USER_CONTEXT_MISMATCH", "Ученик вызова не совпадает с учеником токена")
+# Вызывающий → (agent_id, вид запроса) допустимые; None в виде — основной контракт агента
+MEMORY_REQUESTS: Final = frozenset({("teaching_coach", "gloss_word")})
+
+
+def _check_caller(caller: str, agent_id: str, context: Any) -> None:
+    kind = request_kind(agent_id, context)
+    allowed = (agent_id, kind) in MEMORY_REQUESTS if caller == "memory" else kind is None
+    if not allowed:
+        raise forbidden("CALLER_NOT_ALLOWED", "Вызывающему недоступен этот агент или вид запроса",
+                        {"agent_id": agent_id[:64], "request": kind})
 
 
 @router.post("/agents/{agent_id}/invoke",
@@ -78,7 +95,7 @@ async def invoke_agent(agent_id: str, body: InvokeIn, request: Request,
                        principal: Principal = Depends(invoke_auth)) -> JSONResponse:
     received = time.monotonic()
     deadline = received + body.deadline_ms / 1000 if body.deadline_ms is not None else None
-    _check_user(principal, body.user_id)
+    check_user(principal, body.user_id)
     deps = deps_of(request)
     rt = deps.rt
     async with rt.transaction() as s:
@@ -87,6 +104,7 @@ async def invoke_agent(agent_id: str, body: InvokeIn, request: Request,
         raise not_found("AGENT_NOT_FOUND", "Агент не найден")
     if agent.implementation != "llm" or agent.availability != "active":
         raise not_found("AGENT_NOT_ACTIVE", "Агент не вызывается через ai-gateway")
+    _check_caller(principal.issuer, agent_id, body.context)
     context, errors = validate_context(agent_id, body.context)
     if context is None:
         raise unprocessable("CONTEXT_INVALID", "Контекст агента не соответствует контракту", {"errors": errors})
@@ -132,10 +150,14 @@ async def invoke_agent(agent_id: str, body: InvokeIn, request: Request,
 
 @router.get("/status")
 async def ai_status(request: Request, principal: Principal = Depends(invoke_auth)) -> dict[str, bool]:
-    """{ai_available}: ИИ включён (нет аварийной остановки) и провайдер готов (ключ задан или fake). lessons спрашивает
-    при старте занятия: недоступен → режим «варианты» сразу (INTERNAL_API §2.1), а не после первого отказа. Лимиты
-    бюджета здесь не учитываются — они проверяются на каждом вызове."""
+    """AiStatus {ai_available, speech_available}. ai_available: ИИ включён (нет аварийной остановки) и провайдер
+    готов (ключ задан или fake) — lessons спрашивает при старте занятия: недоступен → режим «варианты» сразу
+    (INTERNAL_API §2.1); лимиты бюджета не учитываются — они проверяются на каждом вызове. speech_available (спринт 5,
+    memory перед оценкой произношения): нет аварийной остановки, ключ и регион Azure заданы (или fake), модель речи
+    включена, месячный потолок не превышен."""
     deps = deps_of(request)
+    speech = speech_deps_of(request)
     async with deps.rt.transaction() as s:
         budget = await costs.get_budget(s)
-    return {"ai_available": bool(budget.ai_enabled and deps.provider.ready())}
+        speech_ok = await speech_available(s, speech.provider, speech.clock())
+    return {"ai_available": bool(budget.ai_enabled and deps.provider.ready()), "speech_available": speech_ok}

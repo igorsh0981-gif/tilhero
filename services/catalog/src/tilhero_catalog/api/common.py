@@ -27,14 +27,17 @@ log = logging.getLogger("tilhero.catalog.api")
 # Вызывающие (INTERNAL_API §1.4–1.5 спринта 3, §4 спринта 4): сотрудники — только admin-bff с actor; ученик —
 # telegram-bff (заявки на песни и фильмы — только он); снимок курса и пары — ещё learning-plan, diagnostics и lessons;
 # каталог сценариев и медиа (карточки, детали) — telegram-bff и lessons; аудио — только telegram-bff (прокси для
-# Mini App); заявка по id — notifications; версии контента с ключами — только lessons и assessment; упражнения
-# к медиа (без ключей) — lessons.
+# Mini App); заявка по id — notifications; версии контента с ключами — lessons и assessment, а также memory (спринт 5:
+# только lesson, media_asset, reading, scenario); упражнения к медиа (без ключей) — lessons; тексты для чтения —
+# telegram-bff и lessons; словарь курса (поиск, переводы ИИ, формы) и задания проверок удержания — только memory.
 staff_auth = InternalAuth({"admin-bff"})
 learner_auth = InternalAuth({"telegram-bff"})
 content_readers = InternalAuth({"telegram-bff", "lessons"})
 course_readers = InternalAuth({"telegram-bff", "learning-plan", "diagnostics", "lessons"})
 request_readers = InternalAuth({"telegram-bff", "notifications"})
-version_readers = InternalAuth({"lessons", "assessment"})
+version_readers = InternalAuth({"lessons", "assessment", "memory"})
+MEMORY_VERSION_KINDS = frozenset({"lesson", "media_asset", "reading", "scenario"})
+memory_auth = InternalAuth({"memory"})
 exercise_readers = InternalAuth({"lessons"})
 no_service = InternalAuth(set())
 

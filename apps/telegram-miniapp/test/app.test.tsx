@@ -9,7 +9,7 @@ const ME = "6f1c2b3a-1111-4a2b-9c3d-000000000001";
 const INVITE = "33333333-aaaa-4bbb-8ccc-0000000000aa";
 
 function session(onboarded: boolean, startParam: string | null = null): SessionResponse {
-  const learner = { learner_id: ME, kind: "self" as const, display_name: "Азиз", age_band: onboarded ? ("18+" as const) : null, is_active: true, onboarding_completed: onboarded };
+  const learner = { learner_id: ME, kind: "self" as const, display_name: "Азиз", age_band: onboarded ? ("18+" as const) : null, is_active: true, onboarding_completed: onboarded, voice_consent: false };
   return {
     access_token: "acc",
     expires_in: 900,

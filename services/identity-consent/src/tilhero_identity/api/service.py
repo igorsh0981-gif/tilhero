@@ -1,5 +1,5 @@
-"""Служебный API: адресация доставки (только notifications), публичный профиль (social, notifications) и статус бота
-(только telegram-bot-gateway)."""
+"""Служебный API: адресация доставки (только notifications), публичный профиль (social, notifications; спринт 5 —
+memory: согласие на запись голоса) и статус бота (только telegram-bot-gateway)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import uuid
 from fastapi import APIRouter, Depends, Path, Response
 
 from tilhero_common.internal_auth import Principal
-from tilhero_identity.api.deps import bot_gateway_only, get_service, notifications_only, social_or_notifications
+from tilhero_identity.api.deps import bot_gateway_only, get_service, notifications_only, public_profile_callers
 from tilhero_identity.schemas import BotStatusRequest, DeliveryInfo, PublicProfile
 from tilhero_identity.service import IdentityService
 
@@ -27,7 +27,7 @@ async def delivery(
 @router.get("/users/{user_id}/public", response_model=PublicProfile)
 async def public_profile(
     user_id: uuid.UUID,
-    _: Principal = Depends(social_or_notifications),
+    _: Principal = Depends(public_profile_callers),
     svc: IdentityService = Depends(get_service),
 ) -> PublicProfile:
     return await svc.public_profile(user_id)

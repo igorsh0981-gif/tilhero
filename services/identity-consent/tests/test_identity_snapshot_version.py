@@ -70,7 +70,7 @@ async def test_guardian_revoke_emits_narrowed_own_consent(env) -> None:
     assert len(accepted) == before + 1
     own = await _active_own(env, teen)
     assert accepted[-1].payload == {
-        "user_id": teen, "consent_id": str(own.consent_id), "policy_version": "1.0", "purposes": REQUIRED,
+        "user_id": teen, "consent_id": str(own.consent_id), "policy_version": "1.1", "purposes": REQUIRED,
         "age_band": "14-17", "basis": "self",
     }
     [revoked] = await env.events("consent.revoked.v1", teen)
@@ -80,7 +80,7 @@ async def test_guardian_revoke_emits_narrowed_own_consent(env) -> None:
     # снимок identity совпадает с последним событием: своё согласие, цели без необязательных, действует
     snap = await _snapshot(env, teen)
     assert snap["consent"] == {
-        "policy_version": "1.0", "purposes": REQUIRED, "accepted_at": snap["consent"]["accepted_at"],
+        "policy_version": "1.1", "purposes": REQUIRED, "accepted_at": snap["consent"]["accepted_at"],
         "revoked_at": None, "basis": "self",
     }
     assert snap["guardian_consent"] == "declined"

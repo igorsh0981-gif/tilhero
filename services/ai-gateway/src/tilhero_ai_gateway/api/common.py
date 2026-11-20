@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -17,7 +18,9 @@ from redis.exceptions import RedisError
 
 from tilhero_ai_gateway.domain.invoke import Deps
 from tilhero_ai_gateway.domain.provider_status import ProviderStatus
+from tilhero_ai_gateway.domain.speech import SpeechDeps
 from tilhero_ai_gateway.providers import Provider
+from tilhero_ai_gateway.providers.speech import SpeechProvider
 from tilhero_ai_gateway.settings import Settings
 from tilhero_common.app import Runtime
 from tilhero_common.errors import conflict, forbidden, unprocessable
@@ -26,8 +29,11 @@ from tilhero_common.redis_tools import IdempotencyStore, fingerprint
 
 log = logging.getLogger("tilhero.ai_gateway.api")
 
-# Вызывающие (INTERNAL_API §0, §1.2, §1.5): вызов агента — lessons и assessment; сотрудники — только admin-bff с actor
-invoke_auth = InternalAuth({"lessons", "assessment"})
+# Вызывающие (INTERNAL_API §0, §1.2, §1.5; спринт 5 §1.7, §1.9, §3): вызов агента — lessons, assessment и memory
+# (memory — только teaching_coach gloss_word, см. api/internal.py CALLER_REQUESTS); статус — они же; оценка
+# произношения — только memory; сотрудники — только admin-bff с actor
+invoke_auth = InternalAuth({"lessons", "assessment", "memory"})
+speech_auth = InternalAuth({"memory"})
 staff_auth = InternalAuth({"admin-bff"})
 
 IdempotencyKey = Header(default=None, alias="Idempotency-Key", min_length=8, max_length=128,
@@ -54,6 +60,27 @@ def deps_of(request: Request) -> Deps:
         state.provider_status = status
     provider = cast(Provider, state.provider)
     return Deps(rt=rt, settings=settings_of(rt), provider=provider, clock=lambda: now_of(rt), status=status)
+
+
+def speech_deps_of(request: Request) -> SpeechDeps:
+    rt: Runtime = request.app.state.runtime
+    state = request.app.state
+    status = getattr(state, "speech_status", None)
+    if status is None:
+        status = ProviderStatus(rt.redis, settings_of(rt).cache_namespace, kind="speech")
+        state.speech_status = status
+    return SpeechDeps(rt=rt, settings=settings_of(rt), provider=cast(SpeechProvider, state.speech),
+                      clock=lambda: now_of(rt), status=status)
+
+
+def check_user(principal: Principal, user_id: uuid.UUID) -> None:
+    """user_id запроса — ученик из токена вызывающего (`sub`, либо `lrn`, если токен его несёт): IDOR, защита в
+    глубину. Токена без `sub` у вызова ученика не бывает → 401 USER_CONTEXT_REQUIRED (ревью R1-07: раньше такой токен
+    пропускал проверку целиком)."""
+    subject = principal.user_id  # нет sub → 401 USER_CONTEXT_REQUIRED
+    allowed = {v for v in (subject, principal.claims.get("lrn")) if isinstance(v, str) and v}
+    if str(user_id) not in allowed:
+        raise forbidden("USER_CONTEXT_MISMATCH", "Ученик вызова не совпадает с учеником токена")
 
 
 def require_any(principal: Principal, *permissions: str) -> Actor:
@@ -113,13 +140,16 @@ class InvokeCache:
     """Идемпотентность вызова по request_id (24 ч, INTERNAL_API §1.2): результат хранится в Redis, не в БД.
     Тот же request_id с другим телом → 422 IDEMPOTENCY_KEY_REUSED; параллельный дубль ждёт результат первого вызова
     (см. begin) и только не дождавшись получает 409 IDEMPOTENCY_IN_PROGRESS.
-    Ключи ученика индексируются множеством — сага удаления стирает его результаты из кеша."""
+    Ключи ученика индексируются множеством — сага удаления стирает его результаты из кеша.
+    kind: `invoke` — вызовы агентов, `speech` — оценка произношения (результат без аудио; отпечаток запроса — хеш
+    меты и хеша аудио)."""
 
     POLL_S = 0.2
+    KINDS = ("invoke", "speech")
 
-    def __init__(self, redis: Redis, namespace: str, ttl: int, pending_ttl: int) -> None:
+    def __init__(self, redis: Redis, namespace: str, ttl: int, pending_ttl: int, kind: str = "invoke") -> None:
         self.redis = redis
-        self.ns = f"{namespace}:invoke"
+        self.ns = f"{namespace}:{kind}"
         self.ttl = ttl
         self.pending_ttl = pending_ttl
 

@@ -40,7 +40,8 @@ SERVICE_DIR = str(Path(__file__).resolve().parents[1])
 AUDITOR = Actor(id="staff-7", role="auditor", permissions=frozenset({"audit.read"}))
 SUPPORT = Actor(id="staff-8", role="support", permissions=frozenset({"support.reply"}))
 SPRINT1_WRITERS = ("identity-consent", "learning-plan", "social", "experience-config", "support", "notifications")
-BUS_WRITERS = (*SPRINT1_WRITERS, "admin-identity", "catalog", "diagnostics", "lessons", "assessment", "ai-gateway")
+BUS_WRITERS = (*SPRINT1_WRITERS, "admin-identity", "catalog", "diagnostics", "lessons", "assessment", "ai-gateway",
+               "memory")
 HTTP_WRITERS = ("identity-consent",)
 
 
@@ -140,6 +141,12 @@ WRITER_RECORDS: dict[str, dict[str, Any]] = {
     "lessons": record(actor_id=str(uuid.uuid4()), actor_role="qa_analyst", action="qa.transcript_viewed",
                       object_type="lesson_session", object_id=str(uuid.uuid4()), before=None, after=None,
                       reason="Разбор спорной оценки по обращению"),
+    # спринт 5: ручная правка карточки (step-up в admin-bff) — было/стало без текста карточки и цитат ученика
+    "memory": record(actor_id=str(uuid.uuid4()), actor_role="operations", action="memory.card_adjusted",
+                     object_type="memory_card", object_id=str(uuid.uuid4()),
+                     before={"status": "review", "due_at": "2026-11-21T08:00:00Z"},
+                     after={"status": "review", "due_at": "2026-11-28T08:00:00Z", "action": "reschedule"},
+                     reason="Ученик в отпуске неделю, перенос по обращению"),
 }
 
 
@@ -188,8 +195,8 @@ async def test_events_from_unknown_producers_are_ignored(env) -> None:
     for producer in ("telegram-bff", "telegram-bot-gateway", "admin-bff", "user-admin", "watch", "news",
                      "provider-gateway"):
         await env.publish("admin.audit.recorded.v1", record(action="config.publish"), producer)
-    # события безопасности — только от identity-consent
-    for producer in ("support", "learning-plan", "social"):
+    # события безопасности — только от identity-consent (memory пишет только свои записи аудита)
+    for producer in ("support", "learning-plan", "social", "memory"):
         await env.publish("consent.revoked.v1", {"user_id": str(uuid.uuid4()), "consent_id": str(uuid.uuid4())},
                           producer)
         await env.publish("user.deletion.requested.v1",

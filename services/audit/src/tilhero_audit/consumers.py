@@ -19,10 +19,12 @@ from tilhero_common.messaging import Envelope
 
 AUDIT_EVENT = "admin.audit.recorded.v1"
 # Писатели через шину: спринт 1 (INTERNAL_API §7) + спринт 2 — admin-identity (вход, сотрудники, роли, four-eyes;
-# docs/sprint2/INTERNAL_API.md §1: аудит auth.*, staff.*, role.*, approval.* через admin.audit.recorded.v1).
+# docs/sprint2/INTERNAL_API.md §1: аудит auth.*, staff.*, role.*, approval.* через admin.audit.recorded.v1); спринты
+# 3–4 — контент, диагностика, уроки, оценки, ИИ; спринт 5 — memory (ручная правка карточки memory.card_adjusted;
+# словарь курса glossary.* пишет catalog).
 AUDIT_EVENT_PRODUCERS = frozenset({
     "identity-consent", "learning-plan", "social", "experience-config", "support", "notifications", "admin-identity",
-    "catalog", "diagnostics", "lessons", "assessment", "ai-gateway",
+    "catalog", "diagnostics", "lessons", "assessment", "ai-gateway", "memory",
 })
 SECURITY_EVENT_PRODUCERS = frozenset({"identity-consent"})
 

@@ -42,6 +42,7 @@ export const DOMAIN = {
   aiGateway: "ai-gateway",
   lessons: "lessons",
   assessment: "assessment",
+  memory: "memory",
 } as const satisfies Record<keyof DomainUrls, string>;
 export type DomainKey = keyof typeof DOMAIN;
 

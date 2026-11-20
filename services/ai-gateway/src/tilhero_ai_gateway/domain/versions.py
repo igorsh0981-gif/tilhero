@@ -33,6 +33,7 @@ from tilhero_ai_gateway.domain.common import (
     version_object_id,
 )
 from tilhero_ai_gateway.domain.golden import active_cases, cases_hash, run_summary
+from tilhero_ai_gateway.domain.registry import LLM_PROVIDERS
 from tilhero_ai_gateway.models import AgentRollout, AgentRow, AgentVersion, ModelRow, TestRunRow, UsageRow
 from tilhero_common.errors import ApiError, conflict, not_found, too_many, unprocessable
 from tilhero_common.internal_auth import Actor
@@ -156,6 +157,8 @@ def body_issues(body: dict[str, Any], models: dict[str, ModelRow]) -> list[dict[
         value = body.get(name)
         if value is not None and value not in models:
             issues.append({"path": name, "message": f"неизвестная модель {value}"})
+        elif value is not None and models[value].provider not in LLM_PROVIDERS:
+            issues.append({"path": name, "message": f"{value} — модель оценки речи, не LLM"})
     if body.get("fallback_model_id") is not None and body["fallback_model_id"] == body["model_id"]:
         issues.append({"path": "fallback_model_id", "message": "резервная модель совпадает с основной"})
     return issues

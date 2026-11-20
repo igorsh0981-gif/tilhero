@@ -10,6 +10,9 @@
   vocabulary — по доле верных gap_fill и phrase_meaning (иначе рубрика медиа не набирала бы 2 оценённых критерия).
 - Правило зачёта — по оценённым критериям (null не входят; веса нормируются); оценённых < 2 → вердикта нет.
 - Навык demonstrated — верно без подсказок ≥ 2/3 его заданий (и хотя бы одно) при зачтённой рубрике.
+- Спринт 5, чтение: вопросы к тексту (single_choice / true_false — индекс, gap_fill — как выше) по ключам версии
+  текста; рубрика встроенная (`reading-comprehension`, единственный критерий comprehension — для вердикта достаточно
+  одного оценённого критерия); всегда practice_only — исходов навыков нет.
 """
 
 from __future__ import annotations
@@ -21,10 +24,11 @@ from dataclasses import dataclass
 from typing import Any
 
 CRITERIA = ("task", "vocabulary", "grammar", "independence", "pronunciation", "fluency", "comprehension")
-CHOICE_TYPES = frozenset({"single_choice", "translate_choice", "comprehension", "phrase_meaning"})
+CHOICE_TYPES = frozenset({"single_choice", "translate_choice", "comprehension", "phrase_meaning", "true_false"})
 LESSON_ITEM_TYPES = frozenset({"single_choice", "gap_fill", "order_words", "translate_choice"})
 MEDIA_GRADABLE = frozenset({"comprehension", "gap_fill", "order_lines", "phrase_meaning"})
 MEDIA_VOCABULARY = frozenset({"gap_fill", "phrase_meaning"})
+READING_QUESTION_TYPES = frozenset({"single_choice", "true_false", "gap_fill"})
 SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 OUTCOME_SCORE = {"success": 3, "alt_success": 2, "fail": 1}
 ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -101,10 +105,16 @@ def rubric_from_snapshot(rubric_id: str, version: int, snap: Mapping[str, Any]) 
                   float(rule["min_weighted"]), int(rule["min_per_criterion"]))
 
 
+def min_evaluated(rubric: Rubric) -> int:
+    """Сколько оценённых критериев нужно для вердикта: 2 (§3.2 п.4 спринта 4); у встроенной рубрики чтения критерий
+    один (comprehension) — достаточно его."""
+    return min(2, len(rubric.criteria))
+
+
 def verdict(rubric: Rubric, scores: Mapping[str, int | None]) -> tuple[float | None, bool | None, int]:
-    """(weighted 0..3, passed, число оценённых критериев). Оценённых < 2 → (None, None, n)."""
+    """(weighted 0..3, passed, число оценённых критериев). Оценённых меньше min_evaluated → (None, None, n)."""
     evaluated = [(c, scores.get(c.code)) for c in rubric.criteria if scores.get(c.code) is not None]
-    if len(evaluated) < 2:
+    if len(evaluated) < min_evaluated(rubric):
         return None, None, len(evaluated)
     total_w = sum(c.weight for c, _ in evaluated)
     if total_w <= 0:
@@ -114,6 +124,24 @@ def verdict(rubric: Rubric, scores: Mapping[str, int | None]) -> tuple[float | N
     passed = weighted + 1e-9 >= rubric.min_weighted and all(
         s is not None and s >= rubric.min_per_criterion for _, s in evaluated)
     return weighted, passed, len(evaluated)
+
+
+# Встроенная рубрика чтения (INTERNAL_API §5 спринта 5): у ReadingPayload рубрики нет — только критерий comprehension
+# (доля верных ответов на вопросы, полосы как share_score); «зачёт» — ≥ 60 % верных. Снимок хранится в оценке, как у
+# рубрик catalog (итоги, переоценка без catalog).
+READING_RUBRIC_ID = "reading-comprehension"
+READING_RUBRIC = Rubric(
+    rubric_id=READING_RUBRIC_ID, version=1,
+    criteria=(Criterion("comprehension", 1.0, {"ru": "Понимание текста", "uz": "Matnni tushunish"}, [
+        {"score": 0, "descriptor": {"ru": "Верно меньше трети ответов.",
+                                    "uz": "Javoblarning uchdan biridan kami toʻgʻri."}},
+        {"score": 1, "descriptor": {"ru": "Понятны отдельные детали.", "uz": "Ayrim tafsilotlar tushunarli."}},
+        {"score": 2, "descriptor": {"ru": "Главное понятно, часть деталей упущена.",
+                                    "uz": "Asosiysi tushunarli, ayrim tafsilotlar tushib qolgan."}},
+        {"score": 3, "descriptor": {"ru": "Понятны смысл и детали текста.",
+                                    "uz": "Matnning maʼnosi ham, tafsilotlari ham tushunarli."}},
+    ]),),
+    min_weighted=2.0, min_per_criterion=2)
 
 
 # ---------------------------------------------------------------- ключи заданий
@@ -169,6 +197,27 @@ def lesson_key_items(payload: Mapping[str, Any]) -> list[KeyItem]:
         return out
     except (KeyError, TypeError) as exc:
         raise ContentInvalid("lesson control items are malformed") from exc
+
+
+def reading_key_items(payload: Mapping[str, Any]) -> list[KeyItem]:
+    """Вопросы текста для чтения (ReadingPayload.questions) → ключи; skill_id — первый навык текста (исходов навыков у
+    чтения нет — practice_only; поле нужно карточке оценки)."""
+    try:
+        skills = [str(x) for x in payload.get("skill_ids") or []]
+        skill = skills[0] if skills else "reading"
+        out = []
+        for q in payload["questions"]:
+            kind = str(q["type"])
+            if kind not in READING_QUESTION_TYPES:
+                raise ContentInvalid(f"unknown reading question type {kind}")
+            answer = _str_list(q["answer"]) if kind == "gap_fill" else q["answer"]
+            out.append(_check_key(KeyItem(str(q["question_id"]), kind, skill, str(q.get("prompt_en") or ""),
+                                          tuple(_str_list(q.get("options") or [])), answer)))
+        if not out:
+            raise ContentInvalid("reading has no questions")
+        return out
+    except (KeyError, TypeError) as exc:
+        raise ContentInvalid("reading questions are malformed") from exc
 
 
 def exercise_key_item(payload: Mapping[str, Any]) -> KeyItem | None:

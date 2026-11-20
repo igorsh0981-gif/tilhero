@@ -216,10 +216,10 @@ function Journal({ filters, setFilters }: { filters: JournalFilters; setFilters:
                   </td>
                   <td>
                     <button type="button" className="tr wrap-any" lang="ru" onClick={() => navigate("qa", `sessions/${s.session_id}`)} data-testid={`qa-open-${s.session_id}`}>
-                      {s.title.ru || s.lesson_id || s.scenario_id || s.asset_id || s.session_id}
+                      {s.title.ru || s.lesson_id || s.scenario_id || s.asset_id || s.reading_id || s.session_id}
                     </button>
                     <span className="xs muted block">
-                      {k("sk", s.kind)} · <span className="mono">{s.lesson_id ?? s.scenario_id ?? s.asset_id ?? "—"}</span> · {k("ageseg", s.audience)}
+                      {k("sk", s.kind)} · <span className="mono">{s.lesson_id ?? s.scenario_id ?? s.asset_id ?? s.reading_id ?? "—"}</span> · {k("ageseg", s.audience)}
                     </span>
                   </td>
                   <td>{s.level ? <span className="tag">{s.level}</span> : "—"}</td>

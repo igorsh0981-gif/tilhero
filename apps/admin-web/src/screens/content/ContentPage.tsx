@@ -2,6 +2,7 @@
  * «Контент» (content.read; sprint 3, ADM-CONT-01…06, ADM-MEDIA-01…04): tabs «Курс», «Уроки», «Сценарии», «Рубрики»,
  * «Медиа» (materials and their exercises), «Заявки учеников», «Проверка» (content.review), «Диагностика». Routes:
  * #/content/<tab>[/<key>] · #/content/review/<kind>/<key> · #/content/requests/<id> · #/content/diagnostics/<test>/<v>.
+ * Sprint 5: «Чтение» (#/content/readings[/<key>]) and «Словарь курса» (#/content/glossary[/queue][/<entry_id>]).
  * Each list opens the entity in the shared Workspace (versions and the life cycle); every command is re-checked by
  * admin-bff and the catalog.
  */
@@ -17,6 +18,7 @@ import { LoadError } from "../../ui/LoadError";
 import { Btn, cx, Empty, Pill, Seg, Select, Spinner, TabPanel, Tabs } from "../../ui/kit";
 import { Drawer } from "../../ui/overlays";
 import { DiagnosticsTab } from "./DiagnosticsTab";
+import { GlossaryTab } from "./GlossaryTab";
 import { BANDS, prereqCycle, STATUSES } from "./model";
 import { RefsProvider, useRefs } from "./refs";
 import { RequestsTab } from "./RequestsTab";
@@ -24,7 +26,7 @@ import { ReviewTab } from "./ReviewTab";
 import { SPECS } from "./specs";
 import { STATUS_TONE, Workspace } from "./Workspace";
 
-export type ContentTab = "course" | "lessons" | "scenarios" | "rubrics" | "media" | "requests" | "review" | "diagnostics";
+export type ContentTab = "course" | "lessons" | "scenarios" | "rubrics" | "media" | "readings" | "glossary" | "requests" | "review" | "diagnostics";
 /** The tab needs its permission (UX; admin-bff and the catalog re-check): the learners' requests register is
  *  media.rights only (decision of the sprint 3 review) — it holds learners' titles, links and comments. */
 export const CONTENT_TABS: ReadonlyArray<{ v: ContentTab; icon: IconName; perm: "content.read" | "content.review" | "media.rights" }> = [
@@ -33,11 +35,14 @@ export const CONTENT_TABS: ReadonlyArray<{ v: ContentTab; icon: IconName; perm: 
   { v: "scenarios", icon: "branch", perm: "content.read" },
   { v: "rubrics", icon: "clipboardCheck", perm: "content.read" },
   { v: "media", icon: "play", perm: "content.read" },
+  // sprint 5: reading texts (ContentKind reading, the shared content API) and the course dictionary
+  { v: "readings", icon: "note", perm: "content.read" },
+  { v: "glossary", icon: "layers", perm: "content.read" },
   { v: "requests", icon: "inbox", perm: "media.rights" },
   { v: "review", icon: "userCheck", perm: "content.review" },
   { v: "diagnostics", icon: "gauge", perm: "content.read" },
 ];
-const TAB_KIND: Partial<Record<string, ContentKind>> = { lessons: "lesson", scenarios: "scenario", rubrics: "rubric", media: "media_asset", exercises: "media_exercise" };
+const TAB_KIND: Partial<Record<string, ContentKind>> = { lessons: "lesson", scenarios: "scenario", rubrics: "rubric", media: "media_asset", exercises: "media_exercise", readings: "reading" };
 
 /** «lessons/l-01» → {tab: lessons, rest: "l-01"}; «exercises/x» is the exercise view of the media tab. */
 export function parseContentRoute(id: string | null): { tab: ContentTab | null; sub: "assets" | "exercises"; rest: string | null } {
@@ -74,7 +79,8 @@ export function ContentPage({ routeId }: { routeId: string | null }) {
         />
         <TabPanel id="ct" value={tab}>
           {tab === "course" && <CourseTab />}
-          {(tab === "lessons" || tab === "scenarios" || tab === "rubrics") && <KindTab key={tab} tab={tab} kind={TAB_KIND[tab]!} routeKey={r.rest} />}
+          {(tab === "lessons" || tab === "scenarios" || tab === "rubrics" || tab === "readings") && <KindTab key={tab} tab={tab} kind={TAB_KIND[tab]!} routeKey={r.rest} />}
+          {tab === "glossary" && <GlossaryTab route={r.rest} />}
           {tab === "media" && <MediaTab sub={r.sub} routeKey={r.rest} />}
           {tab === "requests" && <RequestsTab openId={r.rest} />}
           {tab === "review" && <ReviewTab route={r.rest} />}

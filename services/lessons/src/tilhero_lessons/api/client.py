@@ -1,4 +1,5 @@
-"""API ученика (Mini App → telegram-bff → lessons), INTERNAL_API §2.4, формы bff.ts «Спринт 4».
+"""API ученика (Mini App → telegram-bff → lessons), INTERNAL_API §2.4, формы bff.ts «Спринт 4»; чтение — INTERNAL_API
+спринта 5 §4 (bff.ts «Спринт 5», ReadingView / ReadingCard).
 
 Ученик — `lrn` внутреннего токена, аккаунт — `sub` (никогда из пути или тела): чужая сессия — 404. Ключи ответов
 наружу не уходят; правильность проверки без подсказок не показывается до итогов.
@@ -98,6 +99,28 @@ async def start_media(asset_id: str = _content_id(), pair_id: str = Depends(pair
     return await _started(ctx, svc.start_media(ctx, asset_id, pair_id, audience, locale, idempotency_key(key)))
 
 
+@router.post("/readings/{reading_id}/sessions", status_code=201,
+             responses={**_START, 404: {"description": "READING_NOT_AVAILABLE — не опубликован или не для "
+                                                      "аудитории ученика (ребёнку — только детские тексты)"}})
+async def start_reading(reading_id: str = _content_id(), pair_id: str = Depends(pair_param),
+                        audience: str | None = Depends(audience_param), locale: str = Depends(locale_param),
+                        key: str | None = Header(default=None, alias="Idempotency-Key"),
+                        ctx: Ctx = Depends(learner_ctx)) -> JSONResponse:
+    """Практика «Чтение» (спринт 5) → LessonSession kind reading (ready): текст → вопросы → итоги (practice_only)."""
+    return await _started(ctx, svc.start_reading(ctx, reading_id, pair_id, audience, locale, idempotency_key(key)))
+
+
+@router.get("/reading-results", responses={410: {"description": "USER_DELETED"},
+                                           422: {"description": "VALIDATION_ERROR"}})
+async def reading_results(ids: str = Query(min_length=2, max_length=3300,
+                                           pattern=r"^[a-z0-9][a-z0-9._-]{1,63}(,[a-z0-9][a-z0-9._-]{1,63}){0,49}$",
+                                           description="id текстов через запятую, ≤ 50"),
+                          ctx: Ctx = Depends(learner_ctx)) -> dict[str, Any]:
+    """{items: [{reading_id, correct, total, finished_at}]} — последний результат чтения ученика по каждому тексту
+    (ReadingCard.last_result); тексты без завершённой сессии с оценкой — не в ответе."""
+    return await svc.reading_results(ctx, ids.split(","))
+
+
 @router.post("/sessions/{session_id}/review", status_code=201,
              responses={**_START, 409: {"description": "SESSION_ACTIVE | NOTHING_TO_REVIEW"}})
 async def start_review(session_id: uuid.UUID, locale: str = Depends(locale_param),
@@ -114,7 +137,7 @@ async def active_session(ctx: Ctx = Depends(learner_ctx)) -> dict[str, Any]:
 
 
 @router.get("/sessions", responses={400: {"description": "INVALID_CURSOR"}, 410: {"description": "USER_DELETED"}})
-async def history(kind: Literal["lesson", "scenario", "media", "review"] | None = Query(default=None),
+async def history(kind: Literal["lesson", "scenario", "media", "review", "reading"] | None = Query(default=None),
                   cursor: str | None = Query(default=None, max_length=300),
                   limit: int = Query(default=20, ge=1, le=100), ctx: Ctx = Depends(learner_ctx)) -> dict[str, Any]:
     """Page<LessonHistoryItem> — свои занятия, новые первыми."""

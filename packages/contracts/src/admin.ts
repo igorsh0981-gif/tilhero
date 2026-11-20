@@ -1272,7 +1272,8 @@ export type GoldenCaseInput = Pick<GoldenCase, "title" | "input" | "checks" | "m
 
 // ---------- Модели и затраты (ADM-AGENT-05, ADM-MONEY-01/02) ----------
 /** GET /admin/v1/ai/models (ai.read) → {items: AiModel[]}; PUT /admin/v1/ai/models/{model_id} {input_usd_per_mtok,
- *  output_usd_per_mtok, active, reason} (ai.publish, step-up) → AiModel.
+ *  output_usd_per_mtok, audio_usd_per_hour? (только модели речи, спринт 5), active, reason} (ai.publish, step-up) → AiModel.
+ *  Цена не того вида (audio для LLM, токены для речи) → 422 PRICE_NOT_APPLICABLE.
  *  GET /admin/v1/ai/provider (ai.read) → AiProviderStatus.
  *  GET /admin/v1/ai/budget (costs.read) → AiBudget; PUT /admin/v1/ai/budget AiBudget-поля & {reason, updated_at
  *  (прочитанного бюджета; иначе 409 BUDGET_CONFLICT {updated_at} — лимиты изменил другой сотрудник)} (costs.manage,
@@ -1305,7 +1306,10 @@ export interface AiCall {
   version: number | null;
   model_id: string | null;
   status: "ok" | "unavailable" | "refused";
+  /** у status ok бывает не null: речь insufficient_evidence (not_recognized | low_confidence | incomplete) */
   reason: string | null;
+  /** речь (спринт 5): длительность аудио; LLM — 0 */
+  audio_ms?: number;
   input_tokens: number;
   output_tokens: number;
   cost_usd: number;
@@ -1324,6 +1328,7 @@ export interface SessionRow {
   lesson_id: string | null;
   scenario_id: string | null;
   asset_id: string | null;
+  reading_id: string | null; // спринт 5: сессия чтения
   level: Band | null;
   status: "ready" | "in_progress" | "paused" | "completed" | "failed" | "cancelled";
   outcome: "success" | "alt_success" | "fail" | null;
@@ -1447,7 +1452,19 @@ export type { Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiModel, AiP
  *  PATCH /admin/v1/glossary/{entry_id} GlossaryPatch (glossary.manage; If-Match: updated_at → 428 IF_MATCH_REQUIRED /
  *    409 VERSION_CONFLICT) → GlossaryDetail. Статья course — только override (null — снять).
  *  POST /admin/v1/glossary/{entry_id}/review GlossaryReview (glossary.manage) → GlossaryDetail; 409 NOT_PENDING.
- *  DELETE /admin/v1/glossary/{entry_id} {reason} (glossary.manage; только methodist) → 204 (архив). */
+ *  DELETE /admin/v1/glossary/{entry_id} {reason} (glossary.manage; только methodist, иначе 409 ARCHIVE_NOT_ALLOWED) → 204.
+ *  GET /admin/v1/glossary/stats?pair_id= (dashboard.read | content.read) → GlossaryStats.
+ *  Коды: 404 GLOSSARY_ENTRY_NOT_FOUND; 409 ENTRY_ARCHIVED | COURSE_ENTRY_LOCKED (у course — только override) |
+ *  OVERRIDE_COURSE_ONLY; 422 GLOSSARY_INVALID {errors}. Форму отклонённого перевода ИИ методист может занять своей
+ *  статьёй (отклонённая архивируется). */
+export interface GlossaryStats {
+  pair_id: string | null;
+  ai_glosses_pending: number;
+  ai_approved: number;
+  ai_rejected: number;
+  entries: { course: number; methodist: number; ai: number };
+  overridden: number;
+}
 export interface GlossaryRow {
   entry_id: string;
   pair_id: string;
@@ -1461,13 +1478,14 @@ export interface GlossaryRow {
   refs_count: number;
   overridden: boolean;
   updated_at: string;
+  updated_by: string | null; // staff_id
   updated_by_name: string | null;
 }
 export interface GlossaryDetail extends GlossaryEntry {
   updated_by_name: string | null;
   /** названия мест в контенте для ref (null — снято с публикации) */
   refs_titles: Array<GlossaryRef & { title: ContentLocalized | null }>;
-  history: Array<{ at: string; by_name: string | null; action: "created" | "updated" | "reviewed" | "archived" | "overridden";
+  history: Array<{ at: string; by: string | null; by_name: string | null; action: "created" | "updated" | "reviewed" | "archived" | "overridden";
                    before: Partial<GlossaryEntry> | null; after: Partial<GlossaryEntry> | null; reason: string | null }>;
   /** статьи course: перевод в другом месте контента отличается от действующего — подсказка методисту */
   conflicts: Array<{ ref: GlossaryRef; gloss: ContentLocalized }>;
@@ -1570,6 +1588,7 @@ export interface ReviewLogRow {
   algorithm: string; // fsrs-5
   params_version: string; // fsrs5-default-1
   actor: "learner" | "system" | "staff";
+  actor_id: string | null; // staff_id (имя дополняет admin-bff через staff/lookup)
   actor_name: string | null; // staff
   reason: string | null;
 }
@@ -1617,5 +1636,5 @@ export interface MemoryStats {
   median_minutes: number | null;
   d30_pass_pct: number | null; // 0–100
   avg_due_per_learner: number | null;
-  ai_glosses_pending: number; // очередь переводов ИИ (из catalog)
+  ai_glosses_pending: number | null; // очередь переводов ИИ (из catalog); null — catalog недоступен
 }

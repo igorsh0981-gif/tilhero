@@ -9,9 +9,15 @@ from tilhero_ai_gateway.api.admin_agents import router as agents_router
 from tilhero_ai_gateway.api.admin_costs import router as costs_router
 from tilhero_ai_gateway.api.common import now_of
 from tilhero_ai_gateway.api.internal import router as internal_router
+from tilhero_ai_gateway.api.speech import SpeechBodyMiddleware
+from tilhero_ai_gateway.api.speech import router as speech_router
 from tilhero_ai_gateway.consumers import CONSUMER_USER_DELETED, DELETION_REQUESTED, deletion_handler
+from tilhero_ai_gateway.domain import stand
+from tilhero_ai_gateway.domain.invoke import Deps
+from tilhero_ai_gateway.domain.provider_status import ProviderStatus
 from tilhero_ai_gateway.domain.versions import fail_stale_runs
 from tilhero_ai_gateway.providers import Provider, make_provider
+from tilhero_ai_gateway.providers.speech import SpeechProvider, make_speech_provider
 from tilhero_ai_gateway.settings import Settings, get_settings
 from tilhero_common.app import Runtime, create_app
 
@@ -19,11 +25,14 @@ log = logging.getLogger("tilhero.ai_gateway")
 
 
 def build_app(settings: Settings | None = None, runtime: Runtime | None = None, *, provider: Provider | None = None,
-              transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
-    """provider / transport — для тестов (подмена провайдера или транспорта httpx Anthropic)."""
+              transport: httpx.AsyncBaseTransport | None = None, speech: SpeechProvider | None = None,
+              speech_transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
+    """provider / transport — для тестов (подмена провайдера или транспорта httpx Anthropic); speech /
+    speech_transport — то же для оценки произношения (Azure Speech)."""
     settings = settings or get_settings()
     runtime = runtime or Runtime(settings)
     ai = provider or make_provider(settings, transport)
+    speech_provider = speech or make_speech_provider(settings, speech_transport)
 
     def configure(rt: Runtime) -> None:
         rt.add_consumer(CONSUMER_USER_DELETED, [DELETION_REQUESTED], deletion_handler(rt))
@@ -35,16 +44,32 @@ def build_app(settings: Settings | None = None, runtime: Runtime | None = None, 
                 stale = await fail_stale_runs(session, now_of(rt), settings.golden_run_stale_minutes)
             if stale:
                 log.warning("stale golden runs marked failed", extra={"runs": stale})
+            if settings.speech_provider == "azure" and not speech_provider.ready():
+                log.info("pronunciation assessment not configured (AZURE_SPEECH_KEY / AZURE_SPEECH_REGION)")
+            # dev/e2e-стенд (AI_ALLOW_FAKE_TEST_PUBLISH, fake): черновики сида — прогон на fake и публикация
+            deps = Deps(rt=rt, settings=settings, provider=ai, clock=lambda: now_of(rt),
+                        status=ProviderStatus(rt.redis, settings.cache_namespace))
+            try:
+                published = await stand.publish_seed_drafts(deps)
+            except Exception as exc:  # стенд: публикация сида не должна мешать старту
+                log.warning("stand seed publication failed", extra={"error_type": type(exc).__name__})
+            else:
+                if published:
+                    log.info("stand seed drafts processed", extra={"versions": published})
 
         async def on_stop(_: Runtime) -> None:
             await ai.aclose()
+            await speech_provider.aclose()
 
         rt.on_startup(on_start)
         rt.on_shutdown(on_stop)
 
-    app = create_app(settings, routers=[internal_router, agents_router, costs_router], runtime=runtime,
-                     configure=configure, title="TilHero ai-gateway")
+    app = create_app(settings, routers=[internal_router, speech_router, agents_router, costs_router],
+                     runtime=runtime, configure=configure, title="TilHero ai-gateway")
+    # WAV до 600 000 байт для одного маршрута при общем лимите тела 256 КиБ — снаружи общего middleware
+    app.add_middleware(SpeechBodyMiddleware)
     app.state.provider = ai
+    app.state.speech = speech_provider
     return app
 
 

@@ -17,9 +17,11 @@ from tilhero_diagnostics.consumers import (
     DELETION_REQUESTED,
     PROFILE_CREATED,
     PROFILE_UPDATED,
+    RETENTION_CHECKED,
     on_assessment,
     on_deletion_requested,
     on_profile_event,
+    on_retention_checked,
 )
 from tilhero_diagnostics.settings import Settings, get_settings
 
@@ -40,6 +42,8 @@ def build_app(
         rt.add_consumer("diagnostics.profiles", [PROFILE_CREATED, PROFILE_UPDATED], on_profile_event)
         # спринт 4: карта навыков по оценкам уроков (только от assessment)
         rt.add_consumer("diagnostics.assessment", [ASSESSMENT_COMPLETED, ASSESSMENT_REEVALUATED], on_assessment)
+        # спринт 5: проверки удержания (только от memory) → retained / learning
+        rt.add_consumer("diagnostics.retention", [RETENTION_CHECKED], on_retention_checked)
 
     app = create_app(settings, routers=[client_router, admin_router], runtime=runtime, configure=configure,
                      title="TilHero diagnostics-service")

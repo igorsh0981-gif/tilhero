@@ -48,7 +48,7 @@ def build_request(s: Session, steps: list[Step], turns: list[Turn]) -> dict[str,
     for step in steps:
         if step.answered_at is None:
             continue
-        if step.type == "item" and step.ref.get("src") in ("lesson", "exercise"):
+        if step.type == "item" and step.ref.get("src") in ("lesson", "exercise", "reading"):
             a = step.answer if isinstance(step.answer, dict) else {}
             answers.append({"item_id": step.payload["item"]["item_id"],
                             "answer": None if a.get("dont_know") else a.get("answer"),
@@ -60,12 +60,15 @@ def build_request(s: Session, steps: list[Step], turns: list[Turn]) -> dict[str,
             roleplay_hints += step.hints
     has_roleplay = any(stage["type"] == "roleplay" and stage["units"] for stage in flow.stages(s))
     cv = s.content_versions
+    refs: dict[str, Any] = {"lesson": cv.get("lesson"), "scenario": cv.get("scenario"), "rubric": cv.get("rubric"),
+                            "media_asset": cv.get("media_asset"),
+                            "media_exercises": list(cv.get("media_exercises") or [])}
+    if cv.get("reading"):  # спринт 5: вопросы к тексту — по ключам версии текста (рубрика — встроенная assessment)
+        refs["reading"] = cv["reading"]
     return {
         "session_id": str(s.session_id), "user_id": str(s.user_id), "kind": s.kind, "pair_id": s.pair_id,
         "audience": s.audience, "locale": s.locale,
-        "content_refs": {"lesson": cv.get("lesson"), "scenario": cv.get("scenario"), "rubric": cv.get("rubric"),
-                         "media_asset": cv.get("media_asset"),
-                         "media_exercises": list(cv.get("media_exercises") or [])},
+        "content_refs": refs,
         "answers": answers,
         "turns": [{"turn_id": t.turn_id, "speaker": t.speaker, "text": t.text, "mode": t.mode, "hinted": t.hinted,
                    "node_id": t.node_id} for t in turns if t.text is not None],
@@ -117,6 +120,9 @@ def skill_changes(outcomes: list[dict[str, Any]], before: dict[str, str] | None,
 
 
 def key_words(s: Session, b: Bundle) -> list[dict[str, Any]]:
+    """Слова итогов: урок — ключевые слова; текст для чтения — глоссарий; медиа — фразы (если разрешён словарь)."""
+    if b.reading is not None and s.kind == "reading":
+        return [{"en": g["en"], "gloss": g["gloss"]} for g in b.reading.get("glossary") or []]
     if b.lesson is not None and s.kind in ("lesson", "review"):
         return [{"en": k["en"], "gloss": k["gloss"]} for k in b.lesson.get("key_words") or []]
     if b.media is not None and "dictionary" in ((b.media.get("rights") or {}).get("allowed_uses") or []):
@@ -133,7 +139,9 @@ def store(s: Session, result: Evaluation, now: datetime) -> dict[str, Any]:
     s.evaluation_id = uuid.UUID(clean["evaluation_id"])
     s.evaluation = clean
     s.evaluation_status = "done"
-    summary["can_review"] = any(isinstance(i, dict) and i.get("correct") is False for i in clean["items"])
+    # повтор ошибок — для урока и медиа; у чтения верный ответ к ошибкам уже показан в итогах, повтора нет
+    summary["can_review"] = s.kind != "reading" and any(
+        isinstance(i, dict) and i.get("correct") is False for i in clean["items"])
     summary["requires_human_review"] = result.human_review
     s.summary = summary
     return clean

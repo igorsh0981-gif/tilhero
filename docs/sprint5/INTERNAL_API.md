@@ -16,7 +16,7 @@
   - lessons → catalog (тексты), assessment (оценка вопросов к тексту);
   - admin-bff → memory (память, аналитика), catalog (словарь курса, тексты — общий API контента), ai-gateway (цены и затраты речи);
   - n8n → memory (`memory-tick`).
-- **Ученик в токене.** Как в спринте 4: `sub` — аккаунт, `lrn` — активный ученик, claims `lrn` и `age_band` в каждом вызове. Ученик memory — `lrn`. Аудитория: `age_band` 6-9 / 10-13 → kids, 14-17 → teens, 18+ → adults.
+- **Ученик в токене.** Как в спринте 4: `sub` — аккаунт, `lrn` — активный ученик, claims `lrn` и `age_band` в каждом вызове. Ученик memory — `lrn`. `age_band` — полоса активного ученика (у детского профиля — ребёнка: 6-9 и 10-13 различаются). telegram-bff передаёт также `?audience=` и `?locale=`. Аудитория: `age_band` 6-9 / 10-13 → kids, 14-17 → teens, 18+ → adults.
 - **Время.** UTC в API. «День» ученика — по часовому поясу плана: memory держит проекцию из `learning.plan.updated.v1`, без проекции — `Asia/Tashkent`.
 - **Тексты учеников.** Цитаты ошибок, ввод в повторении и аудио — никогда в логах, событиях и метриках. Аудио не хранится нигде (§1.9).
 
@@ -166,7 +166,7 @@
 - **Эталоны для теста:**
   - S₀(again) = 0.40255, S₀(good) = 3.173;
   - D₀(good) = 7.1949 − e^1.069 + 1 ≈ 5.2824;
-  - после `good` через 3 дня (R(3; 3.173) ≈ 0,9019) S′ ≈ 10,8 (точное значение тест вычисляет формулой).
+  - после `good` через 3 дня (R(3; 3.173) ≈ 0,9047) S′ ≈ 10,8 (точное значение тест вычисляет формулой).
 - **Ручная правка** (§1.11) пишет в `review_log` `before` и `after`. FSRS не пересчитывает: перенос меняет только `due_at`, сброс возвращает `new`.
 
 ### 1.5 Проверки удержания (APP-MEM-05)
@@ -270,6 +270,7 @@
   - `POST …/{id}/tasks/{task_id}` → `ReviewTaskResult`;
   - `POST …/tasks/{task_id}/hint {kind: first_letter | reveal}`;
   - `POST …/{id}/finish | cancel`.
+- `POST /internal/v1/cards/lookup {texts: string[] ≤ 50}` → `{items: [{text, card_id | null}]}` — есть ли слова в словаре ученика (нормализация §1.6, любые виды карточек кроме `archived`); нужен BFF для `ReadingView.glossary[].in_dictionary`.
 - `GET /internal/v1/errors?cursor=` → журнал ошибок: карточки `error` и их сила, без `evidence` в списке; цитата — в карточке, пока не стёрта.
 - `POST /internal/v1/translate`, `POST /internal/v1/pronunciation`.
 
@@ -347,13 +348,16 @@
 - **`POST /internal/v1/glossary/lookup`** `{pair_id, text ≤ 60, content_ref: {kind, key, version, locator?}}`:
   - версия опубликована или бывшая опубликованной; черновик → 404 `CONTENT_NOT_FOUND`;
   - текст — в предложении `locator` или где угодно в версии: токены по границам слов, сравнение нормализованных форм. Нет → 422 `WORD_NOT_IN_CONTENT`;
-  - ответ `{in_content: true, sentence_en: предложение или реплика ≤ 300, entry: GlossaryEntryView | null, rejected: bool}`.
+  - `text` ≤ 120 (перевод по тапу присылает ≤ 60, добавление в словарь — фразу медиа до 120);
+  - ответ `{in_content: true, sentence_en: предложение или реплика ≤ 300, locator, note: Localized | null (пояснение из глоссария текста), entry: GlossaryEntry | null, rejected: bool}`.
 - **`POST /internal/v1/glossary/ai-entries`** `{pair_id, surface, lemma, part_of_speech, gloss, forms, confidence, agent_version, content_ref}`:
   - создаёт статью `source: ai, review_status: pending`;
   - любая из форм уже занята действующей статьей → возвращается она (200, без изменений);
   - иначе 201;
   - `refs` — `content_ref`; персональных данных нет.
-- **`GET /internal/v1/glossary/forms?pair_id=&forms=a,b`** (≤ 50) → статьи по формам. Нужно для `answers_en` карточек.
+- **`GET /internal/v1/glossary/forms?pair_id=&forms=a&forms=b`** (≤ 50; повторяемый параметр — формы бывают с запятой) → `{items: [{form, entry}]}`. Нужно для `answers_en` карточек.
+- **ai-entries** дополнительно проверяет, что слово есть в версии контента; если форма занята статьёй ИИ на проверке — дописывает место в контенте (`refs`).
+- **check-items** отдаёт контрольные задания уроков навыка, сначала задания самого навыка (у урока навыку принадлежат не все 5 заданий).
 
 ### 2.4 Задания проверок удержания
 `GET /internal/v1/skills/{skill_id}/check-items?audience=&pair_id=` (вызывающий memory):
@@ -446,13 +450,17 @@
   - `done`.
 - **Завершение:** `finish` → assessment `EvaluationRequest` с `kind: reading`, `practice_only: true` → итоги: доля верных, верный ответ для ошибок → событие `lesson.session.completed.v1` (`kind: reading`).
 - **Минуты** — как у медиа.
+- **Результаты для списка текстов:** `GET /internal/v1/reading-results?ids=` (≤ 50, telegram-bff) → `{items: [{reading_id, correct, total, finished_at}]}` — последняя завершённая сессия ученика по каждому тексту (`ReadingCard.last_result`).
+- **Вопросы в шагах:** `true_false` показывается как `single_choice` с вариантами `["True", "False"]`.
+- **Журнал сессий админки:** `SessionRow.reading_id`, фильтр `kind=reading`, версия текста в карточке — `reading:<id>`.
 
 ## 5. assessment (дополнение)
 - **`kind: reading`** — только закрытые вопросы по ключам версии текста: критерий `comprehension`, `practice_only`, `skill_outcomes = []`.
 - **`GET /internal/v1/evaluations/{id}/memory-feed`** (вызывающий memory) → `{evaluation_id, session_id, user_id, pair_id, kind, content_refs, practice_only, superseded_by: id | null, errors: [{turn_id, evidence | null, correction, error_code, severity}]}`:
-  - только ошибки текста ученика: `turn_id` `T{n}` или `O{n}`; закрытые задания не входят;
-  - `evidence` — null, если стёрта по сроку;
-  - актуальная запись цепочки.
+  - только ошибки текста ученика: `turn_id` `T{n}` (реплика) или `OA1` (открытый ответ — как у оценщика спринта 4); закрытые задания не входят; у детей список пуст;
+  - `evidence` — null, если сессии больше 90 дней (`MEMORY_EVIDENCE_RETENTION_DAYS`): оценка неизменяема, цитата просто не отдаётся;
+  - `evaluation_id` в ответе — актуальная запись цепочки; `superseded_by` = её id, если запрошенную запись заменили (иначе null);
+  - `content_refs`: `{lesson, scenario, media_asset, reading, rubric: {key, version} | null, media_exercises: [{key, version}]}`.
 - **События** `assessment.completed.v1` / `lesson.session.*`: `kind` + `reading`.
 
 ## 6. diagnostics, learning-plan, notifications, identity-consent, audit
@@ -467,7 +475,7 @@
   - засчитывается в день графика и серию как занятие; `minutes` 0 не засчитывается.
   - Тексты для чтения — `lesson.session.completed.v1` `kind: reading` → активность `practice`.
 - **notifications.** Consumer `memory.reviews.due.v1`, только от memory → шаблон `reviews_due` (`.kid` — опекуну):
-  - категория `reminders`, `dedup_key` `reviews_due:<user>:<date>`, `startapp: review`;
+  - категория `reminders`, `dedup_key` `reviews_due:<user>:<date>`, `startapp: route_review`;
   - текст RU/UZ: «Пора повторить слова: {due_count}. Это займёт около {minutes} минут» (minutes = ceil(due_count × 0,4), 2..15);
   - тихие часы, категории и правила детей — как у `lesson.reminder`.
 - **identity-consent:**

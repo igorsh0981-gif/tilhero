@@ -273,6 +273,11 @@ def test_payload_miniapp_rules() -> None:
 def test_payload_admin_rules() -> None:
     p = admin_payload()
     p["layout"]["menu"].append({"id": "audit", "enabled": False})
+    assert ("payload.layout.menu[15].id", "duplicate") in _errors("admin", p)  # 15 из 16 разрешённых — дубль, не лимит
+    p = admin_payload()
+    p["layout"]["menu"].append({"id": "memory", "enabled": True})  # спринт 5: раздел «Память» разрешён
+    assert validate_payload("admin", p)["layout"]["menu"][-1]["id"] == "memory"
+    p["layout"]["menu"].append({"id": "audit", "enabled": False})
     assert ("payload.layout.menu", "too_many") in _errors("admin", p)
     p = admin_payload()
     p["layout"]["menu"][1] = {"id": "overview", "enabled": True}

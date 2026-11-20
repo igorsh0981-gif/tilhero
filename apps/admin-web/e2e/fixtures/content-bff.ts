@@ -6,7 +6,7 @@
  * (step-up for rights and decisions; also the only right that reads the requests register), lang.manage (step-up).
  */
 import type { AdminMediaRequest, ContentRow, ContentSummary, ContentVersion, ContentVersionMeta, DiagnosticTestRow, PairCard, Permission, Staff } from "@tilhero/contracts/admin";
-import type { ContentKind, Language, LocaleCheck, ScenarioPayload, ScenarioTestRun, VersionStatus } from "@tilhero/contracts/content";
+import type { ContentKind, Language, LocaleCheck, ReadingPayload, ScenarioPayload, ScenarioTestRun, VersionStatus } from "@tilhero/contracts/content";
 import { DAY, HOUR, ID, iso } from "./data";
 import * as C from "./content-data";
 
@@ -16,7 +16,7 @@ interface Ver extends ContentVersion<P> {
   run: (ScenarioTestRun & { hash: string }) | null;
 }
 
-const KEY_FIELD: Record<ContentKind, string> = { course: "course_id", skill: "skill_id", module: "module_id", lesson: "lesson_id", rubric: "rubric_id", scenario: "scenario_id", media_asset: "asset_id", media_exercise: "exercise_id" };
+const KEY_FIELD: Record<ContentKind, string> = { course: "course_id", skill: "skill_id", module: "module_id", lesson: "lesson_id", rubric: "rubric_id", scenario: "scenario_id", media_asset: "asset_id", media_exercise: "exercise_id", reading: "reading_id" };
 const KINDS = Object.keys(KEY_FIELD) as ContentKind[];
 const ID_RE = /^[a-z0-9][a-z0-9._-]{1,63}$/;
 
@@ -110,6 +110,39 @@ export function testRun(p: ScenarioPayload, checked_at: string): ScenarioTestRun
   return { ok: !issues.length, checked_at, issues, stats: { nodes: ids.length, ends: endStats, max_depth: Math.max(...depth.values()), paths_to_success: success.size ? 1 : 0 } };
 }
 
+/* ---------------------------------------------------------------- reading texts (catalog validation.py, sprint 5) */
+
+const words = (t: string) => (t.toLowerCase().replace(/[\u2019\u2018`]/g, "'").match(/[\p{L}\p{N}]+(?:['-][\p{L}\p{N}]+)*/gu) ?? []).length;
+const toks = (t: string) => t.toLowerCase().replace(/[\u2019\u2018`]/g, "'").match(/[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)*/gu) ?? [];
+const inText = (text: string, q: string) => {
+  const h = toks(text);
+  const n = toks(q);
+  return n.length > 0 && h.some((_, i) => n.every((w, j) => h[i + j] === w));
+};
+
+export function readingIssues(p: ReadingPayload): Iss[] {
+  const out: Iss[] = [];
+  const add = (path: string, code: string, message: string) => out.push({ path, code, message });
+  if (p.audience.includes("kids") && p.audience.length > 1) add("payload.audience", "KIDS_CONTENT", "Детский текст — только для аудитории kids");
+  let total = 0;
+  p.paragraphs.forEach((para, i) =>
+    para.sentences.forEach((s, j) => {
+      const n = words(s.text_en);
+      total += n;
+      if (n > 30) add(`payload.paragraphs[${i}].sentences[${j}].text_en`, "SENTENCE_TOO_LONG", `В предложении ${n} слов — не больше 30`);
+    }),
+  );
+  if (total < 60 || total > 250) add("payload.paragraphs", "READING_WORDS", `В тексте ${total} слов — нужно 60..250`);
+  if (p.glossary.length < 3 || p.glossary.length > 20) add("payload.glossary", "COUNT_OUT_OF_RANGE", `Слов глоссария: ${p.glossary.length}, нужно 3..20`);
+  const sentences = p.paragraphs.flatMap((x) => x.sentences.map((s) => s.text_en));
+  p.glossary.forEach((g, i) => {
+    if (!sentences.some((t) => inText(t, g.en))) add(`payload.glossary[${i}].en`, "GLOSSARY_NOT_IN_TEXT", `«${g.en}» не встречается в тексте`);
+    for (const l of ["ru", "uz"] as const) if (g.gloss[l].length > 80) add(`payload.glossary[${i}].gloss.${l}`, "TEXT_TOO_LONG", "Перевод — до 80 знаков");
+  });
+  if (p.questions.length < 3 || p.questions.length > 8) add("payload.questions", "COUNT_OUT_OF_RANGE", `Вопросов: ${p.questions.length}, нужно 3..8`);
+  return out;
+}
+
 /* ---------------------------------------------------------------- store */
 
 export class ContentStore {
@@ -146,6 +179,9 @@ export class ContentStore {
     pub("media_asset", C.mediaMarket(), { ...rights, status: "suspended", suspended_at: iso(-2 * DAY), suspend_reason: "rights_expired" });
     this.put("media_asset", C.mediaTrain() as unknown as P, { status: "draft", author_id: ID.content, locale_checks: { ru: "draft", uz: "draft" } });
     pub("media_exercise", C.exerciseCoffee());
+    // sprint 5: reading texts — one published, one draft with problems (words, a long sentence, a glossary word)
+    pub("reading", C.readingCoffee());
+    this.put("reading", C.readingMarket() as unknown as P, { status: "draft", author_id: ID.methodist, created_at: iso(-2 * HOUR), locale_checks: { ru: "draft", uz: "draft" } });
   }
 
   private put(kind: ContentKind, payload: P, extra: Partial<Ver>): Ver {
@@ -261,6 +297,7 @@ export class ContentStore {
       if (mode === "publish" && !(v.run && v.run.ok && v.run.hash === v.payload_hash)) add("test_run", "SCENARIO_TEST_FAILED", "Нужен успешный тестовый прогон этой версии");
     }
     if (kind === "media_asset") out.push(...this.rights(v, mode));
+    if (kind === "reading") out.push(...readingIssues(p as unknown as ReadingPayload));
     if (mode === "publish") for (const l of ["ru", "uz"] as const) if (v.locale_checks[l] !== "checked") add(`locale_checks.${l}`, "LOCALE_NOT_CHECKED", `Локализация ${l.toUpperCase()} не проверена`);
     return out;
   }

@@ -19,6 +19,8 @@ export const EXTRA_REDACT_PATHS = [
   "req.body.reason",
   "req.body.text",
   "req.body.answer",
+  // спринт 5: «в словарь»
+  "req.body.text_en",
 ];
 
 /** Ключи, значения которых никогда не пишутся в лог (сравнение без учёта регистра). */
@@ -67,6 +69,11 @@ export const SENSITIVE_KEYS = new Set([
   "text_en",
   "learner_turn",
   "appeal_reason",
+  // спринт 5: ввод в повторении, поиск по словарю, слова глоссария, эталон произношения
+  "texts",
+  "reference_text",
+  "speech_text",
+  "example_gap",
 ]);
 
 const CENSOR = "[redacted]";

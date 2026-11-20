@@ -65,6 +65,8 @@ export function learnersOf(account: TelegramLoginResponse): IdentityLearner[] {
     age_band: account.user.age_band ?? null,
     is_active: false,
     onboarding_completed: false,
+    // identity не прислал аккаунт среди учеников — запись голоса не разрешаем (решает identity-consent)
+    voice_consent: false,
   };
   return [{ ...self, kind: "self" }, ...list.filter((l) => l.learner_id !== selfId)];
 }

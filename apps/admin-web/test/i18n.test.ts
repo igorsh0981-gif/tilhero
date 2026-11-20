@@ -22,6 +22,9 @@ import { CONTENT_TABS } from "../src/screens/content/ContentPage";
 import { DECISIONS, REQUEST_STATUSES } from "../src/screens/content/RequestsTab";
 import { MISSING_KEYS, PAIR_STATUSES } from "../src/screens/langs/Langs";
 import * as AI from "../src/screens/ai/model";
+import { READING_QUESTION_TYPES, VOICES } from "../src/screens/content/model";
+import { GLOSSARY_ACTIONS, GLOSSARY_SOURCES, GLOSSARY_STATUSES, PARTS_OF_SPEECH } from "../src/screens/content/glossary";
+import * as MEM from "../src/screens/memory/model";
 
 const placeholders = (s: string) => [...new Set([...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort();
 const CYR = /[Ѐ-ӿ]/;
@@ -192,6 +195,29 @@ describe("i18n dictionaries", () => {
       ...["bug", "method"].map((x) => `qt.kind.${x}`),
       ...["range", "gt_daily", "gt_monthly"].map((x) => `csf.${x}`),
       ...["monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "alert_percent"].flatMap((x) => [`csf.l.${x}`, `csf.h.${x}`]),
+      // sprint 5: reading, course dictionary, memory, forgetting analytics, overview block
+      ...["memory"].flatMap((b) => [`dash.b.${b}`, `dash.empty.${b}`, `dash.svc.${b}`]),
+      ...["READING_WORDS", "SENTENCE_TOO_LONG", "GLOSSARY_NOT_IN_TEXT", "TEXT_TOO_LONG"].map((c) => `ci.${c}`),
+      ...READING_QUESTION_TYPES.map((x) => `rdq.${x}`),
+      ...VOICES.map((x) => `rd.voice.${x}`),
+      ...GLOSSARY_SOURCES.flatMap((x) => [`gls.${x}`, `gls.${x}.long`]),
+      ...GLOSSARY_STATUSES.map((x) => `glst.${x}`),
+      ...GLOSSARY_ACTIONS.map((x) => `gla.${x}`),
+      ...PARTS_OF_SPEECH.map((x) => `pos.${x}`),
+      ...["approve", "correct", "reject"].map((x) => `gl.done.${x}`),
+      ...["required", "too_long", "too_many", "uz_script", "uz_okina", "en_only"].map((x) => `glf.${x}`),
+      ...MEM.MEMORY_TABS.map((x) => `mem.tab.${x}`),
+      ...MEM.CARD_STATUSES.map((x) => `cst.${x}`),
+      ...MEM.CARD_KINDS.map((x) => `ckind.${x}`),
+      ...MEM.CHECK_STATUSES.map((x) => `chst.${x}`),
+      ...["d7", "d30"].flatMap((x) => [`chstage.${x}`, `fa.${x}`, `fa.${x}.hint`]),
+      ...MEM.CARD_ACTIONS.flatMap((x) => [`mact.${x}`, `mact.${x}.t`, `mact.${x}.m`, `mact.${x}.done`]),
+      ...MEM.FSRS_STATES.map((x) => `fsrs.${x}`),
+      ...MEM.LOG_ACTORS.map((x) => `actor.${x}`),
+      ...MEM.ANSWER_MODES.map((x) => `amode.${x}`),
+      ...MEM.GRADES.map((x) => `grade.${x}`),
+      ...["lesson", "media", "reading", "scenario", "evaluation", "manual"].map((x) => `msrc.${x}`),
+      ...["30d", "90d"].map((x) => `fa.p.${x}`),
     ];
     expect(want.filter((k) => !has(k))).toEqual([]);
     void OBJECT_TYPES;
@@ -216,6 +242,9 @@ describe("i18n dictionaries", () => {
       // sprint 4 (ai-gateway, lessons, assessment via admin-bff)
       "TESTS_REQUIRED", "TESTS_FAILED", "NO_PREVIOUS_VERSION", "EVALUATION_SUPERSEDED", "SELF_REEVALUATION", "VERSION_IN_CANARY", "NO_PUBLISHED_VERSION",
       "NO_CANARY", "MODEL_INACTIVE", "MODEL_IN_USE", "TEST_RUN_IN_PROGRESS", "NO_GOLDEN_CASES", "VERSION_INVALID", "BUDGET_CONFLICT", "IF_MATCH_REQUIRED",
+      // sprint 5 (catalog glossary, memory, ai-gateway speech price)
+      "FORM_TAKEN", "NOT_PENDING", "ENTRY_ARCHIVED", "COURSE_ENTRY_LOCKED", "OVERRIDE_COURSE_ONLY", "ARCHIVE_NOT_ALLOWED", "GLOSSARY_ENTRY_NOT_FOUND",
+      "GLOSSARY_INVALID", "CARD_STATE", "DUE_AT_RANGE", "MEMORY_LEARNER_NOT_FOUND", "CARD_NOT_FOUND", "PRICE_NOT_APPLICABLE",
     ];
     expect(codes.filter((c) => !has(`err.${c}`))).toEqual([]);
   });

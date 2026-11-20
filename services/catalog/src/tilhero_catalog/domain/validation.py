@@ -8,7 +8,8 @@
    NO_CONTROL_ITEMS, STAGES_INVALID, RUBRIC_WEIGHTS, RUBRIC_BANDS, RUBRIC_MISMATCH, SCENARIO_TEST_FAILED, коды графа
    сценария (UNREACHABLE_NODE, DEAD_END, …), END_HAS_TRANSITIONS, RIGHTS_REQUIRED, EXTERNAL_SOURCE_DISABLED,
    TRANSCRIPT_INVALID, MEDIA_TOO_LONG, MEDIA_TOO_SHORT, EMBED_INVALID, AUDIENCE_EMPTY, KIDS_CONTENT,
-   COUNT_OUT_OF_RANGE, DUPLICATE_ID, VALUE_REQUIRED, ANSWER_INVALID, LEVEL_RANGE.
+   COUNT_OUT_OF_RANGE, DUPLICATE_ID, VALUE_REQUIRED, ANSWER_INVALID, LEVEL_RANGE; тексты для чтения (спринт 5) —
+   ещё READING_WORDS (60..250 слов), SENTENCE_TOO_LONG (> 30 слов), GLOSSARY_NOT_IN_TEXT, TEXT_TOO_LONG.
 
 Ссылки:
 - «вниз» (зависимости: курс → модули → уроки → навыки/сценарий/рубрика, навык → предпосылки, упражнение → медиа) —
@@ -35,6 +36,7 @@ from tilhero_catalog.content import (
     Localized,
 )
 from tilhero_catalog.domain.scenario_test import run_test
+from tilhero_catalog.domain.text import contains, form_key, word_count
 
 Mode = Literal["submit", "publish"]
 Ref = tuple[str, str]
@@ -54,6 +56,10 @@ _LICENSES_BY_ORIGIN: Final[dict[str, tuple[str, ...]]] = {
     "platform_embed": ("contract",),
 }
 MEDIA_MIN_S, MEDIA_MAX_S = 5, 90
+# тексты для чтения (INTERNAL_API §2.1, content.ts ReadingPayload)
+READING_WORDS_MIN, READING_WORDS_MAX = 60, 250
+SENTENCE_WORDS_MAX = 30
+READING_GLOSS_MAX, READING_NOTE_MAX = 80, 160
 
 
 @dataclass(frozen=True)
@@ -136,6 +142,9 @@ def refs_of(kind: str, p: dict[str, Any]) -> set[Ref]:
         add("media_asset", p.get("asset_id"))
         add("skill", p.get("skill_id"))
         add("rubric", p.get("rubric_id"))
+    elif kind == "reading":
+        for s in p.get("skill_ids") or []:
+            add("skill", s)
     return refs
 
 
@@ -147,6 +156,7 @@ DOWN_REFS: Final[dict[str, tuple[str, ...]]] = {
     "scenario": ("skill", "rubric"),
     "media_asset": ("skill",),
     "media_exercise": ("media_asset", "skill", "rubric"),
+    "reading": ("skill",),
 }
 
 
@@ -604,6 +614,93 @@ class _Checker:
         positions = [lines.index(options[a]) for a in answer]
         if positions != sorted(positions):
             self.add("payload.answer", "ANSWER_INVALID", "Порядок ответа не совпадает с порядком реплик транскрипта")
+
+    # -------------------------------------------------------------- спринт 5: текст для чтения
+
+    def reading(self) -> None:
+        p = self.p
+        self.audience()
+        if "kids" in p["audience"] and p["audience"] != ["kids"]:
+            self.add("payload.audience", "KIDS_CONTENT", "Детский текст — только для аудитории kids")
+        self.count("payload.skill_ids", p["skill_ids"], 0, 3, "Навыков")
+        self.unique("payload.skill_ids", p["skill_ids"], "Навык")
+        for i, s in enumerate(p["skill_ids"]):
+            self.ref_down(f"payload.skill_ids[{i}]", "skill", s)
+        if not 3 <= p["est_minutes"] <= 15:
+            self.add("payload.est_minutes", "COUNT_OUT_OF_RANGE", f"Минут: {p['est_minutes']}, нужно 3..15")
+        self._reading_text()
+        self._reading_glossary()
+        self._reading_questions()
+
+    def _reading_text(self) -> None:
+        paragraphs = self.p["paragraphs"]
+        self.count("payload.paragraphs", paragraphs, 1, 8, "Абзацев")
+        self.unique("payload.paragraphs", [para["p_id"] for para in paragraphs], "Абзац")
+        seen: set[str] = set()
+        total = 0
+        for i, para in enumerate(paragraphs):
+            path = f"payload.paragraphs[{i}]"
+            self.count(f"{path}.sentences", para["sentences"], 1, 8, "Предложений в абзаце")
+            for j, sentence in enumerate(para["sentences"]):
+                s_path = f"{path}.sentences[{j}]"
+                if sentence["s_id"] in seen:
+                    self.add(f"{s_path}.s_id", "DUPLICATE_ID", f"Предложение «{sentence['s_id']}» повторяется")
+                seen.add(sentence["s_id"])
+                self.required(f"{s_path}.text_en", sentence["text_en"], "предложение (EN)")
+                words = word_count(sentence["text_en"])
+                total += words
+                if words > SENTENCE_WORDS_MAX:
+                    self.add(f"{s_path}.text_en", "SENTENCE_TOO_LONG",
+                             f"В предложении {words} слов — не больше {SENTENCE_WORDS_MAX}")
+        if not READING_WORDS_MIN <= total <= READING_WORDS_MAX:
+            self.add("payload.paragraphs", "READING_WORDS",
+                     f"В тексте {total} слов — нужно {READING_WORDS_MIN}..{READING_WORDS_MAX}")
+
+    def _reading_glossary(self) -> None:
+        glossary = self.p["glossary"]
+        self.count("payload.glossary", glossary, 3, 20, "Слов глоссария")
+        sentences = [s["text_en"] for para in self.p["paragraphs"] for s in para["sentences"]]
+        keys: set[str] = set()
+        for i, item in enumerate(glossary):
+            path = f"payload.glossary[{i}]"
+            self.required(f"{path}.en", item["en"], "слово или выражение (EN)")
+            key = form_key(item["en"])
+            if key and key in keys:
+                self.add(f"{path}.en", "DUPLICATE_ID", f"Слово «{item['en']}» повторяется в глоссарии")
+            keys.add(key)
+            if key and not any(contains(text, item["en"]) for text in sentences):
+                self.add(f"{path}.en", "GLOSSARY_NOT_IN_TEXT", f"«{item['en']}» не встречается в тексте")
+            for lang in LOCALES:
+                if len(item["gloss"][lang]) > READING_GLOSS_MAX:
+                    self.add(f"{path}.gloss.{lang}", "TEXT_TOO_LONG", f"Перевод — до {READING_GLOSS_MAX} знаков")
+                if item["note"] is not None and len(item["note"][lang]) > READING_NOTE_MAX:
+                    self.add(f"{path}.note.{lang}", "TEXT_TOO_LONG", f"Пояснение — до {READING_NOTE_MAX} знаков")
+
+    def _reading_questions(self) -> None:
+        questions = self.p["questions"]
+        self.count("payload.questions", questions, 3, 8, "Вопросов")
+        self.unique("payload.questions", [q["question_id"] for q in questions], "Вопрос")
+        for i, q in enumerate(questions):
+            path = f"payload.questions[{i}]"
+            self.required(f"{path}.prompt_en", q["prompt_en"], "вопрос (EN)")
+            options, answer, kind = q["options"], q["answer"], q["type"]
+            if kind == "single_choice":
+                if not 3 <= len(options) <= 4:
+                    self.add(f"{path}.options", "ANSWER_INVALID", "У вопроса с выбором 3–4 варианта")
+                if any(not o.strip() for o in options) or len(set(options)) != len(options):
+                    self.add(f"{path}.options", "ANSWER_INVALID", "Варианты непустые и не повторяются")
+                if not isinstance(answer, int) or answer >= max(len(options), 1):
+                    self.add(f"{path}.answer", "ANSWER_INVALID", "Ответ — индекс одного из вариантов")
+            elif kind == "true_false":
+                if options != ["True", "False"]:
+                    self.add(f"{path}.options", "ANSWER_INVALID", "Варианты «верно / неверно» — [\"True\", \"False\"]")
+                if not isinstance(answer, int) or answer > 1:
+                    self.add(f"{path}.answer", "ANSWER_INVALID", "Ответ — 0 (True) или 1 (False)")
+            elif kind == "gap_fill":
+                if options:
+                    self.add(f"{path}.options", "ANSWER_INVALID", "У вопроса с пропуском нет вариантов")
+                if not isinstance(answer, list) or not answer or any(not a.strip() for a in answer):
+                    self.add(f"{path}.answer", "ANSWER_INVALID", "Укажите допустимые ответы")
 
 
 def _strings(value: Any, path: str) -> Iterator[tuple[str, str]]:

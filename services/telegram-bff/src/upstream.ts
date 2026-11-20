@@ -46,6 +46,7 @@ export const DOMAIN = {
   diagnostics: "diagnostics",
   lessons: "lessons",
   assessment: "assessment",
+  memory: "memory",
 } as const;
 
 /** Отказ внутренней авторизации домена (любой статус). */
@@ -53,8 +54,9 @@ const INTERNAL_AUTH_RE = /^(INTERNAL_|USER_CONTEXT_|CALLER_|ACTOR_)/;
 /** 401 доменов, которые — ответ пользователю (неверный код), а не состояние сессии. */
 export const DOMAIN_BUSINESS_401: ReadonlySet<string> = new Set(["PIN_INVALID", "BIOMETRIC_INVALID", "RESET_CODE_INVALID"]);
 
-/** 503 доменов, которые клиент различает по коду (спринт 3): learning-plan — нет снимка курса и нет кеша. */
-export const DOMAIN_BUSINESS_503: ReadonlySet<string> = new Set(["CATALOG_UNAVAILABLE"]);
+/** 503 доменов, которые клиент различает по коду: спринт 3 — learning-plan без снимка курса и кеша (CATALOG_UNAVAILABLE);
+ *  спринт 5 — memory: оценка произношения выключена (SPEECH_UNAVAILABLE — Mini App скрывает «Произнести»). */
+export const DOMAIN_BUSINESS_503: ReadonlySet<string> = new Set(["CATALOG_UNAVAILABLE", "SPEECH_UNAVAILABLE"]);
 
 export const catalogUnavailable = () =>
   new AppError(503, "CATALOG_UNAVAILABLE", "Курс временно недоступен, повторите позже", { service: "catalog" });
@@ -155,6 +157,8 @@ export interface Domains {
   /** Спринт 4: lessons и assessment — всегда с claims `lrn`, `age_band` (sub = аккаунт), поэтому RawClient. */
   lessons: RawClient;
   assessment: RawClient;
+  /** Спринт 5: memory — sub = аккаунт, claims `lrn`, `age_band` (как lessons); байты аудио произношения. */
+  memory: RawClient;
 }
 
 export interface DomainsOptions {
@@ -164,6 +168,8 @@ export interface DomainsOptions {
   timeoutMs: number;
   /** таймаут lessons / assessment (ИИ в ролевой ситуации и «проще») */
   lessonsTimeoutMs?: number;
+  /** таймаут memory (перевод и произношение — свои, в вызове) */
+  memoryTimeoutMs?: number;
   retries: number;
   fetchImpl?: typeof fetch;
   onFailure?: UpstreamLogger;
@@ -201,16 +207,17 @@ export function createDomains(o: DomainsOptions): Domains {
       fetchImpl: o.fetchImpl ?? ((...a) => fetch(...a)),
       ...(o.onFailure ? { onFailure: o.onFailure } : {}),
     }),
-    lessons: raw("lessons"),
-    assessment: raw("assessment"),
+    lessons: raw("lessons", o.lessonsTimeoutMs),
+    assessment: raw("assessment", o.lessonsTimeoutMs),
+    memory: raw("memory", o.memoryTimeoutMs),
   };
 
-  function raw(key: "lessons" | "assessment"): RawClient {
+  function raw(key: "lessons" | "assessment" | "memory", timeoutMs: number | undefined): RawClient {
     return new RawClient({
       target: DOMAIN[key],
       baseUrl: o.urls[key],
       key: o.key,
-      timeoutMs: o.lessonsTimeoutMs ?? o.timeoutMs,
+      timeoutMs: timeoutMs ?? o.timeoutMs,
       retries: o.retries,
       fetchImpl: o.fetchImpl ?? ((...a) => fetch(...a)),
       ...(o.onFailure ? { onFailure: o.onFailure } : {}),
@@ -241,6 +248,8 @@ export function createTts(o: {
   });
 }
 
+export type RawMethod = "GET" | "POST" | "PUT" | "DELETE";
+
 export interface RawRequest {
   subject?: string | undefined;
   query?: Record<string, string | number | undefined | null>;
@@ -248,6 +257,8 @@ export interface RawRequest {
   /** Дополнительные claims внутреннего JWT (catalog, заявки: lrn — активный ученик, age_band — возраст аккаунта). */
   claims?: Record<string, string>;
   body?: unknown;
+  /** Тело как есть (байты аудио произношения) — вместо JSON `body`; в лог не пишется нигде. */
+  rawBody?: { bytes: Uint8Array; contentType: string };
   idempotencyKey?: string;
   /** таймаут этого вызова (завершение урока ждёт оценку дольше обычного) */
   timeoutMs?: number;
@@ -302,18 +313,23 @@ export class RawClient {
   }
 
   /** JSON-команда с дополнительными claims: ответ разобран, ошибки — как у DomainClient. */
-  async json<T>(method: "GET" | "POST", path: string, ro: RawRequest = {}): Promise<T> {
+  async json<T>(method: RawMethod, path: string, ro: RawRequest = {}): Promise<T> {
+    return (await this.jsonWithStatus<T>(method, path, ro)).body;
+  }
+
+  /** То же, что json, и статус ответа домена (201 — создано, 200 — уже было). */
+  async jsonWithStatus<T>(method: RawMethod, path: string, ro: RawRequest = {}): Promise<{ status: number; body: T }> {
     const resp = await this.request(method, path, ro);
-    if (resp.status === 204) return undefined as T;
+    if (resp.status === 204) return { status: 204, body: undefined as T };
     try {
-      return (await resp.json()) as T;
+      return { status: resp.status, body: (await resp.json()) as T };
     } catch {
       this.o.onFailure?.({ service: this.o.target, status: resp.status, code: "UPSTREAM_BAD_RESPONSE" });
       throw upstreamUnavailable(this.o.target);
     }
   }
 
-  async request(method: "GET" | "POST", path: string, ro: RawRequest = {}): Promise<Response> {
+  async request(method: RawMethod, path: string, ro: RawRequest = {}): Promise<Response> {
     const url = new URL(this.o.baseUrl.replace(/\/$/, "") + path);
     for (const [k, v] of Object.entries(ro.query ?? {})) if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
     const headers: Record<string, string> = {
@@ -327,7 +343,8 @@ export class RawClient {
             ...(ro.subject ? { subject: ro.subject } : {}),
           }),
     };
-    if (ro.body !== undefined) headers["content-type"] = "application/json";
+    if (ro.rawBody) headers["content-type"] = ro.rawBody.contentType;
+    else if (ro.body !== undefined) headers["content-type"] = "application/json";
     if (ro.idempotencyKey) headers["idempotency-key"] = ro.idempotencyKey;
     const attempts = method === "GET" ? (this.o.retries ?? 0) + 1 : 1;
     let resp: Response | null = null;
@@ -336,7 +353,7 @@ export class RawClient {
         resp = await this.o.fetchImpl(url, {
           method,
           headers,
-          body: ro.body !== undefined ? JSON.stringify(ro.body) : null,
+          body: ro.rawBody ? ro.rawBody.bytes : ro.body !== undefined ? JSON.stringify(ro.body) : null,
           signal: AbortSignal.timeout(ro.timeoutMs ?? this.o.timeoutMs),
         });
       } catch {

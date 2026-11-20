@@ -1,7 +1,9 @@
 """Модели = миграции; миграции под ролью-владельцем, сервис — под своей ролью без DDL; неизменяемость версий на уровне
 БД (триггер); реальный сид автора инструкций (migrations/seed) загружается миграцией 0002 как опубликованный v1,
-накладка 0003 (migrations/seed/0003) публикует independent_evaluator v2 и детский золотой кейс; откат и повторный
-подъём миграций, повторная загрузка без изменений."""
+накладка 0003 (migrations/seed/0003) публикует independent_evaluator v2 и детский золотой кейс, накладка 0004
+(migrations/seed/0004) создаёт черновик teaching_coach v2 с gloss_word и кейсы gloss_word, а стенд (fake +
+AI_ALLOW_FAKE_TEST_PUBLISH) при старте публикует его по прогону золотых тестов на fake; реестр и модели речи
+спринта 5; откат и повторный подъём миграций, повторная загрузка без изменений."""
 
 from __future__ import annotations
 
@@ -24,7 +26,7 @@ from sqlalchemy.engine import make_url
 
 from tilhero_ai_gateway.domain.common import SEED_ACTOR_ID
 from tilhero_ai_gateway.domain.registry import AGENT_IDS, AGENTS, LLM_AGENT_IDS
-from tilhero_ai_gateway.domain.seed import apply_seed, load_seed_dir
+from tilhero_ai_gateway.domain.seed import apply_seed, apply_seed_drafts, load_seed_dir
 from tilhero_ai_gateway.main import build_app
 from tilhero_ai_gateway.models import Base
 from tilhero_common.app import Runtime
@@ -43,6 +45,7 @@ TABLES = ("agents", "models", "agent_versions", "agent_rollout", "golden_cases",
           "deleted_users", "outbox", "inbox")
 REAL_SEED = Path(SERVICE_DIR) / "migrations" / "seed"
 OVERLAY_0003 = REAL_SEED / "0003"
+OVERLAY_0004 = REAL_SEED / "0004"
 
 
 def _pg(url: str) -> str:
@@ -90,7 +93,12 @@ async def test_reference_data_seeded(roles_env) -> None:
     assert {a for a, r in by_id.items() if r["implementation"] == "llm" and r["availability"] == "active"} == {
         "teaching_coach", "conversation_partner", "independent_evaluator"}
     assert {a for a, r in by_id.items() if r["implementation"] == "code"} == {
-        "learning_orchestrator", "curriculum_planner", "diagnostic_assessor"}
+        "learning_orchestrator", "curriculum_planner", "diagnostic_assessor", "spaced_repetition_coach",
+        "pronunciation_coach"}
+    assert (by_id["spaced_repetition_coach"]["availability"], by_id["spaced_repetition_coach"]["implemented_in"],
+            by_id["pronunciation_coach"]["availability"], by_id["pronunciation_coach"]["implemented_in"],
+            by_id["pronunciation_coach"]["free_text"], by_id["evening_review_coach"]["availability"]) == (
+        "active", "memory", "active", "ai-gateway", False, "planned")
     assert {a for a, r in by_id.items() if r["implementation"] == "rules"} == {"safety_quality_gate", "error_analyst"}
     assert all(r["planned_sprint"] for r in agents if r["availability"] == "planned")
     assert {a for a, r in by_id.items() if r["free_text"] and r["availability"] == "active"} == {
@@ -99,10 +107,13 @@ async def test_reference_data_seeded(roles_env) -> None:
         title, purpose = json.loads(row["title"]), json.loads(row["purpose"])
         assert set(title) == set(purpose) == {"ru", "uz"} and all(title.values()) and all(purpose.values())
     models = {r["model_id"]: r for r in await _fetch(roles.runtime_url, roles.schema, "SELECT * FROM models")}
-    assert {m: (str(r["input_usd_per_mtok"]), str(r["output_usd_per_mtok"]), r["provider"])
-            for m, r in models.items()} == {
-        "claude-haiku-5-5": ("0.1000", "0.5000", "anthropic"), "claude-sonnet-5-5": ("2.0000", "10.0000", "anthropic"),
-        "fake": ("0.0000", "0.0000", "fake")}
+    assert {m: (str(r["input_usd_per_mtok"]), str(r["output_usd_per_mtok"]), r["provider"],
+                str(r["audio_usd_per_hour"])) for m, r in models.items()} == {
+        "claude-haiku-5-5": ("0.1000", "0.5000", "anthropic", "None"),
+        "claude-sonnet-5-5": ("2.0000", "10.0000", "anthropic", "None"),
+        "fake": ("0.0000", "0.0000", "fake", "None"),
+        "azure-speech-pa": ("0.0000", "0.0000", "azure_speech", "1.3200"),
+        "fake-speech": ("0.0000", "0.0000", "fake_speech", "0.0000")}
     budget = (await _fetch(roles.runtime_url, roles.schema, "SELECT * FROM budget"))[0]
     assert (budget["ai_enabled"], str(budget["monthly_cap_usd"]), str(budget["learner_daily_cap_usd"]),
             str(budget["lesson_cap_usd"]), budget["alert_percent"]) == (True, "20.00", "0.0500", "0.0300", 80)
@@ -113,21 +124,29 @@ async def test_reference_data_seeded(roles_env) -> None:
 
 async def test_real_seed_published_with_audit(roles_env) -> None:
     """Сид автора инструкций: 3 версии v1 автора seed (0002), затем накладка 0003 — independent_evaluator v2 (те же
-    тексты, новые параметры вызова) и кейс ie-19-kids-refused; v1 оценщика → archived; аудит ai.version_published."""
+    тексты, новые параметры вызова) и кейс ie-19-kids-refused; v1 оценщика → archived; аудит ai.version_published;
+    накладка 0004 — черновик teaching_coach v2 (публикация — после золотых тестов) и 8 кейсов gloss_word (6
+    обязательных), аудит ai.version_created."""
     _, roles = roles_env
-    seed, overlay = load_seed_dir(REAL_SEED), load_seed_dir(OVERLAY_0003)
+    seed, overlay, overlay4 = load_seed_dir(REAL_SEED), load_seed_dir(OVERLAY_0003), load_seed_dir(OVERLAY_0004)
     assert set(seed.versions) == {"teaching_coach", "conversation_partner", "independent_evaluator"}
-    assert set(overlay.versions) == {"independent_evaluator"}
-    per_agent = Counter(c["agent_id"] for c in [*seed.cases, *overlay.cases])
+    assert set(overlay.versions) == {"independent_evaluator"} and set(overlay4.versions) == {"teaching_coach"}
+    gloss = [c for c in overlay4.cases if c["input"]["context"].get("request") == "gloss_word"]
+    assert len(gloss) == len(overlay4.cases) >= 6 and sum(c["mandatory"] for c in gloss) >= 6
+    per_agent = Counter(c["agent_id"] for c in [*seed.cases, *overlay.cases, *overlay4.cases])
     assert all(n >= 10 for n in per_agent.values()) and len(per_agent) == 3  # ≥ 10 кейсов на агента (PLAN G)
     rows = await _fetch(roles.runtime_url, roles.schema,
                         "SELECT agent_id, version, status, author_id, published_by, body_hash, max_output_tokens, "
                         "max_cost_usd, timeout_ms, instructions, rules, output_schema FROM agent_versions")
     assert sorted((r["agent_id"], r["version"], r["status"], r["author_id"], r["published_by"]) for r in rows) == \
         sorted([("teaching_coach", 1, "published", SEED_ACTOR_ID, SEED_ACTOR_ID),
+                ("teaching_coach", 2, "draft", SEED_ACTOR_ID, None),
                 ("conversation_partner", 1, "published", SEED_ACTOR_ID, SEED_ACTOR_ID),
                 ("independent_evaluator", 1, "archived", SEED_ACTOR_ID, SEED_ACTOR_ID),
                 ("independent_evaluator", 2, "published", SEED_ACTOR_ID, SEED_ACTOR_ID)])
+    tc2 = next(r for r in rows if (r["agent_id"], r["version"]) == ("teaching_coach", 2))
+    assert (tc2["max_output_tokens"], str(tc2["max_cost_usd"]), tc2["timeout_ms"]) == (400, "0.005000", 8000)
+    assert json.loads(tc2["output_schema"])["anyOf"]  # объединённая схема: v1 + gloss_word
     ev = {r["version"]: r for r in rows if r["agent_id"] == "independent_evaluator"}
     assert (ev[2]["max_output_tokens"], str(ev[2]["max_cost_usd"]), ev[2]["timeout_ms"]) == (600, "0.030000", 12000)
     assert (ev[1]["max_output_tokens"], str(ev[1]["max_cost_usd"]), ev[1]["timeout_ms"]) == (900, "0.020000", 20000)
@@ -144,30 +163,46 @@ async def test_real_seed_published_with_audit(roles_env) -> None:
                                                                      for r in cases}
     outbox = [Envelope.model_validate(json.loads(r["envelope"])) for r in
               await _fetch(roles.runtime_url, roles.schema, "SELECT envelope FROM outbox")]
-    assert len(outbox) == 4
+    assert len(outbox) == 5
     for e in outbox:
         assert_event_conforms(e)
-        assert (e.event_type, e.producer, e.payload["action"], e.payload["actor_type"], e.payload["actor_id"]) == (
-            "admin.audit.recorded.v1", "ai-gateway", "ai.version_published", "system", SEED_ACTOR_ID)
-    assert sorted(e.payload["after"]["published_version"] for e in outbox) == [1, 1, 1, 2]
+        assert (e.event_type, e.producer, e.payload["actor_type"], e.payload["actor_id"]) == (
+            "admin.audit.recorded.v1", "ai-gateway", "system", SEED_ACTOR_ID)
+    published = [e for e in outbox if e.payload["action"] == "ai.version_published"]
+    assert sorted(e.payload["after"]["published_version"] for e in published) == [1, 1, 1, 2]
+    created = [e.payload for e in outbox if e.payload["action"] == "ai.version_created"]
+    assert [(c["object_id"], c["after"]["status"]) for c in created] == [("teaching_coach@2", "draft")]
 
 
 async def test_real_seed_serves_fake_stand_and_golden_runs(roles_env) -> None:
-    """Под ролью сервиса и провайдером fake (стенд e2e): каждый агент отвечает по схеме версии v1 автора; прогон
-    золотых тестов v1 на fake — обязательные пройдены (содержимое output.* — skipped)."""
-    settings, _ = roles_env
+    """Под ролью сервиса и провайдером fake (стенд e2e): при старте черновик сида teaching_coach v2 прогоняется на fake
+    и публикуется (аудит ai.test_run и ai.version_published от system); каждый агент отвечает по схеме опубликованной
+    версии (gloss_word — вызывающий memory); прогон золотых тестов на fake — обязательные пройдены (содержимое
+    output.* — skipped)."""
+    settings, roles = roles_env
     app = build_app(settings, Runtime(settings, bus=InMemoryBus()))
-    seed, overlay = load_seed_dir(REAL_SEED), load_seed_dir(OVERLAY_0003)
-    published = {"teaching_coach": 1, "conversation_partner": 1, "independent_evaluator": 2}
+    seed, overlay, overlay4 = load_seed_dir(REAL_SEED), load_seed_dir(OVERLAY_0003), load_seed_dir(OVERLAY_0004)
+    published = {"teaching_coach": 2, "conversation_partner": 1, "independent_evaluator": 2}
     async with app.router.lifespan_context(app), httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://ai-gateway") as c:
-        for case in [*seed.cases, *overlay.cases]:
+        rows = await _fetch(roles.runtime_url, roles.schema, "SELECT version, status, published_by FROM "
+                                                             "agent_versions WHERE agent_id = 'teaching_coach'")
+        assert sorted((r["version"], r["status"], r["published_by"]) for r in rows) == [
+            (1, "archived", SEED_ACTOR_ID), (2, "published", SEED_ACTOR_ID)]
+        stand_run = await _fetch(roles.runtime_url, roles.schema, "SELECT provider, passed_mandatory, started_by "
+                                                                  "FROM test_runs WHERE agent_id = 'teaching_coach'")
+        assert [(r["provider"], r["passed_mandatory"], r["started_by"]) for r in stand_run] == [
+            ("fake", True, SEED_ACTOR_ID)]
+        for case in [*seed.cases, *overlay.cases, *overlay4.cases]:
             ctx = case["input"]["context"]
-            body = {"request_id": str(uuid.uuid4()), "session_id": str(uuid.uuid4()), "session_kind": "lesson",
+            gloss = ctx.get("request") == "gloss_word"
+            body = {"request_id": str(uuid.uuid4()), "session_id": str(uuid.uuid4()),
+                    "session_kind": "memory" if gloss else "lesson",
                     "user_id": str(uuid.uuid4()), "audience": case["input"]["audience"],
                     "locale": ctx.get("explain_locale", "ru"), "context": ctx}
+            caller = "memory" if gloss else "lessons"
             r = await c.post(f"/internal/v1/agents/{case['agent_id']}/invoke", json=body,
-                             headers=internal_headers(settings, issuer="lessons", subject=body["user_id"]))
+                             headers=internal_headers(settings, issuer=caller, subject=body["user_id"]))
             assert r.status_code == 200, (case["case_id"], r.text)
             expected = "refused" if case["input"]["audience"] == "kids" and case["agent_id"] != "teaching_coach" \
                 else "ok"
@@ -191,6 +226,10 @@ async def test_real_seed_serves_fake_stand_and_golden_runs(roles_env) -> None:
             if agent_id == "independent_evaluator":  # детский кейс накладки 0003 — обязательный и пройден
                 kids = next(x for x in run["results"] if x["case_id"] == "ie-19-kids-refused")
                 assert kids["mandatory"] and kids["passed"], kids
+            if agent_id == "teaching_coach":  # кейсы gloss_word накладки 0004 — обязательные пройдены, дети — ok
+                gloss = {x["case_id"]: x for x in run["results"] if x["case_id"].startswith("tc-gloss-")}
+                assert len(gloss) == len(overlay4.cases) and all(x["passed"] for x in gloss.values()), gloss
+                assert gloss["tc-gloss-kids-ok"]["mandatory"]
 
 
 async def test_seed_migration_is_reversible_and_idempotent(roles_env) -> None:
@@ -208,6 +247,15 @@ async def test_seed_migration_is_reversible_and_idempotent(roles_env) -> None:
                    "INSERT INTO usage (call_id, request_id, caller, agent_id, provider, status, reason, finished_at) "
                    "VALUES ($1, $2, 'lessons', 'independent_evaluator', 'anthropic', 'unavailable', 'cost_limit', "
                    "now())", uuid.uuid4(), uuid.uuid4())
+    # откат 0004: черновик teaching_coach v2 и кейсы gloss_word удалены, агенты и модели — как в спринте 4
+    await asyncio.to_thread(command.downgrade, cfg, "0003")
+    assert await count("SELECT count(*) AS n FROM agent_versions WHERE agent_id = 'teaching_coach'") == 1
+    assert await count("SELECT count(*) AS n FROM golden_cases WHERE case_id LIKE 'tc-gloss-%'") == 0
+    assert await count("SELECT count(*) AS n FROM models") == 3
+    assert await count("SELECT count(*) AS n FROM agent_rollout WHERE agent_id IN ('pronunciation_coach', "
+                       "'spaced_repetition_coach')") == 2
+    assert await count("SELECT count(*) AS n FROM agents WHERE implementation = 'llm' "
+                       "AND availability = 'planned' AND agent_id = 'pronunciation_coach'") == 1
     await asyncio.to_thread(command.downgrade, cfg, "0002")
     rows = await _fetch(roles.owner_url, roles.schema, "SELECT version, status FROM agent_versions "
                                                        "WHERE agent_id = 'independent_evaluator'")
@@ -227,8 +275,8 @@ async def test_seed_migration_is_reversible_and_idempotent(roles_env) -> None:
     assert await count("SELECT count(*) AS n FROM golden_cases") == 0
     assert await count("SELECT count(*) AS n FROM agent_rollout WHERE published_version IS NOT NULL") == 0
     await migrate(SERVICE_DIR, owner)
-    seed, overlay = load_seed_dir(REAL_SEED), load_seed_dir(OVERLAY_0003)
-    assert await count("SELECT count(*) AS n FROM agent_versions") == 4
+    seed, overlay, overlay4 = load_seed_dir(REAL_SEED), load_seed_dir(OVERLAY_0003), load_seed_dir(OVERLAY_0004)
+    assert await count("SELECT count(*) AS n FROM agent_versions") == 5
     engine = make_engine(roles.owner_url, roles.schema, pool_size=1)
     try:
         async with engine.begin() as conn:
@@ -237,6 +285,10 @@ async def test_seed_migration_is_reversible_and_idempotent(roles_env) -> None:
             assert counts == {"published": 0, "skipped": 3, "cases_written": 0, "cases_skipped": len(seed.cases)}
             counts = await conn.run_sync(lambda sync: apply_seed(sync, overlay, datetime(2026, 11, 19, tzinfo=UTC)))
             assert counts == {"published": 0, "skipped": 1, "cases_written": 0, "cases_skipped": len(overlay.cases)}
+            counts = await conn.run_sync(
+                lambda sync: apply_seed_drafts(sync, overlay4, datetime(2026, 11, 20, tzinfo=UTC)))
+            assert counts == {"drafted": 0, "skipped": 1, "blocked": 0, "cases_written": 0,
+                              "cases_skipped": len(overlay4.cases)}
     finally:
         await engine.dispose()
     # полный откат схемы и повторный подъём
@@ -254,9 +306,10 @@ async def test_db_immutability_under_runtime_role(roles_env) -> None:
     app = build_app(settings, Runtime(settings, bus=InMemoryBus()))
     async with app.router.lifespan_context(app), httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://ai-gateway") as c:
+        # стенд опубликовал черновик сида teaching_coach v2 при старте → черновик сотрудника — v3
         r = await c.post("/admin/v1/ai/agents/teaching_coach/versions",
                          headers=internal_headers(settings, issuer="admin-bff", actor=MANAGER))
-        assert r.status_code == 201, r.text
+        assert r.status_code == 201 and r.json()["version"] == 3, r.text
     forbidden = [
         "UPDATE agent_versions SET instructions = 'x' WHERE status = 'published'",
         "UPDATE agent_versions SET status = 'draft' WHERE status = 'published'",
@@ -274,7 +327,7 @@ async def test_db_immutability_under_runtime_role(roles_env) -> None:
             await _execute(roles.owner_url, schema, stmt)
     # черновик правится; под канарейкой — заморожен и не удаляется
     await _execute(rt, schema, "UPDATE agent_versions SET notes = 'n' WHERE status = 'draft'")
-    await _execute(rt, schema, "UPDATE agent_rollout SET canary_version = 2, canary_percent = 10 "
+    await _execute(rt, schema, "UPDATE agent_rollout SET canary_version = 3, canary_percent = 10 "
                                "WHERE agent_id = 'teaching_coach'")
     with pytest.raises(asyncpg.PostgresError):
         await _execute(rt, schema, "UPDATE agent_versions SET notes = 'm' WHERE status = 'draft'")

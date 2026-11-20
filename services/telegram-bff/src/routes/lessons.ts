@@ -22,6 +22,10 @@
  * AI_BUSY (steps, simpler: тот же ответ ещё обрабатывается — Mini App повторяет его) |
  * PAIR_NOT_AVAILABLE | APPEAL_EXISTS | APPEAL_WINDOW_CLOSED | APPEAL_NOT_ALLOWED; 422 ANSWER_INVALID {field}; 410 USER_DELETED;
  * 503 CATALOG_UNAVAILABLE (свой код); ответ не по контракту → 503 UPSTREAM_UNAVAILABLE.
+ *
+ * Спринт 5: сессии kind reading (старт — routes/reading.ts) идут через эти же маршруты: шаг `reading` (ReadingView) —
+ * строго по схеме и явной сборкой, `in_dictionary` глоссария — из словаря ученика (memory cards/lookup, сбой — null);
+ * вопросы к тексту — шаги `item` с graded_later.
  */
 import { Type } from "@fastify/type-provider-typebox";
 import type * as C from "@tilhero/contracts/bff";
@@ -32,7 +36,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { asAccount, asLearner } from "../account.js";
 import { expectShape, matches } from "../check.js";
 import type { BffContext } from "../context.js";
-import { BEARER, authOf, errorResponses, idempotencyKey, type App } from "../http.js";
+import { BEARER, authOf, errorResponses, idempotencyKey, localeOf, type App, type LocaleSource } from "../http.js";
 import {
   ActiveSessionSchema,
   AppealListSchema,
@@ -62,6 +66,7 @@ import {
 import type { AccessClaims } from "../tokens.js";
 import { upstreamUnavailable, type RawRequest } from "../upstream.js";
 import { claimsOf, pageView } from "./content.js";
+import { withInDictionary } from "../memoryApi.js";
 
 const user = { access: "user" } as const;
 const LESSONS = "lessons";
@@ -77,18 +82,7 @@ const answerInvalid = (field: string) => new AppError(422, "ANSWER_INVALID", "О
 
 const loc = (x: Localized): Localized => ({ ru: x.ru, uz: x.uz });
 
-interface LocaleSource {
-  query: unknown;
-  headers: Record<string, string | string[] | undefined>;
-}
-/** Язык ученика: ?locale= (ru|uz) → Accept-Language (Mini App шлёт язык интерфейса) → ru. */
-export function localeOf(req: LocaleSource): "ru" | "uz" {
-  const q = (req.query as { locale?: unknown } | undefined)?.locale;
-  if (q === "ru" || q === "uz") return q;
-  const raw = req.headers["accept-language"];
-  const first = (Array.isArray(raw) ? raw[0] : raw)?.split(",")[0]?.trim().toLowerCase().slice(0, 2);
-  return first === "uz" ? "uz" : "ru";
-}
+export { localeOf } from "../http.js";
 
 // ---------------------------------------------------------------- проверка и сборка ответов
 
@@ -159,9 +153,42 @@ export function stepView(s: C.LessonStep, kids: boolean): C.LessonStep {
       };
     case "open_answer":
       return { ...base, type: "open_answer", prompt: loc(s.prompt), max_length: s.max_length };
+    case "reading":
+      return { ...base, type: "reading", reading: readingView(s.reading) };
     case "done":
       return { ...base, type: "done" };
   }
+}
+
+/** Текст для чтения (спринт 5) — только поля контракта: вопросов и ответов в нём нет по построению. */
+export function readingView(r: C.ReadingView): C.ReadingView {
+  return {
+    reading_id: r.reading_id,
+    version: r.version,
+    title: loc(r.title),
+    level: r.level,
+    voice: r.voice,
+    paragraphs: r.paragraphs.map((p) => ({ p_id: p.p_id, sentences: p.sentences.map((x) => ({ s_id: x.s_id, text_en: x.text_en, gloss: loc(x.gloss) })) })),
+    glossary: r.glossary.map((g) => ({ en: g.en, gloss: loc(g.gloss), note: g.note ? loc(g.note) : null, in_dictionary: g.in_dictionary ?? null })),
+    questions_count: r.questions_count,
+    question_types: [...r.question_types],
+    est_minutes: r.est_minutes,
+  };
+}
+
+/** Вызов lessons от имени ученика: sub = аккаунт, claims lrn и age_band; kids — детская аудитория (сегмент BFF).
+ *  Query для lessons (services/lessons/README.md): `audience` — подсказка BFF (детский профиль lessons не понижает),
+ *  `locale` — язык ученика (варианты проверки понимания, объяснение ИИ). */
+export async function lessonsCall(ctx: BffContext, auth: AccessClaims, req?: LocaleSource): Promise<{ kids: boolean; ro: RawRequest }> {
+  const seg = await ctx.audience.segment(ctx, auth);
+  return {
+    kids: seg.audience === "kids",
+    ro: {
+      subject: asAccount(auth),
+      claims: claimsOf(auth, seg.accountAgeBand),
+      ...(req ? { query: { audience: seg.audience, locale: localeOf(req) } } : {}),
+    },
+  };
 }
 
 export function sessionView(s: C.LessonSession, kids: boolean): C.LessonSession {
@@ -258,20 +285,10 @@ export function lessonsRoutes(app: App, ctx: BffContext): void {
   const log = ctx.log;
   const sess = (id: string) => `/internal/v1/sessions/${id.toLowerCase()}`;
 
-  /** Вызов от имени ученика: lessons — sub = аккаунт, claims lrn и age_band; kids — детская аудитория (сегмент BFF).
-   *  Query для lessons (services/lessons/README.md): `audience` — подсказка BFF (детский профиль lessons не понижает),
-   *  `locale` — язык ученика (варианты проверки понимания, объяснение ИИ). */
-  const asLearnerOf = async (auth: AccessClaims, req?: LocaleSource): Promise<{ kids: boolean; ro: RawRequest }> => {
-    const seg = await ctx.audience.segment(ctx, auth);
-    return {
-      kids: seg.audience === "kids",
-      ro: {
-        subject: asAccount(auth),
-        claims: claimsOf(auth, seg.accountAgeBand),
-        ...(req ? { query: { audience: seg.audience, locale: localeOf(req) } } : {}),
-      },
-    };
-  };
+  const asLearnerOf = (auth: AccessClaims, req?: LocaleSource) => lessonsCall(ctx, auth, req);
+  /** Шаг reading (спринт 5): in_dictionary глоссария — из словаря ученика (memory cards/lookup; сбой — null). */
+  const enrich = async (auth: AccessClaims, step: C.LessonStep): Promise<C.LessonStep> =>
+    step.type === "reading" ? { ...step, reading: await withInDictionary(ctx, auth, step.reading) } : step;
   /** assessment: sub = активный ученик (lrn), claims те же. */
   const asLearnerOfAssessment = async (auth: AccessClaims): Promise<RawRequest> => {
     const seg = await ctx.audience.segment(ctx, auth);
@@ -381,8 +398,8 @@ export function lessonsRoutes(app: App, ctx: BffContext): void {
       config: user,
       schema: {
         tags: ["lessons"],
-        summary: "История сессий ученика (уроки, сценарии, медиа, повторения), новые первыми",
-        description: "?kind=lesson|scenario|media|review, ?cursor=, ?limit= (1–50). Элемент не по контракту отбрасывается.",
+        summary: "История сессий ученика (уроки, сценарии, медиа, повторения, чтение), новые первыми",
+        description: "?kind=lesson|scenario|media|review|reading, ?cursor=, ?limit= (1–50). Элемент не по контракту отбрасывается.",
         security: BEARER,
         querystring: HistoryQuerySchema,
         response: { 200: LessonHistoryPageSchema, ...errorResponses(401, 410, 423) },
@@ -449,17 +466,20 @@ export function lessonsRoutes(app: App, ctx: BffContext): void {
       schema: {
         tags: ["lessons"],
         summary: "Текущий шаг урока (первый запрос начинает урок, после паузы — продолжает с того же шага)",
-        description: "Шаг — по типу: notice, explanation, item, roleplay, roleplay_end, listen, open_answer, done. Ключей ответов нет. 409 SESSION_STATE.",
+        description:
+          "Шаг — по типу: notice, explanation, item, roleplay, roleplay_end, listen, open_answer, reading (спринт 5: текст для чтения; " +
+          "in_dictionary глоссария — из словаря ученика), done. Ключей ответов нет. 409 SESSION_STATE.",
         security: BEARER,
         params: IdParamsSchema,
         response: { 200: LessonStepSchema, ...errorResponses(401, 404, 409, 410, 423) },
       },
     },
     async (req) => {
-      const { kids, ro } = await asLearnerOf(authOf(req), req);
+      const auth = authOf(req);
+      const { kids, ro } = await asLearnerOf(auth, req);
       const step = stepView(checkStep(log, await lessons.json("GET", `${sess(req.params.id)}/current`, ro)), kids);
       await remember(req.params.id, step);
-      return step;
+      return enrich(auth, step);
     },
   );
 
@@ -496,7 +516,7 @@ export function lessonsRoutes(app: App, ctx: BffContext): void {
         ...(b.text !== undefined ? { text: b.text.trim() } : {}),
       };
       const res = expectShape(log, LESSONS, "step_result", StepResultDomainSchema, await lessons.json("POST", `${sess(id)}/steps/${stepId}`, { ...ro, body }));
-      const next = stepView(checkStep(log, res.next, "step_result.next"), kids);
+      const next = await enrich(auth, stepView(checkStep(log, res.next, "step_result.next"), kids));
       const graded = await isGraded(id, stepId);
       if (graded && res.feedback) {
         log.warn({ upstream: LESSONS, check: "step_result.feedback", rule: "graded_later", upstream_code: "UPSTREAM_BAD_RESPONSE" }, "feedback on a graded step dropped");
@@ -568,10 +588,11 @@ export function lessonsRoutes(app: App, ctx: BffContext): void {
       },
     },
     async (req) => {
-      const { kids, ro } = await asLearnerOf(authOf(req), req);
+      const auth = authOf(req);
+      const { kids, ro } = await asLearnerOf(auth, req);
       const step = stepView(checkStep(log, await lessons.json("POST", `${sess(req.params.id)}/roleplay/retry`, ro), "roleplay_retry"), kids);
       await remember(req.params.id, step);
-      return step;
+      return enrich(auth, step);
     },
   );
 

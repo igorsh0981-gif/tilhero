@@ -1,7 +1,7 @@
 """Контент сессии: версии, зафиксированные при старте (content_versions), и работа с заданиями и графом сценария.
 
-content_versions: {"lesson"|"scenario"|"rubric"|"media_asset": {"key", "version"}, "media_exercises": [{"key",
-"version"}], "retrieval": [{"key", "version"}]} — уроки, из которых взяты задания повторения.
+content_versions: {"lesson"|"scenario"|"rubric"|"media_asset"|"reading": {"key", "version"}, "media_exercises":
+[{"key", "version"}], "retrieval": [{"key", "version"}]} — уроки, из которых взяты задания повторения.
 Ключи ответов (control_items[].answer, упражнения) используются только здесь — для проверки повторения и проверки
 понимания; в ответах ученику их нет (render_* строят StepItem без answer).
 """
@@ -32,6 +32,7 @@ class Bundle:
     scenario: dict[str, Any] | None = None
     rubric: dict[str, Any] | None = None
     media: dict[str, Any] | None = None
+    reading: dict[str, Any] | None = None
     exercises: dict[str, dict[str, Any]] = field(default_factory=dict)
     retrieval: dict[tuple[str, int], dict[str, Any]] = field(default_factory=dict)
 
@@ -44,7 +45,7 @@ async def load_bundle(catalog: CatalogGateway, cv: dict[str, Any]) -> Bundle:
     """Версии сессии из catalog (кеш бессрочный). 404 любой версии → ContentGone (сессия → failed)."""
     b = Bundle()
     for kind, attr in (("lesson", "lesson"), ("scenario", "scenario"), ("rubric", "rubric"),
-                       ("media_asset", "media")):
+                       ("media_asset", "media"), ("reading", "reading")):
         r = cv.get(kind)
         if isinstance(r, dict):
             setattr(b, attr, await catalog.version(kind, r["key"], int(r["version"])))
@@ -192,6 +193,56 @@ def answer_text(options: list[str], answer: Any) -> str | None:
     if isinstance(answer, dict):
         return str(answer["text"]) if isinstance(answer.get("text"), str) else None
     return str(answer)
+
+
+# ---------------------------------------------------------------- текст для чтения (спринт 5)
+
+
+# Вопрос текста → тип шага (StepItemType, bff.ts): в StepItemType нет `true_false` — это выбор из двух вариантов
+# ["True", "False"] (ответ — индекс, как у single_choice); gap_fill — строка (сравнение в assessment).
+READING_ITEM_TYPES = {"single_choice": "single_choice", "true_false": "single_choice", "gap_fill": "gap_fill"}
+
+
+def find_question(reading: dict[str, Any], question_id: str) -> dict[str, Any] | None:
+    return next((q for q in reading.get("questions") or [] if q.get("question_id") == question_id), None)
+
+
+def question_view(question: dict[str, Any]) -> dict[str, Any]:
+    """StepItem вопроса на понимание — без ключа (answer остаётся в catalog/assessment)."""
+    item_type = READING_ITEM_TYPES[str(question["type"])]
+    options = [] if item_type == "gap_fill" else [str(o) for o in question.get("options") or []]
+    return item_view(str(question["question_id"]), item_type, question["instruction"], question.get("prompt_en"),
+                     options)
+
+
+def reading_view(reading: dict[str, Any], version: int) -> dict[str, Any]:
+    """ReadingView (bff.ts): текст по предложениям с переводом, глоссарий (подсветка), число и типы вопросов — без
+    вопросов и ответов. `in_dictionary` — null: есть ли слово в словаре ученика, знает memory (дополняет BFF)."""
+    questions = reading.get("questions") or []
+    types: list[str] = []
+    for q in questions:
+        if q.get("type") not in types:
+            types.append(str(q.get("type")))
+    return {
+        "reading_id": reading["reading_id"], "version": version, "title": reading["title"],
+        "level": reading["level"], "voice": reading.get("voice") or "en-GB",
+        "paragraphs": [{"p_id": str(p["p_id"]),
+                        "sentences": [{"s_id": str(x["s_id"]), "text_en": x["text_en"], "gloss": x["gloss"]}
+                                      for x in p.get("sentences") or []]}
+                       for p in reading.get("paragraphs") or []],
+        "glossary": [{"en": g["en"], "gloss": g["gloss"], "note": g.get("note"), "in_dictionary": None}
+                     for g in reading.get("glossary") or []],
+        "questions_count": len(questions), "question_types": types,
+        "est_minutes": int(reading.get("est_minutes") or 0),
+    }
+
+
+def reading_audience_ok(reading: dict[str, Any], audience: str) -> bool:
+    """Аудитория текста подходит ученику; ребёнку — только детский текст (аудитория ровно [kids])."""
+    segments = [str(a) for a in reading.get("audience") or []]
+    if audience == "kids":
+        return segments == ["kids"]
+    return audience in segments
 
 
 # ---------------------------------------------------------------- граф сценария

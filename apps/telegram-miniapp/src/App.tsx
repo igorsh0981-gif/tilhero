@@ -52,6 +52,12 @@ import { LessonSummaryScreen } from "./screens/lessons/Summary";
 import { isOpen, playerMarker } from "./domain/lessons";
 import { Support, TicketScreen } from "./screens/support/Support";
 import { WhatsNewSheet } from "./screens/whatsnew/WhatsNewSheet";
+import { CardScreen } from "./screens/memory/CardScreen";
+import { Dictionary } from "./screens/memory/Dictionary";
+import { ReviewPlayer } from "./screens/memory/ReviewPlayer";
+import { ReviewSummaryScreen } from "./screens/memory/ReviewSummary";
+import { ReadingScreen } from "./screens/reading/ReadingScreen";
+import { VoiceConsent } from "./screens/profile/VoiceConsent";
 
 type Phase =
   | { kind: "boot" }
@@ -454,6 +460,9 @@ function TabScreen({ tab }: { tab: Tab }) {
       return <SkillMap />;
     case "lessons":
       return <LessonsTab />;
+    case "review":
+      // sprint 5: the tab «Словарь» (dictionary, error journal, «Повторение дня» on top)
+      return <Dictionary />;
     default:
       return <Soon what={tab} />;
   }
@@ -522,5 +531,15 @@ function PushedScreen({ p }: { p: Pushed }) {
       return <LessonSummaryScreen key={p.sessionId} sessionId={p.sessionId} initial={p.summary} />;
     case "appeal":
       return <AppealScreen evaluationId={p.evaluationId} title={p.title} />;
+    case "review":
+      return <ReviewPlayer autostart={p.autostart} />;
+    case "reviewSummary":
+      return <ReviewSummaryScreen key={p.sessionId} summary={p.summary} />;
+    case "card":
+      return <CardScreen key={p.id} id={p.id} />;
+    case "reading":
+      return <ReadingScreen key={p.id} id={p.id} />;
+    case "voiceConsent":
+      return <VoiceConsent />;
   }
 }

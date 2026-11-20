@@ -19,6 +19,7 @@ const PROD_OK = {
   DIAGNOSTICS_URL: "http://diagnostics.railway.internal:8111",
   LESSONS_URL: "http://lessons.railway.internal:8112/",
   ASSESSMENT_URL: "http://assessment.railway.internal:8113",
+  MEMORY_URL: "http://memory.railway.internal:8116/",
 };
 
 function problems(env: Record<string, string>): string[] {
@@ -72,6 +73,20 @@ describe("loadConfig", () => {
     expect(c.assessmentUrl).toBe("http://assessment.railway.internal:8113");
     expect(c.lessonsTimeoutMs).toBe(25_000);
     expect(c.lessonsFinishTimeoutMs).toBe(45_000);
+    // спринт 5: memory (INTERNAL_API §8 — таймауты 10 / 12 / 20 с)
+    expect(c.memoryUrl).toBe("http://memory.railway.internal:8116");
+    expect([c.memoryTimeoutMs, c.memoryTranslateTimeoutMs, c.memoryPronunciationTimeoutMs]).toEqual([10_000, 12_000, 20_000]);
+  });
+
+  it("спринт 5: MEMORY_URL — dev-значение 127.0.0.1:8116; в stage/prod обязателен; таймауты memory настраиваются", () => {
+    expect(loadConfig({}).memoryUrl).toBe(DEV_DEFAULTS.MEMORY_URL);
+    expect(DEV_DEFAULTS.MEMORY_URL).toBe("http://127.0.0.1:8116");
+    const { MEMORY_URL: _m, ...noMemory } = PROD_OK;
+    expect(problems(noMemory)).toEqual(["MEMORY_URL не задана (обязательна в stage/prod)"]);
+    expect(problems({ ...PROD_OK, MEMORY_URL: "memory:8116" })).toEqual(['MEMORY_URL="memory:8116": ожидается http(s) URL']);
+    const c = loadConfig({ MEMORY_TIMEOUT_MS: "5000", MEMORY_TRANSLATE_TIMEOUT_MS: "9000", MEMORY_PRONUNCIATION_TIMEOUT_MS: "30000" });
+    expect([c.memoryTimeoutMs, c.memoryTranslateTimeoutMs, c.memoryPronunciationTimeoutMs]).toEqual([5000, 9000, 30_000]);
+    expect(problems({ MEMORY_PRONUNCIATION_TIMEOUT_MS: "500" })).toEqual(["MEMORY_PRONUNCIATION_TIMEOUT_MS=500: допустимо от 1000 до 60000"]);
   });
 
   it("R2-02: таймаут lessons больше таймаута ИИ в lessons (20 с); завершение — больше ожидания оценки (до 32 с)", () => {

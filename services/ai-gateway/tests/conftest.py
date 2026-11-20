@@ -30,13 +30,15 @@ def make_settings(**kw: Any) -> Settings:
     base: dict[str, Any] = {"env": "test", "internal_jwt_secret": "t" * 40, "redis_url": TEST_REDIS_URL,
                             "cache_namespace": f"t:aigw:{uuid.uuid4().hex[:10]}", "seed_dir": str(SEED_DIR),
                             "ai_provider": "fake", "anthropic_api_key": None,
-                            "ai_allow_fake_test_publish": True}
+                            "ai_allow_fake_test_publish": True,
+                            # стенд и тесты — fake-оценка произношения; Azure — тесты test_gw_speech_azure.py
+                            "speech_provider": "fake", "azure_speech_key": None, "azure_speech_region": None}
     base.update(kw)
     return Settings(**base)
 
 
 async def make_env(provider: Provider | None = None, transport: httpx.AsyncBaseTransport | None = None,
-                   **overrides: Any) -> AsyncIterator[Env]:
+                   speech_transport: httpx.AsyncBaseTransport | None = None, **overrides: Any) -> AsyncIterator[Env]:
     schema = unique_schema("aigw")
     await create_schema(schema)
     settings = make_settings(database_url=TEST_ADMIN_URL, db_schema=schema, **overrides)
@@ -44,7 +46,7 @@ async def make_env(provider: Provider | None = None, transport: httpx.AsyncBaseT
         await migrate(SERVICE_DIR, settings)
         bus = InMemoryBus()
         runtime = Runtime(settings, bus=bus)
-        app = build_app(settings, runtime, provider=provider, transport=transport)
+        app = build_app(settings, runtime, provider=provider, transport=transport, speech_transport=speech_transport)
         async with app.router.lifespan_context(app):
             client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://ai-gateway")
             env = Env(settings, client, runtime, bus, schema, app)

@@ -62,7 +62,7 @@ for (const mode of THEMES) {
     test(`dialogue QA: journal, card, re-evaluation, appeals, task (${mode})`, async ({ page }) => {
       await openAs(page, "methodist@tilhero.local", "#/qa", { ai: { qaDown: ["ai-gateway"] } });
       await setTheme(page, mode);
-      await expect(page.locator('[data-testid^="qa-row-"]')).toHaveCount(6);
+      await expect(page.locator('[data-testid^="qa-row-"]')).toHaveCount(7);
       await expectNoHScroll(page);
       await snap(page, `s4-07-qa-journal-${mode}`, true);
       await page.getByTestId(`qa-open-${SID.s1}`).click();

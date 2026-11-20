@@ -7,7 +7,7 @@ from tilhero_common.settings import ServiceSettings
 # Домены спринта 1, которые обязаны подтвердить удаление (user.domain.deleted.v1) до обезличивания профиля
 # (INTERNAL_API §1, ARCHITECTURE «Данные ученика и удаление»). Новый домен с данными ученика добавляется сюда.
 DEFAULT_DELETION_DOMAINS = ("learning-plan", "social", "notifications", "support", "experience-config", "catalog",
-                            "diagnostics", "lessons", "assessment", "ai-gateway")
+                            "diagnostics", "lessons", "assessment", "ai-gateway", "memory")
 
 
 class Settings(ServiceSettings):
@@ -19,7 +19,7 @@ class Settings(ServiceSettings):
     port: int = 8101
 
     # Действующая версия политики обработки данных (тексты — tilhero_identity.domain.policy).
-    current_policy_version: str = "1.0"
+    current_policy_version: str = "1.1"  # спринт 5: цель voice_recording — оценка произношения, звук не хранится
     default_timezone: str = "Asia/Tashkent"
 
     # Дети и подростки (CONVENTIONS §8): не больше N детских профилей на аккаунт; ссылка согласия родителя

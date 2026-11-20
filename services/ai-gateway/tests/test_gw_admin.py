@@ -173,8 +173,11 @@ async def test_rollback_clears_canary(env) -> None:
 
 async def test_models_and_prices(env) -> None:
     items = (await env.c.get("/admin/v1/ai/models", headers=env.h(ANALYST))).json()["items"]
-    assert [(m["model_id"], m["input_usd_per_mtok"], m["output_usd_per_mtok"]) for m in items] == [
-        ("claude-haiku-5-5", 0.1, 0.5), ("claude-sonnet-5-5", 2.0, 10.0), ("fake", 0.0, 0.0)]
+    assert [(m["model_id"], m["provider"], m["input_usd_per_mtok"], m["output_usd_per_mtok"],
+             m["audio_usd_per_hour"]) for m in items] == [
+        ("azure-speech-pa", "azure_speech", 0.0, 0.0, 1.32), ("claude-haiku-5-5", "anthropic", 0.1, 0.5, None),
+        ("claude-sonnet-5-5", "anthropic", 2.0, 10.0, None), ("fake", "fake", 0.0, 0.0, None),
+        ("fake-speech", "fake_speech", 0.0, 0.0, 0.0)]
     body = {"input_usd_per_mtok": 0.12, "output_usd_per_mtok": 0.6, "active": True, "reason": "Новый прайс"}
     r = await env.c.put("/admin/v1/ai/models/claude-haiku-5-5", json=body, headers=env.h(PUBLISHER))
     assert r.status_code == 200 and r.json()["input_usd_per_mtok"] == 0.12
@@ -311,7 +314,9 @@ async def test_summary_month_boundary_and_cap(env) -> None:
 
 async def test_provider_status_fake(env) -> None:
     r = await env.c.get("/admin/v1/ai/provider", headers=env.h(ANALYST))
-    assert r.json() == {"provider": "fake", "key_configured": False, "last_error": None, "ai_enabled": True}
+    assert r.json() == {"provider": "fake", "key_configured": False, "last_error": None, "ai_enabled": True,
+                        "speech": {"provider": "fake_speech", "key_configured": False, "region": None,
+                                   "last_error": None}}
 
 
 async def test_admin_idempotency_replay(env) -> None:

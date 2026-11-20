@@ -62,9 +62,13 @@ class GoldenCasePatch(BaseModel):
 
 
 class ModelUpdateIn(BaseModel):
+    """PUT /admin/v1/ai/models/{model_id}: цены токенов (LLM) и, для модели речи, цена часа аудио (спринт 5,
+    ai.ts AiModel.audio_usd_per_hour; у речи цены токенов — 0; не передана — прежняя)."""
+
     model_config = _IN
     input_usd_per_mtok: float = Field(ge=0, le=1000)
     output_usd_per_mtok: float = Field(ge=0, le=1000)
+    audio_usd_per_hour: float | None = Field(default=None, ge=0, le=1000)
     active: bool
     reason: Reason
 

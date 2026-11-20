@@ -7,7 +7,9 @@
   повторения; наружу (ученику) не уходят никогда;
 - опубликованная версия сущности: `lessons[].version` снимка курса, иначе `GET /internal/v1/versions/{kind}/{key}`
   (без номера → текущая опубликованная; кеш PUBLISHED_CACHE_SECONDS);
-- `GET /internal/v1/media/{asset_id}/exercises?audience=` — опубликованные упражнения к медиа (без ключей).
+- `GET /internal/v1/media/{asset_id}/exercises?audience=` — опубликованные упражнения к медиа (без ключей);
+- спринт 5: `GET /internal/v1/readings/{reading_id}?audience=` — опубликованный текст для чтения (без ключей), номер
+  версии; тело версии — `GET /internal/v1/versions/reading/{key}[/{version}]` (INTERNAL_API §2.1 спринта 5).
 """
 
 from __future__ import annotations
@@ -73,6 +75,17 @@ def _parse_version(data: Any, kind: str, key: str, version: int | None) -> tuple
     if not isinstance(payload, dict):
         raise ValueError("version: no payload")
     return v, payload
+
+
+def _reading_version(data: Any) -> int | None:
+    """Номер версии в ответе `GET /internal/v1/readings/{id}`: `version` верхнего уровня или вложенного `payload`."""
+    if not isinstance(data, dict):
+        return None
+    for source in (data, data.get("payload")):
+        v = source.get("version") if isinstance(source, dict) else None
+        if isinstance(v, int) and not isinstance(v, bool) and v >= 1:
+            return v
+    return None
 
 
 class CatalogGateway:
@@ -196,6 +209,30 @@ class CatalogGateway:
         self._published[(kind, key)] = (now + self.settings.published_cache_seconds, v)
         self._remember((kind, key, v), payload)
         return v, payload
+
+    async def reading(self, reading_id: str, audience: str) -> tuple[int, dict[str, Any]] | None:
+        """Текст для чтения (спринт 5, INTERNAL_API §2.1): опубликован и подходит аудитории — номер опубликованной
+        версии и полное тело версии (с ключами вопросов — они остаются в lessons и наружу не уходят); иначе None.
+
+        1. `GET /internal/v1/readings/{id}?audience=` — опубликованная версия без ключей: catalog проверяет публикацию
+           и аудиторию (404 → None); номер версии — поле `version` ответа (или вложенного `payload`);
+        2. `GET /internal/v1/versions/reading/{id}/{version}` — тело зафиксированной версии (кеш бессрочный). Нет номера
+           в ответе 1 — текущая опубликованная `GET /internal/v1/versions/reading/{id}`."""
+        try:
+            data = await self.runtime.client(CATALOG).get(f"/internal/v1/readings/{reading_id}",
+                                                          params={"audience": audience})
+        except UpstreamError as exc:
+            if exc.status == 404:
+                return None
+            log.warning("catalog reading unavailable", extra={"error_type": type(exc).__name__})
+            raise catalog_unavailable() from None
+        version = _reading_version(data)
+        if version is None:
+            return await self.published("reading", reading_id)
+        try:
+            return version, await self.version("reading", reading_id, version)
+        except ContentGone:  # снят с публикации между двумя запросами
+            return None
 
     async def media_exercises(self, asset_id: str, audience: str) -> list[dict[str, Any]] | None:
         """Опубликованные упражнения к медиа (без ключей); None — материал недоступен (404)."""

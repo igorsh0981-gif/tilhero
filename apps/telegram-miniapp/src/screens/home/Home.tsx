@@ -7,6 +7,7 @@ import { useAction, useLoad } from "../../state/hooks";
 import { Icon } from "../../ui/Icon";
 import { Btn, cx, ErrorLine, HERO, Hero, Margin, NoBreakHyphens, Pill, Skeleton } from "../../ui/kit";
 import { ActiveCard } from "../lessons/LessonsTab";
+import { ReviewCard } from "../memory/ReviewCard";
 import { scheduleSummary } from "../schedule/parts";
 
 /** ISO weekday (1=Mon … 7=Sun) of a plan date "YYYY-MM-DD" (calendar arithmetic, no time zone). */
@@ -104,7 +105,7 @@ function Section({ type, today, active, withToday }: { type: HomeSectionType; to
     case "family":
       return <FamilyCard />;
     case "review":
-      return null;
+      return <ReviewSection />;
     default:
       return null;
   }
@@ -328,6 +329,13 @@ function LearningSection({ active }: { active: LessonSession | null }) {
       </Margin>
     </>
   );
+}
+
+/** Sprint 5: «Повторение дня» (MemoryOverview); a failure of memory hides the card, never blocks Home. */
+function ReviewSection() {
+  const { bff, session } = useApp();
+  const ov = useLoad(() => bff.memoryOverview(true), [session.learner.learner_id]);
+  return <ReviewCard overview={ov.data} loading={ov.loading} />;
 }
 
 function NewsCard() {

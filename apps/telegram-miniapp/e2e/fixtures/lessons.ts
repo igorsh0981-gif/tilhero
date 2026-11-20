@@ -6,6 +6,7 @@ import type {
   LessonSession,
   LessonStep,
   LessonSummary,
+  ReadingView,
   SessionStage,
   StepResult,
   Trajectory,
@@ -91,7 +92,20 @@ type Def =
   | { kind: "roleplay_end" }
   | { kind: "listen"; stage: SessionStage }
   | { kind: "open_answer"; prompt: Localized }
+  /** sprint 5: the text of a reading session (then the questions — items of the stage "questions", graded later) */
+  | { kind: "reading"; reading: ReadingView }
   | { kind: "done" };
+
+/** A question to a reading text (mock catalog): single_choice / true_false (as single_choice ["True","False"]) / gap_fill. */
+export interface ReadingQuestionDef {
+  item_id: string;
+  item_type: "single_choice" | "gap_fill";
+  instruction: Localized;
+  prompt_en: string;
+  options: string[];
+  key: number | string;
+  right: string;
+}
 
 /* ---------------------------------------------------------------- content */
 
@@ -374,11 +388,20 @@ export class MockLessons {
   }
 
   /* ---------- sessions ---------- */
-  private newRun(owner: string, kids: boolean, kind: SessionKind, ref: { lesson_id?: string; scenario_id?: string; asset_id?: string }, plan?: Def[]): Run {
+  private newRun(owner: string, kids: boolean, kind: SessionKind, ref: { lesson_id?: string; scenario_id?: string; asset_id?: string; title?: Localized }, plan?: Def[]): Run {
     const full = !kids && !this.sc.aiDegraded;
     const p = plan ?? (kind === "lesson" ? lessonPlan(kids, full) : kind === "scenario" ? [{ kind: "roleplay" as const, graph: kids ? ZOO : CAFE }, { kind: "roleplay_end" as const }, { kind: "done" as const }] : MEDIA_PLAN);
-    const stageTypes: SessionStage[] = kind === "lesson" ? STAGES5.map((s) => s.type) : kind === "scenario" ? ["roleplay", "summary"] : kind === "media" ? ["listen", "exercises", "summary"] : ["assessment", "summary"];
-    const title =
+    const stageTypes: SessionStage[] =
+      kind === "lesson"
+        ? STAGES5.map((s) => s.type)
+        : kind === "scenario"
+          ? ["roleplay", "summary"]
+          : kind === "media"
+            ? ["listen", "exercises", "summary"]
+            : kind === "reading"
+              ? ["reading", "questions", "summary"]
+              : ["assessment", "summary"];
+    const title = ref.title ?? (
       kind === "lesson"
         ? kids
           ? L("Животные в зоопарке", "Hayvonot bogʻidagi hayvonlar")
@@ -389,7 +412,7 @@ export class MockLessons {
             : L("Заказ в кафе", "Kafeda buyurtma")
           : kind === "media"
             ? L("Кофе с собой", "Olib ketish uchun qahva")
-            : L("Повторение: В кафе", "Takrorlash: Kafeda");
+            : L("Повторение: В кафе", "Takrorlash: Kafeda"));
     const view: LessonSession = {
       session_id: this.id(),
       kind,
@@ -414,6 +437,7 @@ export class MockLessons {
   }
 
   private stageOf(d: Def): SessionStage {
+    if (d.kind === "reading") return "reading";
     if (d.kind === "roleplay" || d.kind === "roleplay_end") return "roleplay";
     if (d.kind === "open_answer") return "assessment";
     if (d.kind === "done") return "summary";
@@ -493,6 +517,9 @@ export class MockLessons {
         break;
       case "open_answer":
         step = { ...base, type: "open_answer", prompt: d.prompt, max_length: 300 };
+        break;
+      case "reading":
+        step = { ...base, type: "reading", reading: d.reading };
         break;
       case "done":
         step = { ...base, type: "done" };
@@ -591,9 +618,10 @@ export class MockLessons {
 
   /* ---------- summary ---------- */
   private finish(r: Run, evaluated = !this.sc.evaluationLater): LessonSummary {
-    const graded = [...r.answers.values()].filter((a) => a.stage === "assessment" || a.stage === "exercises");
+    const graded = [...r.answers.values()].filter((a) => a.stage === "assessment" || a.stage === "exercises" || a.stage === "questions");
     const rp = r.rp;
-    const practice = r.view.kind === "review";
+    const reading = r.view.kind === "reading";
+    const practice = r.view.kind === "review" || reading;
     const right = graded.filter((a) => a.correct).length;
     const ratio = graded.length ? right / graded.length : 1;
     const task = rp?.outcome === "success" ? 3 : rp?.outcome === "alt_success" ? 2 : rp?.outcome === "fail" ? 1 : null;
@@ -608,12 +636,17 @@ export class MockLessons {
       errors.push({ turn_id: a.item.item_id, evidence: a.value === null || a.value === undefined ? "—" : Array.isArray(a.value) ? a.value.join(" ") : typeof a.value === "number" ? a.item.options[a.value] ?? String(a.value) : String(a.value), correction: a.item.right, error_code: closedErrorCode(a.item.item_type), severity: "medium" });
     }
     const scores: EvaluationView["scores"] = [];
-    if (r.view.kind !== "media") scores.push({ code: "task", title: L("Задача разговора", "Suhbat vazifasi"), score: task === null ? null : (task as 1 | 2 | 3) });
-    scores.push({ code: "vocabulary", title: L("Словарь", "Lugʻat"), score: usedText ? 2 : null });
-    scores.push({ code: "grammar", title: L("Грамматика", "Grammatika"), score: usedText ? (errors.length ? 1 : 3) : null });
-    if (r.view.kind !== "media") scores.push({ code: "independence", title: L("Самостоятельность", "Mustaqillik"), score: hints === 0 ? 3 : hints === 1 ? 2 : hints === 2 ? 1 : 0 });
-    scores.push({ code: "comprehension", title: L("Понимание", "Tushunish"), score: graded.length ? (Math.round(ratio * 3) as 0 | 1 | 2 | 3) : null });
-    scores.push({ code: "pronunciation", title: L("Произношение", "Talaffuz"), score: null });
+    if (reading) {
+      // assessment kind reading: only the comprehension criterion, practice only, no skill outcomes
+      scores.push({ code: "comprehension", title: L("Понимание", "Tushunish"), score: graded.length ? (Math.round(ratio * 3) as 0 | 1 | 2 | 3) : null });
+    } else if (r.view.kind !== "media") scores.push({ code: "task", title: L("Задача разговора", "Suhbat vazifasi"), score: task === null ? null : (task as 1 | 2 | 3) });
+    if (!reading) {
+      scores.push({ code: "vocabulary", title: L("Словарь", "Lugʻat"), score: usedText ? 2 : null });
+      scores.push({ code: "grammar", title: L("Грамматика", "Grammatika"), score: usedText ? (errors.length ? 1 : 3) : null });
+      if (r.view.kind !== "media") scores.push({ code: "independence", title: L("Самостоятельность", "Mustaqillik"), score: hints === 0 ? 3 : hints === 1 ? 2 : hints === 2 ? 1 : 0 });
+      scores.push({ code: "comprehension", title: L("Понимание", "Tushunish"), score: graded.length ? (Math.round(ratio * 3) as 0 | 1 | 2 | 3) : null });
+      scores.push({ code: "pronunciation", title: L("Произношение", "Talaffuz"), score: null });
+    }
     const passed = practice ? null : (task === null || task >= 2) && ratio >= 2 / 3;
     const evaluation: EvaluationView | null = !evaluated
       ? null
@@ -633,7 +666,7 @@ export class MockLessons {
             correct_answer: a.correct ? null : a.item.right,
           })),
           practice_only: practice,
-          rubric_version: r.view.kind === "media" ? "r-media-a1@1" : "r-a1@2",
+          rubric_version: reading ? "r-reading@1" : r.view.kind === "media" ? "r-media-a1@1" : "r-a1@2",
           evaluator: usedText ? { model_id: "fake", prompt_version: "independent_evaluator@1" } : null,
           superseded_by: null,
           appeal: null,
@@ -650,10 +683,41 @@ export class MockLessons {
       minutes: Math.max(1, r.view.minutes),
       evaluation,
       skills: practice || !evaluation ? [] : r.kids ? [{ skill_id: "en.vocab.animals", title: L("Животные и цвета", "Hayvonlar va ranglar"), from: "not_started", to: skillTo }] : [{ skill_id: "en.func.order", title: L("Вежливая просьба в кафе", "Kafeda xushmuomala iltimos"), from: "learning", to: skillTo }],
-      key_words: r.kids ? [{ en: "lion", gloss: L("лев", "sher") }, { en: "yellow", gloss: L("жёлтый", "sariq") }] : [{ en: "I’d like", gloss: L("я бы хотел", "men … xohlardim") }, { en: "the bill", gloss: L("счёт", "hisob") }, { en: "to go", gloss: L("с собой", "olib ketish uchun") }],
+      key_words: reading ? [] : r.kids ? [{ en: "lion", gloss: L("лев", "sher") }, { en: "yellow", gloss: L("жёлтый", "sariq") }] : [{ en: "I’d like", gloss: L("я бы хотел", "men … xohlardim") }, { en: "the bill", gloss: L("счёт", "hisob") }, { en: "to go", gloss: L("с собой", "olib ketish uchun") }],
       next_lesson: r.view.kind === "lesson" && !r.kids ? { lesson_id: "l-a1-04-shop", module_id: "m-a1-02", title: L("В магазине: цены и размеры", "Doʻkonda: narx va oʻlchamlar"), goal: L("Спросить цену и размер", "Narx va oʻlchamni soʻrash"), level: "A1", kind: "core", duration_min: 20, primary_skill_id: "en.func.shop", scenario_id: null, stages: STAGES5 } : null,
       can_review: !practice && graded.some((a) => !a.correct),
     };
+  }
+
+  /* ---------- sprint 5: reading sessions (POST /v1/practice/readings/{id}/sessions, routed by MockMemory) ---------- */
+  startReading(owner: string, kids: boolean, reading: ReadingView, questions: ReadingQuestionDef[], idemKey: string | undefined): Res {
+    if (!idemKey) return fail(422, "IDEMPOTENCY_KEY_REQUIRED");
+    const ik = `${owner}:${idemKey}`;
+    if (this.idem.has(ik)) return ok(this.runs.get(this.idem.get(ik) as string)!.view, 201);
+    const open = [...this.runs.values()].find((r) => r.owner === owner && isOpenSt(r.view.status));
+    if (open) return fail(409, "SESSION_ACTIVE", { session_id: open.view.session_id, kind: open.view.kind, title: open.view.title });
+    const plan: Def[] = [
+      { kind: "reading", reading },
+      ...questions.map((q): Def => ({ kind: "item", stage: "questions", graded: true, item: { item_id: q.item_id, item_type: q.item_type, instruction: q.instruction, prompt_en: q.prompt_en, options: [...q.options], key: q.key, right: q.right } })),
+      { kind: "done" },
+    ];
+    const r = this.newRun(owner, kids, "reading", { title: reading.title }, plan);
+    this.readingOf.set(r.view.session_id, reading.reading_id);
+    this.idem.set(ik, r.view.session_id);
+    return ok(r.view, 201);
+  }
+
+  readingOf = new Map<string, string>();
+
+  /** ReadingCard.last_result: the last completed reading session of the learner per text. */
+  readingResult(owner: string, readingId: string): { correct: number; total: number; finished_at: string } | null {
+    let out: { correct: number; total: number; finished_at: string } | null = null;
+    for (const r of this.runs.values()) {
+      if (r.owner !== owner || r.view.kind !== "reading" || r.view.status !== "completed" || this.readingOf.get(r.view.session_id) !== readingId) continue;
+      const items = r.summary?.evaluation?.items ?? [];
+      out = { correct: items.filter((i) => i.correct).length, total: items.length, finished_at: r.view.finished_at ?? new Date().toISOString() };
+    }
+    return out;
   }
 
   /** A completed lesson of the history, evaluated `daysAgo` days ago (no appeal yet). */

@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { expectNoHScroll, openAs } from "./helpers";
 import { LEARNER } from "./fixtures/data";
 import { SID } from "./fixtures/ai-data";
+import { CID, GID } from "./fixtures/memory-data";
 
 async function unnamedControls(page: Page): Promise<string[]> {
   return page.evaluate(() => {
@@ -58,6 +59,14 @@ const SCREENS: Array<[string, string]> = [
   [`#/qa/sessions/${SID.s1}`, "qa-card"],
   [`#/qa/appeals`, "qa-appeals"],
   ["#/costs", "cs-usage"],
+  // sprint 5
+  ["#/content/readings/r-a1-market", "ws-reading"],
+  ["#/content/glossary", "gl-list"],
+  ["#/content/glossary/queue", "gl-queue"],
+  [`#/content/glossary/${GID.coffeeShop}`, "gl-entry"],
+  ["#/memory", "mem-analytics"],
+  [`#/memory/learners/${LEARNER.madina}`, "mem-learner"],
+  [`#/memory/learners/${LEARNER.madina}/${CID.c1}`, "mem-card"],
 ];
 
 for (const [hash, id] of SCREENS) {
@@ -146,4 +155,32 @@ test("sprint 4: EN chrome of agents, dialogue QA and costs has no Russian; the s
   await expect(page.getByTestId("cs-stop-btn")).toHaveAttribute("role", "switch");
   await expect(page.getByTestId("cs-stop-btn")).toHaveAccessibleName(/switch the AI off/i);
   expect(await chrome()).toEqual([]);
+});
+
+test("sprint 5: EN chrome of reading, the dictionary, memory and the analytics has no Russian; the meters are named", async ({ page }) => {
+  await openAs(page, "admin@tilhero.local", "#/content/readings/r-a1-market");
+  await expect(page.getByTestId("reading-editor")).toBeVisible();
+  await page.getByTestId("lang-en").click();
+  await expect(page.getByTestId("ct-tab-readings")).toHaveText(/Reading/);
+  const chrome = async () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("[role=tab], .acts button, label, th, .h2, .h3, .panel-t, .kv > span:first-child, .pill, .rd-rule, legend, .field-label"))
+        .filter((e) => !e.closest('[lang="ru"]'))
+        .map((e) => e.innerText.trim())
+        .filter((x) => /[Ѐ-ӿ]/.test(x)),
+    );
+  expect(await chrome()).toEqual([]);
+  for (const [hash, id] of [
+    ["#/content/glossary/queue", "gl-queue"],
+    [`#/content/glossary/${GID.bakery}`, "gl-entry-body"],
+    ["#/memory/analytics", "mem-analytics"],
+    [`#/memory/learners/${LEARNER.madina}/${CID.c1}`, "mem-log"],
+  ] as const) {
+    await page.evaluate((h) => (window.location.hash = h), hash);
+    await expect(page.getByTestId(id)).toBeVisible();
+    await page.waitForTimeout(200);
+    expect(await chrome(), hash).toEqual([]);
+  }
+  await page.evaluate(() => (window.location.hash = "#/memory/analytics"));
+  for (const m of await page.getByRole("meter").all()) await expect(m).toHaveAttribute("aria-label", /\S/);
 });

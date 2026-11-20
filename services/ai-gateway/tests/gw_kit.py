@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import json
 import uuid
@@ -23,7 +24,9 @@ from tilhero_common.messaging import Envelope, InMemoryBus
 from tilhero_common.testing import TEST_ADMIN_URL, internal_headers
 
 SEED_DIR = Path(__file__).resolve().parent / "fixtures" / "seed"
+REAL_SEED_DIR = Path(__file__).resolve().parents[1] / "migrations" / "seed"
 T0 = datetime(2026, 11, 19, 7, 0, tzinfo=UTC)  # 12:00 по Ташкенту
+SPEECH_URL = "/internal/v1/speech/pronunciation"
 
 
 def _actor(role: str, *perms: str) -> Actor:
@@ -87,6 +90,40 @@ CONTEXTS: dict[str, Callable[[], dict[str, Any]]] = {
 }
 
 CP_OK = json.dumps({"intent": "order_coffee", "reply_en": "Sure! Small or large?", "hint_offered": False})
+
+
+def gloss_context(word: str = "book", sentence: str = "Hello, I'd like to book a day tour to Shahrisabz for Saturday.",
+                  level: str = "A2", kind: str = "lesson") -> dict[str, Any]:
+    """TeachingCoachGlossContext (ai.ts) — слово и предложение из сида catalog."""
+    return {"request": "gloss_word", "word": word, "sentence_en": sentence, "level": level, "content_kind": kind}
+
+
+def gloss_out(ru: str = "забронировать", uz: str = "band qilmoq", *, lemma: str = "book", pos: str = "verb",
+              forms: list[str] | None = None, confidence: float = 0.93, **extra: Any) -> str:
+    return json.dumps({"lemma": lemma, "part_of_speech": pos, "gloss": {"ru": ru, "uz": uz},
+                       "forms": forms if forms is not None else ["book", "books", "booked"], "confidence": confidence,
+                       **extra}, ensure_ascii=False)
+
+
+def v2_body() -> dict[str, Any]:
+    """Тело teaching_coach v2 из накладки миграции 0004 (реальный сид)."""
+    data: dict[str, Any] = json.loads((REAL_SEED_DIR / "0004" / "agents" / "teaching_coach.v2.json")
+                                      .read_text(encoding="utf-8"))
+    return data
+
+
+def meta_header(meta: dict[str, Any]) -> str:
+    raw = json.dumps(meta, ensure_ascii=False).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def speech_meta(user_id: uuid.UUID | str | None = None, **overrides: Any) -> dict[str, Any]:
+    """SpeechAssessMeta (ai.ts)."""
+    meta: dict[str, Any] = {"request_id": str(uuid.uuid4()), "user_id": str(user_id or uuid.uuid4()),
+                            "audience": "adults", "locale": "ru",
+                            "reference_text": "I'd like to book a restaurant table", "language": "en-US"}
+    meta.update(overrides)
+    return meta
 
 
 class ScriptedProvider:
@@ -238,6 +275,27 @@ class Env:
                        "WHERE agent_id = $1 AND version = $2", agent_id, v["version"])
         await self.sql("UPDATE agent_rollout SET published_version = $2 WHERE agent_id = $1", agent_id, v["version"])
         return int(v["version"])
+
+    async def publish_v2(self) -> int:
+        """teaching_coach v2 (тело накладки 0004: объединённая схема, gloss_word) — опубликована в обход тестов."""
+        body = {k: v for k, v in v2_body().items()}
+        return await self.publish_patched("teaching_coach", body)
+
+    async def gloss(self, context: dict[str, Any] | None = None, *, caller: str = "memory",
+                    **kw: Any) -> httpx.Response:
+        kw.setdefault("session_kind", "memory")
+        return await self.invoke("teaching_coach", context or gloss_context(), caller=caller, **kw)
+
+    async def speech(self, wav: bytes, meta: dict[str, Any] | None = None, *, caller: str = "memory",
+                     subject: str | None = None, content_type: str = "audio/wav", raw_meta: str | None = None,
+                     **claims: Any) -> httpx.Response:
+        """POST /internal/v1/speech/pronunciation как memory (sub = ученик меты)."""
+        meta = meta if meta is not None else speech_meta()
+        headers = {**self.svc(caller, subject or str(meta.get("user_id")), **claims), "Content-Type": content_type}
+        header = raw_meta if raw_meta is not None else meta_header(meta)
+        if header:
+            headers["X-Speech-Meta"] = header
+        return await self.c.post(SPEECH_URL, content=wav, headers=headers)
 
     async def agent(self, agent_id: str) -> dict[str, Any]:
         r = await self.c.get(self.url(agent_id), headers=self.h(ANALYST))

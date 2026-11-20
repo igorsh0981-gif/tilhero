@@ -1,4 +1,17 @@
 import type {
+  AdminCardDetail,
+  AdminCardRow,
+  CardAction,
+  ForgettingAnalytics,
+  GlossaryCreate,
+  GlossaryDetail,
+  GlossaryPatch,
+  GlossaryReview,
+  GlossaryRow,
+  GlossaryStats,
+  LearnerMemorySummary,
+  MemoryStats,
+  ReviewLogRow,
   AdminAppeal,
   AdminExperience,
   AgentId,
@@ -95,7 +108,7 @@ import type {
   UiLang,
 } from "@tilhero/contracts/admin";
 import type { Ticket as ClientTicket } from "@tilhero/contracts/bff";
-import type { Band, ContentKind, MediaRequestStatus, ScenarioTestRun, VersionStatus } from "@tilhero/contracts/content";
+import type { Band, ContentKind, GlossaryReviewStatus, GlossarySource, MediaRequestStatus, ScenarioTestRun, VersionStatus } from "@tilhero/contracts/content";
 import type { SessionKind } from "@tilhero/contracts/ai";
 import { api } from "./client";
 
@@ -373,8 +386,16 @@ export const Ai = {
   updateCase: (caseId: string, body: GoldenCaseInput) => api.patch<GoldenCase>(`/ai/golden-cases/${enc(caseId)}`, body),
   archiveCase: (caseId: string) => api.del<void>(`/ai/golden-cases/${enc(caseId)}`),
   models: () => api.get<{ items: AiModel[] }>("/ai/models"),
-  putModel: (m: Pick<AiModel, "model_id" | "input_usd_per_mtok" | "output_usd_per_mtok" | "active">, reason: string) =>
-    api.put<AiModel>(`/ai/models/${enc(m.model_id)}`, { input_usd_per_mtok: m.input_usd_per_mtok, output_usd_per_mtok: m.output_usd_per_mtok, active: m.active, reason }),
+  /** sprint 5: a speech model (azure_speech / fake_speech) also carries the price of an audio hour; an LLM never sends it
+   *  (ai-gateway answers 422 PRICE_NOT_APPLICABLE) */
+  putModel: (m: Pick<AiModel, "model_id" | "input_usd_per_mtok" | "output_usd_per_mtok" | "active"> & { audio_usd_per_hour?: number | null }, reason: string) =>
+    api.put<AiModel>(`/ai/models/${enc(m.model_id)}`, {
+      input_usd_per_mtok: m.input_usd_per_mtok,
+      output_usd_per_mtok: m.output_usd_per_mtok,
+      ...(m.audio_usd_per_hour != null ? { audio_usd_per_hour: m.audio_usd_per_hour } : {}),
+      active: m.active,
+      reason,
+    }),
   provider: (background = false) => api.get<AiProviderStatus>("/ai/provider", { background }),
   budget: (background = false) => api.get<AiBudget>("/ai/budget", { background }),
   /** updatedAt — `updated_at` of the budget that was read: ai-gateway answers 409 BUDGET_CONFLICT {updated_at} when
@@ -410,4 +431,49 @@ export const Qa = {
   appeals: (status: AdminAppeal["status"] | "", cursor?: string | null, background = false) => api.get<Page<AdminAppeal>>("/qa/appeals", { query: { status, cursor, limit: 50 }, background }),
   take: (id: string) => api.post<AdminAppeal>(`/qa/appeals/${enc(id)}/take`),
   decide: (id: string, body: AppealDecision) => api.post<AdminAppeal>(`/qa/appeals/${enc(id)}/decide`, body),
+};
+
+/* ---------------------------------------------------------------- course dictionary (catalog via admin-bff, sprint 5) */
+
+export interface GlossaryFilters {
+  pair_id?: string;
+  q?: string;
+  source?: GlossarySource | "";
+  review_status?: GlossaryReviewStatus | "";
+  cursor?: string | null;
+  limit?: number;
+}
+
+export const Glossary = {
+  /** review_status=pending — the queue of AI translations (the catalog sorts it by the places in the content) */
+  list: (f: GlossaryFilters) =>
+    api.get<Page<GlossaryRow>>("/glossary", { query: { pair_id: f.pair_id, q: f.q, source: f.source, review_status: f.review_status, cursor: f.cursor, limit: f.limit ?? 50 } }),
+  stats: (pairId?: string, background = false) => api.get<GlossaryStats>("/glossary/stats", { query: { pair_id: pairId }, background }),
+  get: (id: string) => api.get<GlossaryDetail>(`/glossary/${enc(id)}`),
+  create: (body: GlossaryCreate, idempotencyKey: string) => api.post<GlossaryDetail>("/glossary", body, { idempotencyKey }),
+  /** If-Match: `updated_at` of the entry that was read (missing → 428 IF_MATCH_REQUIRED, stale → 409 VERSION_CONFLICT) */
+  patch: (id: string, body: GlossaryPatch, ifMatch: string) => api.patch<GlossaryDetail>(`/glossary/${enc(id)}`, body, { headers: { "If-Match": ifMatch } }),
+  review: (id: string, body: GlossaryReview, idempotencyKey: string) => api.post<GlossaryDetail>(`/glossary/${enc(id)}/review`, body, { idempotencyKey }),
+  /** only a methodist entry (course / ai → 409 ARCHIVE_NOT_ALLOWED) */
+  archive: (id: string, reason: string) => api.del<void>(`/glossary/${enc(id)}`, { reason }),
+};
+
+/* ---------------------------------------------------------------- learner memory and forgetting analytics (memory, sprint 5) */
+
+export interface CardFilters {
+  status?: AdminCardDetail["status"] | "";
+  kind?: AdminCardDetail["kind"] | "";
+  cursor?: string | null;
+  limit?: number;
+}
+
+export const Memory = {
+  learner: (userId: string) => api.get<LearnerMemorySummary>(`/memory/learners/${enc(userId)}`),
+  cards: (userId: string, f: CardFilters) => api.get<Page<AdminCardRow>>(`/memory/learners/${enc(userId)}/cards`, { query: { status: f.status, kind: f.kind, cursor: f.cursor, limit: f.limit ?? 50 } }),
+  card: (cardId: string) => api.get<AdminCardDetail>(`/memory/cards/${enc(cardId)}`),
+  log: (cardId: string, cursor: string) => api.get<Page<ReviewLogRow>>(`/memory/cards/${enc(cardId)}/log`, { query: { cursor } }),
+  /** one card at a time (memory.manage, step-up; reason ≥ 10) — there are no bulk actions */
+  act: (cardId: string, action: CardAction, idempotencyKey: string) => api.post<AdminCardDetail>(`/memory/cards/${enc(cardId)}/actions`, action, { idempotencyKey }),
+  analytics: (period: ForgettingAnalytics["period"], pairId?: string) => api.get<ForgettingAnalytics>("/memory/analytics", { query: { period, pair_id: pairId } }),
+  stats: (period: Period) => api.get<MemoryStats>("/memory/stats", { query: { period } }),
 };

@@ -94,7 +94,8 @@ export function settingsView(s: NotificationSettings): NotificationSettings {
   };
 }
 
-/** Ученик для Mini App: is_active — по lrn сессии, onboarding_completed — из learning-plan (identity его не знает). */
+/** Ученик для Mini App: is_active — по lrn сессии, onboarding_completed — из learning-plan (identity его не знает),
+ *  voice_consent — из identity-consent как есть (спринт 5). */
 export function learnerView(l: LearnerSummary, activeId: string, onboarded: boolean): LearnerSummary {
   return {
     learner_id: l.learner_id,
@@ -103,6 +104,8 @@ export function learnerView(l: LearnerSummary, activeId: string, onboarded: bool
     age_band: l.age_band ?? null,
     is_active: l.learner_id === activeId,
     onboarding_completed: onboarded,
+    // спринт 5: решение identity-consent (своё согласие / согласие опекуна); нет поля — запись голоса не разрешена
+    voice_consent: l.voice_consent === true,
   };
 }
 

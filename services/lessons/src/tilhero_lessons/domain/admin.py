@@ -28,7 +28,7 @@ from tilhero_common.messaging import emit
 from tilhero_lessons.domain import machine
 from tilhero_lessons.domain.common import AUDIT_EVENT, PRODUCER, decode_cursor, encode_cursor, iso
 from tilhero_lessons.domain.content import answer_text
-from tilhero_lessons.models import Session, StatusHistory, Step, Turn
+from tilhero_lessons.models import KINDS, Session, StatusHistory, Step, Turn
 
 LESSONS_FLAGS = ("ai_used", "ai_unavailable", "hints", "human_review", "failed")
 OTHER_FLAGS = ("appealed", "flagged")  # ведёт assessment — фильтрует admin-bff
@@ -67,7 +67,8 @@ def flags(s: Session) -> list[str]:
 def row(s: Session) -> dict[str, Any]:
     return {
         "session_id": str(s.session_id), "kind": s.kind, "title": s.title, "lesson_id": s.lesson_id,
-        "scenario_id": s.scenario_id, "asset_id": s.asset_id, "level": s.level, "status": s.status,
+        "scenario_id": s.scenario_id, "asset_id": s.asset_id, "reading_id": s.reading_id, "level": s.level,
+        "status": s.status,
         "outcome": s.outcome if s.status == "completed" else None, "passed": _passed(s),
         "minutes": s.minutes if s.status in machine.TERMINAL else machine.minutes_of(s),
         "audience": s.audience, "ai_mode": s.ai_mode, "flags": flags(s),
@@ -134,7 +135,8 @@ def user_ref(user_id: uuid.UUID, key: bytes) -> str:
 
 def content_versions(cv: dict[str, Any]) -> dict[str, int]:
     """Record<string, number>: lesson / scenario / rubric / media_asset — номер версии; упражнения и уроки
-    повторения — `media_exercise:<id>` / `retrieval:<lesson_id>`."""
+    повторения — `media_exercise:<id>` / `retrieval:<lesson_id>`; текст для чтения — `reading:<reading_id>` (в
+    SessionRow нет поля reading_id — id текста виден по ключу)."""
     out: dict[str, int] = {}
     for kind in ("lesson", "scenario", "rubric", "media_asset"):
         r = cv.get(kind)
@@ -144,6 +146,9 @@ def content_versions(cv: dict[str, Any]) -> dict[str, int]:
         out[f"media_exercise:{r['key']}"] = int(r["version"])
     for r in cv.get("retrieval") or []:
         out[f"retrieval:{r['key']}"] = int(r["version"])
+    r = cv.get("reading")
+    if isinstance(r, dict):
+        out[f"reading:{r['key']}"] = int(r["version"])
     return out
 
 
@@ -222,12 +227,12 @@ async def stats(db: AsyncSession, *, period: str, since: datetime) -> dict[str, 
     """LessonStats без appeals_open / human_review_open (их добавляет admin-bff из assessment).
     started — сессии, начатые (ready → in_progress) за период; completed — завершённые за период;
     completion_pct — доля завершённых среди начатых за период (null при 0 начатых); median_minutes — медиана minutes
-    завершённых за период; by_kind — начатые по видам (все 4 ключа); ai_degraded_pct — доля начатых в упрощённом
-    режиме (ИИ недоступен)."""
+    завершённых за период; by_kind — начатые по видам (все 5 ключей SessionKind, с чтением); ai_degraded_pct — доля
+    начатых в упрощённом режиме (ИИ недоступен)."""
     started_rows = (await db.execute(
         select(Session.kind, Session.status, Session.ai_degraded).where(Session.started_at >= since)
     )).all()
-    by_kind = dict.fromkeys(("lesson", "scenario", "media", "review"), 0)
+    by_kind = dict.fromkeys(KINDS, 0)
     for kind, _, _ in started_rows:
         by_kind[kind] = by_kind.get(kind, 0) + 1
     started = len(started_rows)

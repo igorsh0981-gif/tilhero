@@ -1,4 +1,4 @@
-"""Модели assessment — зеркало миграции 0001 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
+"""Модели assessment — зеркало миграций 0001–0003 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
 
 user_id — ученик (`lrn`) из `sub` внутреннего токена; PII сервис не хранит. Тексты ученика хранятся минимально:
 ответы на закрытые задания (для итогов ученика), цитаты-доказательства ошибок (≤ 120) и причина апелляции;
@@ -41,7 +41,7 @@ class Evaluation(Base):
 
     __tablename__ = "evaluations"
     __table_args__ = (
-        CheckConstraint("kind IN ('lesson','scenario','media','review')", name="ck_evaluations_kind"),
+        CheckConstraint("kind IN ('lesson','scenario','media','review','reading')", name="ck_evaluations_kind"),
         CheckConstraint("audience IN ('kids','teens','adults')", name="ck_evaluations_audience"),
         CheckConstraint("status IN ('ok','partial','insufficient_evidence','pending_review')",
                         name="ck_evaluations_status"),
@@ -73,7 +73,8 @@ class Evaluation(Base):
     kind: Mapped[str] = mapped_column(String(8), nullable=False)
     pair_id: Mapped[str] = mapped_column(String(16), nullable=False)
     audience: Mapped[str] = mapped_column(String(8), nullable=False)
-    # [{kind, key, version}] — версии контента, по которым оценено (ключи и рубрика — из catalog по ним)
+    # [{kind, key, version}] — версии контента, по которым оценено (ключи и рубрика — из catalog по ним; у чтения —
+    # только reading, рубрика встроенная)
     content_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB(), nullable=False)
     rubric_id: Mapped[str] = mapped_column(String(64), nullable=False)
     rubric_version: Mapped[int] = mapped_column(Integer(), nullable=False)

@@ -5,8 +5,9 @@
  * reason (users.sensitive.read, step-up, audit `sensitive.view`) and only for 60 seconds.
  */
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import type { AdminLearnerCard, AdminLearnerRow, AgeBand, LearnerKind, LearnerStatus, UiLang } from "@tilhero/contracts/admin";
-import { Learners, type LearnerFilters } from "../../api/endpoints";
+import type { AdminLearnerCard, AdminLearnerRow, AgeBand, LearnerKind, LearnerMemorySummary, LearnerStatus, UiLang } from "@tilhero/contracts/admin";
+import { Learners, Memory, type LearnerFilters } from "../../api/endpoints";
+import { SummaryCard } from "../memory/Summary";
 import { ApiError } from "../../api/errors";
 import { useI18n, fmtCountdown } from "../../i18n";
 import { shortId } from "../../lib/ids";
@@ -315,9 +316,39 @@ export function RevealTelegramId({ card }: { card: Pick<AdminLearnerCard, "user_
   );
 }
 
+/* ---------------------------------------------------------------- memory tab (memory.read, sprint 5) */
+
+function LearnerMemoryTab({ id }: { id: string }) {
+  const { t } = useI18n();
+  const { navigate } = useNav();
+  const [sum, setSum] = useState<LearnerMemorySummary | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const load = useCallback(() => {
+    setError(null);
+    Memory.learner(id)
+      .then(setSum)
+      .catch(setError);
+  }, [id]);
+  useEffect(load, [load]);
+  const open = <Btn kind="primary" icon="layers" label={t("lr.memoryOpen")} onClick={() => navigate("memory", `learners/${id}`)} testId="lc-memory-open" />;
+  if (error)
+    return error instanceof ApiError && error.status === 404 ? (
+      <Empty icon="layers" title={t("mem.noMemory")} text={t("mem.noMemoryM")} testId="lc-memory-none" />
+    ) : (
+      <LoadError error={error} onRetry={load} />
+    );
+  if (!sum) return <Spinner label={t("common.loading")} />;
+  return (
+    <div className="stack" data-testid="lc-memory">
+      <SummaryCard s={sum} compact />
+      <div className="acts">{open}</div>
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------- card */
 
-type Tab = "account" | "consent" | "plan" | "notif" | "tickets";
+type Tab = "account" | "consent" | "plan" | "notif" | "tickets" | "memory";
 
 export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () => void; onOpen: (id: string) => void }) {
   const i = useI18n();
@@ -369,6 +400,8 @@ export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () =
               { v: "plan", label: t("lr.tab.plan"), testId: "lc-tab-plan" },
               { v: "notif", label: t("lr.tab.notif"), testId: "lc-tab-notif" },
               { v: "tickets", label: t("lr.tab.tickets"), cnt: card.tickets ? card.tickets.length : null, testId: "lc-tab-tickets" },
+              // sprint 5: the learner's memory (memory.read) — the summary here, the cards and history in «Память»
+              ...(can("memory.read") ? [{ v: "memory" as const, label: t("lr.tab.memory"), testId: "lc-tab-memory" }] : []),
             ]}
           />
         )
@@ -586,6 +619,7 @@ export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () =
             ) : (
               <Empty icon="support" title={t("lr.noTickets")} />
             ))}
+          {tab === "memory" && can("memory.read") && <LearnerMemoryTab id={card.user_id} />}
           <p className="xs muted mt-16 row">
             <Icon name="shield" /> {t("lr.piiNote")}
           </p>

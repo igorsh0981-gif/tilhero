@@ -833,3 +833,22 @@ async def test_consumer_spec_default_max_deliver_from_settings() -> None:
     await mem.subscribe(ConsumerSpec("t.mem", ["item.created.v1"], failing))
     await mem.publish(make_envelope("item.created.v1", {"id": 2}, producer="svc-a"))
     assert calls["n"] == 10 and len(mem.dlq) == 1
+
+
+async def test_service_client_raw_content_body() -> None:
+    """Спринт 5: сырое тело (audio/wav) уходит как есть, Content-Type — из headers; json и content несовместимы."""
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.content
+        seen["ct"] = request.headers.get("content-type")
+        seen["auth"] = request.headers.get("x-internal-token")
+        return httpx.Response(200, json={"ok": True})
+
+    client = ServiceClient(settings(), target="svc-b", base_url="http://b", transport=httpx.MockTransport(handler))
+    body = b"RIFF\x00\x00\x00\x00WAVEfmt "
+    assert await client.post("/audio", content=body, headers={"content-type": "audio/wav"}) == {"ok": True}
+    assert seen["body"] == body and seen["ct"] == "audio/wav" and seen["auth"]
+    with pytest.raises(ValueError):
+        await client.post("/audio", content=body, json={})
+    await client.aclose()

@@ -11,6 +11,7 @@ import { Sheet, showToast } from "../../ui/overlays";
 import { ChatList, RoleplayView, type Cast } from "./Roleplay";
 import { DoneView, ExplanationView, ItemView, ListenView, NoticeView, OpenAnswerView, RoleplayEndView, StepFrame } from "./steps";
 import { usePlayer } from "./usePlayer";
+import { ReadingStepView } from "../reading/ReadingStep";
 
 /**
  * The lesson player (APP-LESS-02…06, AT-40…43): a header with the stages (strip and the current stage in words), the
@@ -162,6 +163,9 @@ export function LessonPlayer({ sessionId }: { sessionId: string }) {
         break;
       case "open_answer":
         body = <OpenAnswerView key={step.step_id} {...p} step={step} />;
+        break;
+      case "reading":
+        body = <ReadingStepView key={step.step_id} {...p} step={step} />;
         break;
       case "done":
         body = <DoneView key={step.step_id} {...p} step={step} onFinish={() => void finish()} />;

@@ -166,6 +166,7 @@ function UsageBody({ s }: { s: AiUsageSummary }) {
         {s.unavailable_pct != null && ` · ${t("cs.unavailShort", { p: fmt.pct(s.unavailable_pct) })}`}
       </div>
       <BarChart data={days} title={t("cs.byDay")} valueLabel={t("cs.spent")} format={(n) => money(n)} testId="cs-chart" />
+      <SpeechBlock s={s} />
       <div className="grid2">
         <div className="stack sm">
           <h3 className="h3">{t("cs.byAgent")}</h3>
@@ -255,6 +256,57 @@ function UsageBody({ s }: { s: AiUsageSummary }) {
         <Icon name="info" /> {t("cs.note", { p: k("usp", s.period) })}
       </p>
     </div>
+  );
+}
+
+/* ---------------------------------------------------------------- pronunciation (sprint 5) */
+
+/** «Оценка произношения» (agent pronunciation_coach, Azure): calls, minutes of audio, spend — part of the period total. */
+function SpeechBlock({ s }: { s: AiUsageSummary }) {
+  const { t, fmt } = useI18n();
+  const money = useUsd();
+  const sp = s.speech;
+  if (!sp) return null;
+  return (
+    <section className="cs-speech" aria-labelledby="cs-speech-h" data-testid="cs-speech" data-available={String(sp.speech_available)}>
+      <div className="row between">
+        <h3 className="h3" id="cs-speech-h">
+          {t("cs.speech")}
+        </h3>
+        {sp.speech_available ? (
+          <span className="pill good" data-testid="cs-speech-on">
+            {t("cs.speechOn")}
+          </span>
+        ) : (
+          <span className="pill warn" data-testid="cs-speech-off">
+            <Icon name="alert" /> {t("cs.speechOff")}
+          </span>
+        )}
+      </div>
+      <div className="kpis cs-kpis">
+        <div className="kpi">
+          <div className="kpi-l">{t("cs.calls")}</div>
+          <div className="kpi-v" data-testid="cs-speech-calls">
+            {fmt.num(sp.calls)}
+          </div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-l">{t("cs.speechMinutes")}</div>
+          <div className="kpi-v" data-testid="cs-speech-minutes">
+            {fmt.num(sp.audio_minutes, Number.isInteger(sp.audio_minutes) ? 0 : 1)}
+          </div>
+          <div className="kpi-n">{t("cs.speechMinutesN")}</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-l">{t("cs.spent")}</div>
+          <div className="kpi-v" data-testid="cs-speech-spent">
+            {money(sp.spent_usd)}
+          </div>
+          <div className="kpi-n">{t("cs.speechShare", { s: money(s.spent_usd) })}</div>
+        </div>
+      </div>
+      <p className="xs muted">{sp.speech_available ? t("cs.speechNote") : t("cs.speechOffM")}</p>
+    </section>
   );
 }
 

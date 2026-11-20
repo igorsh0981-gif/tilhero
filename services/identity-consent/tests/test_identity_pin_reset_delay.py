@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -293,7 +294,9 @@ async def test_scheduled_notice_without_code_or_pii(env) -> None:
     assert set(notice) == {"notification_id", "user_id", "template", "params", "dedup_key"}
     assert notice["dedup_key"] == f"pin_reset_scheduled:{uid}:{uuid.UUID(notice['notification_id']).hex}"
     assert env.notifications.headers[-1]["idempotency-key"] == notice["notification_id"]
-    text = str(notice)
+    # идентификаторы (UUID и их hex) — случайные шестнадцатеричные строки: в них могут встретиться цифры кода, без
+    # этой замены проверка изредка падает ложно
+    text = re.sub(r"[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}", "<id>", str(notice))
     for secret in (code, NEW, PIN, "Секретное", "Имя", "secret_name"):
         assert secret not in text
     # в шину ничего о сбросе не уходит (код — только синхронно в notifications)

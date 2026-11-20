@@ -1,4 +1,4 @@
-import type { DiagnosticResult, LessonSummary } from "@tilhero/contracts/bff";
+import type { DiagnosticResult, LessonSummary, ReviewSummary } from "@tilhero/contracts/bff";
 import type { Localized } from "@tilhero/contracts/content";
 import { useCallback, useMemo, useState } from "react";
 import type { AppRoute } from "../tg/deeplink";
@@ -36,9 +36,17 @@ export type Pushed =
   | { name: "lessonCard"; id: string }
   | { name: "player"; sessionId: string }
   | { name: "lessonSummary"; sessionId: string; summary?: LessonSummary }
-  | { name: "appeal"; evaluationId: string; title: Localized };
+  | { name: "appeal"; evaluationId: string; title: Localized }
+  // sprint 5: «Повторение дня» (autostart — from the card of Home / the dictionary: the session starts at once; without
+  // it — a start panel, e.g. from the notification reviews_due), its summary, a card of the dictionary, a reading text,
+  // the voice recording consent
+  | { name: "review"; autostart?: boolean }
+  | { name: "reviewSummary"; sessionId: string; summary: ReviewSummary }
+  | { name: "card"; id: string }
+  | { name: "reading"; id: string }
+  | { name: "voiceConsent" };
 
-export type PracticeTab = "scenarios" | "media";
+export type PracticeTab = "scenarios" | "media" | "reading";
 
 export interface NavState {
   tab: Tab;
@@ -72,6 +80,9 @@ const ROUTE_SCREEN: Partial<Record<AppRoute, Pushed>> = {
 };
 /** Routes that open a tab root: the skill map lives on the «Прогресс» tab. */
 const ROUTE_TAB: Partial<Record<AppRoute, Tab>> = { skills: "progress" };
+/** Sprint 5: route_review (the evening notification reviews_due, «Что нового») opens «Повторение дня» above the
+ *  «Словарь» tab — «Назад» lands in the dictionary. */
+const REVIEW_SCREEN: Pushed = { name: "review" };
 
 const samePushed = (a: Pushed | undefined, b: Pushed): boolean => !!a && JSON.stringify(a) === JSON.stringify(b);
 
@@ -80,6 +91,11 @@ const samePushed = (a: Pushed | undefined, b: Pushed): boolean => !!a && JSON.st
  * where the link was opened — the notification center, «Что нового», Home).
  */
 export function routeTarget(r: AppRoute, cur: NavState): NavState {
+  if (r === "review") {
+    const top = cur.stack[cur.stack.length - 1];
+    if (cur.tab === "review" && top?.name === "review") return cur;
+    return { tab: "review", stack: [REVIEW_SCREEN] };
+  }
   if ((TABS as readonly string[]).includes(r)) return { tab: r as Tab, stack: [] };
   const tab = ROUTE_TAB[r];
   if (tab) return { tab, stack: [] };

@@ -17,11 +17,17 @@ archived); тело, которое сид уже публиковал рань�
 Изменения сида после 0002 — отдельные миграции с собственным каталогом-«накладкой» `<SEED_DIR>/<ревизия>/` в том же
 формате (`agents/<agent_id>.v<N>.json`, `golden/<agent_id>.json` — только новые кейсы): опубликованная версия
 неизменяема (триггер), поэтому новые параметры — новая версия (0003: `independent_evaluator` v2 и детский кейс).
+
+Накладка может создавать версию **черновиком** (`apply_seed_drafts`, 0004: `teaching_coach` v2 с `gloss_word`):
+публикация — после прогона золотых тестов (prod — сотрудник на anthropic; dev/e2e-стенд — автоматически на fake,
+`domain/stand.py`). Черновик не создаётся, если у агента уже есть черновик (сотрудника) — предупреждение в лог
+миграции; тело, уже записанное сидом раньше (в любом статусе), заново не создаётся.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -44,6 +50,8 @@ from tilhero_common.messaging import make_envelope
 VERSION_FILE: Final = re.compile(r"^(?P<agent>[a-z_]+)\.v(?P<n>[1-9][0-9]*)\.json$")
 CASE_ID: Final = re.compile(r"^[a-z0-9][a-z0-9._-]{1,63}$")
 SEED_REASON: Final = "Сид инструкций агентов спринта 4"
+DRAFT_REASON: Final = "Сид: черновик новой версии — публикация после прогона золотых тестов"
+log = logging.getLogger("tilhero.ai_gateway.seed")
 
 
 class SeedInvalid(RuntimeError):
@@ -200,14 +208,7 @@ def _emit(conn: Connection, event_type: str, payload: dict[str, Any]) -> None:
 
 def apply_seed(conn: Connection, seed: Seed, now: datetime) -> dict[str, int]:
     """Публикует версии и записывает кейсы. Возвращает счётчики (published, skipped, cases_written, cases_skipped)."""
-    models = set(conn.execute(sa.text("SELECT model_id FROM models")).scalars().all())
-    problems = []
-    for agent_id, body in seed.versions.items():
-        for name in ("model_id", "fallback_model_id"):
-            if body.get(name) is not None and body[name] not in models:
-                problems.append(f"agents/{agent_id}: {name} {body[name]} — нет в таблице models")
-    if problems:
-        raise SeedInvalid(problems)
+    _check_models(conn, seed)
     counts = {"published": 0, "skipped": 0, "cases_written": 0, "cases_skipped": 0}
     for agent_id in sorted(seed.versions):
         body = seed.versions[agent_id]
@@ -225,6 +226,22 @@ def apply_seed(conn: Connection, seed: Seed, now: datetime) -> dict[str, int]:
             continue
         _publish(conn, agent_id, body, digest, int(current.version) if current is not None else None, now)
         counts["published"] += 1
+    _write_cases(conn, seed, now, counts)
+    return counts
+
+
+def _check_models(conn: Connection, seed: Seed) -> None:
+    models = set(conn.execute(sa.text("SELECT model_id FROM models")).scalars().all())
+    problems = []
+    for agent_id, body in seed.versions.items():
+        for name in ("model_id", "fallback_model_id"):
+            if body.get(name) is not None and body[name] not in models:
+                problems.append(f"agents/{agent_id}: {name} {body[name]} — нет в таблице models")
+    if problems:
+        raise SeedInvalid(problems)
+
+
+def _write_cases(conn: Connection, seed: Seed, now: datetime, counts: dict[str, int]) -> None:
     for case in seed.cases:
         existing = conn.execute(sa.text(
             "SELECT agent_id, created_by, title, input, checks, mandatory, archived_at FROM golden_cases "
@@ -244,6 +261,50 @@ def apply_seed(conn: Connection, seed: Seed, now: datetime) -> dict[str, int]:
             title=case["title"], input=case["input"], checks=case["checks"], mandatory=case["mandatory"],
             archived_at=None))
         counts["cases_written"] += 1
+
+
+def apply_seed_drafts(conn: Connection, seed: Seed, now: datetime) -> dict[str, int]:
+    """Накладка-черновик: версии сида → **черновики** автора seed (публикация — после золотых тестов), кейсы — как в
+    apply_seed. Пропуск: тело уже записано сидом (в любом статусе — повтор миграции ничего не меняет) или у агента
+    есть черновик сотрудника (один черновик на агента; предупреждение — удалить черновик и повторить миграцию).
+    Счётчики: drafted, skipped, blocked, cases_written, cases_skipped."""
+    _check_models(conn, seed)
+    counts = {"drafted": 0, "skipped": 0, "blocked": 0, "cases_written": 0, "cases_skipped": 0}
+    for agent_id in sorted(seed.versions):
+        body = seed.versions[agent_id]
+        digest = body_hash(body)
+        seeded_before = conn.execute(sa.text(
+            "SELECT 1 FROM agent_versions WHERE agent_id = :a AND author_id = :s AND body_hash = :h"),
+            {"a": agent_id, "s": SEED_ACTOR_ID, "h": digest}).first()
+        if seeded_before is not None:
+            counts["skipped"] += 1
+            continue
+        draft = conn.execute(sa.text("SELECT version FROM agent_versions WHERE agent_id = :a AND status = 'draft'"),
+                             {"a": agent_id}).first()
+        if draft is not None:
+            log.warning("seed draft not created: agent already has a draft",
+                        extra={"agent_id": agent_id, "agent_version": int(draft.version)})
+            counts["blocked"] += 1
+            continue
+        max_version = conn.execute(sa.text("SELECT max(version) FROM agent_versions WHERE agent_id = :a"),
+                                   {"a": agent_id}).scalar()
+        version = int(max_version or 0) + 1
+        conn.execute(_versions.insert().values(
+            id=uuid.uuid4(), agent_id=agent_id, version=version, status="draft",
+            instructions=body["instructions"], rules=body["rules"], output_schema=body["output_schema"],
+            schema_version=body["schema_version"], model_id=body["model_id"],
+            fallback_model_id=body.get("fallback_model_id"), temperature=_temperature(body["temperature"]),
+            max_output_tokens=body["max_output_tokens"], timeout_ms=body["timeout_ms"],
+            max_cost_usd=_cost(body["max_cost_usd"]), notes=body.get("notes"), body_hash=digest,
+            author_id=SEED_ACTOR_ID, created_at=now, updated_by=SEED_ACTOR_ID, updated_at=now,
+            published_by=None, published_at=None,
+        ))
+        audit = audit_payload(None, "ai.version_created", "agent_version", version_object_id(agent_id, version),
+                              after={"status": "draft", "from_version": None, "body_hash": digest},
+                              reason=DRAFT_REASON, actor_type="system", actor_id=SEED_ACTOR_ID)
+        _emit(conn, AUDIT_EVENT, audit)
+        counts["drafted"] += 1
+    _write_cases(conn, seed, now, counts)
     return counts
 
 

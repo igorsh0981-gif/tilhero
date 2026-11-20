@@ -41,7 +41,7 @@ describe("ученики (AT-03)", () => {
     expect(res.statusCode).toBe(201);
     const child = res.json();
     expect(Value.Check(LearnerSummarySchema, child)).toBe(true);
-    expect(child).toEqual({ learner_id: expect.any(String), kind: "child", display_name: "Мадина", age_band: "6-9", is_active: false, onboarding_completed: false });
+    expect(child).toEqual({ learner_id: expect.any(String), kind: "child", display_name: "Мадина", age_band: "6-9", is_active: false, onboarding_completed: false, voice_consent: false });
     expect(res.body).not.toContain("guardian_user_id");
     const call = h.fake.callsTo("identity", "POST", "/internal/v1/me/learners")[0]!;
     expect(call.subject).toBe(s.userId);

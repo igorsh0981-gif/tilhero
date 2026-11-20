@@ -86,10 +86,13 @@ KINDS = {"course", "skill", "module", "lesson", "rubric", "scenario", "media_ass
 S3_PERMS = {"content.read", "content.edit", "content.review", "content.publish", "media.rights", "lang.manage"}
 ALL_PERMS = s2.ALL_PERMS | S3_PERMS
 # + права спринта 4 (admin-identity 0004): methodist — агенты и контроль диалогов, analyst — только чтение
+# + права спринта 5 (admin-identity 0005): methodist — memory.read и glossary.manage, content_manager — glossary.manage,
+#   analyst — memory.read
 METHODIST_PERMS = {"dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish",
-                   "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review"}
-CM_PERMS = {"dashboard.read", "content.read", "content.edit", "media.rights"}
-ANALYST_PERMS = {"dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read"}
+                   "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review",
+                   "memory.read", "glossary.manage"}
+CM_PERMS = {"dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage"}
+ANALYST_PERMS = {"dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read"}
 
 # bff.ts DiagnosticItem — ровно эти поля (ключа ответа, полосы и тегов нет)
 ITEM_KEYS = {"item_id", "area", "type", "instruction", "prompt_en", "passage_en", "audio_text_en", "options", "position"}
@@ -421,7 +424,32 @@ def _create(c: s2.Ctx, who: str, role: str, name: str, privileged: bool) -> None
     c.staff[who] = Staff(c.browser(who), body["email"], tmp, body["display_name"], created["staff"]["staff_id"])
 
 
+def warm_admin_identity(c: s2.Ctx) -> None:
+    """admin-identity сразу после старта (reset_admin перезапускает его, up — соседние сервисы) считает хеш пароля дольше
+    таймаута admin-bff (UPSTREAM_TIMEOUT_MS 3 с): смена пароля — это проверка прежнего и хеш нового, под нагрузкой
+    стенда она шла 3,3 с → 503, хотя пароль уже сменён (bootstrap-учётка израсходована, прогон надо повторять со
+    сбросом). Прогрев: вход несуществующей учёткой (тот же расчёт dummy-хеша) — до трёх ответов подряд быстрее 0,6 с
+    (нагрузка после запуска сервисов спала), не дольше 120 с."""
+    b = c.browser("warmup")
+    deadline = time.monotonic() + 120
+    fast = n = 0
+    dt = 0.0
+    while time.monotonic() < deadline:
+        t0 = time.monotonic()
+        n += 1  # свой email на каждую попытку: лимит входа по email (prod-значение) не должен сработать
+        r = b.post("/admin/v1/auth/login", {"email": f"warmup.{c.tag.lower()}.{n}@tilhero.local",
+                                            "password": "Warmup-e2e-not-a-password-0"})
+        dt = time.monotonic() - t0
+        fast = fast + 1 if r.status_code == 401 and dt < 0.6 else 0
+        if fast >= 3:
+            return
+        time.sleep(1 if fast else 3)
+    print(f"      admin-identity медленно считает хеш ({dt:.1f} с, ответ {r.status_code}) — возможен 503 на смене "
+          "пароля", flush=True)
+
+
 def s_staff(c: s2.Ctx) -> None:
+    warm_admin_identity(c)
     root = Staff(c.browser("root"), s2.BOOT_EMAIL, s2.BOOT_PASSWORD, display_name="Администратор")
     c.staff["root"] = root
     c.remember("пароль bootstrap", s2.BOOT_PASSWORD)

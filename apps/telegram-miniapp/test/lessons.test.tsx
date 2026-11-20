@@ -435,7 +435,7 @@ const PLAN: LearningPlan = {
   onboarding_completed_at: "2026-11-10T08:00:00Z", updated_at: "2026-11-10T08:00:00Z", version: 1,
 };
 function appSession(kid: boolean): SessionResponse {
-  const learner = { learner_id: ME, kind: kid ? ("child" as const) : ("self" as const), display_name: "Азиз", age_band: kid ? ("6-9" as const) : ("18+" as const), is_active: true, onboarding_completed: true };
+  const learner = { learner_id: ME, kind: kid ? ("child" as const) : ("self" as const), display_name: "Азиз", age_band: kid ? ("6-9" as const) : ("18+" as const), is_active: true, onboarding_completed: true, voice_consent: false };
   return {
     access_token: "acc", expires_in: 900, refresh_token: "ref",
     account: { user_id: ME, display_name: "Азиз", username: null, locale: "ru", status: "ACTIVE", is_new: false, age_band: "18+", guardian_consent: "not_required" },

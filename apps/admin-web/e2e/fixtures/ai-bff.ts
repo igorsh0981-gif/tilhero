@@ -26,6 +26,8 @@ export interface AiScenario {
   qaDown?: Array<"lessons" | "assessment" | "ai-gateway">;
   /** prod/stage ai-gateway: a run on fake does not open publication (422 TESTS_REQUIRED {reason: real_provider_required}) */
   realProviderRequired?: boolean;
+  /** sprint 5: the Azure Speech key / region are not set (pronunciation hidden from learners) */
+  noSpeechKey?: boolean;
 }
 
 interface Run extends TestRun {
@@ -59,7 +61,10 @@ export class AiStore {
   constructor(private readonly sc: AiScenario = {}) {
     this.spent = sc.spentUsd ?? 12.4;
     this.budget = { ai_enabled: !sc.aiOff, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 80, updated_at: iso(-6 * DAY) };
-    this.provider = sc.noKey ? { provider: "anthropic", key_configured: false, last_error: { code: "ai_disabled", at: iso(-10 * MIN) } } : { provider: "anthropic", key_configured: true, last_error: { code: "timeout", at: iso(-26 * HOUR) } };
+    const speech: AiProviderStatus["speech"] = sc.noSpeechKey
+      ? { provider: "azure_speech", key_configured: false, region: null, last_error: { code: "not_configured", at: iso(-3 * HOUR) } }
+      : { provider: "azure_speech", key_configured: true, region: "westeurope", last_error: null };
+    this.provider = sc.noKey ? { provider: "anthropic", key_configured: false, last_error: { code: "ai_disabled", at: iso(-10 * MIN) }, speech } : { provider: "anthropic", key_configured: true, last_error: { code: "timeout", at: iso(-26 * HOUR) }, speech };
     // the green run of the independent_evaluator draft (it is the canary)
     const v2 = this.vers.independent_evaluator!.find((v) => v.version === 2)!;
     const r = this.makeRun("independent_evaluator", 2, null, true);
@@ -231,6 +236,12 @@ export class AiStore {
       avg_cost_per_lesson_usd: 0.0118,
       ai_enabled: this.budget.ai_enabled,
       alert_percent: this.budget.alert_percent,
+      // sprint 5: pronunciation (pronunciation_coach, azure-speech-pa) — part of spent_usd
+      speech: (() => {
+        const minutes = period === "day" ? 14.5 : period === "week" ? 96 : 412.5;
+        const price = this.models.find((m) => m.model_id === "azure-speech-pa")?.audio_usd_per_hour ?? 1.32;
+        return { calls: Math.round(minutes * 6), audio_minutes: minutes, spent_usd: Math.round((minutes / 60) * price * 10_000) / 10_000, speech_available: this.budget.ai_enabled && !this.sc.noSpeechKey };
+      })(),
     };
   }
 
@@ -242,7 +253,7 @@ export class AiStore {
       completed: 51 * m,
       completion_pct: 79.7,
       median_minutes: 18,
-      by_kind: { lesson: 40 * m, scenario: 14 * m, media: 8 * m, review: 2 * m },
+      by_kind: { lesson: 40 * m, scenario: 14 * m, media: 8 * m, review: 2 * m, reading: 5 * m },
       ai_degraded_pct: this.budget.ai_enabled ? 6.3 : 100,
       appeals_open: this.appeals.filter((a) => a.status === "new" || a.status === "in_review").length,
       human_review_open: Object.values(this.evals).filter((ch) => ch.length && ch[ch.length - 1]!.requires_human_review).length,
@@ -475,7 +486,14 @@ export class AiStore {
       const pi = Number(body.input_usd_per_mtok);
       const po = Number(body.output_usd_per_mtok);
       if (!(pi >= 0 && pi <= 1000) || !(po >= 0 && po <= 1000) || typeof body.active !== "boolean") return bad("input_usd_per_mtok").then(() => true);
-      Object.assign(md, { input_usd_per_mtok: pi, output_usd_per_mtok: po, active: body.active, updated_at: iso(0) });
+      // sprint 5: the audio hour price belongs to speech models only (ai-gateway 422 PRICE_NOT_APPLICABLE)
+      const speech = md.provider === "azure_speech" || md.provider === "fake_speech";
+      const pa = body.audio_usd_per_hour;
+      if (pa !== undefined && pa !== null && !speech) return fail(422, "PRICE_NOT_APPLICABLE", { field: "audio_usd_per_hour" });
+      if (pa !== undefined && pa !== null && !(typeof pa === "number" && pa >= 0 && pa <= 1000)) return bad("audio_usd_per_hour").then(() => true);
+      // lowering a price needs costs.manage as well (ai-gateway)
+      if (speech && typeof pa === "number" && md.audio_usd_per_hour != null && pa < md.audio_usd_per_hour && !has("costs.manage")) return fail(403, "PERMISSION_DENIED", { permission: "costs.manage" });
+      Object.assign(md, { input_usd_per_mtok: pi, output_usd_per_mtok: po, active: body.active, updated_at: iso(0), ...(speech && typeof pa === "number" ? { audio_usd_per_hour: pa } : {}) });
       audit("ai.model_updated", md.model_id, reason);
       return done(200, md);
     }

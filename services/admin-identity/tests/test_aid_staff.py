@@ -130,7 +130,7 @@ async def test_self_action_and_last_super_admin(env: Env, root: Person) -> None:
     # матрица: auditor получает staff.manage (root — единственный super_admin → waived)
     grant = await env.c.put("/admin/v1/roles/auditor",
                             json={"permissions": ["dashboard.read", "audit.read", "content.read", "ai.read",
-                                                  "qa.read", "costs.read", "staff.manage"],
+                                                  "qa.read", "costs.read", "memory.read", "staff.manage"],
                                   "reason": "Аудитор ведёт учётки"}, headers=env.h(me))
     assert grant.status_code == 202, grant.text
     a = grant.json()["approval"]
@@ -251,13 +251,14 @@ async def test_role_matrix_update_via_approval(env: Env, root: Person, root2: Pe
     assert [r["code"] for r in roles["items"]] == ["super_admin", "operations", "communications", "support",
                                                      "methodist", "content_manager", "qa_analyst", "analyst",
                                                      "auditor", "read_only"]
-    assert len(roles["permissions"]) == 31
+    assert len(roles["permissions"]) == 34
     by = {r["code"]: r for r in roles["items"]}
     assert by["super_admin"]["staff_count"] == 2 and by["analyst"]["staff_count"] == 1
     assert by["operations"]["privileged"] is True and by["support"]["privileged"] is False
     assert by["operations"]["permissions"] == ["dashboard.read", "users.read", "support.read", "audit.read",
                                                "config.read", "config.edit", "config.publish", "content.read",
-                                               "ai.read", "qa.read", "costs.read", "costs.manage"]
+                                               "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read",
+                                               "memory.manage"]
     assert by["methodist"]["privileged"] is True and by["content_manager"]["privileged"] is True
     assert by["qa_analyst"]["privileged"] is False
     assert by["read_only"]["name"] == {"ru": "Только просмотр", "en": "Read Only"}
@@ -304,7 +305,8 @@ async def test_session_version_grows_and_principal_reflects(env: Env, root: Pers
     assert r.status_code == 200 and r.json()["role"] == "analyst"  # непривилегированная — сразу
     p = (await env.principal(person.staff_id)).json()
     assert p["session_version"] == sv + 1 and p["staff"]["role"] == "analyst"
-    assert p["permissions"] == ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read"]
+    assert p["permissions"] == ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read",
+                                "memory.read"]
     name = await env.patch(root.actor, person.staff_id, {"display_name": "Новое имя", "reason": "Имя"})
     assert name.status_code == 200
     assert (await env.principal(person.staff_id)).json()["session_version"] == sv + 1  # имя не отзывает сессии

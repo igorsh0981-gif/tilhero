@@ -3,7 +3,9 @@
 **Владелец:** платформа (ИИ) + методисты (инструкции агентов). **Bounded context:** реестр 17 агентов LinguaFlow, версии
 инструкций LLM-агентов (черновик → золотые тесты → публикация, канарейка, откат), золотые тесты, маршрутизация моделей и
 цены, бюджеты и аварийная остановка ИИ, вызов агента со строгой проверкой JSON и правилами безопасности
-(`safety_quality_gate`), учёт затрат **без текстов** (спринт 4, AT-49…51; INTERNAL_API §1, §9).
+(`safety_quality_gate`), учёт затрат **без текстов** (спринт 4, AT-49…51; INTERNAL_API §1, §9). Спринт 5
+(`docs/sprint5/INTERNAL_API.md` §3): `teaching_coach` v2 с переводом слова `gloss_word` для memory и оценка
+произношения `pronunciation_coach` — Azure AI Speech (Pronunciation Assessment) + советы правилами (AT-57, AT-58).
 
 Порт 8114, схема PostgreSQL `ai_gateway` (роли `ai_gateway_owner` — миграции, `ai_gateway` — рантайм без DDL),
 внутренний JWT с `aud = ai-gateway`. Redis — идемпотентность вызовов (результат по `request_id`, 24 ч) и команд
@@ -11,14 +13,37 @@
 `tilhero_ai_gateway/contracts.py` повторяют их 1:1, контрактный тест сверяет поля и перечисления); формы admin API —
 `admin.ts` («ИИ, контроль диалогов, затраты»).
 
-**ИИ необязателен:** ответ вызова всегда 200 с `status: ok | unavailable | refused` — вызывающий (lessons, assessment)
-обязан продолжить без ИИ при `unavailable`/`refused`; ученик ошибку провайдера не видит.
+**ИИ необязателен:** ответ вызова всегда 200 с `status: ok | unavailable | refused` — вызывающий (lessons, assessment,
+memory) обязан продолжить без ИИ при `unavailable`/`refused`; ученик ошибку провайдера не видит. То же для оценки
+произношения (`ok | insufficient_evidence | unavailable`).
 
-## Вызов агента (`/internal/v1`, вызывающие — lessons, assessment)
+## Вызов агента (`/internal/v1`, вызывающие — lessons, assessment, memory)
 | Метод | Путь | Ответ / ошибки |
 |---|---|---|
-| POST | `/agents/{agent_id}/invoke` `AgentInvokeRequest` (+ `deadline_ms?` 1000..60000) | 200 `AgentInvokeResult`; 404 `AGENT_NOT_FOUND`, `AGENT_NOT_ACTIVE` (не `llm`+`active`); 422 `CONTEXT_INVALID {errors}` (контекст не по ai.ts), `IDEMPOTENCY_KEY_REUSED`; 409 `IDEMPOTENCY_IN_PROGRESS` (дубль не дождался первого вызова); 401 `USER_CONTEXT_REQUIRED` (в токене нет `sub`); 403 `USER_CONTEXT_MISMATCH` |
-| GET | `/status` | `{ai_available}` — аварийной остановки нет и провайдер готов (lessons — при старте занятия) |
+| POST | `/agents/{agent_id}/invoke` `AgentInvokeRequest` (+ `deadline_ms?` 1000..60000; `session_kind` — `AiSessionKind`: + `reading`, `memory`) | 200 `AgentInvokeResult`; 404 `AGENT_NOT_FOUND`, `AGENT_NOT_ACTIVE` (не `llm`+`active`); 403 `CALLER_NOT_ALLOWED {agent_id, request}` (политика вызывающих ниже); 422 `CONTEXT_INVALID {errors}` (контекст не по ai.ts), `IDEMPOTENCY_KEY_REUSED`; 409 `IDEMPOTENCY_IN_PROGRESS` (дубль не дождался первого вызова); 401 `USER_CONTEXT_REQUIRED` (в токене нет `sub`); 403 `USER_CONTEXT_MISMATCH` |
+| GET | `/status` | `AiStatus {ai_available, speech_available}` — `ai_available`: аварийной остановки нет и провайдер LLM готов (lessons — при старте занятия); `speech_available`: нет остановки, ключ и регион Azure заданы (или fake), модель речи включена, месячный потолок не превышен (memory — перед «Произнести») |
+| POST | `/speech/pronunciation` (только memory) | см. «Оценка произношения» |
+
+**Политика вызывающих (спринт 5, защита в глубину):** memory — только `teaching_coach` с `context.request = gloss_word`
+(перевод слова, которое memory проверила в опубликованном контенте через catalog); lessons и assessment — все
+LLM-агенты, кроме `gloss_word` (иначе в «перевод слова» мог бы попасть текст ученика, а `gloss_word` разрешён детям).
+Иное → 403 `CALLER_NOT_ALLOWED`.
+
+**`teaching_coach` — два вида запроса** (ai.ts): `simpler_example | explain_again` (`TeachingCoachContext` →
+`TeachingCoachOutput`) и `gloss_word` (`TeachingCoachGlossContext {word ≤ 60, sentence_en ≤ 300, level,
+content_kind}` → `TeachingCoachGlossOutput {lemma, part_of_speech, gloss {ru, uz}, forms ≤ 6, confidence}`). `word`
+обязано встречаться в `sentence_en` (нормализация §1.6: регистр, апострофы, пробелы) — иначе 422. Контракт вывода
+выбирается по виду запроса: схема v2 — объединённая (`anyOf`), вывод «не того» вида → `contract_mismatch` и повтор.
+Лимиты `gloss_word` поверх версии (`REQUEST_LIMITS`, INTERNAL_API §3.1): **≤ 200 выходных токенов и ≤ 6 с** (меньшее
+из лимитов версии и запроса; оценка стоимости — по 200): у v2 общий `max_output_tokens` 400 и `timeout_ms` 8000 нужны
+запросам v1, поэтому лимиты gloss — в коде шлюза, длины полей — в схеме и контракте. Версия, чья схема вывода не
+принимает образцовый вывод gloss (v1 и черновики из неё), `gloss_word` не обслуживает → `refused: agent_not_active` без
+вызова провайдера (memory показывает «перевода нет» до публикации v2). Детям `gloss_word` разрешён (текста ученика нет).
+Правила безопасности gloss (`domain/safety.py`): ссылки, e-mail, телефоны, ключи — как у всех; `gloss.ru` — кириллица
+без латиницы («без английского»), `gloss.uz` — латиница без кириллицы, `lemma`/`forms` — без кириллицы →
+`wrong_language` и повтор; `oʻ/gʻ`, записанные `' ‘ ’ \``, исправляются на `ʻ` (U+02BB) без повтора
+(`warnings: ["uz_apostrophe_fixed"]`). Провайдер fake отвечает `gloss {ru: "[ru] <word>", uz: "[uz] <word>"}`,
+`lemma = word`, `confidence 0.9` — языковые правила gloss к нему не применяются (заглушка стенда).
 
 Порядок (INTERNAL_API §1.2): агент `llm`+`active` → свободный текст и аудитория kids → `refused: kids_not_allowed`
 (аудитория — из тела: lessons и assessment передают аудиторию сессии; проверка claims токена `lrn` ≠ `sub` /
@@ -74,11 +99,11 @@ pattern, anyOf; прочие ключевые слова отклоняются 
 | POST | `/agents/{agent_id}/rollback` `{reason}` | ai.publish | `AgentRow`; 409 `NO_PREVIOUS_VERSION` |
 | GET / POST | `/agents/{agent_id}/golden-cases?include_archived=&cursor=` / `GoldenCaseInput` | ai.read / ai.manage | `{items: GoldenCase[], next_cursor}` / 201 `GoldenCase`; 422 `GOLDEN_CASE_INVALID {errors}` |
 | PATCH / DELETE | `/golden-cases/{case_id}` | ai.manage | `GoldenCase` / 204 (удаление = архив); 409 `GOLDEN_CASE_ARCHIVED` |
-| GET / PUT | `/models` / `/models/{model_id}` `{input_usd_per_mtok, output_usd_per_mtok, active, reason}` | ai.read / ai.publish (снижение цены — ещё costs.manage) | `{items: AiModel[]}` / `AiModel`; 403 `PERMISSION_DENIED {permission: costs.manage}` (снижение цены); 404 `MODEL_NOT_FOUND`; 409 `MODEL_IN_USE {versions}`; 422 `PRICE_REQUIRED {fields}` (у модели anthropic цены > 0) |
-| GET | `/provider` | ai.read | `AiProviderStatus` — ключ только «задан / не задан», ошибка — код и время |
+| GET / PUT | `/models` / `/models/{model_id}` `{input_usd_per_mtok, output_usd_per_mtok, audio_usd_per_hour?, active, reason}` | ai.read / ai.publish (снижение цены — ещё costs.manage) | `{items: AiModel[]}` (+ `audio_usd_per_hour`: речь — $ за час аудио, LLM — null) / `AiModel`; 403 `PERMISSION_DENIED {permission: costs.manage}` (снижение цены, в т. ч. часа аудио); 404 `MODEL_NOT_FOUND`; 409 `MODEL_IN_USE {versions}` (LLM; модель речи выключать можно — оценка произношения → `not_configured`); 422 `PRICE_REQUIRED {fields}` (anthropic — цены > 0; azure_speech — час аудио > 0), `PRICE_NOT_APPLICABLE {fields}` (цены токенов у речи ≠ 0 или час аудио у LLM). `audio_usd_per_hour` не передана — прежняя |
+| GET | `/provider` | ai.read | `AiProviderStatus` — ключ только «задан / не задан», ошибка — код и время; `speech {provider, key_configured, region, last_error}` (ключ Azure не показывается никогда; регион — как введён) |
 | GET / PUT | `/budget` / `AiBudget`-поля `& {reason}` (`updated_at?` — защита от гонки, `ai_enabled?`) | costs.read / costs.manage | `AiBudget`; 409 `BUDGET_CONFLICT` |
 | POST | `/emergency-stop` `{enabled, reason}` | costs.manage | `AiBudget`; `enabled: true` — остановка включена (ИИ выключен) |
-| GET | `/usage/summary?period=day\|week\|month` | costs.read \| dashboard.read | `AiUsageSummary` |
+| GET | `/usage/summary?period=day\|week\|month` | costs.read \| dashboard.read | `AiUsageSummary` (+ `speech {calls, audio_minutes, spent_usd, speech_available}` — вызовы `pronunciation_coach` за период, минуты оценённого аудио, расход; входит в `spent_usd`) |
 | GET | `/usage?session_id=\|agent_id=&cursor=&limit=` | costs.read (с `session_id` — ещё qa.read) | `Page<AiCall>` (без user_id и текстов) |
 | GET | `/usage/by-session?session_id=<id>&session_id=…` (≤ 50) | qa.read \| costs.read | `{items: [{session_id, models, cost_usd, p95_latency_ms}]}` — для журнала «Контроля диалогов»; сессии без вызовов — нули; 422 `TOO_MANY_SESSIONS` |
 
@@ -111,13 +136,78 @@ archived`, `ai.model_updated`, `ai.budget_updated`, `ai.emergency_stop` (без 
   лимите 0.02, на v2 — 0.0169; тест `test_gw_seed_cost.py`); обязательный кейс `ie-19-kids-refused` (ревью R1-15);
   `usage.reason` + `cost_limit`. Откат 0003 возвращает v1 и удаляет кейс. Прогон золотых тестов v2 на fake (dev/test) —
   по общим правилам (`test_gw_schema.py`).
+- **0004** (спринт 5): `teaching_coach` **v2 — черновик** автора seed (накладка `migrations/seed/0004/`: тексты v1 +
+  `gloss_word`, объединённая схема `teaching_coach.v2`, параметры v1) и 8 кейсов `gloss_word` (6 обязательных:
+  многозначность по контексту, фразовый глагол, форма → лемма, инъекция в `sentence_en`, ребёнок → ok, имя
+  собственное). **Публикация** — после прогона золотых тестов: в stage/prod сотрудник (владелец) прогоняет тесты на
+  anthropic и публикует (`POST …/teaching_coach/versions/2/test-runs` → `…/publish`); на dev/e2e-стенде
+  (`AI_ALLOW_FAKE_TEST_PUBLISH=true` и `AI_PROVIDER=fake`) это делает сам шлюз при старте (`domain/stand.py`: обычный
+  прогон на fake и обычная публикация, автор — системный seed, аудит `ai.test_run` / `ai.version_published` с
+  `actor_type: system`; ошибка не мешает старту). Если у агента уже есть черновик сотрудника, v2 не создаётся
+  (предупреждение в лог миграции) — удалить черновик и повторить `alembic upgrade`. Новые обязательные кейсы меняют
+  набор — прежние прогоны teaching_coach устаревают; черновик из v1 (схема без gloss) их не пройдёт. Там же: модели и
+  учёт речи, реестр агентов (`spaced_repetition_coach` → `code`/memory, `pronunciation_coach` → `code`/ai-gateway,
+  их пустая маршрутизация версий удаляется). Откат возвращает всё как в спринте 4 (вызовы речи из `usage` удаляются).
 - Золотые прогоны: не больше `GOLDEN_RUNS_DAILY_LIMIT` (20) в сутки по Ташкенту на все агенты (429 `TEST_RUNS_LIMIT`);
   аварийная остановка прогон **не** блокирует (проверка сотрудником перед включением ИИ), месячный потолок —
   учитывается (ревью R1-11).
 
+## Оценка произношения (`pronunciation_coach`, implementation `code`; INTERNAL_API §1.9, §3.2; AT-58)
+`POST /internal/v1/speech/pronunciation` — вызывающий **только memory**. Тело — WAV (PCM 16 бит, моно, 16 000 Гц,
+0,5..15 с, ≤ 600 000 байт), `Content-Type: audio/wav`; заголовок `X-Speech-Meta` = base64url(JSON `SpeechAssessMeta
+{request_id, user_id, audience, locale, reference_text 1..200, language: "en-US"}`). Ответ — всегда 200
+`PronunciationResult` (ai.ts).
+
+| Ошибка | Когда |
+|---|---|
+| 401 `INTERNAL_TOKEN_MISSING` / `USER_CONTEXT_REQUIRED` | нет токена / в токене нет `sub` |
+| 403 `CALLER_NOT_ALLOWED` | вызывающий не memory |
+| 403 `USER_CONTEXT_MISMATCH` | `user_id` меты ≠ `sub` / `lrn` токена |
+| 422 `SPEECH_META_INVALID {errors}` | нет заголовка, не base64url, не JSON, поля не по контракту (значения не возвращаются) |
+| 422 `AUDIO_INVALID {reason: format \| too_short \| too_long \| too_large}` | не RIFF/WAVE, не PCM 16 бит моно 16 кГц, не `audio/wav`; < 0,5 с; > 15 с; > 600 000 байт |
+| 422 `IDEMPOTENCY_KEY_REUSED`, 409 `IDEMPOTENCY_IN_PROGRESS` | тот же `request_id` с другой метой/аудио; дубль не дождался первого |
+
+Порядок: аварийная остановка → `unavailable: ai_disabled`; нет `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION` (или регион не
+похож на регион Azure, или модель речи выключена в админке) → `unavailable: not_configured`; бюджет (месяц UTC, ученик
+за день по Ташкенту) по оценке стоимости длительности → `unavailable: budget_exceeded` — всё **до** вызова провайдера.
+Azure REST для короткого аудио: `POST https://{region}.stt.speech.microsoft.com/speech/recognition/conversation/
+cognitiveservices/v1?language=en-US&format=detailed`, заголовки `Ocp-Apim-Subscription-Key`, `Content-Type: audio/wav;
+codecs=audio/pcm; samplerate=16000`, `Accept: application/json`, `Pronunciation-Assessment` = base64(JSON
+`{ReferenceText, GradingSystem: HundredMark, Granularity: Word, Dimension: Comprehensive, EnableMiscue: true}`); тело —
+WAV как есть. Таймаут попытки ≤ 12 с; **один повтор** при 5xx или сетевой ошибке, если до дедлайна (14,5 с от приёма —
+memory ждёт 15 с) осталось ≥ 4 с; таймаут, 4xx и неразборчивый ответ не повторяются (`unavailable: timeout |
+provider_error`, код — в `speech.last_error` админки).
+
+Разбор `NBest[0]` (баллы — в элементе в формате REST или в `PronunciationAssessment` в формате SDK; читаются оба):
+`RecognitionStatus ≠ Success` → `insufficient_evidence: not_recognized`; `Confidence < 0,4` → `low_confidence`;
+`CompletenessScore < 30` → `incomplete` (баллов, слов и советов нет). Иначе `scores {accuracy, fluency, completeness,
+pron}` 0..100, `words ≤ 40 [{word, accuracy, error_type: none | omission | insertion | mispronunciation}]`,
+`intelligibility` clear (pron ≥ 80) | mostly_clear (60..79) | needs_practice (< 60). Нет баллов у распознанной речи —
+`unavailable: provider_error` (`bad_response`). Советы (`domain/speech.py`, скилл 08): ≤ 2 — `mispronunciation` с
+точностью < 60 и `omission`, сначала самые низкие, одно слово — один совет; RU/UZ по `locale`; детям (audience kids
+или claims токена `lrn ≠ sub` / `age_band` 6–13) — мягкий вариант на «ты»; слова «акцент» нет ни в одном шаблоне.
+
+Учёт — строка `usage`: `agent_id pronunciation_coach`, `model_id azure-speech-pa | fake-speech`, `provider
+azure_speech | fake_speech`, `session_kind memory`, `audio_ms`, `cost_usd = audio_ms / 3 600 000 × audio_usd_per_hour` за
+каждую оплаченную попытку (успех, `insufficient_evidence`, ответ 200 с неразборчивым телом, таймаут — консервативно;
+5xx, сеть, 4xx — 0). `insufficient_evidence` — `status ok` с причиной (`not_recognized | low_confidence | incomplete`).
+
+**Аудио не хранится нигде:** тело читает `SpeechBodyMiddleware` (снаружи общего middleware, только этот маршрут: общий
+лимит тела сервисов — 256 КиБ, `tilhero_common.app`), байты — в состоянии запроса до его конца; провайдеру — тело
+запроса; в БД, Redis, логи и события не пишутся. Идемпотентность — `request_id` 24 ч: в Redis только JSON результата
+(эталон и слова, без аудио), отпечаток — хеш меты и SHA-256 аудио. В логах — статус, причина, `audio_ms`, задержка,
+попытки. Ключ Azure — только переменная окружения: не в БД, логах (ошибка httpx — только тип), ответах и `repr`.
+
+**fake** (`SPEECH_PROVIDER=fake`, стенд и тесты; в stage/prod запрещён): средняя |амплитуда| < 200 →
+`insufficient_evidence: not_recognized`; иначе слова эталона с точностью 90, слова ≥ 8 букв — 55 и `mispronunciation`;
+модель `fake-speech` стоит 0.
+
 ## Бюджеты (решение владельца 19.11.2026)
 `budget` (singleton): `ai_enabled` (аварийная остановка), `monthly_cap_usd` 20 (календарный месяц UTC),
 `learner_daily_cap_usd` 0.05 (день — Asia/Tashkent), `lesson_cap_usd` 0.03 (сумма по `session_id`), `alert_percent` 80.
+Перевод по тапу (`gloss_word`, `session_kind: memory`) — из лимитов месяца и ученика в день; лимит урока к дневной
+сессии memory не применяется (занятия нет). Оценка произношения входит в те же месяц и лимит ученика в день (резерв — оценка стоимости длительности, $1,32 за
+час аудио по умолчанию; лимит урока к ней не применяется — сессии нет).
 Резерв: строка usage вызова в статусе `pending` держит `reserved_usd` (оценка следующей попытки) — под транзакционной
 advisory-блокировкой параллельные вызовы видят резервы друг друга; «зависший» pending старше 10 минут снимается.
 Дополнительно — `max_cost_usd` версии на вызов (накопительно по попыткам, причина отказа `cost_limit`). Стоимость —
@@ -132,23 +222,38 @@ advisory-блокировкой параллельные вызовы видят
 - `AI_PROVIDER=fake` (тесты, стенд e2e; в stage/prod запрещён): детерминированный (`providers/fake.py`), стоимость 0
   (модель `fake` 0/0), реплика ученика — только слова.
 
+- `SPEECH_PROVIDER=azure` (prod): Azure AI Speech REST для короткого аудио через httpx (`providers/speech.py`), ключ —
+  `AZURE_SPEECH_KEY`, регион — `AZURE_SPEECH_REGION`. `SPEECH_PROVIDER=fake` — тесты и стенд e2e (в stage/prod запрещён).
+
 **Как добавить ключ:** Railway → сервис ai-gateway → Variables → `ANTHROPIC_API_KEY` (вводит владелец), `AI_PROVIDER=
 anthropic`; redeploy. Ключ живёт только в переменной окружения ai-gateway: не в БД, не в логах, не в ответах; в админке —
 только «задан / не задан» (`GET /admin/v1/ai/provider`). Без ключа все вызовы — `unavailable: ai_disabled`, уроки идут
 без ИИ.
 
+**Ключ Azure Speech (решение владельца 20.11.2026):** Railway → общие переменные проекта (Shared Variables) →
+`AZURE_SPEECH_KEY` (ключ ресурса Speech) и `AZURE_SPEECH_REGION` (регион ресурса, например `westeurope`); у ai-gateway
+уже заданы ссылки `AZURE_SPEECH_KEY=${{shared.AZURE_SPEECH_KEY}}`, `AZURE_SPEECH_REGION=${{shared.AZURE_SPEECH_REGION}}`,
+`SPEECH_PROVIDER=azure`; redeploy ai-gateway. Пустые переменные — «не настроено»: `speech_available=false`, кнопки
+«Произнести» нет, уроки и повторения идут без неё. Проверка — `GET /admin/v1/ai/provider` → `speech.key_configured`,
+`speech.region`; цена часа аудио — `PUT /admin/v1/ai/models/azure-speech-pa` (по умолчанию 1.32; бесплатный уровень
+Azure F0 — 5 ч в месяц, шлюз его не учитывает и считает по цене).
+
 ## События
 - Публикует: `admin.audit.recorded.v1` (аудит), `user.domain.deleted.v1 {domain: "ai-gateway", mode: "anonymized"}`.
-- Потребляет: `user.deletion.requested.v1` (только от identity-consent; inbox) → `usage.user_id = NULL`, `deleted_users`,
-  кеш результатов вызовов ученика в Redis стирается.
+- Потребляет: `user.deletion.requested.v1` (только от identity-consent; inbox) → `usage.user_id = NULL` (вызовы агентов и
+  оценки произношения), `deleted_users`, кеш результатов вызовов и оценок произношения ученика в Redis стирается (аудио
+  не хранилось нигде).
 
 ## Данные
-`agents` (сид 17), `models` (сид: claude-haiku-5-5 0.10/0.50, claude-sonnet-5-5 2.00/10.00, fake 0/0), `agent_versions`
-(триггер неизменяемости), `agent_rollout`, `golden_cases`, `test_runs` (завершённый неизменяем), `budget`, `usage`
-(только метаданные вызова), `deleted_users`, `outbox`, `inbox`.
+`agents` (сид 17), `models` (сид: claude-haiku-5-5 0.10/0.50, claude-sonnet-5-5 2.00/10.00, fake 0/0; речь —
+`audio_usd_per_hour`: azure-speech-pa 1.32, fake-speech 0, миграция 0004), `agent_versions` (триггер неизменяемости),
+`agent_rollout` (только LLM-агенты), `golden_cases`, `test_runs` (завершённый неизменяем), `budget`, `usage` (только
+метаданные вызова; речь — + `audio_ms`), `deleted_users`, `outbox`, `inbox`.
 
 ## Настройки
-`AI_PROVIDER`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` (тесты), `AI_ALLOW_FAKE_TEST_PUBLISH` (dev/test), `SEED_DIR`,
+`AI_PROVIDER`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` (тесты), `AI_ALLOW_FAKE_TEST_PUBLISH` (dev/test; на стенде ещё
+и публикация черновиков сида по прогону на fake при старте), `SPEECH_PROVIDER` (azure | fake), `AZURE_SPEECH_KEY`,
+`AZURE_SPEECH_REGION`, `SEED_DIR`,
 `TIMEZONE` (Asia/Tashkent), `GOLDEN_RUN_MAX_AGE_DAYS` (14), `GOLDEN_RUN_STALE_MINUTES` (60), `GOLDEN_RUNS_DAILY_LIMIT`
 (20), `INVOKE_CACHE_TTL_SECONDS`
 (86400), `CACHE_NAMESPACE`, общие `DATABASE_URL`, `MIGRATION_DATABASE_URL`, `REDIS_URL`, `NATS_URL`, внутренний JWT.
@@ -157,4 +262,10 @@ anthropic`; redeploy. Ключ живёт только в переменной �
 - **Авария провайдера / расходы:** `POST /admin/v1/ai/emergency-stop {enabled: true}` — все вызовы `ai_disabled`.
 - **Регрессия версии:** `POST /agents/{id}/rollback` (снимает и канарейку).
 - **Прогон «завис» в running** (рестарт процесса): при старте прогоны старше 60 минут помечаются `failed`.
+- **Произношение не работает:** `GET /admin/v1/ai/provider` → `speech` (ключ/регион, `last_error`: `http_401` — неверный
+  ключ, `http_429` — лимит ресурса Azure, `timeout`, `network`); выключить без аварийной остановки ИИ — `PUT
+  /admin/v1/ai/models/azure-speech-pa {active: false}` (→ `not_configured`, кнопка скрыта).
+- **teaching_coach v2 в prod:** `POST /admin/v1/ai/agents/teaching_coach/versions/2/test-runs` (anthropic) → при
+  `passed_mandatory` — `POST …/versions/2/publish`. До этого `gloss_word` → `refused: agent_not_active` (перевод только
+  из словаря курса).
 - Тесты: `uv run pytest services/ai-gateway -q -p no:cacheprovider` (стенд `infra/dev/stack.sh up`).

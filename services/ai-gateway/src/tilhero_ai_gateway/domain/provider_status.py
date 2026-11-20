@@ -1,5 +1,5 @@
 """Последняя ошибка провайдера для `GET /admin/v1/ai/provider` — только код и время (без тела ответа и ключа).
-Общая для реплик через Redis; без Redis — в памяти процесса."""
+Общая для реплик через Redis; без Redis — в памяти процесса. kind: `provider` — LLM, `speech` — оценка произношения."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ log = logging.getLogger("tilhero.ai_gateway.provider")
 
 
 class ProviderStatus:
-    def __init__(self, redis: Redis | None, namespace: str) -> None:
+    def __init__(self, redis: Redis | None, namespace: str, kind: str = "provider") -> None:
         self.redis = redis
-        self.key = f"{namespace}:provider:last_error"
+        self.key = f"{namespace}:{kind}:last_error"
         self._memory: dict[str, Any] | None = None
 
     async def record_error(self, code: str, at: datetime) -> None:

@@ -289,6 +289,7 @@ function ModelsTab() {
             <Callout kind={prov.key_configured ? "info" : "warn"} icon="key" testId="prov-note">
               {prov.key_configured ? t("prov.noteSet") : t("prov.noteUnset")}
             </Callout>
+            {prov.speech && <SpeechProvider s={prov.speech} />}
           </>
         )}
       </section>
@@ -319,6 +320,9 @@ function ModelsTab() {
                   <th scope="col" className="r">
                     {t("mdl.col.out")}
                   </th>
+                  <th scope="col" className="r">
+                    {t("mdl.col.audio")}
+                  </th>
                   <th scope="col">{t("col.status")}</th>
                   <th scope="col">{t("mdl.col.updated")}</th>
                   <th scope="col">
@@ -332,10 +336,13 @@ function ModelsTab() {
                     <td className="mono">{m.model_id}</td>
                     <td className="mono small">{m.provider}</td>
                     <td className="r num" data-testid={`mdl-in-${m.model_id}`}>
-                      {money(m.input_usd_per_mtok)}
+                      {isSpeech(m) ? "—" : money(m.input_usd_per_mtok)}
                     </td>
                     <td className="r num" data-testid={`mdl-out-${m.model_id}`}>
-                      {money(m.output_usd_per_mtok)}
+                      {isSpeech(m) ? "—" : money(m.output_usd_per_mtok)}
+                    </td>
+                    <td className="r num" data-testid={`mdl-audio-${m.model_id}`}>
+                      {isSpeech(m) ? money(m.audio_usd_per_hour) : "—"}
                     </td>
                     <td>{m.active ? <Pill tone="good">{t("mdl.active")}</Pill> : <Pill>{t("mdl.inactive")}</Pill>}</td>
                     <td className="small muted">{fmt.dateTime(m.updated_at)}</td>
@@ -365,23 +372,60 @@ function ModelsTab() {
   );
 }
 
+/** sprint 5: a speech model (Azure Pronunciation Assessment) is priced per hour of audio, not per token. */
+export const isSpeech = (m: Pick<AiModel, "provider">): boolean => m.provider === "azure_speech" || m.provider === "fake_speech";
+
+/** Status of the pronunciation provider: «key set / not set», region, last error — the key itself is never shown or entered. */
+function SpeechProvider({ s }: { s: AiProviderStatus["speech"] }) {
+  const { t, fmt } = useI18n();
+  return (
+    <div className="stack sm prov-speech" data-testid="prov-speech">
+      <h3 className="h3">{t("prov.speech")}</h3>
+      <Kv k={t("prov.provider")} v={<span className="mono">{s.provider}</span>} />
+      <Kv
+        k={t("prov.speechKey")}
+        testId="prov-speech-key"
+        v={
+          s.key_configured ? (
+            <Pill tone="good" testId="prov-speech-set">
+              <Icon name="checkCircle" /> {t("prov.keySet")}
+            </Pill>
+          ) : (
+            <Pill tone="warn" testId="prov-speech-unset">
+              <Icon name="alert" /> {t("prov.keyUnset")}
+            </Pill>
+          )
+        }
+      />
+      <Kv k={t("prov.region")} v={s.region ? <span className="mono">{s.region}</span> : t("prov.noRegion")} testId="prov-speech-region" />
+      <Kv k={t("prov.lastError")} v={s.last_error ? `${s.last_error.code} · ${fmt.dateTime(s.last_error.at)}` : t("prov.noErrors")} testId="prov-speech-error" />
+      <Callout kind={s.key_configured ? "info" : "warn"} icon="key" testId="prov-speech-note">
+        {s.key_configured ? t("prov.speechNoteSet") : t("prov.speechNoteUnset")}
+      </Callout>
+    </div>
+  );
+}
+
 function ModelDialog({ model, onClose, onSaved, errText: et }: { model: AiModel; onClose: () => void; onSaved: (m: AiModel) => void; errText: (e: unknown) => string }) {
   const { t } = useI18n();
+  const speech = isSpeech(model);
   const [inp, setInp] = useState(String(model.input_usd_per_mtok));
   const [out, setOut] = useState(String(model.output_usd_per_mtok));
+  const [audio, setAudio] = useState(String(model.audio_usd_per_hour ?? ""));
   const [active, setActive] = useState(model.active);
   const price = (s: string) => {
     const n = Number(s.replace(",", "."));
     return s.trim() !== "" && Number.isFinite(n) && n >= 0 && n <= 1000 ? n : null;
   };
-  const pi = price(inp);
-  const po = price(out);
-  const bad = pi == null || po == null;
-  const same = pi === model.input_usd_per_mtok && po === model.output_usd_per_mtok && active === model.active;
+  const pi = speech ? model.input_usd_per_mtok : price(inp);
+  const po = speech ? model.output_usd_per_mtok : price(out);
+  const pa = speech ? price(audio) : null;
+  const bad = pi == null || po == null || (speech && pa == null);
+  const same = pi === model.input_usd_per_mtok && po === model.output_usd_per_mtok && active === model.active && (!speech || pa === model.audio_usd_per_hour);
   return (
     <ConfirmCommand
       title={t("mdl.editT", { m: model.model_id })}
-      text={t("mdl.editM")}
+      text={speech ? t("mdl.editSpeechM") : t("mdl.editM")}
       icon="coins"
       ok={t("common.save")}
       okDisabled={bad || same}
@@ -390,20 +434,37 @@ function ModelDialog({ model, onClose, onSaved, errText: et }: { model: AiModel;
       onClose={onClose}
       extra={
         <div className="stack sm">
-          <div className="grid2 tight">
+          {speech ? (
             <div className="field">
-              <label htmlFor="mdl-in" className="req">
-                {t("mdl.col.in")}
+              <label htmlFor="mdl-audio" className="req">
+                {t("mdl.col.audio")}
               </label>
-              <input id="mdl-in" className={cx("input num", pi == null && "is-invalid")} inputMode="decimal" value={inp} onChange={(e) => setInp(e.target.value)} aria-invalid={pi == null} data-testid="mdl-in" />
+              <div className="unit-input">
+                <span className="unit" aria-hidden="true">
+                  $
+                </span>
+                <input id="mdl-audio" className={cx("input num", pa == null && "is-invalid")} inputMode="decimal" value={audio} onChange={(e) => setAudio(e.target.value)} aria-invalid={pa == null} aria-describedby="mdl-audio-h" data-testid="mdl-audio" />
+              </div>
+              <span className="hint" id="mdl-audio-h">
+                {t("mdl.audioHint")}
+              </span>
             </div>
-            <div className="field">
-              <label htmlFor="mdl-out" className="req">
-                {t("mdl.col.out")}
-              </label>
-              <input id="mdl-out" className={cx("input num", po == null && "is-invalid")} inputMode="decimal" value={out} onChange={(e) => setOut(e.target.value)} aria-invalid={po == null} data-testid="mdl-out" />
+          ) : (
+            <div className="grid2 tight">
+              <div className="field">
+                <label htmlFor="mdl-in" className="req">
+                  {t("mdl.col.in")}
+                </label>
+                <input id="mdl-in" className={cx("input num", pi == null && "is-invalid")} inputMode="decimal" value={inp} onChange={(e) => setInp(e.target.value)} aria-invalid={pi == null} data-testid="mdl-in" />
+              </div>
+              <div className="field">
+                <label htmlFor="mdl-out" className="req">
+                  {t("mdl.col.out")}
+                </label>
+                <input id="mdl-out" className={cx("input num", po == null && "is-invalid")} inputMode="decimal" value={out} onChange={(e) => setOut(e.target.value)} aria-invalid={po == null} data-testid="mdl-out" />
+              </div>
             </div>
-          </div>
+          )}
           {bad && <FieldErr msg={t("mdl.priceErr")} />}
           <Switch id="mdl-active" checked={active} onChange={setActive} label={t("mdl.activeL")} />
           <Callout kind="info" icon="smartphoneKey">
@@ -413,7 +474,7 @@ function ModelDialog({ model, onClose, onSaved, errText: et }: { model: AiModel;
       }
       onConfirm={async (reason) => {
         try {
-          const m = await Ai.putModel({ model_id: model.model_id, input_usd_per_mtok: pi!, output_usd_per_mtok: po!, active }, reason);
+          const m = await Ai.putModel({ model_id: model.model_id, input_usd_per_mtok: pi!, output_usd_per_mtok: po!, active, ...(speech ? { audio_usd_per_hour: pa } : {}) }, reason);
           onSaved(m);
           return null;
         } catch (e) {

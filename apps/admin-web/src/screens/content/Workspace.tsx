@@ -361,7 +361,8 @@ export function Workspace({ spec, entityKey, newCtx, onOpen, onChanged, onCancel
               </>
             )}
           </div>
-          <h2 className="h2 wrap-any" id={`ws-h-${kind}`}>
+          {/* the title is the RU text of the content (data, not interface chrome) */}
+          <h2 className="h2 wrap-any" id={`ws-h-${kind}`} lang={!isNew && draft?.title?.ru ? "ru" : undefined}>
             {isNew ? t("ct.newT", { k: t(`kind.${kind}` as MessageKey) }) : titleText}
           </h2>
         </div>

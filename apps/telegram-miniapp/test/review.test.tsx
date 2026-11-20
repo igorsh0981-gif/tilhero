@@ -36,8 +36,8 @@ const INVITE = "33333333-aaaa-4bbb-8ccc-0000000000aa";
 const REQUIRED = ["terms", "privacy", "learning"];
 
 function makeSession(o: { pin?: boolean; consent?: string[] | null; kid?: boolean; children?: boolean; age?: "18+" | null } = {}): SessionResponse {
-  const self = { learner_id: ME, kind: "self" as const, display_name: "Азиз", age_band: o.age === undefined ? ("18+" as const) : o.age, is_active: !o.kid, onboarding_completed: true };
-  const kid = { learner_id: KID, kind: "child" as const, display_name: "Мадина", age_band: "6-9" as const, is_active: !!o.kid, onboarding_completed: true };
+  const self = { learner_id: ME, kind: "self" as const, display_name: "Азиз", age_band: o.age === undefined ? ("18+" as const) : o.age, is_active: !o.kid, onboarding_completed: true, voice_consent: false };
+  const kid = { learner_id: KID, kind: "child" as const, display_name: "Мадина", age_band: "6-9" as const, is_active: !!o.kid, onboarding_completed: true, voice_consent: false };
   const consent = o.consent === undefined ? [...REQUIRED] : o.consent;
   return {
     access_token: "acc",
@@ -413,7 +413,7 @@ const familyRoutes = (extra: Record<string, Reply | Reply[]> = {}): Record<strin
   "GET /v1/family": [204, null],
   "GET /v1/invites": [200, { items: [], next_cursor: null }],
   "GET /v1/family/guardian-consents": [200, { items: [] }],
-  "POST /v1/learners": (b) => [201, { learner_id: KID, kind: "child", display_name: (b as { display_name: string }).display_name, age_band: "6-9", is_active: false, onboarding_completed: false }],
+  "POST /v1/learners": (b) => [201, { learner_id: KID, kind: "child", display_name: (b as { display_name: string }).display_name, age_band: "6-9", is_active: false, onboarding_completed: false, voice_consent: false }],
   "PUT /v1/profile/security/pin": [200, security(true)],
   ...extra,
 });

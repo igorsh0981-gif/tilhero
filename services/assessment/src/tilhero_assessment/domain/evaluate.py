@@ -6,7 +6,8 @@
    принимается вовсе (в запросе её нет — только ответы ученика);
 3. свободный текст ученика (ролевая ситуация в режиме текста, открытый ответ; не дети) → `independent_evaluator`
    через ai-gateway; ИИ необязателен;
-4. расчёт (`compute`) по правилам `rules` + наложение баллов оценщика;
+4. расчёт (`compute`) по правилам `rules` + наложение баллов оценщика (чтение — только правила: вопросы по ключам
+   версии текста, встроенная рубрика `reading-comprehension`, practice_only);
 5. запись под блокировками ученика и сессии (повторная проверка гонки) + `assessment.completed.v1` (outbox).
 """
 
@@ -32,6 +33,7 @@ from tilhero_assessment.schemas import EvaluationRequestIn
 from tilhero_common.errors import ApiError, conflict, unavailable, unprocessable
 
 OPEN_ANSWER_TURN = "OA1"
+PRACTICE_ONLY_KINDS = frozenset({"review", "reading"})
 OPEN_ANSWER_PROMPT_TURN = "Q1"
 
 
@@ -52,7 +54,7 @@ def content_invalid() -> ApiError:
 class Plan:
     """Что оценивается — только по версиям catalog."""
 
-    content: str  # lesson | scenario | media
+    content: str  # lesson | scenario | media | reading
     refs: list[dict[str, Any]]
     rubric: rules.Rubric
     rubric_bands: dict[str, list[dict[str, Any]]]
@@ -102,7 +104,11 @@ async def resolve(gateway: ContentGateway, req: EvaluationRequestIn) -> Plan:
         "media": media_form,
         "review": (lesson_form and count("scenario") <= 1) or media_form,
     }
-    if count("rubric") != 1 or not shapes[req.kind]:
+    if req.kind == "reading":
+        # спринт 5: только текст для чтения; рубрика встроенная (у ReadingPayload её нет)
+        if count("reading") != 1 or len(by_kind) != 1:
+            raise refs_invalid("refs_shape", kind=req.kind)
+    elif count("rubric") != 1 or count("reading") != 0 or not shapes[req.kind]:
         raise refs_invalid("refs_shape", kind=req.kind)
 
     fetched = await asyncio.gather(*(gateway.version(r["kind"], r["key"], r["version"]) for r in refs))
@@ -112,6 +118,20 @@ async def resolve(gateway: ContentGateway, req: EvaluationRequestIn) -> Plan:
     def one(kind: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
         items = by_kind.get(kind, [])
         return (items[0], payloads[(kind, items[0]["key"])]) if items else None
+
+    if req.kind == "reading":
+        _, text = one("reading")  # type: ignore[misc]
+        try:
+            key_items = {k.item_id: k for k in rules.reading_key_items(text)}
+            rubric_r = rules.READING_RUBRIC
+            return Plan(content="reading", refs=refs, rubric=rubric_r,
+                        rubric_bands={c.code: c.bands for c in rubric_r.criteria}, key_items=key_items,
+                        evaluate_all=True, skills=[], level=str(text.get("level", "A1")), goal=None, completion=None,
+                        outcomes=None)
+        except rules.ContentInvalid:
+            raise content_invalid() from None
+        except (KeyError, TypeError, AttributeError):
+            raise content_invalid() from None
 
     rubric_ref, rubric_payload = one("rubric")  # type: ignore[misc]
     try:
@@ -229,6 +249,9 @@ def validate_request(req: EvaluationRequestIn, plan: Plan) -> None:
         raise unprocessable("TURNS_INVALID", "Повторяющийся turn_id", {"reason": "duplicate_turn"})
     if plan.content == "media" and (req.turns or req.roleplay is not None):
         raise unprocessable("TURNS_INVALID", "У медиа нет ролевой ситуации", {"reason": "no_roleplay"})
+    if plan.content == "reading" and (req.turns or req.roleplay is not None or req.open_answer is not None):
+        # чтение — только закрытые вопросы: свободного текста ученика (и оценщика ИИ) нет
+        raise unprocessable("TURNS_INVALID", "У чтения только закрытые вопросы", {"reason": "closed_only"})
     if req.roleplay is not None and req.roleplay.outcome is not None and plan.outcomes is not None \
             and req.roleplay.outcome not in plan.outcomes:
         raise unprocessable("OUTCOME_INVALID", "У сценария нет такого исхода", {"outcome": req.roleplay.outcome})
@@ -321,8 +344,9 @@ def compute(req: EvaluationRequestIn, plan: Plan, ai: EvaluatorResult | None, *,
     weighted, passed, evaluated = rules.verdict(plan.rubric, scores)
     if ai is not None and ai.status != "ok":
         status = "partial" if evaluated >= 2 else "pending_review"
-    elif evaluated < 2:
-        # §3.2 п.4: insufficient_evidence — только когда оценённых критериев меньше двух
+    elif evaluated < rules.min_evaluated(plan.rubric):
+        # §3.2 п.4: insufficient_evidence — только когда оценённых критериев меньше двух (у рубрики чтения — нет ни
+        # одного: вопросов нет)
         status, weighted, passed = "insufficient_evidence", None, None
     elif ai_insufficient:
         # ревью R1-01: оценщику не хватило доказательств в свободном тексте — его критерии null, но правила оценили
@@ -331,7 +355,8 @@ def compute(req: EvaluationRequestIn, plan: Plan, ai: EvaluatorResult | None, *,
         status = "partial"
     else:
         status = "ok"
-    practice_only = req.practice_only or req.kind == "review"
+    # повтор и чтение — тренировка без влияния на освоение (исходов навыков нет)
+    practice_only = req.practice_only or req.kind in PRACTICE_ONLY_KINDS
     outcomes = [] if practice_only else rules.skill_outcomes(plan.skills, graded, passed)
     items = [{"item_id": g.item.item_id, "skill_id": g.item.skill_id, "type": g.item.type, "correct": g.correct,
               "hinted": g.hinted, "answered": g.answered, "prompt_en": g.item.prompt_en, "your_answer": g.your_answer,

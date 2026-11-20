@@ -21,6 +21,11 @@
   Пройденный без зачёта урок, исправленный переоценкой, уходит из «повторить», и наоборот.
 Актуальна последняя оценка цепочки сессии (created_at); повтор события (inbox) и повторная публикация — без изменений.
 
+Спринт 5 (INTERNAL_API спринта 5 §6, AT-59): kind `reading` (вопросы к тексту) — занятие `practice`;
+`memory.review.completed.v1` (издатель — только memory, completed | expired) — занятие `review`: минуты из события,
+`local_date` — дата `finished_at` в поясе плана, одно занятие на сессию повторения (ключ `review/<session_id>`),
+0 минут не засчитывается. Серия, пропуски и напоминания учитывают его как любое занятие.
+
 Ручная активность Mini App (`POST /internal/v1/me/activities`, спринт 1) остаётся для совместимости.
 """
 
@@ -41,10 +46,13 @@ from tilhero_learning_plan.domain import schedule as sch
 from tilhero_learning_plan.domain.plans import ACTIVITY_RECORDED, lock_user
 from tilhero_learning_plan.models import Activity, CompletedLesson, DeletedUser, LessonEvaluation, Plan
 
-# kind сессии lessons → kind занятия (bff.ts SessionKind; review — повтор ошибок без влияния на освоение)
-ACTIVITY_KIND: Final = {"lesson": "lesson", "scenario": "practice", "media": "practice", "review": "practice"}
+# kind сессии lessons → kind занятия (bff.ts SessionKind; review — повтор ошибок без влияния на освоение;
+# спринт 5: reading — вопросы к тексту, практика)
+ACTIVITY_KIND: Final = {"lesson": "lesson", "scenario": "practice", "media": "practice", "review": "practice",
+                        "reading": "practice"}
 MAX_ACTIVITY_MINUTES: Final = 240
 SESSION_KEY_PREFIX: Final = "lesson/"  # «/» нет в Idempotency-Key клиента — ручной ключ не займёт ключ сессии
+REVIEW_KEY_PREFIX: Final = "review/"  # спринт 5: «Повторение дня» memory — одно занятие на сессию повторения
 MAX_CHAIN: Final = 100  # длина цепочки переоценок (защита от зацикливания при протягивании session_id)
 
 
@@ -78,14 +86,43 @@ async def _deleted(session: AsyncSession, user_id: uuid.UUID) -> bool:
     return await session.get(DeletedUser, user_id) is not None
 
 
-async def _local_date(session: AsyncSession, ev: SessionCompleted, default_tz: str) -> date:
-    if ev.local_date is not None:
-        return ev.local_date
-    plan = await session.get(Plan, ev.user_id)
+async def _plan_local_date(session: AsyncSession, user_id: uuid.UUID, at: datetime, default_tz: str) -> date:
+    """Дата момента `at` в часовом поясе плана; плана нет (или зона неверна) — зона по умолчанию."""
+    plan = await session.get(Plan, user_id)
     tz = plan.timezone if plan is not None and sch.is_valid_timezone(plan.timezone) else default_tz
     if not sch.is_valid_timezone(tz):
         tz = sch.FALLBACK_TIMEZONE
-    return sch.local_date(ev.finished_at, sch.zone(tz))
+    return sch.local_date(at, sch.zone(tz))
+
+
+async def _local_date(session: AsyncSession, ev: SessionCompleted, default_tz: str) -> date:
+    if ev.local_date is not None:
+        return ev.local_date
+    return await _plan_local_date(session, ev.user_id, ev.finished_at, default_tz)
+
+
+async def _insert_activity(session: AsyncSession, *, user_id: uuid.UUID, local: date, kind: str, minutes: int,
+                           key: str, session_id: uuid.UUID, at: datetime, producer: str) -> bool:
+    """Занятие по событию сессии (одно на session_id) + learning.activity.recorded.v1. → новая запись."""
+    activity_id = uuid.uuid4()
+    # без цели конфликта: и UNIQUE(user_id, idempotency_key), и частичный уникальный индекс session_id
+    inserted = (await session.execute(
+        insert(Activity).values(
+            activity_id=activity_id, user_id=user_id, local_date=local, kind=kind, minutes=minutes,
+            idempotency_key=key, recorded_at=at, session_id=session_id,
+        ).on_conflict_do_nothing().returning(Activity.activity_id)
+    )).scalar_one_or_none()
+    if inserted is None:
+        return False
+    await emit(session, ACTIVITY_RECORDED, {
+        "user_id": str(user_id),
+        "activity_id": str(activity_id),
+        "local_date": local.isoformat(),
+        "kind": kind,
+        "minutes": minutes,
+        "recorded_at": iso(at),
+    }, producer=producer)
+    return True
 
 
 async def record_session(session: AsyncSession, ev: SessionCompleted, *, default_tz: str,
@@ -94,26 +131,10 @@ async def record_session(session: AsyncSession, ev: SessionCompleted, *, default
     if await _deleted(session, ev.user_id):
         return Recorded(False, False)
     local = await _local_date(session, ev, default_tz)
-    kind = ACTIVITY_KIND[ev.kind]
-    minutes = max(0, min(ev.minutes, MAX_ACTIVITY_MINUTES))
-    activity_id = uuid.uuid4()
-    # без цели конфликта: и UNIQUE(user_id, idempotency_key), и частичный уникальный индекс session_id
-    inserted = (await session.execute(
-        insert(Activity).values(
-            activity_id=activity_id, user_id=ev.user_id, local_date=local, kind=kind, minutes=minutes,
-            idempotency_key=f"{SESSION_KEY_PREFIX}{ev.session_id}", recorded_at=ev.finished_at,
-            session_id=ev.session_id,
-        ).on_conflict_do_nothing().returning(Activity.activity_id)
-    )).scalar_one_or_none()
-    if inserted is not None:
-        await emit(session, ACTIVITY_RECORDED, {
-            "user_id": str(ev.user_id),
-            "activity_id": str(activity_id),
-            "local_date": local.isoformat(),
-            "kind": kind,
-            "minutes": minutes,
-            "recorded_at": iso(ev.finished_at),
-        }, producer=producer)
+    inserted = await _insert_activity(
+        session, user_id=ev.user_id, local=local, kind=ACTIVITY_KIND[ev.kind],
+        minutes=max(0, min(ev.minutes, MAX_ACTIVITY_MINUTES)), key=f"{SESSION_KEY_PREFIX}{ev.session_id}",
+        session_id=ev.session_id, at=ev.finished_at, producer=producer)
     lesson = False
     if ev.kind == "lesson" and ev.lesson_id:
         row = (await session.execute(
@@ -128,7 +149,32 @@ async def record_session(session: AsyncSession, ev: SessionCompleted, *, default
         if ev.evaluation_id is not None:
             await _propagate(session, ev.user_id, ev.session_id, [ev.evaluation_id])
         await _apply_latest(session, ev.user_id, ev.session_id)
-    return Recorded(inserted is not None, lesson)
+    return Recorded(inserted, lesson)
+
+
+# ---------------------------------------------------------------- «Повторение дня» memory (спринт 5)
+
+
+@dataclass(frozen=True)
+class ReviewCompleted:
+    session_id: uuid.UUID
+    user_id: uuid.UUID
+    minutes: int
+    finished_at: datetime
+
+
+async def record_review(session: AsyncSession, ev: ReviewCompleted, *, default_tz: str, producer: str) -> bool:
+    """memory.review.completed.v1 (completed | expired) → занятие kind `review`: минуты из события, `local_date` —
+    дата `finished_at` в поясе плана. Идемпотентно по session_id. 0 минут — не занятие (день не засчитывается).
+    → новая запись."""
+    if ev.minutes <= 0:
+        return False
+    if await _deleted(session, ev.user_id):
+        return False
+    local = await _plan_local_date(session, ev.user_id, ev.finished_at, default_tz)
+    return await _insert_activity(
+        session, user_id=ev.user_id, local=local, kind="review", minutes=min(ev.minutes, MAX_ACTIVITY_MINUTES),
+        key=f"{REVIEW_KEY_PREFIX}{ev.session_id}", session_id=ev.session_id, at=ev.finished_at, producer=producer)
 
 
 # ---------------------------------------------------------------- оценки уроков (R1-05)

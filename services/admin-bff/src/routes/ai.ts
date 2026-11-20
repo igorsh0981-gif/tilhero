@@ -40,7 +40,7 @@ import {
   publicAgentRow,
 } from "../contractAi.js";
 import type { BffContext } from "../context.js";
-import { hasPermission, idempotencyKeyOf, passReplayed, staffOf, validationError, type App, type StaffAuth } from "../http.js";
+import { hasPermission, idempotencyKeyOf, ifMatchOf, passReplayed, staffOf, type App, type StaffAuth } from "../http.js";
 import { requirePermission, requireStepUp } from "../rbac.js";
 import { NO_CONTENT } from "../responses.js";
 import {
@@ -55,7 +55,6 @@ import {
   EMERGENCY_STOP,
   GOLDEN_CASE_CREATE,
   GOLDEN_CASE_PATCH,
-  IF_MATCH_RE,
   LIMIT_Q,
   MODEL_ID,
   MODEL_UPDATE,
@@ -82,13 +81,6 @@ const EMPTY = obj({});
 
 type AgentP = { agentId: string };
 type VersionP = AgentP & { v: string };
-
-/** If-Match черновика (updated_at версии) → ai-gateway как есть; неверный формат → 422 до домена. */
-function ifMatchOf(raw: string | string[] | undefined): Record<string, string> {
-  if (raw === undefined) return {};
-  if (typeof raw !== "string" || !IF_MATCH_RE.test(raw)) throw validationError("if-match", "Некорректный If-Match", "headers");
-  return { "if-match": raw };
-}
 
 export function aiRoutes(app: App, ctx: BffContext): void {
   const agentPath = (p: AgentP) => `${BASE}/agents/${p.agentId}`;

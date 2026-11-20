@@ -220,6 +220,7 @@ const CARD: SessionCard = {
     lesson_id: "l-01-greetings",
     scenario_id: null,
     asset_id: null,
+    reading_id: null,
     level: "A1",
     status: "completed",
     outcome: "success",

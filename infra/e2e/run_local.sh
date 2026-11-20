@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TilHero — сквозной локальный стенд спринтов 1–3: все сервисы на реальных PG/Redis/NATS + мок Telegram Bot API.
+# TilHero — сквозной локальный стенд спринтов 1–5: все сервисы на реальных PG/Redis/NATS + мок Telegram Bot API.
 # Перенесён из aievent (infra/e2e/run_local.sh) — только то, что нужно TilHero, без туристического контура.
 #
 #   infra/e2e/run_local.sh up        — ключи внутреннего JWT (Ed25519 на издателя, как в prod), bootstrap ролей БД
@@ -13,6 +13,10 @@
 #                                      (спринт 3: контент, диагностика, план, практика — Mini App и админка)
 #   infra/e2e/run_local.sh lessons   — сброс учёток admin-identity + up + только infra/e2e/scenario_lessons.py
 #                                      (спринт 4: урок, практика, оценка, апелляции, агенты ИИ, затраты; ИИ — fake)
+#   infra/e2e/run_local.sh memory    — сброс учёток admin-identity + перезапуск memory (окно напоминания стенда) + up +
+#                                      только infra/e2e/scenario_memory.py (спринт 5: словарь, «Повторение дня» и FSRS,
+#                                      проверки удержания, чтение и перевод по тапу, произношение, вечернее напоминание,
+#                                      «Память» и словарь курса в админке, сага; ИИ и речь — fake)
 #   infra/e2e/run_local.sh ui [TGID] — дополнительно Mini App (vite :5173) с VITE_DEV_INIT_DATA для Telegram ID TGID
 #   infra/e2e/run_local.sh status    — состояние процессов и /health/ready
 #   infra/e2e/run_local.sh restart [name] — перезапустить один сервис (после правки кода) или всё
@@ -25,6 +29,10 @@
 # контент (спринт 3): catalog 8110 (сид курса, сценариев и медиа — миграцией), diagnostics 8111 (сид тестов — миграцией).
 # catalog:tick (истечение прав медиа) на стенде вызывает сценарий с E2E_SCHEDULER_TOKEN, как n8n.
 # урок и оценка (спринт 4): ai-gateway 8114 (провайдер fake; E2E_AI_PROVIDER), assessment 8113, lessons 8112.
+# память (спринт 5): memory 8116; memory:tick (истечение сессий, вечернее напоминание, проверки удержания) на стенде
+# вызывает сценарий с E2E_SCHEDULER_TOKEN, как n8n `memory-tick`. Окно напоминания стенда — 60 мин (prod 15,
+# E2E_MEMORY_REMINDER_WINDOW_MINUTES): поясов со смещением :15 нет, и в UTC-минуты 45–59 (и многие другие) пояса, где
+# сейчас 19:00–19:14, не существует — сценарий выбирает пояс, где сейчас 19:xx (внутри prod-окна, если такой есть).
 # Сценарий спринта 2 входит bootstrap-учёткой admin-identity (временный пароль → смена → TOTP), а bootstrap срабатывает
 # только при старте admin-identity и только без активного super_admin, — поэтому `test` и `admin` перед прогоном
 # сбрасывают сотрудников и заявки admin-identity (матрица ролей — сид миграции — остаётся) и их ключи Redis (reset_admin).
@@ -94,6 +102,7 @@ PY_SERVICES=(
   "assessment|services/assessment|tilhero_assessment.main:app|8113|assessment"
   "lessons|services/lessons|tilhero_lessons.main:app|8112|lessons"
   "tts|services/tts|tilhero_tts.main:app|8115|"
+  "memory|services/memory|tilhero_memory.main:app|8116|memory"
 )
 
 log() { printf '\033[1;34m[e2e]\033[0m %s\n' "$*"; }
@@ -145,7 +154,8 @@ svc_env() {
     diagnostics)
       env="$env CATALOG_URL=http://127.0.0.1:8110" ;;
     ai-gateway)  # стенд — детерминированный fake-провайдер; ключ провайдера не нужен
-      env="$env AI_PROVIDER=${E2E_AI_PROVIDER:-fake} AI_ALLOW_FAKE_TEST_PUBLISH=true" ;;
+      # спринт 5: речь — fake (без ключа Azure функция была бы скрыта)
+      env="$env AI_PROVIDER=${E2E_AI_PROVIDER:-fake} AI_ALLOW_FAKE_TEST_PUBLISH=true SPEECH_PROVIDER=${E2E_SPEECH_PROVIDER:-fake}" ;;
     tts)  # стенд — fake-синтез (детерминированный MP3 без моделей Piper); prod — Piper с голосами в образе
       env="$env TTS_ENGINE=fake" ;;
     assessment)  # SCHEDULER_TOKEN — вход n8n assessment-tick (стирание текста апелляций по сроку, R3-04)
@@ -153,6 +163,11 @@ svc_env() {
     lessons)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 AI_GATEWAY_URL=http://127.0.0.1:8114"
       env="$env ASSESSMENT_URL=http://127.0.0.1:8113 LEARNING_PLAN_URL=http://127.0.0.1:8102 DIAGNOSTICS_URL=http://127.0.0.1:8111" ;;
+    memory)  # спринт 5: SCHEDULER_TOKEN — вход n8n memory-tick (на стенде tick вызывает сценарий)
+      env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 ASSESSMENT_URL=http://127.0.0.1:8113"
+      env="$env AI_GATEWAY_URL=http://127.0.0.1:8114 IDENTITY_CONSENT_URL=http://127.0.0.1:8101"
+      # окно вечернего напоминания стенда (prod 15 мин): сценарий подбирает пояс, где сейчас 19:xx (см. шапку)
+      env="$env REMINDER_WINDOW_MINUTES=${E2E_MEMORY_REMINDER_WINDOW_MINUTES:-60}" ;;
     social)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN INVITE_TOKEN_KEY=$E2E_INVITE_TOKEN_KEY"
       env="$env TELEGRAM_APP_LINK=$E2E_TELEGRAM_APP_LINK IDENTITY_CONSENT_URL=http://127.0.0.1:8101" ;;
@@ -268,6 +283,7 @@ up() {
     NOTIFICATIONS_URL=http://127.0.0.1:8104 EXPERIENCE_URL=http://127.0.0.1:8106 SOCIAL_URL=http://127.0.0.1:8109 \
     CATALOG_URL=http://127.0.0.1:8110 DIAGNOSTICS_URL=http://127.0.0.1:8111 \
     LESSONS_URL=http://127.0.0.1:8112 ASSESSMENT_URL=http://127.0.0.1:8113 TTS_URL=http://127.0.0.1:8115 \
+    MEMORY_URL=http://127.0.0.1:8116 \
     RATE_LIMIT_SESSION_IP_PER_MIN="${E2E_RATE_LIMIT_SESSION_IP_PER_MIN:-500}" \
     RATE_LIMIT_USER_PER_MIN="${E2E_RATE_LIMIT_USER_PER_MIN:-600}" \
     RATE_LIMIT_PUBLIC_IP_PER_MIN="${E2E_RATE_LIMIT_PUBLIC_IP_PER_MIN:-600}" \
@@ -286,6 +302,7 @@ up() {
     AUDIT_URL=http://127.0.0.1:8105 EXPERIENCE_URL=http://127.0.0.1:8106 \
     CATALOG_URL=http://127.0.0.1:8110 DIAGNOSTICS_URL=http://127.0.0.1:8111 \
     AI_GATEWAY_URL=http://127.0.0.1:8114 LESSONS_URL=http://127.0.0.1:8112 ASSESSMENT_URL=http://127.0.0.1:8113 \
+    MEMORY_URL=http://127.0.0.1:8116 \
     RATE_LIMIT_LOGIN_IP_PER_MIN="${E2E_RATE_LIMIT_LOGIN_IP_PER_MIN:-60}" \
     RATE_LIMIT_AUTH_STEP_IP_PER_MIN="${E2E_RATE_LIMIT_AUTH_STEP_IP_PER_MIN:-120}" \
     npx tsx src/main.ts
@@ -351,7 +368,7 @@ stop_one() {
 
 stop() {
   local f
-  for f in miniapp admin-bff telegram-bff tts lessons assessment ai-gateway diagnostics catalog user-admin admin-identity notifications telegram-bot-gateway social support \
+  for f in miniapp admin-bff telegram-bff memory tts lessons assessment ai-gateway diagnostics catalog user-admin admin-identity notifications telegram-bot-gateway social support \
            learning-plan identity-consent experience-config audit mock-telegram; do
     stop_one "$f"
   done
@@ -390,13 +407,19 @@ case "${1:-up}" in
     if [ -f infra/e2e/scenario_lessons.py ]; then
       echo; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_lessons.py || rc=1
     fi
+    # сценарий спринта 5 — последним, со свежей bootstrap-учёткой и memory с окном напоминания стенда
+    if [ -f infra/e2e/scenario_memory.py ]; then
+      echo; reset_admin; stop_one memory; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_memory.py || rc=1
+    fi
     exit $rc ;;
   content) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_content.py "$@" ;;
   lessons) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_lessons.py "$@" ;;  # уборка — в шаге L00
+  # memory перезапускается: окно напоминания стенда (REMINDER_WINDOW_MINUTES) применяется только при старте процесса
+  memory) shift; reset_admin; stop_one memory; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_memory.py "$@" ;;  # уборка — в шаге M00
   admin) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_admin.py "$@" ;;  # уборка — в шаге A00
   stop|down) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi ;;
   restart) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi; up ;;
   status) status ;;
-  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|content [аргументы]|lessons [аргументы]|ui [tg_id]|status|stop [name]|restart [name]"
+  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|content [аргументы]|lessons [аргументы]|memory [аргументы]|ui [tg_id]|status|stop [name]|restart [name]"
      exit 2 ;;
 esac

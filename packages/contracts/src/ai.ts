@@ -54,7 +54,8 @@ export type SessionKind = "lesson" | "scenario" | "media" | "review" | "reading"
 export type AiSessionKind = SessionKind | "memory";
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Вызов агента: POST /internal/v1/agents/{agent_id}/invoke (вызывающие lessons, assessment)
+// Вызов агента: POST /internal/v1/agents/{agent_id}/invoke (вызывающие lessons, assessment; memory — только
+// teaching_coach с gloss_word, а lessons и assessment gloss_word вызывать не могут — 403 CALLER_NOT_ALLOWED)
 // ---------------------------------------------------------------------------------------------------------------------
 
 export interface AgentInvokeRequest<C = AgentContext> {

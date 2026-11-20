@@ -42,6 +42,7 @@ from tilhero_identity.schemas import (
     SecurityState,
     SettingsPatch,
     TelegramLoginRequest,
+    VoiceConsentRequest,
 )
 from tilhero_identity.service import IdentityService
 
@@ -121,6 +122,14 @@ async def patch_learner(
     learner_id: uuid.UUID, body: LearnerPatch, user_id: uuid.UUID = Me, svc: IdentityService = Svc
 ) -> LearnerDetail:
     return await svc.patch_learner(user_id, learner_id, body)
+
+
+@router.put("/me/learners/{child_id}/voice-consent", response_model=LearnerDetail)
+async def set_child_voice_consent(
+    child_id: uuid.UUID, body: VoiceConsentRequest, user_id: uuid.UUID = Me, svc: IdentityService = Svc
+) -> LearnerDetail:
+    """Спринт 5: согласие опекуна на запись голоса ребёнка (только аккаунт 18+ со своим согласием)."""
+    return await svc.set_child_voice_consent(user_id, child_id, body.granted)
 
 
 # ---------- согласие родителя для 14–17 ----------

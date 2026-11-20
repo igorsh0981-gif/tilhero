@@ -112,13 +112,15 @@ def audit_payload(actor: Actor | None, action: str, object_type: str, object_id:
                   before: dict[str, Any] | None = None, after: dict[str, Any] | None = None,
                   reason: str | None = None, actor_type: str | None = None,
                   actor_id: str | None = None) -> dict[str, Any]:
-    """admin.audit.recorded.v1 — без текстов инструкций и реплик (журнал неизменяем): версии, хеши, числа."""
+    """admin.audit.recorded.v1 — без текстов инструкций и реплик (журнал неизменяем): версии, хеши, числа.
+    Системный автор seed (миграции, публикация сида на dev/e2e-стенде) — actor_type system."""
+    system_actor = actor is None or actor.id == SEED_ACTOR_ID
     return {
         "record_id": str(uuid.uuid4()),
         "occurred_at": iso_z(utcnow()),
-        "actor_type": actor_type or ("staff" if actor is not None else "system"),
+        "actor_type": actor_type or ("system" if system_actor else "staff"),
         "actor_id": actor_id or (actor.id[:64] if actor is not None else SYSTEM_ACTOR_ID),
-        "actor_role": (actor.role[:64] if actor is not None else None),
+        "actor_role": (actor.role[:64] if actor is not None and not system_actor else None),
         "action": action,
         "object_type": object_type,
         "object_id": object_id[:200],

@@ -36,6 +36,8 @@ const LangsPage = lazy(() => import("../screens/langs/Langs").then((m) => ({ def
 const AgentsPage = lazy(() => import("../screens/ai/Agents").then((m) => ({ default: m.AgentsPage })));
 const QaPage = lazy(() => import("../screens/ai/Qa").then((m) => ({ default: m.QaPage })));
 const CostsPage = lazy(() => import("../screens/ai/Costs").then((m) => ({ default: m.CostsPage })));
+// sprint 5: «Память и повторения»
+const MemoryPage = lazy(() => import("../screens/memory/MemoryPage").then((m) => ({ default: m.MemoryPage })));
 
 export const APP_VERSION = "admin-web 0.2.0";
 
@@ -46,6 +48,7 @@ function crumbOf(page: PageId | "", id: string | null): string | null {
   if (page === "content") return id.split("/").slice(1).join("/") || null;
   if (page === "qa") return id.startsWith("sessions/") ? id.slice(9, 17) : id.startsWith("appeals/") ? id.slice(8, 16) : null;
   if (page === "agents") return id === "models" ? null : id;
+  if (page === "memory") return null;
   return id;
 }
 
@@ -372,6 +375,10 @@ export function Shell() {
               ) : page === "costs" ? (
                 <Suspense fallback={<Spinner label={t("common.loading")} />}>
                   <CostsPage />
+                </Suspense>
+              ) : page === "memory" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <MemoryPage routeId={route.id} />
                 </Suspense>
               ) : null}
             </ErrorBoundary>

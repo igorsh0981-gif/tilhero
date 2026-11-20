@@ -22,6 +22,8 @@ import type {
   MediaType,
   MediaUse,
   ModulePayload,
+  ReadingPayload,
+  ReadingQuestion,
   RubricCriterion,
   RubricPayload,
   ScenarioPayload,
@@ -32,9 +34,10 @@ import type {
   VersionStatus,
 } from "@tilhero/contracts/content";
 import { analyzeScenario } from "./graph";
+import { formKey, readingWords, wordCount, contains } from "./text";
 
 export type Kind = ContentKind;
-export const KINDS: readonly ContentKind[] = ["course", "skill", "module", "lesson", "rubric", "scenario", "media_asset", "media_exercise"];
+export const KINDS: readonly ContentKind[] = ["course", "skill", "module", "lesson", "rubric", "scenario", "media_asset", "media_exercise", "reading"];
 export const KEY_FIELD: Readonly<Record<ContentKind, string>> = {
   course: "course_id",
   skill: "skill_id",
@@ -44,6 +47,7 @@ export const KEY_FIELD: Readonly<Record<ContentKind, string>> = {
   scenario: "scenario_id",
   media_asset: "asset_id",
   media_exercise: "exercise_id",
+  reading: "reading_id",
 };
 export const BANDS: readonly Band[] = ["A0", "A1", "A2", "B1", "B2"];
 export const AUDIENCES: readonly AudienceSegment[] = ["kids", "teens", "adults"];
@@ -69,6 +73,13 @@ export const LICENSES_BY_ORIGIN: Readonly<Record<MediaOrigin, readonly MediaRigh
 };
 export const MEDIA_USES: readonly MediaUse[] = ["listen", "show_transcript", "exercises", "dictionary", "translation"];
 export const EXERCISE_TYPES: readonly MediaExercisePayload["type"][] = ["comprehension", "gap_fill", "order_lines", "phrase_meaning", "shadowing", "roleplay"];
+/** sprint 5: questions of a reading text (content.ts ReadingQuestionType) */
+export const READING_QUESTION_TYPES: readonly ReadingQuestion["type"][] = ["single_choice", "true_false", "gap_fill"];
+export const VOICES: readonly ReadingPayload["voice"][] = ["en-GB", "en-US"];
+/** the rules of a reading text (catalog validation.py, INTERNAL_API §2.1) */
+export const READING = { wordsMin: 60, wordsMax: 250, sentenceWordsMax: 30, sentenceMax: 240, paragraphsMax: 8, sentencesMax: 8, glossaryMin: 3, glossaryMax: 20, glossMax: 80, noteMax: 160, questionsMin: 3, questionsMax: 8, minutesMin: 3, minutesMax: 15, skillsMax: 3 } as const;
+export const SENTENCE_ID_RE = /^[a-z0-9]{1,8}$/;
+export const PARAGRAPH_ID_RE = /^[a-z0-9][a-z0-9_-]{0,15}$/;
 export const STATUSES: readonly VersionStatus[] = ["draft", "in_review", "approved", "published", "suspended", "archived"];
 export const MEDIA_MIN_S = 5;
 export const MEDIA_MAX_S = 90;
@@ -387,6 +398,83 @@ export function validateExercise(p: MediaExercisePayload): Issue[] {
   return [...localeIssues(p), ...c.out];
 }
 
+/* ---------------------------------------------------------------- reading (sprint 5) */
+
+/** Checks of a reading text in the catalog's order and codes (READING_WORDS, SENTENCE_TOO_LONG, GLOSSARY_NOT_IN_TEXT, TEXT_TOO_LONG, …). */
+export function validateReading(p: ReadingPayload): Issue[] {
+  const c = new Checks();
+  const R = READING;
+  c.audience(p.audience);
+  if (p.audience.includes("kids") && (p.audience.length !== 1 || p.audience[0] !== "kids")) c.add("payload.audience", "KIDS_CONTENT");
+  c.count("payload.skill_ids", p.skill_ids.length, 0, R.skillsMax);
+  c.unique("payload.skill_ids", p.skill_ids);
+  if (!Number.isInteger(p.est_minutes) || p.est_minutes < R.minutesMin || p.est_minutes > R.minutesMax) c.add("payload.est_minutes", "COUNT_OUT_OF_RANGE");
+  // text
+  c.count("payload.paragraphs", p.paragraphs.length, 1, R.paragraphsMax);
+  c.unique("payload.paragraphs", p.paragraphs.map((x) => x.p_id));
+  const seen = new Set<string>();
+  p.paragraphs.forEach((para, i) => {
+    const path = `payload.paragraphs[${i}]`;
+    if (!PARAGRAPH_ID_RE.test(para.p_id)) c.add(path, "SCHEMA_INVALID");
+    c.count(`${path}.sentences`, para.sentences.length, 1, R.sentencesMax);
+    para.sentences.forEach((s, j) => {
+      const sp = `${path}.sentences[${j}]`;
+      if (!SENTENCE_ID_RE.test(s.s_id)) c.add(`${sp}.s_id`, "SCHEMA_INVALID");
+      else if (seen.has(s.s_id)) c.add(`${sp}.s_id`, "DUPLICATE_ID");
+      seen.add(s.s_id);
+      c.required(`${sp}.text_en`, s.text_en);
+      if (s.text_en.length > R.sentenceMax) c.add(`${sp}.text_en`, "TEXT_TOO_LONG");
+      if (wordCount(s.text_en) > R.sentenceWordsMax) c.add(`${sp}.text_en`, "SENTENCE_TOO_LONG");
+    });
+  });
+  const words = readingWords(p);
+  if (words < R.wordsMin || words > R.wordsMax) c.add("payload.paragraphs", "READING_WORDS");
+  // glossary
+  c.count("payload.glossary", p.glossary.length, R.glossaryMin, R.glossaryMax);
+  const sentences = p.paragraphs.flatMap((x) => x.sentences.map((s) => s.text_en));
+  const keys = new Set<string>();
+  p.glossary.forEach((g, i) => {
+    const path = `payload.glossary[${i}]`;
+    c.required(`${path}.en`, g.en);
+    if (g.en.length > 60) c.add(`${path}.en`, "TEXT_TOO_LONG");
+    const key = formKey(g.en);
+    if (key && keys.has(key)) c.add(`${path}.en`, "DUPLICATE_ID");
+    keys.add(key);
+    if (key && !sentences.some((t) => contains(t, g.en))) c.add(`${path}.en`, "GLOSSARY_NOT_IN_TEXT");
+    for (const l of ["ru", "uz"] as const) {
+      if (g.gloss[l].length > R.glossMax) c.add(`${path}.gloss.${l}`, "TEXT_TOO_LONG");
+      if (g.note && g.note[l].length > R.noteMax) c.add(`${path}.note.${l}`, "TEXT_TOO_LONG");
+    }
+  });
+  // questions
+  c.count("payload.questions", p.questions.length, R.questionsMin, R.questionsMax);
+  c.unique("payload.questions", p.questions.map((q) => q.question_id));
+  p.questions.forEach((q, i) => {
+    const path = `payload.questions[${i}]`;
+    c.required(`${path}.prompt_en`, q.prompt_en);
+    if (q.prompt_en.length > 200) c.add(`${path}.prompt_en`, "TEXT_TOO_LONG");
+    const a = q.answer;
+    if (q.type === "single_choice") {
+      if (q.options.length < 3 || q.options.length > 4 || q.options.some((o) => !o.trim()) || new Set(q.options).size !== q.options.length) c.add(`${path}.options`, "ANSWER_INVALID");
+      if (typeof a !== "number" || a < 0 || a >= Math.max(q.options.length, 1)) c.add(`${path}.answer`, "ANSWER_INVALID");
+    } else if (q.type === "true_false") {
+      if (q.options.join("|") !== "True|False") c.add(`${path}.options`, "ANSWER_INVALID");
+      if (typeof a !== "number" || a < 0 || a > 1) c.add(`${path}.answer`, "ANSWER_INVALID");
+    } else {
+      if (q.options.length) c.add(`${path}.options`, "ANSWER_INVALID");
+      if (!Array.isArray(a) || !a.length || a.some((x) => !x.trim())) c.add(`${path}.answer`, "ANSWER_INVALID");
+    }
+  });
+  return [...localeIssues(p), ...c.out];
+}
+
+/** Next free id of the form `<prefix><n>` (s_id / p_id / question_id are stable between versions: never renumbered). */
+export function nextId(prefix: string, taken: readonly string[]): string {
+  const re = new RegExp(`^${prefix}(\\d+)$`);
+  const max = taken.reduce((m, x) => Math.max(m, Number(re.exec(x)?.[1] ?? 0)), 0);
+  return `${prefix}${max + 1}`;
+}
+
 /* ---------------------------------------------------------------- course, module, skill */
 
 /** A cycle of prerequisites through `me` (me → … → me), else null. `graph` — prerequisites of the other skills. */
@@ -452,6 +540,8 @@ export function validatePayload(kind: ContentKind, p: unknown, ctx: ValidateCtx 
       return validateModule(p as ModulePayload);
     case "course":
       return validateCourse(p as CoursePayload);
+    case "reading":
+      return validateReading(p as ReadingPayload);
   }
 }
 
@@ -551,6 +641,20 @@ export function emptyPayload(kind: ContentKind, key: string, x: NewCtx = {}): Re
       } satisfies MediaPayload;
     case "media_exercise":
       return { exercise_id: key, asset_id: x.asset_id ?? "", type: "comprehension", skill_id: "", level: "A1", instruction: L(), prompt_en: "", options: ["", ""], answer: 0, line_index: null, rubric_id: null } satisfies MediaExercisePayload;
+    case "reading":
+      return {
+        reading_id: key,
+        title: L(),
+        level: "A1",
+        audience: ["teens", "adults"],
+        topics: [],
+        skill_ids: [],
+        paragraphs: [{ p_id: "p1", sentences: [{ s_id: "s1", text_en: "", gloss: L() }] }],
+        glossary: [],
+        questions: [],
+        voice: "en-GB",
+        est_minutes: 5,
+      } satisfies ReadingPayload;
   }
 }
 

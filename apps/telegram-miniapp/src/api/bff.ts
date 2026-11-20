@@ -1,4 +1,22 @@
 import type {
+  AddCardRequest,
+  CardKind,
+  CardStatus,
+  DictionaryCard,
+  DictionaryCardDetail,
+  ErrorJournalItem,
+  MemoryOverview,
+  PronunciationView,
+  ReadingCard,
+  ReadingView,
+  ReviewAnswer,
+  ReviewHint,
+  ReviewSession,
+  ReviewSummary,
+  ReviewTask,
+  ReviewTaskResult,
+  TranslateRequest,
+  WordGloss,
   Appeal,
   EvaluationView,
   LessonCardDetail,
@@ -63,7 +81,7 @@ import type {
   WhatsNewNote,
 } from "@tilhero/contracts/bff";
 import type { SessionKind } from "@tilhero/contracts/ai";
-import type { Localized } from "@tilhero/contracts/content";
+import type { Band, Localized } from "@tilhero/contracts/content";
 import type { ApiClient } from "./client";
 
 export interface ScenarioFilters {
@@ -75,6 +93,13 @@ export interface MediaFilters {
   type?: string | null;
   level?: string | null;
   topic?: string | null;
+}
+
+/** «Словарь»: filters of GET /v1/memory/cards (q — by the English text and the translation, ≤ 60). */
+export interface CardFilters {
+  kind?: CardKind | null;
+  status?: CardStatus | null;
+  q?: string | null;
 }
 
 export interface SupportCategory {
@@ -220,6 +245,41 @@ export function createBff(client: ApiClient) {
     evaluation: (id: string) => get<EvaluationView>(`/v1/evaluations/${enc(id)}`),
     appeal: (id: string, reason: string, key: string) => client.request<Appeal>("POST", `/v1/evaluations/${enc(id)}/appeal`, { body: { reason }, idempotencyKey: key }),
     appeals: () => get<{ items: Appeal[] }>("/v1/appeals"),
+
+    // ---- sprint 5: memory (dictionary, «Повторение дня», error journal, translation by tap, pronunciation), reading ----
+    /** `quiet` — Home and the dictionary card: a failure only hides the card (never «Нет связи») */
+    memoryOverview: (quiet = false) => get<MemoryOverview>("/v1/memory/overview", undefined, quiet),
+    memoryCards: (f: CardFilters, cursor: string | null) => get<Page<DictionaryCard>>("/v1/memory/cards", { kind: f.kind, status: f.status, q: f.q?.trim() || undefined, cursor, limit: 20 }),
+    memoryCard: (id: string) => get<DictionaryCardDetail>(`/v1/memory/cards/${enc(id)}`),
+    /** 201 — a new card, 200 — it was already there (the source is added); one key per «В словарь» tap */
+    addCard: (body: AddCardRequest, key: string) => client.request<DictionaryCard>("POST", "/v1/memory/cards", { body, idempotencyKey: key }),
+    markKnown: (id: string) => client.request<DictionaryCard>("POST", `/v1/memory/cards/${enc(id)}/known`),
+    unmarkKnown: (id: string) => client.request<DictionaryCard>("DELETE", `/v1/memory/cards/${enc(id)}/known`),
+    removeCard: (id: string) => client.request<void>("DELETE", `/v1/memory/cards/${enc(id)}`),
+    memoryErrors: (cursor: string | null) => get<Page<ErrorJournalItem>>("/v1/memory/errors", { cursor, limit: 20 }),
+    /** 201 — a new session, 200 — the active one; 409 NOTHING_TO_REVIEW {next_due_at} */
+    startReviewSession: (key: string) => client.request<ReviewSession>("POST", "/v1/memory/review-sessions", { idempotencyKey: key }),
+    activeReviewSession: (quiet = false) => get<{ session: ReviewSession | null }>("/v1/memory/review-sessions/active", undefined, quiet),
+    reviewSession: (id: string) => get<ReviewSession>(`/v1/memory/review-sessions/${enc(id)}`),
+    reviewTask: (id: string) => get<ReviewTask>(`/v1/memory/review-sessions/${enc(id)}/current`),
+    /** the same answer to the same task is answered the same way — safe to re-send */
+    answerReviewTask: (id: string, taskId: string, body: ReviewAnswer) =>
+      client.request<ReviewTaskResult>("POST", `/v1/memory/review-sessions/${enc(id)}/tasks/${enc(taskId)}`, { body }),
+    reviewHint: (id: string, taskId: string, kind: ReviewHint["kind"]) =>
+      client.request<ReviewHint>("POST", `/v1/memory/review-sessions/${enc(id)}/tasks/${enc(taskId)}/hint`, { body: { kind } }),
+    finishReview: (id: string) => client.request<ReviewSummary>("POST", `/v1/memory/review-sessions/${enc(id)}/finish`),
+    cancelReview: (id: string) => client.request<ReviewSession>("POST", `/v1/memory/review-sessions/${enc(id)}/cancel`),
+    /** only a word of this published text (422 WORD_NOT_IN_CONTENT): the learner's own text is never sent */
+    translate: (body: TranslateRequest) => client.request<WordGloss>("POST", "/v1/memory/translate", { body }),
+    /** the WAV (PCM 16 bit, mono, 16 kHz) goes as the body; the server puts the reference text by `target` */
+    pronounce: (target: string, wav: Blob) =>
+      client.request<PronunciationView>("POST", "/v1/memory/pronunciation", { query: { target }, raw: { body: wav, contentType: "audio/wav" } }),
+    /** a parent (18+) switches the voice recording of a child profile on or off */
+    setChildVoiceConsent: (learnerId: string, granted: boolean) =>
+      client.request<LearnerSummary>("PUT", `/v1/learners/${enc(learnerId)}/voice-consent`, { body: { granted } }),
+    readings: (level: Band | null, cursor: string | null) => get<Page<ReadingCard>>("/v1/practice/readings", { level, cursor, limit: 20 }),
+    reading: (id: string) => get<ReadingView>(`/v1/practice/readings/${enc(id)}`),
+    startReading: (id: string, key: string) => client.request<LessonSession>("POST", `/v1/practice/readings/${enc(id)}/sessions`, { idempotencyKey: key }),
 
     // ---- deletion ----
     requestDeletion: (body: DeletionRequest) => client.request<DeletionResponse>("POST", "/v1/profile/delete-request", { body }),

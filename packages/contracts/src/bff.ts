@@ -846,6 +846,8 @@ export interface LessonSession {
 }
 
 // ---------- Шаги (GET /v1/sessions/{id}/current → LessonStep; авто-продолжение после паузы) ----------
+/** Вопросы к тексту для чтения (спринт 5): single_choice и true_false приходят как single_choice (true_false — варианты
+ *  ["True", "False"]), gap_fill — как gap_fill. */
 export type StepItemType = ControlItemType | "comprehension" | "gap_fill_media" | "order_lines" | "phrase_meaning" | "meaning_check";
 
 export interface StepItem {
@@ -1063,7 +1065,8 @@ export interface DictionaryCard {
   last_reviewed_at: string | null;
   created_at: string;
 }
-/** GET /v1/memory/cards?kind=&status=&q=&cursor= → Page<DictionaryCard> (q — по английскому и переводу, ≤ 60) */
+/** GET /v1/memory/cards?kind=&status=&q=&cursor=&limit= → Page<DictionaryCard> (q — по английскому и переводу, ≤ 60;
+ *  limit необязателен, как у остальных списков; так же /v1/memory/errors и /v1/practice/readings). */
 
 export interface CardSource {
   kind: "lesson" | "media" | "reading" | "scenario" | "evaluation" | "manual";
@@ -1090,6 +1093,7 @@ export interface DictionaryCardDetail extends DictionaryCard {
  *  DELETE /v1/memory/cards/{id}/known → DictionaryCard (вернуть в повторение; срок — сейчас).
  *  DELETE /v1/memory/cards/{id} → 204 (убрать из словаря). */
 export interface AddCardRequest {
+  /** форма как в тексте (сервер проверяет, что она есть в версии контента; лемму и формы берёт из словаря курса) */
   text_en: string; // ≤ 120
   source: ContentRef;
 }
@@ -1129,7 +1133,8 @@ export interface ReviewSession {
   minutes: number;
 }
 
-/** GET /v1/memory/review-sessions/{id}/current → ReviewTask. Ключа ответа нет. */
+/** GET /v1/memory/review-sessions/{id}/current → ReviewTask. Ключа ответа нет. Все задания пройдены →
+ *  409 TASK_NOT_CURRENT {current_task_id: null} — вызвать POST …/finish. */
 export interface ReviewTask {
   task_id: string;
   index: number; // 1-based

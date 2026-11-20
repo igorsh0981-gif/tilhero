@@ -86,6 +86,16 @@ options[], answer: index | string[]}]}`. Проверки: поля и типы,
   переоценкой урока не отменяется. Идемпотентно: оценка записывается в `lesson_evaluations`, повторная публикация
   (новый event_id) — без изменений; оценка, уже заменённая пришедшей раньше переоценкой, записывается без
   применения. `skills.state.changed.v1` (source `lesson`, evidence_id = evaluation_id) — только при изменениях.
+  Спринт 5: kind `reading` (вопросы к тексту) принимается и, как `review`, навыки не меняет (практика).
+- **Проверки удержания** (спринт 5, `domain/retention.py`, INTERNAL_API спринта 5 §1.5, §6, AT-56):
+  `memory.retention.checked.v1` (только от memory; durable `diagnostics.retention`). Только для навыка в
+  `demonstrated`: `stage d30, passed` → `retained` («закреплён»); `consecutive_failures ≥ 2` → `learning`; иначе
+  (d7, первый провал) — без изменений. Результат записывается свидетельством истории карты (source `retention`,
+  ref_id = check_id, positive | negative, время — `checked_at`); состояние — `source = retention`,
+  `confidence = null`, `state_ref = check_id`. Навык не в `demonstrated` — проверка устарела: ни свидетельства, ни
+  перехода. Идемпотентно по check_id (повторная публикация с новым event_id — без изменений).
+  `skills.state.changed.v1` (source `retention`, evidence_id = check_id) — только при переходе. `retained`
+  уроки и переоценки не трогают; диагностика понижает только двумя отрицательными свидетельствами подряд.
 - **Уточнение**: `POST …/results/{id}/followup {area}` — только если область `needs_followup` в последней
   ревизии, ≤ 24 ч после ревизии 1, одно на область; отдельная сессия той же версии и seed (+`followup_items`
   заданий области). Завершение → ревизия N+1 по всем ответам (основная сессия + завершённые уточнения);
@@ -132,7 +142,8 @@ coverage) — `content.read`; `POST /tests/{id}/versions/{v}/publish {reason}` �
 - Потребляет (только от identity-consent): `user.deletion.requested.v1` (сага: сессии, ответы, результаты,
   состояния, свидетельства, проекция, полученные оценки уроков), `user.profile.created.v1` /
   `user.profile.updated.v1` (проекция возраста). Спринт 4 (только от assessment; durable `diagnostics.assessment`):
-  `assessment.completed.v1`, `assessment.reevaluated.v1` → карта навыков по оценкам уроков. Чужой издатель —
+  `assessment.completed.v1`, `assessment.reevaluated.v1` → карта навыков по оценкам уроков. Спринт 5 (только от
+  memory; durable `diagnostics.retention`): `memory.retention.checked.v1` → retained / learning. Чужой издатель —
   предупреждение в логе без user_id, событие подтверждается без действия; payload не по контракту — DLQ.
 
 ## Тесты

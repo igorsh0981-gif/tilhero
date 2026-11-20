@@ -3,7 +3,7 @@ import type { IconName } from "../ui/Icon";
 
 /**
  * Menu sections of TilHero Admin = the ids of the experience-config `admin` seed (layout.menu, 0002_seed.py) and the
- * NAV of the approved prototype (Admin.dc.html): 15 sections in 5 groups. The active admin config decides the order
+ * NAV of the approved prototype (Admin.dc.html): 15 sections in 5 groups, + «memory» of sprint 5. The active admin config decides the order
  * and which sections are switched on; the role decides which of them the staff member sees (RBAC is re-checked by
  * admin-bff and every domain — the menu is UX only).
  */
@@ -11,6 +11,7 @@ export type PageId =
   | "overview"
   | "users"
   | "content"
+  | "memory"
   | "agents"
   | "qa"
   | "costs"
@@ -42,6 +43,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: "users", group: "product", icon: "users", perms: ["users.read"] },
   // sprint 3: course, lessons, scenarios, rubrics, media and rights, learners' requests, review, diagnostics
   { id: "content", group: "product", icon: "book", perms: ["content.read"] },
+  // sprint 5: «Память и повторения» — forgetting analytics (memory.read | dashboard.read, aggregates only) and a
+  // learner's memory (memory.read). Not in the experience-config menu whitelist yet: it follows the config's sections.
+  { id: "memory", group: "product", icon: "trendDown", perms: ["memory.read", "dashboard.read"] },
   // sprint 4: agents and skills (ai.read), dialogue QA (qa.read), AI costs and limits (costs.read)
   { id: "agents", group: "ai", icon: "cpu", perms: ["ai.read"] },
   { id: "qa", group: "ai", icon: "clipboardCheck", perms: ["qa.read"] },

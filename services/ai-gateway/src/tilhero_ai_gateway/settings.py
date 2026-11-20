@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import re
 from functools import lru_cache
-from typing import Literal
+from typing import Final, Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 
 from tilhero_common.settings import ServiceSettings
+
+REGION_RE: Final = re.compile(r"[a-z][a-z0-9]{1,39}")
 
 
 class Settings(ServiceSettings):
@@ -23,6 +26,13 @@ class Settings(ServiceSettings):
     anthropic_api_key: SecretStr | None = None
     # База Messages API (тесты подменяют транспорт httpx; в stage/prod — только https)
     anthropic_base_url: str = "https://api.anthropic.com"
+
+    # Оценка произношения (спринт 5, INTERNAL_API §3.2): azure (prod) | fake (тесты, стенд e2e; в stage/prod запрещён).
+    # Ключ и регион Azure Speech — ТОЛЬКО переменные окружения ai-gateway (в Railway — ссылки на общие переменные
+    # проекта, вводит владелец). Пусто — «не настроено»: speech_available=false, вызовы — unavailable: not_configured.
+    speech_provider: Literal["azure", "fake"] = "azure"
+    azure_speech_key: SecretStr | None = None
+    azure_speech_region: str | None = None
 
     # Каталог сида версий и золотых тестов для миграции 0002 (по умолчанию — migrations/seed; тесты — свой набор)
     seed_dir: str | None = None
@@ -42,11 +52,22 @@ class Settings(ServiceSettings):
     # не больше N золотых прогонов в сутки (по TIMEZONE) на все агенты — прогон на anthropic стоит денег (ревью R1-11)
     golden_runs_daily_limit: int = Field(default=20, ge=1, le=1000)
 
-    @field_validator("anthropic_api_key", mode="before")
+    @field_validator("anthropic_api_key", "azure_speech_key", mode="before")
     @classmethod
     def _strip_key(cls, v: object) -> object:
         if isinstance(v, str):
             v = v.strip()
+            return v or None
+        return v
+
+    @field_validator("azure_speech_region", mode="before")
+    @classmethod
+    def _region(cls, v: object) -> object:
+        """Пустая ссылка Railway (`${{shared.AZURE_SPEECH_REGION}}` до ввода владельцем) — «не задан». Неверный формат
+        не роняет сервис (ИИ уроков не должен страдать из-за необязательной функции): регион считается не заданным
+        (`speech_region` → None), в админке виден введённый текст."""
+        if isinstance(v, str):
+            v = v.strip().lower()
             return v or None
         return v
 
@@ -60,6 +81,8 @@ class Settings(ServiceSettings):
     def _provider_guard(self) -> Settings:
         if self.is_secure_env and self.ai_provider == "fake":
             raise ValueError("AI_PROVIDER=fake is not allowed in stage/prod")
+        if self.is_secure_env and self.speech_provider == "fake":
+            raise ValueError("SPEECH_PROVIDER=fake is not allowed in stage/prod")
         if self.ai_allow_fake_test_publish and self.env not in ("dev", "test"):
             raise ValueError("AI_ALLOW_FAKE_TEST_PUBLISH=true is allowed only with ENV dev|test")
         if not self.anthropic_base_url.startswith(("https://", "http://")):
@@ -77,6 +100,17 @@ class Settings(ServiceSettings):
     def api_key(self) -> str | None:
         """Значение ключа — только для заголовка запроса к провайдеру (никогда в логи и ответы)."""
         return self.anthropic_api_key.get_secret_value() if self.anthropic_api_key is not None else None
+
+    @property
+    def speech_key(self) -> str | None:
+        """Ключ Azure Speech — только для заголовка Ocp-Apim-Subscription-Key (никогда в логи, ответы и БД)."""
+        return self.azure_speech_key.get_secret_value() if self.azure_speech_key is not None else None
+
+    @property
+    def speech_region(self) -> str | None:
+        """Регион Azure (westeurope, eastus2, …) или None — не задан или не похож на регион (тогда речь выключена)."""
+        region = self.azure_speech_region
+        return region if region is not None and REGION_RE.fullmatch(region) else None
 
 
 @lru_cache

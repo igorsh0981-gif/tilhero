@@ -59,7 +59,7 @@ export function SessionCardView({ id, onBack, appealId }: { id: string; onBack: 
   if (!card) return <Spinner label={t("common.loading")} />;
   const s = card.session;
   const latest = latestOf(card);
-  const title = s ? s.title.ru || s.lesson_id || s.scenario_id || s.asset_id || id : id;
+  const title = s ? s.title.ru || s.lesson_id || s.scenario_id || s.asset_id || s.reading_id || id : id;
   return (
     <div className="stack" data-testid="qa-card" data-session={id}>
       <div className="row">
@@ -181,7 +181,7 @@ function SessionBlock({ card }: { card: SessionCard }) {
           <div className="grid2 tight">
             <div>
               <Kv k={t("qa.k.kind")} v={k("sk", s.kind)} />
-              <Kv k={t("qa.k.content")} v={<span className="mono">{s.lesson_id ?? s.scenario_id ?? s.asset_id ?? "—"}</span>} />
+              <Kv k={t("qa.k.content")} v={<span className="mono">{s.lesson_id ?? s.scenario_id ?? s.asset_id ?? s.reading_id ?? "—"}</span>} />
               <Kv k={t("qa.k.started")} v={fmt.dateTime(s.started_at) || "—"} />
               <Kv k={t("qa.k.finished")} v={fmt.dateTime(s.finished_at) || "—"} />
               <Kv k={t("qa.k.minutes")} v={fmt.num(s.minutes)} />

@@ -21,8 +21,10 @@ from tilhero_common.internal_auth import HEADER, InternalAuth, Principal
 log = logging.getLogger("tilhero.assessment.api")
 
 # Оценка — только lessons (sub = ученик `lrn`); оценки и апелляции ученика — только telegram-bff (sub = `lrn`);
+# ошибки оценки для карточек (memory-feed, спринт 5) — только memory (sub = ученик из события);
 # админка — только admin-bff с actor (права — в домене).
 lessons_auth = InternalAuth({"lessons"})
+memory_auth = InternalAuth({"memory"})
 client_auth = InternalAuth({"telegram-bff"})
 staff_auth = InternalAuth({"admin-bff"})
 # Вход планировщика (n8n): внутренний JWT любого сервиса → 403 CALLER_NOT_ALLOWED

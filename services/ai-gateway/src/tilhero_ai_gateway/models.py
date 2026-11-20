@@ -4,7 +4,9 @@
 версии, а также черновик под канарейкой неизменяемы: триггер `agent_versions_guard` (миграция 0001) запрещает менять
 тело и идентичность, допускает только переходы статуса draft → published, published → archived, archived → published
 (откат); удалить можно только черновик не под канарейкой. Роль сервиса не может снять триггер (DDL — у владельца).
-`usage` — только метаданные вызова (без текстов запроса и ответа).
+`usage` — только метаданные вызова (без текстов запроса и ответа); вызов оценки произношения (спринт 5) — та же
+таблица: агент `pronunciation_coach`, провайдер `azure_speech | fake_speech`, длительность аудио `audio_ms` (самого
+аудио нет нигде). `models` — LLM (цена за 1 млн токенов) и речь (цена часа аудио `audio_usd_per_hour`).
 """
 
 from __future__ import annotations
@@ -41,8 +43,21 @@ TS = DateTime(timezone=True)
 AGENT_IDS_SQL = ", ".join(f"'{a}'" for a in AGENT_IDS)
 ID_SQL = "'^[a-z0-9][a-z0-9._-]{1,63}$'"
 HEX64_SQL = "'^[0-9a-f]{64}$'"
-REASONS_SQL = ("'ai_disabled', 'budget_exceeded', 'cost_limit', 'provider_error', 'timeout', 'invalid_output', "
-               "'kids_not_allowed', 'agent_not_active'")
+# причины unavailable / refused (ai.ts AgentUnavailableReason | AgentRefusedReason; спринт 5: + not_configured)
+REASONS_SQL = ("'ai_disabled', 'not_configured', 'budget_exceeded', 'cost_limit', 'provider_error', 'timeout', "
+               "'invalid_output', 'kids_not_allowed', 'agent_not_active'")
+# оценка произношения: вызов состоялся (status ok), но оценки нет (PronunciationResult insufficient_evidence)
+INSUFFICIENT_SQL = "'not_recognized', 'low_confidence', 'incomplete'"
+PROVIDERS_SQL = "'anthropic', 'fake', 'azure_speech', 'fake_speech'"
+SPEECH_PROVIDERS_SQL = "'azure_speech', 'fake_speech'"
+SESSION_KINDS_SQL = "'lesson', 'scenario', 'media', 'review', 'reading', 'memory', 'golden'"
+USAGE_STATUS_REASON_SQL = (
+    f"(status = 'pending' AND reason IS NULL) "
+    f"OR (status = 'ok' AND (reason IS NULL OR reason IN ({INSUFFICIENT_SQL}))) "
+    f"OR (status IN ('unavailable', 'refused') AND reason IN ({REASONS_SQL}))")
+MODELS_KIND_SQL = (
+    f"(provider IN ({SPEECH_PROVIDERS_SQL})) = (audio_usd_per_hour IS NOT NULL) "
+    f"AND (provider NOT IN ({SPEECH_PROVIDERS_SQL}) OR (input_usd_per_mtok = 0 AND output_usd_per_mtok = 0))")
 
 
 class Base(DeclarativeBase):
@@ -76,20 +91,25 @@ class AgentRow(Base):
 
 
 class ModelRow(Base):
-    """Маршрутизация моделей и цены ($ за 1 млн токенов), правка — ai.publish."""
+    """Маршрутизация моделей и цены, правка — ai.publish (снижение — ещё costs.manage). LLM — $ за 1 млн токенов
+    (audio_usd_per_hour NULL); речь (azure_speech | fake_speech, миграция 0004) — $ за час аудио, токенов нет (0)."""
 
     __tablename__ = "models"
     __table_args__ = (
         CheckConstraint(f"model_id ~ {ID_SQL}", name="ck_models_id"),
-        CheckConstraint("provider IN ('anthropic', 'fake')", name="ck_models_provider"),
+        CheckConstraint(f"provider IN ({PROVIDERS_SQL})", name="ck_models_provider"),
         CheckConstraint("input_usd_per_mtok >= 0 AND input_usd_per_mtok <= 1000", name="ck_models_input"),
         CheckConstraint("output_usd_per_mtok >= 0 AND output_usd_per_mtok <= 1000", name="ck_models_output"),
+        CheckConstraint("audio_usd_per_hour IS NULL OR (audio_usd_per_hour >= 0 AND audio_usd_per_hour <= 1000)",
+                        name="ck_models_audio"),
+        CheckConstraint(MODELS_KIND_SQL, name="ck_models_kind"),
     )
 
     model_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     provider: Mapped[str] = mapped_column(String(16), nullable=False)
     input_usd_per_mtok: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
     output_usd_per_mtok: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    audio_usd_per_hour: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     active: Mapped[bool] = mapped_column(Boolean, nullable=False)
     updated_by: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
@@ -267,11 +287,13 @@ class UsageRow(Base):
     __tablename__ = "usage"
     __table_args__ = (
         CheckConstraint("status IN ('pending', 'ok', 'unavailable', 'refused')", name="ck_usage_status"),
-        CheckConstraint(f"reason IS NULL OR reason IN ({REASONS_SQL})", name="ck_usage_reason"),
-        CheckConstraint("(status IN ('pending', 'ok')) = (reason IS NULL)", name="ck_usage_status_reason"),
-        CheckConstraint("provider IN ('anthropic', 'fake')", name="ck_usage_provider"),
-        CheckConstraint("session_kind IS NULL OR session_kind IN ('lesson', 'scenario', 'media', 'review', 'golden')",
+        CheckConstraint(f"reason IS NULL OR reason IN ({REASONS_SQL}, {INSUFFICIENT_SQL})", name="ck_usage_reason"),
+        CheckConstraint(USAGE_STATUS_REASON_SQL, name="ck_usage_status_reason"),
+        CheckConstraint(f"provider IN ({PROVIDERS_SQL})", name="ck_usage_provider"),
+        CheckConstraint(f"session_kind IS NULL OR session_kind IN ({SESSION_KINDS_SQL})",
                         name="ck_usage_session_kind"),
+        CheckConstraint(f"audio_ms BETWEEN 0 AND 60000 AND (audio_ms = 0 OR provider IN ({SPEECH_PROVIDERS_SQL}))",
+                        name="ck_usage_audio"),
         CheckConstraint("input_tokens >= 0 AND output_tokens >= 0", name="ck_usage_tokens"),
         CheckConstraint("cost_usd >= 0 AND reserved_usd >= 0", name="ck_usage_cost"),
         CheckConstraint("latency_ms >= 0", name="ck_usage_latency"),
@@ -307,6 +329,8 @@ class UsageRow(Base):
     session_kind: Mapped[str | None] = mapped_column(String(16))
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     canary: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # длительность оценённого аудио, мс (только речь; стоимость = audio_ms / 3 600 000 × audio_usd_per_hour)
+    audio_ms: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(TS)
 

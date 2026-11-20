@@ -91,6 +91,14 @@ export interface Config {
   lessonsTimeoutMs: number;
   /** Таймаут завершения урока, мс (45 000): lessons ждёт оценку assessment до 32 с плюс вспомогательные вызовы. */
   lessonsFinishTimeoutMs: number;
+  /** memory (8116, спринт 5): словарь, «Повторение дня», журнал ошибок, перевод по тапу, произношение. */
+  memoryUrl: string;
+  /** Таймаут вызовов memory, мс (10 000; INTERNAL_API §8). */
+  memoryTimeoutMs: number;
+  /** Таймаут перевода по тапу, мс (12 000): memory ждёт `gloss_word` ai-gateway до 8 с плюс catalog. */
+  memoryTranslateTimeoutMs: number;
+  /** Таймаут оценки произношения, мс (20 000): memory ждёт ai-gateway (Azure) до 15 с. */
+  memoryPronunciationTimeoutMs: number;
   upstreamTimeoutMs: number;
   upstreamRetries: number;
   experienceCacheSeconds: number;
@@ -132,6 +140,7 @@ export const DEV_DEFAULTS = {
   DIAGNOSTICS_URL: "http://127.0.0.1:8111",
   LESSONS_URL: "http://127.0.0.1:8112",
   ASSESSMENT_URL: "http://127.0.0.1:8113",
+  MEMORY_URL: "http://127.0.0.1:8116",
 } as const;
 
 export class ConfigError extends Error {
@@ -351,6 +360,10 @@ export function loadConfig(env: Env = process.env): Config {
     assessmentUrl: url("ASSESSMENT_URL"),
     lessonsTimeoutMs: int("LESSONS_TIMEOUT_MS", 25_000, 1000, 60_000),
     lessonsFinishTimeoutMs: int("LESSONS_FINISH_TIMEOUT_MS", 45_000, 5000, 120_000),
+    memoryUrl: url("MEMORY_URL"),
+    memoryTimeoutMs: int("MEMORY_TIMEOUT_MS", 10_000, 1000, 60_000),
+    memoryTranslateTimeoutMs: int("MEMORY_TRANSLATE_TIMEOUT_MS", 12_000, 1000, 60_000),
+    memoryPronunciationTimeoutMs: int("MEMORY_PRONUNCIATION_TIMEOUT_MS", 20_000, 1000, 60_000),
     upstreamTimeoutMs: int("UPSTREAM_TIMEOUT_MS", 3000, 100, 60_000),
     upstreamRetries: int("UPSTREAM_RETRIES", 1, 0, 5),
     experienceCacheSeconds: int("EXPERIENCE_CACHE_SECONDS", 60, 0, 3600),

@@ -40,6 +40,7 @@ export interface LearnerSegment {
 
 export class AudienceResolver {
   private readonly cache = new Map<string, { seg: LearnerSegment; at: number }>();
+  private readonly bands = new Map<string, { band: AgeBand | null; at: number }>();
   constructor(private readonly ttlMs: number) {}
 
   /** Сегмент активного ученика сессии. */
@@ -59,6 +60,22 @@ export class AudienceResolver {
       this.cache.set(auth.accountId, { seg, at: Date.now() });
     }
     return seg;
+  }
+
+  /** Возрастная полоса АКТИВНОГО ученика (спринт 5, claim `age_band` для memory: 6–9 — сборка вместо ввода, 10–13 —
+   *  ввод): аккаунт — его возраст; детский профиль — полоса ребёнка из identity-consent (кеш AUDIENCE_CACHE_SECONDS);
+   *  ребёнок не найден — null (memory ведёт себя как с 6–9: строже). */
+  async learnerBand(ctx: BffContext, auth: AccessClaims): Promise<AgeBand | null> {
+    const seg = await this.segment(ctx, auth);
+    if (auth.learnerId === auth.accountId) return seg.accountAgeBand;
+    const hit = this.bands.get(auth.learnerId);
+    if (hit && Date.now() - hit.at < this.ttlMs) return hit.band;
+    const band = learnerAgeBand(await loadMe(ctx, auth.accountId), auth.learnerId);
+    if (this.ttlMs > 0) {
+      if (this.bands.size > 10_000) this.bands.clear();
+      this.bands.set(auth.learnerId, { band, at: Date.now() });
+    }
+    return band;
   }
 
   /** Возраст аккаунта изменился (PUT /v1/profile/age). */
