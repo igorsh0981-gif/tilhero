@@ -42,6 +42,9 @@ class Settings(ServiceSettings):
     # текст апелляции (свободный текст ученика) стирается через N дней после решения (ревью R1-14)
     appeal_reason_retention_days: int = Field(default=90, ge=1, le=3650)
     tick_batch_size: int = Field(default=500, ge=10, le=10_000)
+    # memory-feed (спринт 5): цитата ученика (evidence) не отдаётся memory для сессий старше N дней — срок хранения
+    # текста ученика (90 дней, как реплики в lessons и цитата в карточке memory); сама оценка не меняется
+    memory_evidence_retention_days: int = Field(default=90, ge=1, le=3650)
 
     @field_validator("scheduler_token", mode="before")
     @classmethod

@@ -180,6 +180,21 @@ export function clientTimezone(req: { headers: Record<string, string | string[] 
   return tz && tz.length <= 64 && TIMEZONE_RE.test(tz) ? tz : undefined;
 }
 
+// ---------- язык ученика ----------
+
+export interface LocaleSource {
+  query: unknown;
+  headers: Record<string, string | string[] | undefined>;
+}
+/** Язык ученика: ?locale= (ru|uz) → Accept-Language (Mini App шлёт язык интерфейса) → ru. */
+export function localeOf(req: LocaleSource): "ru" | "uz" {
+  const q = (req.query as { locale?: unknown } | undefined)?.locale;
+  if (q === "ru" || q === "uz") return q;
+  const raw = req.headers["accept-language"];
+  const first = (Array.isArray(raw) ? raw[0] : raw)?.split(",")[0]?.trim().toLowerCase().slice(0, 2);
+  return first === "uz" ? "uz" : "ru";
+}
+
 // ---------- детский профиль ----------
 
 /** Детский профиль 6–13 (lrn ≠ sub): действие доступно только в профиле самого аккаунта. */

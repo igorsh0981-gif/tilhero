@@ -31,7 +31,7 @@ export function account(over: Partial<UserSummary> = {}): UserSummary {
 }
 
 export function selfLearner(over: Partial<LearnerSummary> = {}): LearnerSummary {
-  return { learner_id: ACCOUNT_ID, kind: "self", display_name: "Азиз", age_band: null, is_active: true, onboarding_completed: false, ...over };
+  return { learner_id: ACCOUNT_ID, kind: "self", display_name: "Азиз", age_band: null, is_active: true, onboarding_completed: false, voice_consent: false, ...over };
 }
 
 export function security(over: Partial<SecurityState> = {}): SecurityState {

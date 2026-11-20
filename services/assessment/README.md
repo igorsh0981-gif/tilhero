@@ -7,6 +7,8 @@ QA-флаги. Контракты: `docs/sprint4/INTERNAL_API.md` §3, `packages
 ConfirmedError), `bff.ts` «Спринт 4» (EvaluationView, Appeal), `admin.ts` «Контроль диалогов» (EvaluationCard,
 Reevaluation, AdminAppeal, AppealDecision), события `assessment.completed.v1`, `assessment.reevaluated.v1`,
 `assessment.appeal.decided.v1`. Скилл — LinguaFlow `skills/05_independent_evaluator.md`.
+Спринт 5 (`docs/sprint5/INTERNAL_API.md` §5, §1.2): оценка чтения (kind `reading`) и лента ошибок для memory
+(`memory-feed`).
 
 ## Запуск и настройки
 `python -m tilhero_common.serve tilhero_assessment.main:app`; миграции — `alembic upgrade head` (под
@@ -25,10 +27,12 @@ Reevaluation, AdminAppeal, AppealDecision), события `assessment.completed
 | `SCHEDULER_TOKEN` | пусто (вход выключен) | `Authorization: Bearer` для n8n `assessment-tick`; в stage/prod — пусто или ≥ 32 символов |
 | `APPEAL_REASON_RETENTION_DAYS` | 90 | текст апелляции стирается через N дней после решения (ревью R1-14) |
 | `TICK_BATCH_SIZE` | 500 | сколько апелляций стирает один tick |
+| `MEMORY_EVIDENCE_RETENTION_DAYS` | 90 | `memory-feed`: цитата ученика (`evidence`) не отдаётся для сессий старше N дней (срок хранения текста ученика — как реплики в lessons и цитата в карточке memory); оценка не меняется |
 
 ## API
 Вызывающие и `sub`: lessons — оценка (`sub` = ученик `lrn`); telegram-bff — оценки и апелляции ученика (`sub` =
-`lrn`); admin-bff — админка с `actor` (права проверяются здесь). Ошибки — ErrorBody.
+`lrn`); memory — лента ошибок для карточек (`sub` = ученик, `user_id` из события); admin-bff — админка с `actor`
+(права проверяются здесь). Ошибки — ErrorBody.
 
 **lessons** — `POST /internal/v1/evaluations` (`EvaluationRequest` ниже) → 201 `EvaluationView` + `session_id`,
 `skill_outcomes` [{skill_id, outcome}] (practice_only — []), `requires_human_review`; повтор по `session_id` → 200 та
@@ -42,10 +46,11 @@ VALIDATION_ERROR`, 503 `CATALOG_UNAVAILABLE | CATALOG_INVALID_RESPONSE` (без 
 
 ```
 EvaluationRequest {
-  session_id: uuid, user_id?: uuid (= sub токена), kind: lesson|scenario|media|review,
+  session_id: uuid, user_id?: uuid (= sub токена), kind: lesson|scenario|media|review|reading,
   pair_id: "ru-en", audience: kids|teens|adults, locale?: ru|uz (ru),
-  content_refs: [{kind: lesson|scenario|rubric|media_asset|media_exercise, key, version}]
-              | {lesson?, scenario?, rubric, media_asset?: {key, version} | null, media_exercises?: [{key, version}]},
+  content_refs: [{kind: lesson|scenario|rubric|media_asset|media_exercise|reading, key, version}]
+              | {lesson?, scenario?, rubric?, media_asset?: {key, version} | null, media_exercises?: [{key, version}],
+                 reading?: {key, version} | null},
   answers: [{item_id, answer: int | string | (string|int)[] | null, hinted?: bool, dont_know?: bool}],  // без правильности
   turns: [{turn_id: "T{n}", speaker: learner|character, text ≤ 500, mode?: choice|text, hinted?: bool, node_id?}],
   roleplay: {outcome: success|alt_success|fail|null, hints: int} | null,
@@ -55,7 +60,9 @@ EvaluationRequest {
 ```
 Формы ссылок: lesson — lesson + rubric (= lesson.rubric_id) [+ scenario (= lesson.scenario_id)]; scenario — scenario +
 rubric (= scenario.rubric_id); media — media_exercise ≥ 1 (одного медиа) [+ media_asset] + rubric (одна из рубрик
-упражнений); review — как у исходной сессии (урок или медиа), всегда practice_only. Ответы: choice — индекс варианта
+упражнений); review — как у исходной сессии (урок или медиа), всегда practice_only; reading — только `reading`
+(рубрика встроенная, ссылка на рубрику — 422), всегда practice_only, без `turns`/`roleplay`/`open_answer` (422
+`TURNS_INVALID {reason: closed_only}`). Ссылка `reading` у других видов — 422 `CONTENT_REFS_INVALID`. Ответы: choice — индекс варианта
 в порядке контента (или точный текст варианта); gap_fill — строка; order_words / order_lines — строки по порядку
 (или индексы вариантов); `null`/`dont_know` — без ответа (неверно). Поля правильности в запросе отклоняются (422).
 
@@ -72,6 +79,35 @@ rubric (= scenario.rubric_id); media — media_exercise ≥ 1 (одного ме
 `flags[].by`; имена подставляет admin-bff); в карточке дополнительно `kind`, `outcome`, `ai_status`,
 `superseded_by`, `appeal_id`, `appeal` (AdminAppeal цепочки). В `AdminAppeal` — `reason: string | null` и
 `reason_redacted: boolean` («текст стёрт по сроку хранения», ревью R1-14; admin.ts — запрос к общему коду).
+
+**memory** — `GET /internal/v1/evaluations/{id}/memory-feed` (спринт 5, INTERNAL_API §5) → `MemoryFeed` ниже;
+вызывающий только memory (иначе 403 `CALLER_NOT_ALLOWED`), без `sub` — 401 `USER_CONTEXT_REQUIRED`; чужая
+или несуществующая оценка — 404 `EVALUATION_NOT_FOUND`; удалённый ученик — 410 `USER_DELETED`.
+
+```
+MemoryFeed {
+  evaluation_id: uuid,          // АКТУАЛЬНАЯ запись цепочки (как у ученика)
+  session_id, user_id: uuid, pair_id, kind: lesson|scenario|media|review|reading,
+  content_refs: {               // ключи и версии для catalog GET /internal/v1/versions/{kind}/{key}/{version}
+    lesson: {key, version} | null,       // урок (и review урока): key_words → карточки
+    scenario: {key, version} | null,     // сценарий урока или практики
+    media_asset: {key, version} | null,  // медиа (и review медиа): phrases → карточки при allowed_uses ∋ dictionary
+    media_exercises: [{key, version}],   // упражнения медиа ([] у остальных)
+    reading: {key, version} | null,      // текст для чтения
+    rubric: {key, version} | null        // рубрика catalog (у чтения — null: встроенная)
+  },
+  practice_only: bool,          // review и reading — всегда true
+  superseded_by: uuid | null,   // запрошенная заменена переоценкой → id актуальной (= evaluation_id); иначе null
+  errors: [{turn_id, evidence: string | null, correction, error_code, severity: low|medium|high}]
+}
+```
+- `errors` — только подтверждённые ошибки **текста ученика**: `turn_id` реплики свободным текстом `T{n}` или
+  открытого ответа `OA1` (в INTERNAL_API — `O{n}`); ошибки закрытых заданий (`turn_id` = id задания) не входят —
+  их повторяет очередь lessons. Детский профиль — всегда `[]` (свободного текста у детей нет; защита в глубину).
+- `evidence` — цитата ученика ≤ 120; `null`, если стёрта по сроку хранения: сессии (исходной оценке цепочки) больше
+  `MEMORY_EVIDENCE_RETENTION_DAYS` (90) дней — и для переоценки, скопировавшей цитату позже. Оценка в assessment не
+  меняется (неизменяема, цитата — основание оценки; PLAN спринта 4).
+- Переоценка: лента любой записи цепочки — данные актуальной (memory архивирует ошибки, которых в ней нет).
 
 **планировщик (n8n `assessment-tick`)** — `POST /internal/v1/assessment:tick`, `Authorization: Bearer
 <SCHEDULER_TOKEN>` (внутренний JWT сервиса → 403 `CALLER_NOT_ALLOWED`, неверный/пустой токен → 401
@@ -98,7 +134,8 @@ Reevaluation: `scores` — Partial (не переданный критерий �
 
 ## События (outbox) и аудит
 - `assessment.completed.v1 {evaluation_id, user_id, pair_id, session_id, kind, skill_outcomes, passed,
-  practice_only, supersedes: null, created_at}` — новая оценка (practice_only — `skill_outcomes: []`) → diagnostics.
+  practice_only, supersedes: null, created_at}` — новая оценка (practice_only — `skill_outcomes: []`) → diagnostics,
+  memory (kind `lesson | scenario | media | review | reading`; чтение — `practice_only: true`, `skill_outcomes: []`).
 - `assessment.reevaluated.v1 {evaluation_id, supersedes, session_id, user_id, pair_id, skill_outcomes, passed,
   appeal_id, created_at}` → diagnostics (может отменить demonstrated), learning-plan (`session_id` — сессия заменённой
   оценки: сопоставление с пройденным уроком).
@@ -115,6 +152,13 @@ Reevaluation: `scores` — Partial (не переданный критерий �
   comprehension / phrase_meaning — индекс; gap_fill — без регистра, лишних пробелов и концевой пунктуации
   (`. , ! ? ; : …`), типографские апострофы = `'`; order_words / order_lines — точный порядок. Урок и медиа —
   все задания версии (без ответа — неверно), повтор — только отвеченные. shadowing и roleplay медиа не оцениваются.
+- **Чтение (спринт 5)**: все вопросы версии текста (`questions`; без ответа — неверно): `single_choice` /
+  `true_false` (варианты `["True", "False"]`) — индекс (или точный текст варианта), `gap_fill` — как выше (любой из
+  допустимых ответов). Встроенная рубрика `reading-comprehension@1`: единственный критерий `comprehension` = доля
+  верных (≥ 0,8 → 3, ≥ 0,6 → 2, ≥ 0,3 → 1, иначе 0), вердикт по одному критерию — зачёт при ≥ 2; статус `ok`;
+  оценщик ИИ не вызывается; `practice_only: true`, `skill_outcomes: []` (навыки не меняются); апелляция — 409
+  `APPEAL_NOT_ALLOWED`; ошибки — неверные вопросы (`turn_id` = id вопроса) — в итогах ученика, но не в `memory-feed`.
+  Переоценка — по той же встроенной рубрике (только `comprehension`, без исходов навыков).
 - **Критерии по правилам**: vocabulary, grammar, fluency, pronunciation — null; task — исход сценария (success 3,
   alt_success 2, fail 1; не дошёл до конца или ни одной реплики ученика — 0), без ролевой ситуации (медиа, урок без
   сценария) — доля верных закрытых заданий (≥ 0,8 → 3, ≥ 0,6 → 2, ≥ 0,3 → 1, иначе 0); independence — подсказки
@@ -142,12 +186,13 @@ Reevaluation: `scores` — Partial (не переданный критерий �
   встречающейся в ней, ≤ 120 (выбранные варианты — текст контента, не ошибка); неверные закрытые задания — ответ
   ученика (цитата) и верный ответ ключа, `severity: medium`; хранится ≤ 5 по severity, ученику — 1–3.
 
-## Данные (миграции 0001, 0002)
+## Данные (миграции 0001–0003)
 `evaluations` (неизменяема — триггер `evaluations_immutable`; DELETE — только сага; у сессии одна исходная запись —
 частичный UNIQUE, цепочка линейна — UNIQUE `supersedes`; снимок рубрики версии; метаданные реплик без текста),
 `appeals` (одна на сессию; триггер `appeals_guard`: поля подачи неизменяемы, переходы new → in_review →
 upheld|corrected, решённая неизменяема — кроме стирания текста по сроку хранения: `reason` → NULL с
-`reason_redacted_at`, миграция 0002), `flags` (append-only), `deleted_users`, `outbox`/`inbox`.
+`reason_redacted_at`, миграция 0002), `flags` (append-only), `deleted_users`, `outbox`/`inbox`. Миграция 0003 —
+`evaluations.kind` + `reading` (откат удаляет оценки чтения и флаги к ним).
 
 ## Срок хранения текстов ученика (ревью R1-14)
 - `appeals.reason` — 90 дней после решения (`upheld`/`corrected`), затем NULL (tick); нерешённые не стираются.
@@ -166,4 +211,4 @@ ACK. После удаления запросы ученика и lessons — 41
 - Рост `human_review_open` на обзоре — ИИ недоступен или исчерпан бюджет (`ai_status` в карточке оценки); разбор —
   переоценкой (qa.review).
 - Тесты: `uv run pytest services/assessment -q -p no:cacheprovider` (стенд PostgreSQL; catalog и ai-gateway —
-  заглушки на реальном сиде catalog).
+  заглушки на реальном сиде catalog; текст для чтения — фикстура `READINGS` в `tests/as_testkit.py`).

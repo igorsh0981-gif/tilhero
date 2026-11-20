@@ -216,6 +216,7 @@ describe("overview", () => {
       diagnostics: { available: false, data: null, service: "diagnostics" },
       lessons: { available: false, data: null, service: "lessons" },
       ai: { available: false, data: null, service: "ai-gateway" },
+      memory: { available: false, data: null, service: "memory" },
     };
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);
     ui(<Overview />, ["dashboard.read"]);
@@ -237,6 +238,7 @@ describe("overview", () => {
       diagnostics: { available: false, data: null, service: "diagnostics" },
       lessons: { available: false, data: null, service: "lessons" },
       ai: { available: false, data: null, service: "ai-gateway" },
+      memory: { available: false, data: null, service: "memory" },
     };
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);
     ui(<Overview />, ["dashboard.read"]);
@@ -261,14 +263,16 @@ describe("overview · sprint 4 blocks", () => {
     campaigns: { available: false, data: null, service: "notifications" },
     content: { available: false, data: null, service: "catalog" },
     diagnostics: { available: false, data: null, service: "diagnostics" },
-    lessons: { available: true, data: { period: "today", started: 64, completed: 51, completion_pct: 79.7, median_minutes: 18, by_kind: { lesson: 40, scenario: 14, media: 8, review: 2 }, ai_degraded_pct: 6.3, appeals_open: 2, human_review_open: 1 } },
+    lessons: { available: true, data: { period: "today", started: 64, completed: 51, completion_pct: 79.7, median_minutes: 18, by_kind: { lesson: 40, scenario: 14, media: 8, review: 2, reading: 3 }, ai_degraded_pct: 6.3, appeals_open: 2, human_review_open: 1 } },
     ai: {
       available: true,
       data: {
         period: "month", spent_usd: 18.4, monthly_cap_usd: 20, cap_used_pct: 92, calls: 2400, unavailable: 110, unavailable_pct: 4.6, p95_latency_ms: 2380,
         by_agent: [], by_model: [], by_day: [], avg_cost_per_lesson_usd: 0.0118, ai_enabled: false, alert_percent: 80,
+        speech: { calls: 120, audio_minutes: 18.5, spent_usd: 0.41, speech_available: false, cap_usd: 5 },
       },
     },
+    memory: { available: true, data: { period: "today", review_sessions: 84, learners_reviewing: 61, median_minutes: 6, d30_pass_pct: 78.9, avg_due_per_learner: 11.4, ai_glosses_pending: 3 } },
   };
   it("lessons and ai blocks with their own «no data»; attention: budget threshold, AI off, appeals, manual reviews", async () => {
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: base } : undefined);

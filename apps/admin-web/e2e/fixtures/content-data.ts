@@ -13,6 +13,7 @@ import type {
   MediaExercisePayload,
   MediaPayload,
   ModulePayload,
+  ReadingPayload,
   RubricPayload,
   ScenarioNode,
   ScenarioPayload,
@@ -369,3 +370,97 @@ export const dxStats = (period: string): DiagnosticStats => ({
   not_assessed_pct: { vocabulary: 0, grammar: 0, reading: 2.2, listening: 18.4 },
   followups: 23,
 });
+
+/* ---------------------------------------------------------------- sprint 5: reading texts */
+
+const S = (s_id: string, text_en: string, ru: string, uz: string) => ({ s_id, text_en, gloss: L(ru, uz) });
+
+/** Published reading (66 words, glossary in the text, 3 questions of the three types). */
+export function readingCoffee(): ReadingPayload {
+  return {
+    reading_id: "r-a1-coffee-shop",
+    title: L("В кофейне", "Qahvaxonada"),
+    level: "A1",
+    audience: ["teens", "adults"],
+    topics: ["food", "small_talk"],
+    skill_ids: ["en.func.greet"],
+    paragraphs: [
+      {
+        p_id: "p1",
+        sentences: [
+          S("s1", "Every morning Lola goes to a small coffee shop near her office.", "Каждое утро Лола ходит в маленькую кофейню рядом с офисом.", "Har kuni ertalab Lola ofisi yonidagi kichik qahvaxonaga boradi."),
+          S("s2", "She orders a large latte with milk and a warm croissant.", "Она заказывает большой латте с молоком и тёплый круассан.", "U sutli katta latte va iliq kruassan buyurtma qiladi."),
+          S("s3", "The barista knows her name and always smiles.", "Бариста знает её имя и всегда улыбается.", "Barista uning ismini biladi va doim jilmayadi."),
+        ],
+      },
+      {
+        p_id: "p2",
+        sentences: [
+          S("s4", "Today the coffee shop is very busy, so Lola waits in a long queue.", "Сегодня в кофейне много людей, поэтому Лола стоит в длинной очереди.", "Bugun qahvaxona juda gavjum, shuning uchun Lola uzun navbatda turadi."),
+          S("s5", "She pays by card and finds a free table by the window.", "Она платит картой и находит свободный столик у окна.", "U karta bilan toʻlaydi va deraza yonidan boʻsh stol topadi."),
+          S("s6", "The coffee is hot and the music is quiet.", "Кофе горячий, а музыка тихая.", "Qahva issiq, musiqa esa sokin."),
+        ],
+      },
+    ],
+    glossary: [
+      { en: "coffee shop", gloss: L("кофейня", "qahvaxona"), note: null },
+      { en: "queue", gloss: L("очередь", "navbat"), note: L("В американском английском — line", "Amerika inglizchasida — line") },
+      { en: "barista", gloss: L("бариста", "barista"), note: null },
+    ],
+    questions: [
+      { question_id: "q1", type: "single_choice", instruction: L("Выберите ответ", "Javobni tanlang"), prompt_en: "Where does Lola go every morning?", options: ["To a bakery", "To a coffee shop", "To a market"], answer: 1 },
+      { question_id: "q2", type: "true_false", instruction: L("Верно или неверно?", "Toʻgʻri yoki notoʻgʻri?"), prompt_en: "The coffee shop is quiet today.", options: ["True", "False"], answer: 1 },
+      { question_id: "q3", type: "gap_fill", instruction: L("Впишите слово", "Soʻzni yozing"), prompt_en: "Lola waits in a long ___.", options: [], answer: ["queue", "line"] },
+    ],
+    voice: "en-GB",
+    est_minutes: 5,
+  };
+}
+
+/**
+ * Draft reading with problems: 58 words (< 60), one sentence of 33 words (> 30) and a glossary word that is not in
+ * the text («bakery»).
+ */
+export function readingMarket(): ReadingPayload {
+  return {
+    reading_id: "r-a1-market",
+    title: L("На рынке", "Bozorda"),
+    level: "A1",
+    audience: ["teens", "adults"],
+    topics: ["shopping", "food"],
+    skill_ids: [],
+    paragraphs: [
+      {
+        p_id: "p1",
+        sentences: [
+          S("s1", "Every Saturday morning, Aziz goes to the big market near his house.", "Каждую субботу утром Азиз идёт на большой рынок рядом с домом.", "Har shanba ertalab Aziz uyi yonidagi katta bozorga boradi."),
+          S(
+            "s2",
+            "He buys fresh bread, tomatoes, cucumbers and some green apples for the family, and then he talks with the old seller about the weather, the prices and his little garden in the village.",
+            "Он покупает свежий хлеб, помидоры, огурцы и зелёные яблоки для семьи, а потом говорит со старым продавцом о погоде, ценах и своём маленьком саде в деревне.",
+            "U oila uchun yangi non, pomidor, bodring va yashil olma oladi, keyin keksa sotuvchi bilan ob-havo, narxlar va qishloqdagi kichik bogʻi haqida gaplashadi.",
+          ),
+        ],
+      },
+      {
+        p_id: "p2",
+        sentences: [
+          S("s3", "The market is noisy and colourful.", "Рынок шумный и яркий.", "Bozor shovqinli va rang-barang."),
+          S("s4", "People sell fruit, spices, clothes and toys.", "Люди продают фрукты, специи, одежду и игрушки.", "Odamlar meva, ziravor, kiyim va oʻyinchoq sotadi."),
+        ],
+      },
+    ],
+    glossary: [
+      { en: "market", gloss: L("рынок", "bozor"), note: null },
+      { en: "seller", gloss: L("продавец", "sotuvchi"), note: null },
+      { en: "bakery", gloss: L("пекарня", "novvoyxona"), note: null },
+    ],
+    questions: [
+      { question_id: "q1", type: "single_choice", instruction: L("Выберите ответ", "Javobni tanlang"), prompt_en: "When does Aziz go to the market?", options: ["On Saturday", "On Monday", "Every evening"], answer: 0 },
+      { question_id: "q2", type: "true_false", instruction: L("Верно или неверно?", "Toʻgʻri yoki notoʻgʻri?"), prompt_en: "The market is quiet.", options: ["True", "False"], answer: 1 },
+      { question_id: "q3", type: "gap_fill", instruction: L("Впишите слово", "Soʻzni yozing"), prompt_en: "People sell fruit, ___, clothes and toys.", options: [], answer: ["spices"] },
+    ],
+    voice: "en-US",
+    est_minutes: 5,
+  };
+}

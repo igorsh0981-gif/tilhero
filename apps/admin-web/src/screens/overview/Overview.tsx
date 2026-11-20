@@ -6,7 +6,7 @@
  * the others keep working (admin.ts Dashboard, always 200; a block missing in an older admin-bff counts as down).
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { AiUsageSummary, ContentSummary, Dashboard, DashboardBlock, DashboardCampaigns, DashboardLearners, DashboardWhatsNew, DiagnosticStats, LessonStats, SupportStats } from "@tilhero/contracts/admin";
+import type { AiUsageSummary, ContentSummary, Dashboard, DashboardBlock, DashboardCampaigns, DashboardLearners, DashboardWhatsNew, DiagnosticStats, LessonStats, MemoryStats, SupportStats } from "@tilhero/contracts/admin";
 import type { ContentKind } from "@tilhero/contracts/content";
 import { DashboardApi, type Period } from "../../api/endpoints";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -19,12 +19,12 @@ import { setAiEnabled } from "../ai/aiState";
 import { budgetLevel, usd } from "../ai/model";
 
 const PERIODS: readonly Period[] = ["today", "7d", "30d"];
-type BlockKey = "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai";
-const SESSION_KINDS = ["lesson", "scenario", "media", "review"] as const;
+type BlockKey = "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai" | "memory";
+const SESSION_KINDS = ["lesson", "scenario", "media", "review", "reading"] as const;
 const OFF = (service: string) => ({ available: false, data: null, service });
 const DX_AREAS = ["vocabulary", "grammar", "reading", "listening"] as const;
 const LEVELS = ["A0", "A1", "A2", "B1", "B2", "none"] as const;
-const SUMMARY_KINDS: readonly ContentKind[] = ["lesson", "scenario", "rubric", "media_asset", "media_exercise", "skill"];
+const SUMMARY_KINDS: readonly ContentKind[] = ["lesson", "scenario", "rubric", "media_asset", "media_exercise", "reading", "skill"];
 
 export function Overview() {
   const i = useI18n();
@@ -98,6 +98,10 @@ export function Overview() {
             </Block>
             <Block<AiUsageSummary> k="ai" icon="cpu" block={data.ai ?? OFF("ai-gateway")} empty={(x) => x.calls === 0 && x.spent_usd === 0 && x.ai_enabled}>
               {(x) => <AiBody x={x} />}
+            </Block>
+            {/* sprint 5: memory and reviews; a failure of this block never breaks the overview */}
+            <Block<MemoryStats> k="memory" icon="trendDown" block={data.memory ?? OFF("memory")} empty={(x) => x.review_sessions === 0 && x.learners_reviewing === 0 && !x.ai_glosses_pending}>
+              {(x) => <MemoryBody x={x} period={periodLabel} />}
             </Block>
           </div>
         </>
@@ -173,6 +177,9 @@ function Attention({ d }: { d: Dashboard }) {
     rows.push({ id: "appeals", label: t("att.appeals"), n: ls.appeals_open, go: () => navigate("qa", "appeals"), show: can("qa.read") });
     rows.push({ id: "human-review", label: t("att.humanReview"), n: ls.human_review_open, go: () => navigate("qa", "flag/human_review"), show: can("qa.read") });
   }
+  // sprint 5: the queue of AI translations waiting for a methodist (the course dictionary)
+  const mem = d.memory?.available ? d.memory.data : null;
+  if (mem && mem.ai_glosses_pending != null) rows.push({ id: "glosses", label: t("att.glosses"), n: mem.ai_glosses_pending, go: () => navigate("content", "glossary/queue"), show: can("content.read") });
   const live = rows.filter((r) => r.n > 0);
   if (!live.length) return null;
   return (
@@ -499,11 +506,60 @@ function AiBody({ x }: { x: AiUsageSummary }) {
       <Row k={t("dai.unavailable")} v={`${fmt.num(x.unavailable)}${x.unavailable_pct != null ? ` · ${fmt.pct(x.unavailable_pct)}` : ""}`} testId="dai-unavail" />
       <Row k={t("dai.p95")} v={x.p95_latency_ms != null ? `${fmt.num(x.p95_latency_ms)} ms` : "—"} />
       <Row k={t("dai.avgLesson")} v={money(x.avg_cost_per_lesson_usd)} />
+      {x.speech && (
+        <Row
+          k={t("dai.speech")}
+          testId="dai-speech"
+          v={
+            <>
+              {money(x.speech.spent_usd)} · {t("dai.speechMin", { n: fmt.num(x.speech.audio_minutes, Number.isInteger(x.speech.audio_minutes) ? 0 : 1) })}
+              {!x.speech.speech_available && <span className="xs muted block">{t("dai.speechOff")}</span>}
+            </>
+          }
+        />
+      )}
       {can("costs.read") && (
         <div className="acts">
           <Btn size="sm" icon="gauge" label={t("dai.open")} onClick={() => navigate("costs")} />
         </div>
       )}
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------- sprint 5: memory and reviews */
+
+function MemoryBody({ x, period }: { x: MemoryStats; period: string }) {
+  const { t, fmt } = useI18n();
+  const { can } = useSession();
+  const { navigate } = useNav();
+  const pending = x.ai_glosses_pending;
+  return (
+    <>
+      <Row k={t("dmem.sessions", { p: period })} v={fmt.num(x.review_sessions)} testId="dmem-sessions" />
+      <Row k={t("dmem.learners", { p: period })} v={fmt.num(x.learners_reviewing)} testId="dmem-learners" />
+      <Row k={t("dmem.median")} v={fmt.minutes(x.median_minutes)} />
+      <Row k={t("dmem.d30")} v={x.d30_pass_pct != null ? fmt.pct(x.d30_pass_pct) : t("dmem.noData")} testId="dmem-d30" />
+      <Row k={t("dmem.due")} v={x.avg_due_per_learner != null ? fmt.num(x.avg_due_per_learner, 1) : "—"} testId="dmem-due" />
+      <Row
+        k={t("dmem.glosses")}
+        testId="dmem-glosses"
+        v={
+          pending == null ? (
+            <span className="muted">{t("dmem.noData")}</span>
+          ) : can("content.read") && pending > 0 ? (
+            <button type="button" className="tr" onClick={() => navigate("content", "glossary/queue")} data-testid="dmem-glosses-link">
+              {fmt.num(pending)}
+            </button>
+          ) : (
+            fmt.num(pending)
+          )
+        }
+      />
+      <div className="acts">
+        <Btn size="sm" icon="trendDown" label={t("dmem.open")} onClick={() => navigate("memory", "analytics")} testId="dmem-open" />
+        {can("content.read") && <Btn size="sm" icon="layers" label={t("dmem.queue")} onClick={() => navigate("content", "glossary/queue")} testId="dmem-queue" />}
+      </div>
     </>
   );
 }

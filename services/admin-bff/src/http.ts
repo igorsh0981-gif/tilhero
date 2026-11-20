@@ -6,7 +6,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest, FastifySchemaValida
 import type { Permission, StaffStatus, StaffSummary } from "@tilhero/contracts/admin";
 import { AppError, type Actor } from "@tilhero/ts-common";
 import type { Effective, Guard, RateClass } from "./rbac.js";
-import { IDEMPOTENCY_RE } from "./schemas.js";
+import { IDEMPOTENCY_RE, IF_MATCH_RE } from "./schemas.js";
 import type { SessionData } from "./sessions.js";
 
 export type App = FastifyInstance;
@@ -121,6 +121,16 @@ export function idempotencyKeyOf(req: FastifyRequest, required: boolean): string
     throw new AppError(422, "IDEMPOTENCY_KEY_INVALID", "Некорректный Idempotency-Key (8–128 символов A-Z a-z 0-9 . _ : -)");
   }
   return raw;
+}
+
+/**
+ * If-Match оптимистической блокировки (updated_at черновика версии агента, статьи словаря курса) → домену как есть;
+ * неверный формат → 422 до домена; нет заголовка — решает домен (428 IF_MATCH_REQUIRED).
+ */
+export function ifMatchOf(raw: string | string[] | undefined): Record<string, string> {
+  if (raw === undefined) return {};
+  if (typeof raw !== "string" || !IF_MATCH_RE.test(raw)) throw validationError("if-match", "Некорректный If-Match", "headers");
+  return { "if-match": raw };
 }
 
 /** Ответ домена — повтор команды по тому же Idempotency-Key → клиенту `Idempotent-Replayed: true`. */

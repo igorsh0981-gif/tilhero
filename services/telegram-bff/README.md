@@ -25,6 +25,7 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
   | social (приглашения, семья) | аккаунт |
   | support | аккаунт (пишет и получает ответы в Telegram аккаунт) |
   | identity `telegram-login`, `legal/policy`, `GET guardian-consents/{token}`; experience `experience/miniapp/current` | без sub |
+  | catalog (контент ученика), lessons, **memory** (спринт 5) | аккаунт + claims `lrn`, `age_band` (у memory — полоса **активного ученика**, см. «Спринт 5») |
 
   Матрица по всем маршрутам — `test/subjects.test.ts`.
 - **Переключение ученика** (`POST /v1/session/learner`): BFF проверяет ученика в identity-consent `GET /internal/v1/me/learners/{id}` от имени аккаунта (свой или свой ребёнок, иначе `404 LEARNER_NOT_FOUND`; ответ сверяется: тот же id, `kind=child`, есть в `/me.learners`). Выход **из** детского профиля (к родителю или другому ребёнку) при заданном коде родителя требует `pin` (нет/неверный → `401 PIN_INVALID`, блокировка → `423 PIN_LOCKED`, лимит `tg.pin` 5/мин); вход в детский профиль кода не требует. Ответ собирается до перевыпуска refresh (сбой домена не ломает текущую сессию), затем в той же сессии перевыпускаются токены с новым `lrn`. **Активный ученик — свойство сессии в Redis:** access-токен, выданный до переключения, сразу перестаёт действовать (`401 TOKEN_EXPIRED {reason: learner_switched}` → клиент делает refresh).
@@ -123,12 +124,53 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 | GET | `/v1/evaluations/{id}` | assessment (**sub = ученик `lrn`**, claims `lrn`, `age_band`) | `EvaluationView` актуальной записи цепочки (то же правило ключей); 404 `EVALUATION_NOT_FOUND` |
 | POST | `/v1/evaluations/{id}/appeal` | assessment | `{reason ≤ 500}`, `Idempotency-Key` обязателен → 201 `Appeal`; 409 `APPEAL_EXISTS` / `APPEAL_WINDOW_CLOSED` / `APPEAL_NOT_ALLOWED`; причина не логируется |
 | GET | `/v1/appeals` | assessment (`?limit=50`) | `{items: Appeal[]}` (элемент не по контракту отбрасывается); `reason: null` — текст стёрт по сроку хранения (90 дней после решения) |
+| GET | `/v1/memory/overview` | memory `/overview` (**аккаунт**, claims `lrn`, `age_band` ученика; query `audience`, `locale`) | спринт 5, `MemoryOverview` (`pronunciation`: available / consent_self / consent_guardian / unavailable) |
+| GET | `/v1/memory/cards?kind=&status=&q=&cursor=&limit=` | memory `/cards` | `Page<DictionaryCard>` (элемент не по контракту отбрасывается); `q` ≤ 60, в лог не пишется |
+| GET | `/v1/memory/cards/{id}` | memory `/cards/{id}` | `DictionaryCardDetail`; чужая — 404 `CARD_NOT_FOUND` |
+| POST | `/v1/memory/cards` | memory `/cards` (таймаут `MEMORY_TRANSLATE_TIMEOUT_MS`) | `AddCardRequest`, `Idempotency-Key` обязателен → 201 новая / 200 уже была (статус memory); 422 `WORD_NOT_IN_CONTENT` / `GLOSS_UNAVAILABLE` / `CARDS_LIMIT {limit}`; 404 `CONTENT_NOT_FOUND`; 429 — общий с переводом лимит `tg.memory.translate` (может вызвать перевод ИИ; повтор отвеченного ключа лимит не тратит, отметка в Redis на 24 ч) |
+| POST / DELETE | `/v1/memory/cards/{id}/known` | memory | `DictionaryCard`; 409 `CARD_STATE {status}` |
+| DELETE | `/v1/memory/cards/{id}` | memory | 204 |
+| GET | `/v1/memory/errors?cursor=&limit=` | memory `/errors` | `Page<ErrorJournalItem>` (у детей пусто) |
+| POST | `/v1/memory/review-sessions` | memory | `Idempotency-Key` обязателен → 201 / 200 (уже активная); 409 `NOTHING_TO_REVIEW {next_due_at}` |
+| GET | `/v1/memory/review-sessions/active`, `/{id}` | memory | `{session}` / `ReviewSession`; 404 `REVIEW_SESSION_NOT_FOUND` |
+| GET | `/v1/memory/review-sessions/{id}/current` | memory | `ReviewTask` — **строгая** проверка (лишнее поле на любом уровне или раскрывающее ответ поле подсказки → 503), явная сборка; задания проверки удержания запоминаются в Redis (26 ч); 409 `REVIEW_SESSION_STATE {status}` / `TASK_NOT_CURRENT` |
+| POST | `/v1/memory/review-sessions/{id}/tasks/{task_id}` | memory | `ReviewAnswer` → `ReviewTaskResult`; больше одного вида ответа → 422 `ANSWER_INVALID {field}` до memory; детям ввод разрешён; на проверке удержания `result`/`correct_answer` до конца блока — `null` всегда; 409 `TASK_NOT_CURRENT {current_task_id}`; 429 `tg.memory.answer` (300 / 10 мин на ученика) |
+| POST | `/v1/memory/review-sessions/{id}/tasks/{task_id}/hint` | memory | `{kind}` → `ReviewHint`; проверка удержания → 409 `HINTS_NOT_ALLOWED` до вызова memory |
+| POST | `/v1/memory/review-sessions/{id}/finish`, `/cancel` | memory | `ReviewSummary` / `ReviewSession`; 409 `TASK_NOT_CURRENT` / `REVIEW_SESSION_STATE` |
+| POST | `/v1/memory/translate` | memory `/translate` `{content_ref, text}` (таймаут `MEMORY_TRANSLATE_TIMEOUT_MS`) | `TranslateRequest` → `WordGloss`; 422 `WORD_NOT_IN_CONTENT`; 404 `CONTENT_NOT_FOUND`; 429 `tg.memory.translate` (60 / 10 мин); детям разрешён (слово из контента) |
+| POST | `/v1/memory/pronunciation?target=` | memory `/pronunciation?target_kind=&target=` (сырое тело, таймаут `MEMORY_PRONUNCIATION_TIMEOUT_MS`, без повторов) | тело `audio/wav` ≤ 600 000 байт (лимит и парсер — только у этого маршрута); заголовок WAV проверяется до memory → 422 `AUDIO_INVALID {reason: format \| too_short \| too_long \| too_large}`; `target` — `card:<uuid>` \| `sentence:<kind>:<key>:<version>:<locator>` (иначе 422 `VALIDATION_ERROR {field: target}`); → `PronunciationView`; 403 `VOICE_CONSENT_REQUIRED {who}`; 503 `SPEECH_UNAVAILABLE` (код memory как есть); 429 `tg.memory.pronunciation` (20 / 10 мин) |
+| GET | `/v1/practice/readings?level=&cursor=&limit=` | catalog `/readings?pair_id=&audience=&level=` (аккаунт + claims) + lessons `/reading-results?ids=` | `Page<ReadingCard>`; `limit` ≤ 50 (один вызов lessons на страницу); lessons недоступен — `last_result: null` |
+| GET | `/v1/practice/readings/{id}` | catalog `/readings/{id}?audience=` + memory `/cards/lookup` | `ReadingView` без вопросов и ответов; `in_dictionary` — из memory (сбой — null); 404 `READING_NOT_AVAILABLE` |
+| POST | `/v1/practice/readings/{id}/sessions` | lessons `/readings/{id}/sessions` | `Idempotency-Key` обязателен → 201 `LessonSession` (kind reading); дальше — общие маршруты сессий (шаг `reading` строго по схеме, `in_dictionary` из memory); 404 `READING_NOT_AVAILABLE`; 409 `SESSION_ACTIVE` |
+| PUT | `/v1/learners/{learner_id}/voice-consent` | identity `/me/learners/{id}/voice-consent` (аккаунт) + learning-plan (онбординг ребёнка) | `{granted}` → `LearnerSummary`; из детского профиля → 403 `ADULT_REQUIRED` до identity; 404 `LEARNER_NOT_FOUND` (чужой, свой аккаунт, не UUID); 403 `ADULT_REQUIRED` / `CONSENT_REQUIRED {purpose}` identity |
 | POST | `/v1/speech` | tts `/internal/v1/speech` (**аккаунт**, и в детском профиле) | release 4.1, `SpeechRequest` → `audio/mpeg` (MP3 из tts как есть, ≤ 3 МБ), `Cache-Control: private, max-age=86400`. Текст нормализуется как в tts (пробелы, табуляция и переводы строки схлопываются, края обрезаются) и уходит в tts уже нормализованным, `speed` по умолчанию `normal`. 422 `TEXT_INVALID {field}` — после нормализации пусто или > 400 знаков (символов Unicode), управляющие символы, нет латиницы, чужой `variant` / `speed`, лишние поля, а также 422 самого tts; 429 `RATE_LIMITED` (`tg.speech`, 120 за 10 минут на аккаунт); 503 `SPEECH_UNAVAILABLE {service: tts}` — `TTS_URL` не задан, tts недоступен / таймаут `TTS_TIMEOUT_MS` (без повторов) / 5xx / любой другой ответ, в том числе не `audio/mpeg` (Mini App откатывается на синтез речи устройства) |
 
 Сегмент ученика `audience` (kids / teens / adults) — по возрасту активного ученика, как для «Что нового»: детский профиль
 (`lrn ≠ sub`) — всегда kids без запроса к identity; возраст аккаунта не выбран — kids (самый строгий набор). Кеш
 `AUDIENCE_CACHE_SECONDS`, сбрасывается при `PUT /v1/profile/age`. Ответы catalog, diagnostics и learning-plan сверяются
 со схемой контракта до ответа Mini App (`src/check.ts`): не по контракту → 503 `UPSTREAM_UNAVAILABLE {service}`.
+
+### Спринт 5 — память, повторения, чтение, произношение
+
+- **memory** (`src/memoryApi.ts`, `src/routes/memory.ts`, `src/routes/pronunciation.ts`): `sub` — аккаунт, claims `lrn` и
+  `age_band`; для memory `age_band` — полоса **активного ученика** (детский профиль — полоса ребёнка из identity, кеш
+  `AUDIENCE_CACHE_SECONDS`): по ней memory выбирает воспроизведение (6–9 — сборка, 10–13 — ввод). Query `audience`, `locale`.
+- **Ключи ответов.** `ReviewTask` (и `next` в `ReviewTaskResult`) — схема `additionalProperties: false` на всех уровнях и
+  правило «подсказка не раскрывает ответ» (`typed`/`cloze`/`assemble`/`error_fix` — `text_en`, `example_en`, `speech_text`
+  = null; `meaning_choice` — `gloss`; `listen_choice` — `text_en`, `example_en`; `check_item` — плюс `gloss`); нарушение →
+  503 и строка `domain response does not match the contract` (`check`, `path`, `rule`: `additionalProperties` /
+  `answer_revealed`, без значений).
+- **Дети:** ввод в повторении и перевод по тапу не блокируются (сравнение локальное в memory, слово — из контента); чтение
+  — только детские тексты (catalog и lessons распознают детский профиль сами); запись голоса — только с согласия опекуна
+  (проверяет memory; родитель включает `PUT /v1/learners/{id}/voice-consent`).
+- **`LearnerSummary.voice_consent`** — из identity-consent как есть во всех ответах с учениками (сессия, профиль, список,
+  создание ребёнка); нет поля — `false`.
+- **Произношение:** своя область Fastify — парсер `audio/wav` (`audio/x-wav`, `audio/wave`) как Buffer и `bodyLimit`
+  600 000 только у этого маршрута (на остальных — прежние 64 КБ, `audio/wav` → 415). Ошибки разбора тела этого маршрута
+  (413, 415) → 422 `AUDIO_INVALID`. Ответ memory — `PronunciationView` или `PronunciationResult` (ai.ts) + `attempt_id`;
+  BFF собирает `PronunciationView`: `score = scores.pron`, разборчивость по баллу (≥ 80 / 60–79 / < 60), ≤ 40 слов, ≤ 2
+  совета, баллы — только при `ok`, `message` (RU/UZ) — для `insufficient_evidence` / `unavailable`, `attempt_id = null`
+  при `unavailable`.
 
 ## Переменные окружения
 
@@ -154,9 +196,11 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 | `AUDIO_CACHE_MB` / `AUDIENCE_CACHE_SECONDS` | `32` / `30` | кеш байтов аудио медиатеки (LRU, 0 — выключен) / кеш сегмента ученика |
 | `TTS_URL` | — | release 4.1: адрес tts (Railway: `http://tts.railway.internal:8115`, локально `http://127.0.0.1:8115`). **Необязателен и в stage/prod**: без него `POST /v1/speech` отвечает 503 `SPEECH_UNAVAILABLE`, при старте — одно предупреждение `TTS_URL is not set` (BFF можно выложить раньше tts). Если задан — только http(s) |
 | `TTS_TIMEOUT_MS` | `15000` | таймаут вызова tts (1000–60000), без повторов: длинная фраза синтезируется секунды, кеш MP3 — у tts |
+| `MEMORY_URL` | `http://127.0.0.1:8116` | спринт 5: memory (Railway: `http://memory.railway.internal:8116`); в stage/prod обязателен |
+| `MEMORY_TIMEOUT_MS` / `MEMORY_TRANSLATE_TIMEOUT_MS` / `MEMORY_PRONUNCIATION_TIMEOUT_MS` | `10000` / `12000` / `20000` | таймауты memory (1000–60000): обычные вызовы / перевод по тапу (memory ждёт `gloss_word` до 8 с) / оценка произношения (memory ждёт ai-gateway до 15 с); GET повторяются по `UPSTREAM_RETRIES`, команды и аудио — нет |
 | `UPSTREAM_TIMEOUT_MS` / `UPSTREAM_RETRIES` | `3000` / `1` | таймаут и повторы (GET и команды с `Idempotency-Key`) |
 | `EXPERIENCE_CACHE_SECONDS` | `60` | кэш конфига интерфейса |
-| `RATE_LIMIT_USER_PER_MIN` / `RATE_LIMIT_SESSION_IP_PER_MIN` / `RATE_LIMIT_PIN_PER_MIN` / `RATE_LIMIT_PUBLIC_IP_PER_MIN` | `120` / `10` / `5` / `120` | политики `tg.user`, `tg.session_ip`, `tg.pin` (код родителя, в т. ч. при выходе из детского профиля; сброс — отдельный счётчик), `tg.public_ip`; `tg.support_create` и `tg.speech` (120 за 600 с на аккаунт, `POST /v1/speech`) — из каталога |
+| `RATE_LIMIT_USER_PER_MIN` / `RATE_LIMIT_SESSION_IP_PER_MIN` / `RATE_LIMIT_PIN_PER_MIN` / `RATE_LIMIT_PUBLIC_IP_PER_MIN` | `120` / `10` / `5` / `120` | политики `tg.user`, `tg.session_ip`, `tg.pin` (код родителя, в т. ч. при выходе из детского профиля; сброс — отдельный счётчик), `tg.public_ip`; `tg.support_create`, `tg.speech` (120 за 600 с на аккаунт, `POST /v1/speech`) и спринт 5 — `tg.memory.translate` (60), `tg.memory.pronunciation` (20), `tg.memory.answer` (300) за 600 с на **ученика** — из каталога |
 | `RATE_LIMITS_ENABLED`, `RATE_LIMIT_OVERRIDE_REFRESH_SECONDS` | `true`, `30` | единый лимитер ts-common |
 | `TRUST_PROXY_HOPS` | `1` | доверенные прокси (Railway edge) |
 | `LOG_LEVEL`, `SERVICE_VERSION` | `info`, версия package.json | |
@@ -178,6 +222,10 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
   отдаётся никогда, верный ответ в итогах — только у заданий с ошибкой.
 - Release 4.1: текст озвучиваемых фраз (`POST /v1/speech`) в логи не попадает — `req.body.text` в redact-путях, ключ `text`
   вычищается из любого объекта лога; предупреждения о tts пишут только статус, код и правило проверки.
+- Спринт 5: ввод в повторении, поиск по словарю (`q`), слово перевода, слова глоссария (`texts`), эталон произношения
+  (`reference_text`) и цитаты ошибок в логи не попадают. **Аудио произношения** живёт только в памяти процесса на время
+  запроса: не пишется на диск, в Redis, логи и метрики; в логе — `audio_ms` и статус (`pronunciation assessed` /
+  `pronunciation not assessed`), без target и байтов; POST в memory не повторяется (аудио не пересылается дважды).
 - Сбой Redis → `503` (fail-closed).
 
 ## Отклонения от контракта и обходы
@@ -216,6 +264,22 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
   - табуляция и переводы строки (`\t \n \r`) допустимы и схлопываются в пробел, как в tts; прочие управляющие символы
     (Cc) → 422. Длина считается в символах Unicode (как `len()` в tts), не в единицах UTF-16.
 
+- **Спринт 5:**
+  - **Строгость `ReviewTask`:** по общему правилу BFF лишние поля доменов допустимы (отбрасываются сериализатором); у задания
+    повторения лишнее поле → 503 `UPSTREAM_UNAVAILABLE {service: memory}` (сигнал утечки ключа), как требует задача спринта.
+  - **`503 SPEECH_UNAVAILABLE`** memory передаётся клиенту как есть (в `DOMAIN_BUSINESS_503` вместе с
+    `CATALOG_UNAVAILABLE`), а не как `UPSTREAM_UNAVAILABLE` — Mini App по нему скрывает «Произнести».
+  - **Не тот `Content-Type`** у произношения (JSON, MP3, без типа) → 422 `AUDIO_INVALID {reason: format}` (а не 415): код из
+    контракта, Mini App различает только `AUDIO_INVALID`. Принимаются синонимы `audio/x-wav`, `audio/wave`.
+  - **Перевод:** тело в memory — `{content_ref, text}` (INTERNAL_API §1.7), в публичном API — `{text, content}` (bff.ts).
+  - **`?limit=`** у `/v1/memory/cards`, `/v1/memory/errors` (1–100) и `/v1/practice/readings` (1–50) — сверх контракта
+    (необязательный, как у остальных списков).
+  - **Проверка удержания:** BFF помнит задания `check_item`, выданные ученику (Redis, 26 ч): подсказка → 409
+    `HINTS_NOT_ALLOWED` без вызова memory; `result` до `check_result` и `correct_answer` всегда `null` (защита в глубину).
+  - **`DELETE /v1/memory/cards/{id}`** → 204 без тела (контракт), `POST …/cards` и `POST …/review-sessions` — статус memory
+    (201 / 200).
+  - **Шаг `reading`** общих маршрутов сессий получает `in_dictionary` глоссария из memory (как `GET /v1/practice/readings/{id}`).
+
 ## Локальная разработка
 
 ```bash
@@ -233,6 +297,11 @@ npx tsx scripts/dev-init-data.ts --user-id 900001 --name Игорь --start-para
 - **Деплой (Railway):** `RAILWAY_DOCKERFILE_PATH=services/telegram-bff/Dockerfile` (контекст — корень репозитория), healthcheck `/health/ready`.
 - **`/health/ready` = 503 `redis: down`:** проверить Redis и `REDIS_URL`; пока Redis недоступен, авторизованные запросы → 503.
 - **Массовые `503 UPSTREAM_UNAVAILABLE {service}`:** строки лога `domain unavailable` (`upstream`, `upstream_status`, `upstream_code`). `INTERNAL_TOKEN_*` / `CALLER_NOT_ALLOWED` — у домена нет открытого ключа `telegram-bff` или домен не разрешает `telegram-bff`.
+- **Спринт 5, «Произнести»:** `503 SPEECH_UNAVAILABLE` на `/v1/memory/pronunciation` — оценка выключена в ai-gateway (нет
+  ключа Azure, аварийная остановка, бюджет; см. ai-gateway); `403 VOICE_CONSENT_REQUIRED` — нет согласия на запись голоса
+  (`who: guardian` — родитель включает в карточке ребёнка). Лог `pronunciation not assessed` — `audio_ms`, статус и код memory.
+  Массовые `503 UPSTREAM_UNAVAILABLE {service: memory}` на «Повторении дня» при живом memory — строки `domain response does
+  not match the contract` с `check: review_task` (`rule: additionalProperties` / `answer_revealed`): memory отдаёт ключ в задании.
 - **`503 SPEECH_UNAVAILABLE` на `/v1/speech`:** при старте `TTS_URL is not set` — переменная не задана; иначе строки `domain unavailable` / `speech unavailable` / `speech audio rejected` с `upstream: tts` (статус, код, причина). Mini App в это время озвучивает синтезом устройства, где он есть (в Telegram на Android его нет — там аудирование отмечается недоступным).
 - **Вход падает 503 `learning-plan`:** сессия не создаётся (онбординг ученика неизвестен), initData можно предъявить снова после восстановления.
 - **Частые `401 TOKEN_EXPIRED {reason: learner_switched}`:** Mini App продолжает слать старый access-токен после `POST /v1/session/learner` — ошибка клиента (токены надо заменить из ответа).

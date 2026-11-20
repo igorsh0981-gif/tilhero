@@ -32,10 +32,11 @@ PARAMS: dict[str, dict] = {
     "media_request.decided": {"request_id": INVITE, "request_title": "Moonlight Café", "status": "rejected",
                               "linked_asset_id": None},
     "appeal_decided": {"appeal_id": INVITE, "evaluation_id": INVITE, "decision": "corrected"},
+    "reviews_due": {"local_date": "2026-11-20", "due_count": 12},
     "pin.reset_code": {"code": "482913", "ttl_minutes": 10},
     "pin.reset_scheduled": {"effective_at": "2026-11-19T05:30:00.000Z"},
 }
-for base in ("lesson.reminder", "lesson.missed", "lesson.comeback", "appeal_decided"):
+for base in ("lesson.reminder", "lesson.missed", "lesson.comeback", "appeal_decided", "reviews_due"):
     PARAMS[base + ".kid"] = PARAMS[base]
 
 # Детям и о детях — без давления: ни «потери серии», ни «провала» (CONVENTIONS §8). Список — в коде: им же
@@ -54,13 +55,14 @@ STARTAPP = {
     "release_note.published": "route_news",
     "media_request.decided": "route_media_requests",
     "appeal_decided": "route_lessons",
+    "reviews_due": "route_review",
 }
 
 
 def test_every_template_has_params_fixture() -> None:
     assert set(PARAMS) == set(TEMPLATES)
     assert KID_TEMPLATES == {"lesson.reminder.kid", "lesson.missed.kid", "lesson.comeback.kid",
-                             "appeal_decided.kid"}
+                             "appeal_decided.kid", "reviews_due.kid"}
 
 
 @pytest.mark.parametrize("name", sorted(TEMPLATES))

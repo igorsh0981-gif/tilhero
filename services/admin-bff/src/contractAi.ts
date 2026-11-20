@@ -89,8 +89,11 @@ void _exact;
 
 // ---------------------------------------------------------------- ключ провайдера ИИ
 
-/** Имя поля, похожее на ключ или секрет (ai-gateway такие поля не отдаёт никогда). `key_configured` — не ключ. */
-const KEY_FIELD_RE = /(?:^|[_-])(?:api[_-]?key|x[_-]api[_-]key|secret|password|authorization|private[_-]?key)$|^anthropic[_-]?(?:api[_-]?)?key$/i;
+/** Имя поля, похожее на ключ или секрет (ai-gateway такие поля не отдаёт никогда). `key_configured` — не ключ.
+ *  Спринт 5: ключ Azure Speech (`AZURE_SPEECH_KEY`, заголовок `Ocp-Apim-Subscription-Key`) — `speech_key`,
+ *  `azure_speech_key`, `subscription_key`, `ocp-apim-subscription-key`. */
+const KEY_FIELD_RE =
+  /(?:^|[_-])(?:api[_-]?key|x[_-]api[_-]key|secret|password|authorization|private[_-]?key|subscription[_-]?key|speech[_-]?key)$|^anthropic[_-]?(?:api[_-]?)?key$/i;
 /**
  * Строка вида ключа провайдера (Anthropic `sk-ant-…`, любые `sk-` с длинным хвостом) — отдельным словом: упоминание
  * «sk-» в правилах и слова вроде «task-…», «ask-for-…» (идентификаторы сценариев) ключом не считаются.
@@ -372,11 +375,15 @@ export const GOLDEN_CASES = itemsOf(GOLDEN_CASE, 500);
 
 // ---------------------------------------------------------------- модели, провайдер, бюджет, затраты
 
+/** Провайдер модели: LLM (anthropic | fake) и, со спринта 5, речь (azure_speech | fake_speech). */
+const MODEL_PROVIDER = C.oneOf(["anthropic", "fake", "azure_speech", "fake_speech"] as const);
 export const AI_MODEL: Codec<AiModel> = C.obj<AiModel>({
   model_id: MODEL,
-  provider: PROVIDER,
+  provider: MODEL_PROVIDER,
   input_usd_per_mtok: C.num(0, 1000),
   output_usd_per_mtok: C.num(0, 1000),
+  // речь: цена часа аудио (azure-speech-pa 1.32); LLM — null (нет поля у ai-gateway прошлой версии — тоже null)
+  audio_usd_per_hour: C.nullable(C.num(0, 1000)),
   active: C.bool,
   updated_at: C.time,
 });
@@ -384,20 +391,35 @@ export const AI_MODELS = itemsOf(AI_MODEL, 100);
 
 type ProviderError = NonNullable<AiProviderStatus["last_error"]>;
 const PROVIDER_ERROR = C.obj<ProviderError>({ code: C.id(/^[a-z0-9_.:-]{1,64}$/i, 64), at: C.time });
-/** «Задан / не задан» и код последней ошибки — без ключа и без текста ошибки провайдера. Ошибка без времени или с
- *  неожиданным кодом не показывается (null), статус провайдера — показывается. */
-export const AI_PROVIDER: Codec<AiProviderStatus> = C.obj<AiProviderStatus>({
-  provider: PROVIDER,
-  key_configured: C.bool,
-  last_error: C.custom<ProviderError | null>(C.nullable(PROVIDER_ERROR).schema, (v, p) => {
+/** Значение по кодеку или null, если оно испорчено (необязательная подробность не ломает весь ответ). */
+const lenient = <T>(c: Codec<T>): Codec<T | null> =>
+  C.custom<T | null>(C.nullable(c).schema, (v, p) => {
     try {
-      return C.nullable(PROVIDER_ERROR).parse(v, p);
+      return C.nullable(c).parse(v, p);
     } catch (e) {
       if (e instanceof BadValue) return null;
       throw e;
     }
-  }),
+  });
+/** Ошибка без времени или с неожиданным кодом не показывается (null), статус провайдера — показывается. */
+const LAST_ERROR = lenient(PROVIDER_ERROR);
+/**
+ * Регион Azure (westeurope, eastus2, southcentralus): только строчные буквы и цифра в конце. Иначе — null: если в
+ * переменную региона по ошибке попал ключ (32 hex), он не уйдёт в админку.
+ */
+const AZURE_REGION = lenient(C.id(/^[a-z]{2,30}[0-9]?$/, 31));
+/** «Задан / не задан» и код последней ошибки — без ключа и без текста ошибки провайдера (LLM и, спринт 5, речь). */
+export const AI_PROVIDER: Codec<AiProviderStatus> = C.obj<AiProviderStatus>({
+  provider: PROVIDER,
+  key_configured: C.bool,
+  last_error: LAST_ERROR,
   ai_enabled: C.bool,
+  speech: C.obj<AiProviderStatus["speech"]>({
+    provider: C.oneOf(["azure_speech", "fake_speech"] as const),
+    key_configured: C.bool,
+    region: AZURE_REGION,
+    last_error: LAST_ERROR,
+  }),
 });
 
 export const AI_BUDGET: Codec<AiBudget> = C.obj<AiBudget>({
@@ -405,6 +427,8 @@ export const AI_BUDGET: Codec<AiBudget> = C.obj<AiBudget>({
   monthly_cap_usd: C.num(0, 100_000),
   learner_daily_cap_usd: C.num(0, 1000),
   lesson_cap_usd: C.num(0, 1000),
+  // спринт 5 (решение владельца): подлимит оценки произношения внутри monthly_cap_usd, по умолчанию 5
+  speech_monthly_cap_usd: C.num(0, 100_000),
   alert_percent: C.int(1, 100),
   updated_at: C.time,
 });
@@ -415,7 +439,10 @@ export const AI_CALL: Codec<AiCall> = C.obj<AiCall>({
   version: C.nullable(VERSION_NO),
   model_id: C.nullable(MODEL),
   status: C.oneOf(["ok", "unavailable", "refused"] as const),
+  // у status ok бывает не null: речь insufficient_evidence (not_recognized | low_confidence | incomplete)
   reason: C.nullable(C.id(/^[a-z][a-z0-9_]{0,63}$/, 64)),
+  // спринт 5: длительность аудио вызова речи (запись ≤ 15 с; LLM — 0); необязательное — нет поля / null → ключа нет
+  audio_ms: C.int(0, 3_600_000),
   input_tokens: COUNT,
   output_tokens: COUNT,
   cost_usd: USD,
@@ -423,7 +450,7 @@ export const AI_CALL: Codec<AiCall> = C.obj<AiCall>({
   session_id: C.nullable(C.uuid),
   canary: C.bool,
   created_at: C.time,
-});
+}, "audio_ms");
 export const AI_CALL_PAGE = pageOf(AI_CALL, 200);
 
 export const AI_USAGE_SUMMARY: Codec<AiUsageSummary> = C.obj<AiUsageSummary>({
@@ -445,6 +472,15 @@ export const AI_USAGE_SUMMARY: Codec<AiUsageSummary> = C.obj<AiUsageSummary>({
   avg_cost_per_lesson_usd: C.nullable(USD),
   ai_enabled: C.bool,
   alert_percent: C.int(1, 100),
+  // спринт 5: оценка произношения (pronunciation_coach) — входит в spent_usd; минуты — оценённого аудио
+  speech: C.obj<AiUsageSummary["speech"]>({
+    calls: COUNT,
+    audio_minutes: C.num(0, 1e9),
+    spent_usd: USD,
+    speech_available: C.bool,
+    // подлимит речи на месяц (AiBudget.speech_monthly_cap_usd)
+    cap_usd: C.num(0, 100_000),
+  }),
 });
 
 // ---------------------------------------------------------------- контроль диалогов: сессии (lessons)
@@ -459,6 +495,8 @@ const SESSION_ROW_PROPS = {
   lesson_id: C.nullable(KEY),
   scenario_id: C.nullable(KEY),
   asset_id: C.nullable(KEY),
+  // спринт 5: сессия чтения (текст в content_versions карточки — ключ `reading:<reading_id>`)
+  reading_id: C.nullable(KEY),
   level: C.nullable(BAND),
   status: C.oneOf(STATUSES),
   outcome: C.nullable(C.oneOf(OUTCOMES)),
@@ -514,7 +552,8 @@ export function mergeSummary(row: SessionRowDomain, s: SessionSummary | undefine
 type CardSession = NonNullable<SessionCard["session"]>;
 type CardExtra = Pick<CardSession, "content_versions" | "status_history" | "steps" | "turns_meta">;
 const CARD_EXTRA_PROPS = {
-  // lesson | scenario | rubric | media_asset, а также `media_exercise:<id>` и `retrieval:<lesson_id>` (id каталога)
+  // lesson | scenario | rubric | media_asset, а также `media_exercise:<id>`, `retrieval:<lesson_id>` и (спринт 5)
+  // `reading:<reading_id>` (id каталога)
   content_versions: C.dict(/^[a-z][a-z0-9_]{0,31}(:[a-z0-9][a-z0-9_.-]{0,63})?$/, VERSION_NO, 40),
   status_history: C.arr(
     C.obj<CardSession["status_history"][number]>({
@@ -694,7 +733,7 @@ const LESSON_STATS_PROPS = {
   completed: COUNT,
   completion_pct: C.nullable(PCT),
   median_minutes: C.nullable(C.num(0, 1e6)),
-  by_kind: C.obj<LessonStats["by_kind"]>({ lesson: COUNT, scenario: COUNT, media: COUNT, review: COUNT }),
+  by_kind: C.obj<LessonStats["by_kind"]>({ lesson: COUNT, scenario: COUNT, media: COUNT, review: COUNT, reading: COUNT }),
   ai_degraded_pct: C.nullable(PCT),
 };
 export const LESSON_STATS_DOMAIN: Codec<LessonStatsDomain> = C.obj<LessonStatsDomain>({

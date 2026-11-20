@@ -10,7 +10,8 @@ rollback {to_version} — опубликовать прежде опублико
 версия на проверке. Конкурентные команды по одному ключу сериализуются advisory-блокировкой (kind, key).
 
 Каждая команда — запись аудита admin.audit.recorded.v1 (outbox, та же транзакция); публикация, откат и снятие —
-событие catalog.version.published.v1.
+событие catalog.version.published.v1. Публикация и откат урока, медиа и текста для чтения строят статьи словаря курса
+(domain/glossary_build.py, та же транзакция) — изменения статей → catalog.glossary.changed.v1.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ from tilhero_catalog.domain.common import (
     version_not_found,
     version_object_id,
 )
+from tilhero_catalog.domain.glossary_build import build_for_version, emit_changes
 from tilhero_catalog.domain.scenario_test import run_test
 from tilhero_catalog.domain.validation import (
     DOWN_REFS,
@@ -478,6 +480,14 @@ async def _emit_published(session: AsyncSession, row: ContentVersion, action: st
     })
 
 
+async def _build_glossary(session: AsyncSession, row: ContentVersion, actor: Actor, at: datetime) -> None:
+    """Статьи course словаря курса из опубликованной версии (урок, медиа, текст) — в транзакции публикации."""
+    kind, key, version, payload = row.kind, row.key, row.version, dict(row.payload)
+    changes = await session.run_sync(lambda s: build_for_version(s.connection(), kind, key, version, payload,
+                                                                 by=actor.id[:64], now=at))
+    await emit_changes(session, changes, at)
+
+
 async def _archive_version(session: AsyncSession, kind: str, key: str, version: int, at: datetime) -> None:
     await session.execute(update(CV).where(CV.kind == kind, CV.key == key, CV.version == version)
                           .values(status="archived", archived_at=at).execution_options(synchronize_session=False))
@@ -513,6 +523,7 @@ async def publish(session: AsyncSession, kind: str, key: str, version: int, reas
     ptr.published_version = version
     ptr.updated_at = now
     await session.flush()
+    await _build_glossary(session, row, actor, now)
     await _emit_published(session, row, "published", version, previous, actor, now)
     await emit_audit(session, _audit_version(actor, "content.published", row,
                                              before={"published_version": previous},
@@ -587,6 +598,7 @@ async def rollback(session: AsyncSession, kind: str, key: str, to_version: int, 
     ptr.published_version = to_version
     ptr.updated_at = now
     await session.flush()
+    await _build_glossary(session, target, actor, now)
     await _emit_published(session, target, "rolled_back", to_version, current, actor, now)
     await emit_audit(session, _audit_version(actor, "content.rolled_back", target,
                                              before={"published_version": current},

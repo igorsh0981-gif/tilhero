@@ -5,7 +5,7 @@ import { translate } from "../src/i18n";
 import {
   CALL_REASONS,
   buildCheck, budgetLevel, capPct, checkBudget, checkContextJson, checkForm, checkLine, checkOutputSchema, collapseDiff, diffStats, draftOf,
-  emptyCheck, formOf, isOutputPath, lineDiff, mergeBudgetForm, niceMax, parseValueList, patchOf, PATH_RE, publishGate, scrubPii, taskFileName,
+  emptyCheck, formOf, isOutputPath, lineDiff, mergeBudgetForm, niceMax, parseValueList, patchOf, PATH_RE, publishGate, scrubPii, speechHourPrice, speechHours, taskFileName,
   taskMarkdown, usd,
 } from "../src/screens/ai/model";
 
@@ -181,20 +181,38 @@ describe("budget share and levels", () => {
     expect(budgetLevel(120, 100)).toBe("over");
   });
   it("limits: positive, lesson ≤ day ≤ month, threshold 1…100", () => {
-    const ok = { monthly_cap_usd: "20", learner_daily_cap_usd: "0.05", lesson_cap_usd: "0,03", alert_percent: "80" };
-    expect(checkBudget(ok).value).toEqual({ monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 80 });
+    const ok = { monthly_cap_usd: "20", learner_daily_cap_usd: "0.05", lesson_cap_usd: "0,03", speech_monthly_cap_usd: "5", alert_percent: "80" };
+    expect(checkBudget(ok).value).toEqual({ monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80 });
     const codes = (p: Partial<typeof ok>) => checkBudget({ ...ok, ...p }).issues.map((x) => `${x.field}:${x.code}`);
     expect(codes({ lesson_cap_usd: "0.06" })).toEqual(["lesson_cap_usd:gt_daily"]);
     expect(codes({ learner_daily_cap_usd: "25" })).toEqual(["learner_daily_cap_usd:gt_monthly"]);
     expect(codes({ monthly_cap_usd: "0" })).toEqual(["monthly_cap_usd:range"]);
     expect(codes({ alert_percent: "101" })).toEqual(["alert_percent:range"]);
     expect(codes({ alert_percent: "80.5" })).toEqual(["alert_percent:range"]);
+    // sprint 5: the sub-cap of pronunciation is 0…the month; 0 turns the feature off
+    expect(codes({ speech_monthly_cap_usd: "0" })).toEqual([]);
+    expect(codes({ speech_monthly_cap_usd: "20" })).toEqual([]);
+    expect(codes({ speech_monthly_cap_usd: "20,01" })).toEqual(["speech_monthly_cap_usd:gt_monthly"]);
+    expect(codes({ speech_monthly_cap_usd: "-1" })).toEqual(["speech_monthly_cap_usd:range0"]);
+    expect(codes({ speech_monthly_cap_usd: "" })).toEqual(["speech_monthly_cap_usd:range0"]);
+  });
+  it("pronunciation sub-cap: hours of audio at the price of the active speech model", () => {
+    const m = (provider: "anthropic" | "azure_speech" | "fake_speech", active: boolean, audio_usd_per_hour: number | null) => ({ provider, active, audio_usd_per_hour });
+    expect(speechHourPrice([m("anthropic", true, null), m("fake_speech", true, 0), m("azure_speech", true, 1.32)])).toBe(1.32);
+    expect(speechHourPrice([m("azure_speech", false, 1.32), m("fake_speech", true, 0.5)])).toBe(0.5);
+    expect(speechHourPrice([m("azure_speech", false, 1.32)])).toBeNull();
+    expect(speechHourPrice(null)).toBeNull();
+    expect(speechHours(5, 1.32)).toBe(3.8);
+    expect(speechHours(0, 1.32)).toBe(0);
+    expect(speechHours(5, null)).toBeNull();
+    expect(speechHours(null, 1.32)).toBeNull();
+    expect(speechHours(-1, 1.32)).toBeNull();
   });
   it("R2-07 BUDGET_CONFLICT: edited fields keep the entered values, untouched ones take the values saved now", () => {
-    const read = { monthly_cap_usd: "20", learner_daily_cap_usd: "0.05", lesson_cap_usd: "0.03", alert_percent: "80" };
+    const read = { monthly_cap_usd: "20", learner_daily_cap_usd: "0.05", lesson_cap_usd: "0.03", speech_monthly_cap_usd: "5", alert_percent: "80" };
     const entered = { ...read, lesson_cap_usd: "0.04", alert_percent: "90" };
     const now = { ...read, monthly_cap_usd: "25", alert_percent: "70" };
-    expect(mergeBudgetForm(read, entered, now)).toEqual({ monthly_cap_usd: "25", learner_daily_cap_usd: "0.05", lesson_cap_usd: "0.04", alert_percent: "90" });
+    expect(mergeBudgetForm(read, entered, now)).toEqual({ monthly_cap_usd: "25", learner_daily_cap_usd: "0.05", lesson_cap_usd: "0.04", speech_monthly_cap_usd: "5", alert_percent: "90" });
     // nothing edited — exactly the values saved now
     expect(mergeBudgetForm(read, read, now)).toEqual(now);
   });
@@ -220,6 +238,7 @@ const CARD: SessionCard = {
     lesson_id: "l-01-greetings",
     scenario_id: null,
     asset_id: null,
+    reading_id: null,
     level: "A1",
     status: "completed",
     outcome: "success",

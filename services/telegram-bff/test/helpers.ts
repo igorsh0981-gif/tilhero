@@ -31,6 +31,7 @@ import type { App } from "../src/http.js";
 import { signInitData } from "../src/telegramAuth.js";
 import { FakeContent } from "./fakeContent.js";
 import { FakeLessons } from "./fakeLessons.js";
+import { FakeMemory, FakeReading } from "./fakeMemory.js";
 
 export const TEST_REDIS_URL = process.env.TEST_REDIS_URL ?? "redis://127.0.0.1:6379/14";
 export const BOT_TOKEN = "7000000001:AAtest-bot-token-for-unit-tests-only-xx";
@@ -51,6 +52,7 @@ const URLS = {
   lessons: "http://lessons.test",
   assessment: "http://assessment.test",
   tts: "http://tts.test",
+  memory: "http://memory.test",
 } as const;
 
 export type Service = keyof typeof URLS;
@@ -67,6 +69,7 @@ const DOMAIN_AUD: Record<Service, string> = {
   lessons: "lessons",
   assessment: "assessment",
   tts: "tts",
+  memory: "memory",
 };
 
 /** MP3-заглушка tts: два беззвучных кадра MPEG-1 Layer III (32 кбит/с, 48 кГц, моно). */
@@ -99,6 +102,7 @@ export function testConfig(env: Record<string, string> = {}): Config {
     LESSONS_URL: URLS.lessons,
     ASSESSMENT_URL: URLS.assessment,
     TTS_URL: URLS.tts,
+    MEMORY_URL: URLS.memory,
     UPSTREAM_RETRIES: "0",
     UPSTREAM_TIMEOUT_MS: "2000",
     LOG_LEVEL: "info",
@@ -133,6 +137,8 @@ export interface Call {
   headers: Record<string, string>;
   /** все claims внутреннего JWT (после проверки подписи) */
   claims: Record<string, unknown>;
+  /** тело не-JSON (байты аудио произношения) */
+  rawBody: Buffer | null;
 }
 
 export interface Req {
@@ -143,6 +149,7 @@ export interface Req {
   body: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   headers: Record<string, string>;
   claims: Record<string, unknown>;
+  rawBody: Buffer | null;
 }
 
 export type Handler = (r: Req) => Response | Promise<Response>;
@@ -168,6 +175,8 @@ export interface FakeChild {
   age_band: AgeBand;
   guardian: string;
   settings: NotificationSettings;
+  /** спринт 5: согласие опекуна на запись голоса */
+  voiceConsent: boolean;
 }
 
 export const json = (status: number, body: unknown) =>
@@ -253,6 +262,9 @@ export class FakeDomains {
   readonly content = new FakeContent();
   /** Спринт 4: lessons и assessment (test/fakeLessons.ts). */
   readonly lessons = new FakeLessons();
+  /** Спринт 5: memory и чтение (catalog readings, lessons reading) — test/fakeMemory.ts. */
+  readonly memory = new FakeMemory();
+  readonly reading = new FakeReading();
   private readonly overrides = new Map<string, Handler>();
   private ticketSeq = 3000;
 
@@ -313,7 +325,7 @@ export class FakeDomains {
   /** Детский профиль напрямую. */
   addChild(guardian: string, name = "Мадина", band: AgeBand = "6-9"): string {
     const id = randomUUID();
-    this.children.set(id, { learner_id: id, display_name: name, age_band: band, guardian, settings: DEFAULT_SETTINGS() });
+    this.children.set(id, { learner_id: id, display_name: name, age_band: band, guardian, settings: DEFAULT_SETTINGS(), voiceConsent: false });
     this.account(guardian).children.push(id);
     return id;
   }
@@ -340,6 +352,7 @@ export class FakeDomains {
     const method = (init?.method ?? "GET").toUpperCase();
     const bodyText = typeof init?.body === "string" ? init.body : null;
     const body = bodyText ? JSON.parse(bodyText) : undefined;
+    const rawBody = init?.body instanceof Uint8Array ? Buffer.from(init.body) : null;
 
     let subject: string | undefined;
     try {
@@ -351,8 +364,8 @@ export class FakeDomains {
     }
     const query = Object.fromEntries(url.searchParams);
     const claims = decodeJwt(headers["x-internal-token"] ?? "") as Record<string, unknown>;
-    this.calls.push({ service, method, path: url.pathname, query, subject, body, headers, claims });
-    const req: Req = { method, path: url.pathname, query, subject, body, headers, claims };
+    this.calls.push({ service, method, path: url.pathname, query, subject, body, headers, claims, rawBody });
+    const req: Req = { method, path: url.pathname, query, subject, body, headers, claims, rawBody };
     if (this.failAll && !this.failAll.except.has(service)) return domainError(this.failAll.status, this.failAll.code, { from: service });
     const ov = this.overrides.get(`${service} ${method} ${url.pathname}`);
     // таймаут BFF (AbortSignal) действует и на подделку: медленный обработчик прерывается как настоящий запрос
@@ -393,15 +406,17 @@ export class FakeDomains {
       case "experience":
         return this.experienceRoute(r);
       case "catalog":
-        return this.content.catalog(r);
+        return this.reading.catalog(r) ?? this.content.catalog(r);
       case "diagnostics":
         return this.content.diagnostics(r);
       case "lessons":
-        return this.lessons.lessons(r);
+        return this.reading.lessons(r) ?? this.lessons.lessons(r);
       case "assessment":
         return this.lessons.assessment(r);
       case "tts":
         return this.ttsRoute(r);
+      case "memory":
+        return this.memory.memory(r);
     }
   }
 
@@ -430,6 +445,8 @@ export class FakeDomains {
       age_band: u.summary.age_band,
       is_active: false,
       onboarding_completed: false,
+      // спринт 5: своё согласие с voice_recording (подросток — после согласия родителя)
+      voice_consent: u.consent.purposes.includes("voice_recording") && (u.summary.age_band !== "14-17" || u.summary.guardian_consent === "granted"),
       telegram_user_id: u.telegramId, // внутреннее поле — BFF не должен его пропустить наружу
     };
   }
@@ -442,6 +459,7 @@ export class FakeDomains {
       age_band: c.age_band,
       is_active: false,
       onboarding_completed: false,
+      voice_consent: c.voiceConsent,
       guardian_user_id: c.guardian, // внутреннее поле
       ...(withSettings ? { settings: c.settings } : {}),
     };
@@ -575,6 +593,18 @@ export class FakeDomains {
       teen.summary = { ...teen.summary, guardian_consent: "declined" };
       teen.consent = { ...teen.consent, purposes: teen.consent.purposes.filter((p) => ["terms", "privacy", "learning"].includes(p)) };
       return json(200, this.grantView(teenId, { ...g, status: "declined" }));
+    }
+    // спринт 5: согласие опекуна на запись голоса детского профиля (как identity-consent: 18+, своё согласие, свой ребёнок)
+    const vc = /^\/internal\/v1\/me\/learners\/([^/]+)\/voice-consent$/.exec(r.path);
+    if (vc && r.method === "PUT") {
+      if (u.summary.age_band !== "18+") return domainError(403, "ADULT_REQUIRED");
+      if (!u.consent.accepted) return domainError(403, "CONSENT_REQUIRED", { purpose: "terms" });
+      const c = this.children.get(vc[1]!);
+      if (!c || c.guardian !== u.summary.user_id) return domainError(404, "LEARNER_NOT_FOUND");
+      const b = r.body as Record<string, unknown>;
+      if (Object.keys(b ?? {}).join() !== "granted" || typeof b.granted !== "boolean") return domainError(422, "VALIDATION_ERROR");
+      c.voiceConsent = b.granted;
+      return json(200, this.childView(c, true));
     }
     const lm = /^\/internal\/v1\/me\/learners\/([^/]+)$/.exec(r.path);
     if (lm) {

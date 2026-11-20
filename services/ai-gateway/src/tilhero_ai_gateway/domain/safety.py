@@ -6,6 +6,12 @@
 
 Коды: link, email, phone, secret, certificate_claim, pronunciation_scored, too_long, too_many_words, wrong_language,
 intent_unknown, criterion_unknown (+ разбор: not_json, schema_invalid, contract_mismatch).
+
+teaching_coach `gloss_word` (спринт 5, INTERNAL_API §3.1): без ссылок, e-mail, телефонов и ключей (общие правила);
+`gloss.ru` — кириллица без латиницы («без английского»), `gloss.uz` — латиница без кириллицы, `lemma` и `forms` —
+без кириллицы → `wrong_language`; длины — схема версии и контракт ai.ts (≤ 60 / 80 / 6 форм). Апострофы узбекского
+oʻ/gʻ, записанные ' ‘ ’ `, исправляются на ʻ (U+02BB) без повтора (`uz_apostrophe_fixed`). Провайдер fake
+(`[ru] word`, решение §3.1) языковые правила gloss не проверяет — это заглушка стенда, не перевод.
 """
 
 from __future__ import annotations
@@ -23,6 +29,8 @@ ALLOWED_PHONE_RE: Final = re.compile(r"^\d{0,4}55501\d{2}$")
 SECRET_RE: Final = re.compile(r"\bsk-[A-Za-z0-9_\-]{6,}|eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}")
 CERT_RE: Final = re.compile(r"сертифик|certificat|sertifikat", re.IGNORECASE)
 CYRILLIC_RE: Final = re.compile(r"[Ѐ-ӿ]")
+LATIN_RE: Final = re.compile(r"[A-Za-z]")
+UZ_APOSTROPHE_RE: Final = re.compile(r"(?<=[oOgG])['‘’`]")
 LETTER_RE: Final = re.compile(r"[^\W\d_]")
 WORD_RE: Final = re.compile(r"[^\s]+")
 LOW_BANDS: Final = frozenset({"A0", "A1", "A2"})
@@ -42,7 +50,9 @@ CONSTRAINTS: Final[dict[str, str]] = {
     "pronunciation_scored": "Произношение по тексту не оценивается: pronunciation_score и scores.pronunciation — null.",
     "too_long": "Реплика персонажа — не длиннее 240 символов.",
     "too_many_words": "Для уровней A0–A2 реплика персонажа — не больше 25 слов, один вопрос.",
-    "wrong_language": "Объяснения — на языке объяснений ученика (ru/uz), учебные поля — только на английском.",
+    "wrong_language": "Объяснения — на языке объяснений ученика (ru/uz), учебные поля — только на английском; "
+                      "gloss.ru — только кириллица без латиницы, gloss.uz — только латиница, lemma и forms — "
+                      "на английском.",
     "intent_unknown": "intent — только один из переходов текущего узла, либо unclear, либо off_topic.",
     "criterion_unknown": "scores — только критерии рубрики из контекста.",
 }
@@ -101,8 +111,9 @@ def check_text(text: str, secrets: tuple[str, ...] = ()) -> list[str]:
 
 
 def check_output(agent_id: str, output: dict[str, Any], context: dict[str, Any], *,
-                 secrets: tuple[str, ...] = ()) -> GateResult:
-    """Правила §1.3 по выводу, уже прошедшему схему версии и контракт ai.ts."""
+                 secrets: tuple[str, ...] = (), provider: str | None = None) -> GateResult:
+    """Правила §1.3 по выводу, уже прошедшему схему версии и контракт ai.ts. provider — имя провайдера ответа
+    (fake: языковые правила gloss_word не применяются)."""
     result = GateResult(output=output)
     for path, text in _strings(output):
         # цитата ученика (evidence) — данные ученика, а не текст агента: проверяется только на ключи
@@ -118,6 +129,8 @@ def check_output(agent_id: str, output: dict[str, Any], context: dict[str, Any],
         result.add("certificate_claim")
     if agent_id == "conversation_partner":
         _conversation_partner(output, context, result)
+    elif agent_id == "teaching_coach" and context.get("request") == "gloss_word":
+        _gloss_word(output, result, check_language=provider != "fake")
     elif agent_id == "teaching_coach":
         _teaching_coach(output, context, result)
     elif agent_id == "independent_evaluator":
@@ -148,6 +161,21 @@ def _teaching_coach(output: dict[str, Any], context: dict[str, Any], result: Gat
         # ru — объяснение кириллицей (английские слова-примеры внутри допустимы); uz — латиницей (CONVENTIONS)
         if (locale == "ru" and share < 0.5) or (locale == "uz" and share > 0.2):
             result.add("wrong_language")
+
+
+def _gloss_word(output: dict[str, Any], result: GateResult, *, check_language: bool) -> None:
+    gloss = output.get("gloss") or {}
+    ru, uz = str(gloss.get("ru", "")), str(gloss.get("uz", ""))
+    if check_language:
+        english = [str(output.get("lemma", "")), *(str(f) for f in output.get("forms") or [])]
+        if LATIN_RE.search(ru) or not CYRILLIC_RE.search(ru) or CYRILLIC_RE.search(uz) \
+                or any(CYRILLIC_RE.search(t) for t in english):
+            result.add("wrong_language")
+            return
+    fixed = UZ_APOSTROPHE_RE.sub("ʻ", uz)
+    if fixed != uz:
+        result.output = {**output, "gloss": {**gloss, "uz": fixed}}
+        result.redactions.append("uz_apostrophe_fixed")
 
 
 def _independent_evaluator(output: dict[str, Any], context: dict[str, Any], result: GateResult) -> None:

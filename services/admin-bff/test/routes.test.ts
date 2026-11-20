@@ -42,6 +42,9 @@ import {
   stepUp,
   languageRow,
   pairCard,
+  CARD_ID,
+  GLOSSARY_ENTRY_ID,
+  LEARNER_USER_ID,
   type Harness,
   type Service,
 } from "./helpers.js";
@@ -570,7 +573,7 @@ const CASES: Record<string, Case> = {
   "GET /admin/v1/ai/budget": { url: "/admin/v1/ai/budget", status: 200, domain: ["aiGateway", "GET", "/admin/v1/ai/budget"] },
   "PUT /admin/v1/ai/budget": {
     url: "/admin/v1/ai/budget",
-    payload: { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 80, reason: "решение владельца" },
+    payload: { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80, reason: "решение владельца" },
     status: 200,
     domain: ["aiGateway", "PUT", "/admin/v1/ai/budget"],
   },
@@ -622,6 +625,67 @@ const CASES: Record<string, Case> = {
     status: 200,
     domain: ["assessment", "POST", `/admin/v1/appeals/${APPEAL_ID}/decide`],
   },
+  // ---------- спринт 5: словарь курса (catalog)
+  "GET /admin/v1/glossary": {
+    url: "/admin/v1/glossary?pair_id=ru-en&q=coff&source=ai&review_status=pending&limit=20",
+    status: 200,
+    domain: ["catalog", "GET", "/admin/v1/glossary"],
+  },
+  "GET /admin/v1/glossary/stats": { url: "/admin/v1/glossary/stats?pair_id=ru-en", status: 200, domain: ["catalog", "GET", "/admin/v1/glossary/stats"] },
+  "GET /admin/v1/glossary/:entryId": { url: `/admin/v1/glossary/${GLOSSARY_ENTRY_ID}`, status: 200, domain: ["catalog", "GET", `/admin/v1/glossary/${GLOSSARY_ENTRY_ID}`] },
+  "POST /admin/v1/glossary": {
+    url: "/admin/v1/glossary",
+    payload: { pair_id: "ru-en", lemma: "receipt", forms: ["receipt", "receipts"], part_of_speech: "noun", gloss: { ru: "чек", uz: "chek" }, example_en: null, reason: null },
+    headers: IK("gloss"),
+    status: 201,
+    domain: ["catalog", "POST", "/admin/v1/glossary"],
+  },
+  "PATCH /admin/v1/glossary/:entryId": {
+    url: `/admin/v1/glossary/${GLOSSARY_ENTRY_ID}`,
+    payload: { override: { gloss: { ru: "кофе", uz: "qahva" }, example_en: null }, reason: "uz — латиница" },
+    headers: { "if-match": "2026-11-19T10:00:00.000Z" },
+    status: 200,
+    domain: ["catalog", "PATCH", `/admin/v1/glossary/${GLOSSARY_ENTRY_ID}`],
+  },
+  "POST /admin/v1/glossary/:entryId/review": {
+    url: `/admin/v1/glossary/${GLOSSARY_ENTRY_ID}/review`,
+    payload: { decision: "correct", gloss: { ru: "латте", uz: "latte" }, note: "Уточнение" },
+    headers: IK("greview"),
+    status: 200,
+    domain: ["catalog", "POST", `/admin/v1/glossary/${GLOSSARY_ENTRY_ID}/review`],
+  },
+  "DELETE /admin/v1/glossary/:entryId": {
+    url: `/admin/v1/glossary/${GLOSSARY_ENTRY_ID}`,
+    payload: { reason: "дубль статьи" },
+    status: 204,
+    domain: ["catalog", "DELETE", `/admin/v1/glossary/${GLOSSARY_ENTRY_ID}`],
+  },
+  // ---------- спринт 5: память ученика (memory)
+  "GET /admin/v1/memory/learners/:userId": {
+    url: `/admin/v1/memory/learners/${LEARNER_USER_ID}`,
+    status: 200,
+    domain: ["memory", "GET", `/admin/v1/memory/learners/${LEARNER_USER_ID}`],
+  },
+  "GET /admin/v1/memory/learners/:userId/cards": {
+    url: `/admin/v1/memory/learners/${LEARNER_USER_ID}/cards?status=review&kind=word&limit=20`,
+    status: 200,
+    domain: ["memory", "GET", `/admin/v1/memory/learners/${LEARNER_USER_ID}/cards`],
+  },
+  "GET /admin/v1/memory/cards/:cardId": { url: `/admin/v1/memory/cards/${CARD_ID}`, status: 200, domain: ["memory", "GET", `/admin/v1/memory/cards/${CARD_ID}`] },
+  "GET /admin/v1/memory/cards/:cardId/log": {
+    url: `/admin/v1/memory/cards/${CARD_ID}/log?cursor=c2&limit=20`,
+    status: 200,
+    domain: ["memory", "GET", `/admin/v1/memory/cards/${CARD_ID}/log`],
+  },
+  "POST /admin/v1/memory/cards/:cardId/actions": {
+    url: `/admin/v1/memory/cards/${CARD_ID}/actions`,
+    payload: { action: "reschedule", due_at: "2026-12-01T09:00:00+05:00", reason: "Перенос по просьбе родителя" },
+    headers: IK("cardact"),
+    status: 200,
+    domain: ["memory", "POST", `/admin/v1/memory/cards/${CARD_ID}/actions`],
+  },
+  "GET /admin/v1/memory/analytics": { url: "/admin/v1/memory/analytics?pair_id=ru-en&period=90d", status: 200, domain: ["memory", "GET", "/admin/v1/memory/analytics"] },
+  "GET /admin/v1/memory/stats": { url: "/admin/v1/memory/stats?period=7d", status: 200, domain: ["memory", "GET", "/admin/v1/memory/stats"] },
 };
 
 let h: Harness;

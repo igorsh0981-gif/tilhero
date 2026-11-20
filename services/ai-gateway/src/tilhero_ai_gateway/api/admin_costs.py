@@ -21,6 +21,7 @@ from tilhero_ai_gateway.api.common import (
     now_of,
     require_any,
     settings_of,
+    speech_deps_of,
     staff_auth,
 )
 from tilhero_ai_gateway.domain import costs
@@ -34,6 +35,7 @@ from tilhero_ai_gateway.domain.common import (
     decode_cursor,
     encode_cursor,
 )
+from tilhero_ai_gateway.domain.speech import speech_available
 from tilhero_ai_gateway.schemas import BudgetIn, EmergencyStopIn, ModelUpdateIn
 from tilhero_common.app import Runtime, get_runtime
 from tilhero_common.errors import unprocessable
@@ -54,19 +56,25 @@ async def list_models(principal: Principal = Depends(staff_auth), rt: Runtime = 
                                                                   "снижение цены без права на бюджет"},
                                              404: {"description": "MODEL_NOT_FOUND"},
                                              409: {"description": "MODEL_IN_USE {versions}"},
-                                             422: {"description": "PRICE_REQUIRED {fields} — модель anthropic с "
-                                                                  "нулевой ценой"}})
+                                             422: {"description": "PRICE_REQUIRED {fields} — модель anthropic или "
+                                                                  "azure_speech с нулевой ценой; "
+                                                                  "PRICE_NOT_APPLICABLE {fields} — цена токенов у "
+                                                                  "речи или цена часа аудио у LLM"}})
 async def update_model(model_id: str, body: ModelUpdateIn, principal: Principal = Depends(staff_auth),
                        rt: Runtime = Depends(get_runtime),
                        idempotency_key: str | None = IdempotencyKey) -> JSONResponse:
     actor = principal.require_permission(AI_PUBLISH)
+
+    audio_given = "audio_usd_per_hour" in body.model_fields_set
+    audio = Decimal(str(body.audio_usd_per_hour)).quantize(Decimal("0.0001")) \
+        if body.audio_usd_per_hour is not None else None
 
     async def run() -> tuple[int, Any]:
         async with rt.transaction() as session:
             row = await costs.update_model(
                 session, model_id[:64], input_usd=Decimal(str(body.input_usd_per_mtok)).quantize(Decimal("0.0001")),
                 output_usd=Decimal(str(body.output_usd_per_mtok)).quantize(Decimal("0.0001")), active=body.active,
-                reason=body.reason, actor=actor, now=now_of(rt))
+                reason=body.reason, actor=actor, now=now_of(rt), audio_usd=audio, audio_given=audio_given)
             return 200, costs.model_view(row)
 
     return await idempotent(rt, scope=f"{actor.id}:ai:model:{model_id[:64]}", key=idempotency_key,
@@ -77,13 +85,17 @@ async def update_model(model_id: str, body: ModelUpdateIn, principal: Principal 
 async def provider_status(request: Request, principal: Principal = Depends(staff_auth),
                           rt: Runtime = Depends(get_runtime)) -> dict:
     """AiProviderStatus: ключ — только «задан / не задан», ошибка — только код и время; ai_enabled — для ролей без
-    costs.read (баннер «ИИ выключен» в разделах агентов и контроля диалогов)."""
+    costs.read (баннер «ИИ выключен» в разделах агентов и контроля диалогов). speech (спринт 5): провайдер оценки
+    произношения, ключ Azure задан / не задан (сам ключ — никогда), регион (как введён), последняя ошибка речи."""
     principal.require_permission(AI_READ)
     deps = deps_of(request)
+    speech = speech_deps_of(request)
     async with rt.transaction() as session:
         budget = await costs.get_budget(session)
     return {"provider": deps.provider.name, "key_configured": bool(deps.settings.api_key),
-            "last_error": await deps.status.last_error(), "ai_enabled": budget.ai_enabled}
+            "last_error": await deps.status.last_error(), "ai_enabled": budget.ai_enabled,
+            "speech": {"provider": speech.provider.name, "key_configured": bool(deps.settings.speech_key),
+                       "region": deps.settings.azure_speech_region, "last_error": await speech.status.last_error()}}
 
 
 @router.get("/budget")
@@ -93,7 +105,9 @@ async def get_budget(principal: Principal = Depends(staff_auth), rt: Runtime = D
         return costs.budget_view(await costs.get_budget(session))
 
 
-@router.put("/budget", responses={409: {"description": "BUDGET_CONFLICT {updated_at}"}})
+@router.put("/budget", responses={409: {"description": "BUDGET_CONFLICT {updated_at}"},
+                                   422: {"description": "BUDGET_INVALID {fields} — подлимит речи больше потолка "
+                                                        "месяца"}})
 async def update_budget(body: BudgetIn, principal: Principal = Depends(staff_auth),
                         rt: Runtime = Depends(get_runtime),
                         idempotency_key: str | None = IdempotencyKey) -> JSONResponse:
@@ -102,6 +116,7 @@ async def update_budget(body: BudgetIn, principal: Principal = Depends(staff_aut
         "monthly_cap_usd": Decimal(str(body.monthly_cap_usd)).quantize(Decimal("0.01")),
         "learner_daily_cap_usd": Decimal(str(body.learner_daily_cap_usd)).quantize(Decimal("0.0001")),
         "lesson_cap_usd": Decimal(str(body.lesson_cap_usd)).quantize(Decimal("0.0001")),
+        "speech_monthly_cap_usd": Decimal(str(body.speech_monthly_cap_usd)).quantize(Decimal("0.01")),
         "alert_percent": body.alert_percent,
     }
     if body.ai_enabled is not None:
@@ -134,12 +149,15 @@ async def emergency_stop(body: EmergencyStopIn, principal: Principal = Depends(s
 
 
 @router.get("/usage/summary")
-async def usage_summary(principal: Principal = Depends(staff_auth), rt: Runtime = Depends(get_runtime),
+async def usage_summary(request: Request, principal: Principal = Depends(staff_auth),
+                        rt: Runtime = Depends(get_runtime),
                         period: Literal["day", "week", "month"] = Query(default="month")) -> dict:
-    """AiUsageSummary (costs.read; обзор админки — dashboard.read)."""
+    """AiUsageSummary (costs.read; обзор админки — dashboard.read); speech — оценка произношения за период."""
     require_any(principal, COSTS_READ, DASHBOARD_READ)
+    speech = speech_deps_of(request)
     async with rt.transaction() as session:
-        return await costs.summary(session, period, now_of(rt), settings_of(rt).timezone)
+        available = await speech_available(session, speech.provider, now_of(rt))
+        return await costs.summary(session, period, now_of(rt), settings_of(rt).timezone, speech_available=available)
 
 
 MAX_SESSIONS = 50

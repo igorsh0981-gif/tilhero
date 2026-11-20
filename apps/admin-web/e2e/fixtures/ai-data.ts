@@ -209,9 +209,12 @@ export const FAKE_OUTPUT: Record<string, Record<string, unknown>> = {
 };
 
 export const MODELS = (): AiModel[] => [
-  { model_id: "claude-haiku-5-5", provider: "anthropic", input_usd_per_mtok: 0.1, output_usd_per_mtok: 0.5, active: true, updated_at: iso(-1 * DAY) },
-  { model_id: "claude-sonnet-5-5", provider: "anthropic", input_usd_per_mtok: 2, output_usd_per_mtok: 10, active: true, updated_at: iso(-1 * DAY) },
-  { model_id: "fake", provider: "fake", input_usd_per_mtok: 0, output_usd_per_mtok: 0, active: true, updated_at: iso(-14 * DAY) },
+  { model_id: "claude-haiku-5-5", provider: "anthropic", input_usd_per_mtok: 0.1, output_usd_per_mtok: 0.5, audio_usd_per_hour: null, active: true, updated_at: iso(-1 * DAY) },
+  { model_id: "claude-sonnet-5-5", provider: "anthropic", input_usd_per_mtok: 2, output_usd_per_mtok: 10, audio_usd_per_hour: null, active: true, updated_at: iso(-1 * DAY) },
+  { model_id: "fake", provider: "fake", input_usd_per_mtok: 0, output_usd_per_mtok: 0, audio_usd_per_hour: null, active: true, updated_at: iso(-14 * DAY) },
+  // sprint 5: Azure Pronunciation Assessment — priced per hour of audio ($1.32 by default)
+  { model_id: "azure-speech-pa", provider: "azure_speech", input_usd_per_mtok: 0, output_usd_per_mtok: 0, audio_usd_per_hour: 1.32, active: true, updated_at: iso(-2 * DAY) },
+  { model_id: "fake-speech", provider: "fake_speech", input_usd_per_mtok: 0, output_usd_per_mtok: 0, audio_usd_per_hour: 0, active: true, updated_at: iso(-2 * DAY) },
 ];
 
 /* ---------------------------------------------------------------- sessions, evaluations, appeals */
@@ -223,6 +226,7 @@ export const SID = {
   s4: "5e000000-0000-4000-8000-000000000004",
   s5: "5e000000-0000-4000-8000-000000000005",
   s6: "5e000000-0000-4000-8000-000000000006",
+  s7: "5e000000-0000-4000-8000-000000000007",
 };
 export const EID = { e1: "e7000000-0000-4000-8000-000000000001", e2: "e7000000-0000-4000-8000-000000000002", e3: "e7000000-0000-4000-8000-000000000003", e4: "e7000000-0000-4000-8000-000000000004", e6: "e7000000-0000-4000-8000-000000000006" };
 export const AID = { a1: "a9000000-0000-4000-8000-000000000001", a2: "a9000000-0000-4000-8000-000000000002", a3: "a9000000-0000-4000-8000-000000000003", a4: "a9000000-0000-4000-8000-000000000004" };
@@ -239,6 +243,7 @@ const row = (p: Partial<SessionRow> & Pick<SessionRow, "session_id" | "kind" | "
   lesson_id: null,
   scenario_id: null,
   asset_id: null,
+  reading_id: null,
   level: "A1",
   status: "completed",
   outcome: null,
@@ -317,6 +322,9 @@ export function sessions(): MockSession[] {
   const s5 = row({ session_id: SID.s5, kind: "lesson", title: L("Привет! Знакомимся", "Salom! Tanishamiz"), lesson_id: "l-01-greetings", status: "paused", minutes: 6, flags: [], started_at: iso(-40 * MIN), finished_at: null });
   const s6 = row({ session_id: SID.s6, kind: "scenario", title: L("Заселение в отель", "Mehmonxonaga joylashish"), scenario_id: "sc-hotel-checkin", level: "A2", status: "failed", passed: null, minutes: 3, models: ["claude-haiku-5-5"], cost_usd: 0.0008, p95_latency_ms: 30120, flags: ["failed", "ai_unavailable", "ai_used"], started_at: iso(-5 * DAY), finished_at: iso(-5 * DAY + 3 * MIN) });
 
+  // sprint 5: a reading text in «Практика» (questions graded by keys, practice only, no AI)
+  const s7 = row({ session_id: SID.s7, kind: "reading", title: L("В кофейне", "Qahvaxonada"), reading_id: "r-a1-coffee-shop", level: "A1", outcome: null, passed: null, minutes: 6, ai_mode: "choices", cost_usd: 0, started_at: iso(-4 * HOUR), finished_at: iso(-4 * HOUR + 6 * MIN) });
+
   const hist = (r: SessionRow) => [
     { from: null, to: "ready", reason: "started", at: r.started_at! },
     { from: "ready", to: "in_progress", reason: "started", at: r.started_at! },
@@ -374,6 +382,11 @@ export function sessions(): MockSession[] {
         { turn_id: "T1", speaker: "learner", text: null, mode: "text", redacted: true },
         { turn_id: "T2", speaker: "character", text: "Welcome! Do you have a booking?", mode: "text", redacted: false },
       ]),
+    },
+    {
+      row: s7,
+      card: card(s7, [{ step_id: "s1", stage: "reading", type: "reading", result: null, hinted: false, answered_at: s7.started_at }, { step_id: "s2", stage: "questions", type: "single_choice", result: "correct", hinted: false, answered_at: s7.finished_at }], [], { "reading:r-a1-coffee-shop": 1 }),
+      transcript: tr(s7, []),
     },
   ];
 }

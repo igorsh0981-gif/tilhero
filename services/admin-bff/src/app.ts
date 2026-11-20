@@ -20,8 +20,10 @@ import { contentRoutes } from "./routes/content.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
 import { diagnosticsRoutes } from "./routes/diagnostics.js";
 import { experienceRoutes } from "./routes/experience.js";
+import { glossaryRoutes } from "./routes/glossary.js";
 import { languageRoutes } from "./routes/languages.js";
 import { learnerRoutes } from "./routes/learners.js";
+import { memoryRoutes } from "./routes/memory.js";
 import { notificationRoutes } from "./routes/notifications.js";
 import { qaRoutes } from "./routes/qa.js";
 import { releaseNoteRoutes } from "./routes/releaseNotes.js";
@@ -256,6 +258,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   diagnosticsRoutes(app, ctx);
   aiRoutes(app, ctx);
   qaRoutes(app, ctx);
+  // спринт 5: словарь курса (catalog), память ученика и аналитика забывания (memory)
+  glossaryRoutes(app, ctx);
+  memoryRoutes(app, ctx);
 
   app.addHook("onClose", async () => {
     redis.off("error", onRedisError);

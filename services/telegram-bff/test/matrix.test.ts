@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bearer, closeRedis, initDataFor, login, makeHarness, type Harness, type LoggedIn } from "./helpers.js";
+import { makeWav } from "./wavFixture.js";
 
 let h: Harness;
 let s: LoggedIn;
@@ -29,7 +30,16 @@ afterAll(closeRedis);
 const ID = "8b0e1c3a-5d2f-4a6b-9c7d-1e2f3a4b5c6d";
 const TOKEN = "Q".repeat(43);
 /** speech — POST /v1/speech: любая ошибка tts (4xx, кроме 422, и 5xx) клиенту → 503 SPEECH_UNAVAILABLE {service: tts}. */
-type Sample = { payload?: object | (() => object); idem?: boolean; params?: Record<string, string>; noDomain?: boolean; speech?: boolean };
+type Sample = {
+  payload?: object | (() => object);
+  idem?: boolean;
+  params?: Record<string, string>;
+  noDomain?: boolean;
+  speech?: boolean;
+  /** спринт 5: тело не JSON (audio/wav) и строка запроса */
+  raw?: { body: Buffer; contentType: string };
+  query?: string;
+};
 
 /** Пример корректного запроса для каждого маршрута: ключ — "METHOD /openapi/path". */
 const SAMPLES: Record<string, Sample> = {
@@ -132,6 +142,29 @@ const SAMPLES: Record<string, Sample> = {
   "get /v1/appeals": {},
   // release 4.1
   "post /v1/speech": { payload: { text: "Could I have a cup of tea, please?", variant: "en-GB" }, speech: true },
+  // спринт 5
+  "get /v1/memory/overview": {},
+  "get /v1/memory/cards": {},
+  "post /v1/memory/cards": { payload: { text_en: "coffee", source: { kind: "lesson", key: "l-a1-03-cafe", version: 3 } }, idem: true },
+  "get /v1/memory/cards/{id}": {},
+  "post /v1/memory/cards/{id}/known": {},
+  "delete /v1/memory/cards/{id}/known": {},
+  "delete /v1/memory/cards/{id}": {},
+  "get /v1/memory/errors": {},
+  "post /v1/memory/review-sessions": { idem: true },
+  "get /v1/memory/review-sessions/active": {},
+  "get /v1/memory/review-sessions/{id}": {},
+  "get /v1/memory/review-sessions/{id}/current": {},
+  "post /v1/memory/review-sessions/{id}/tasks/{task_id}": { params: { task_id: ID }, payload: { choice: 0 } },
+  "post /v1/memory/review-sessions/{id}/tasks/{task_id}/hint": { params: { task_id: ID }, payload: { kind: "first_letter" } },
+  "post /v1/memory/review-sessions/{id}/finish": {},
+  "post /v1/memory/review-sessions/{id}/cancel": {},
+  "post /v1/memory/translate": { payload: { text: "coffee", content: { kind: "reading", key: "r-a1-coffee-shop", version: 2, locator: "s2" } } },
+  "post /v1/memory/pronunciation": { raw: { body: makeWav(), contentType: "audio/wav" }, query: `target=card:${ID}` },
+  "get /v1/practice/readings": {},
+  "get /v1/practice/readings/{id}": { params: { id: "r-a1-coffee-shop" } },
+  "post /v1/practice/readings/{id}/sessions": { params: { id: "r-a1-coffee-shop" }, idem: true },
+  "put /v1/learners/{learner_id}/voice-consent": { params: { learner_id: ID }, payload: { granted: true } },
 };
 
 interface Op {
@@ -154,7 +187,8 @@ async function operations(): Promise<Op[]> {
 }
 
 function urlOf(op: Op, sample: Sample): string {
-  return op.path.replace(/\{(\w+)\}/g, (_, name: string) => sample.params?.[name] ?? ID);
+  const path = op.path.replace(/\{(\w+)\}/g, (_, name: string) => sample.params?.[name] ?? ID);
+  return sample.query ? `${path}?${sample.query}` : path;
 }
 
 async function call(op: Op, headers: Record<string, string>) {
@@ -163,8 +197,8 @@ async function call(op: Op, headers: Record<string, string>) {
   return h.app.inject({
     method: op.method as "GET",
     url: urlOf(op, sample),
-    headers: { ...headers, ...(sample.idem ? { "idempotency-key": randomUUID() } : {}) },
-    ...(payload ? { payload } : {}),
+    headers: { ...headers, ...(sample.idem ? { "idempotency-key": randomUUID() } : {}), ...(sample.raw ? { "content-type": sample.raw.contentType } : {}) },
+    ...(sample.raw ? { payload: sample.raw.body } : payload ? { payload } : {}),
   });
 }
 

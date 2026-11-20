@@ -116,8 +116,12 @@ class ServiceClient:
         idempotency_key: str | None = None,
         headers: dict[str, str] | None = None,
         raw: bool = False,
+        content: bytes | None = None,
     ) -> Any:
-        """raw=True → вернуть httpx.Response (2xx/3xx) без разбора тела: нужен для ETag/304."""
+        """raw=True → вернуть httpx.Response (2xx/3xx) без разбора тела: нужен для ETag/304.
+        content — сырое тело (например audio/wav, спринт 5); вместе с json нельзя, Content-Type — в headers."""
+        if content is not None and json is not None:
+            raise ValueError("content и json взаимоисключающие")
         method = method.upper()
         if not self.breaker.allow():
             raise CircuitOpen(503, "UPSTREAM_UNAVAILABLE", f"{self.target} временно недоступен",
@@ -128,7 +132,7 @@ class ServiceClient:
         for attempt in range(1, attempts + 1):
             try:
                 resp = await self._client.request(
-                    method, path, json=json, params=params,
+                    method, path, json=json, params=params, content=content,
                     headers={**(headers or {}), **self._headers(subject, actor, idempotency_key)},
                 )
             except httpx.TransportError as exc:

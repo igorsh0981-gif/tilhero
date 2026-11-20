@@ -28,16 +28,17 @@ export const ALL_PERMS: Permission[] = [...PERMISSIONS];
 /** Default matrix (PLAN.md «Роли и права»; super_admin — all; users.sensitive.read, staff.manage, roles.manage — only super_admin). */
 export const MATRIX: Record<RoleCode, Permission[]> = {
   super_admin: [...ALL_PERMS],
-  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage"],
+  // sprint 5: + memory.read, memory.manage (step-up)
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read", "memory.manage"],
   communications: ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"],
   support: ["dashboard.read", "users.read", "support.read", "support.reply"],
   // sprint 3 (PLAN «Права и роли»)
-  // sprint 4: + agents, dialogue QA, costs
-  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish", "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review"],
-  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights"],
-  qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts"],
-  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read"],
-  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read"],
+  // sprint 4: + agents, dialogue QA, costs; sprint 5: + memory.read, glossary.manage
+  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish", "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "memory.read", "glossary.manage"],
+  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage"],
+  qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts", "memory.read"],
+  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read"],
   read_only: ["dashboard.read"],
 };
 

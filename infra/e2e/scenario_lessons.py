@@ -111,7 +111,8 @@ S4_PERMS = {"ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "
 ALL_PERMS = s3.ALL_PERMS | S4_PERMS
 METHODIST_S4 = {"ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review"}
 OPS_S4 = {"ai.read", "qa.read", "costs.read", "costs.manage"}
-QA_PERMS = {"dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts"}
+QA_PERMS = {"dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts",
+            "memory.read"}  # + спринт 5 (admin-identity 0005)
 READ_S4 = {"ai.read", "qa.read", "costs.read"}
 
 CHOICE_TYPES = {"single_choice", "translate_choice", "comprehension", "phrase_meaning", "meaning_check"}
@@ -502,8 +503,13 @@ def drop_restore(*keys: str) -> None:
         RESTORE_FILE.unlink()
 
 
+# поля AiBudget в теле PUT /admin/v1/ai/budget (admin.ts: «AiBudget-поля & {reason, updated_at}»); спринт 5 —
+# + speech_monthly_cap_usd (подлимит оценки произношения, ai.ts AiBudget)
+BUDGET_FIELDS = ("monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "speech_monthly_cap_usd", "alert_percent")
+
+
 def budget_body(b: dict[str, Any], reason: str, **changes: Any) -> dict[str, Any]:
-    body = {k: b[k] for k in ("monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "alert_percent")}
+    body = {k: b[k] for k in BUDGET_FIELDS if k in b}
     body.update(changes)
     body["reason"] = reason
     return body
@@ -633,19 +639,8 @@ def s_stand(c: s2.Ctx) -> None:
 def warm_admin_identity(c: s2.Ctx) -> None:
     """admin-identity сразу после старта (и под нагрузкой машины) считает хеш пароля дольше таймаута admin-bff (~3 с)
     → 503 на смене пароля bootstrap-учётки, хотя пароль уже сменён (учётка израсходована, прогон надо повторять со
-    сбросом). Прогрев: вход несуществующей учёткой (тот же расчёт хеша — dummy-хеш) до ответа быстрее 1,5 с, ≤ 90 с."""
-    b = c.browser("warmup")
-    deadline = time.monotonic() + 90
-    dt = 0.0
-    while time.monotonic() < deadline:
-        t0 = time.monotonic()
-        r = b.post("/admin/v1/auth/login", {"email": f"warmup.{c.tag.lower()}@tilhero.local",
-                                            "password": "Warmup-e2e-not-a-password-0"})
-        dt = time.monotonic() - t0
-        if r.status_code == 401 and dt < 1.5:
-            return
-        time.sleep(3)
-    print(f"      admin-identity медленно считает хеш ({dt:.1f} с) — возможен 503 на смене пароля", flush=True)
+    сбросом). Прогрев — общий со сценарием спринта 3: три быстрых ответа подряд (scenario_content.warm_admin_identity)."""
+    s3.warm_admin_identity(c)
 
 
 def s_staff(c: s2.Ctx) -> None:
@@ -659,7 +654,7 @@ def s_staff(c: s2.Ctx) -> None:
                          "admin-identity)")
     me = s2.login(c, root, expect_next=["password_change", "mfa_enroll", "done"])
     check(me["staff"]["role"] == "super_admin", me["staff"])
-    check(set(me["permissions"]) == ALL_PERMS, f"права super_admin (31): {sorted(set(me['permissions']) ^ ALL_PERMS)}")
+    check(set(me["permissions"]) == ALL_PERMS, f"права super_admin (34): {sorted(set(me['permissions']) ^ ALL_PERMS)}")
     roles = {x["code"]: x for x in expect(root.browser.get("/admin/v1/roles"), 200)["items"]}
     perms = {k: set(v.get("permissions") or []) for k, v in roles.items()}
     check("qa_analyst" in roles and perms["qa_analyst"] == QA_PERMS and roles["qa_analyst"]["privileged"] is False,
@@ -1694,8 +1689,11 @@ def s_agents(c: s2.Ctx) -> None:
               "версия оценщика в карточке сессии")
         # провайдер: ключ не задан, сам ключ не виден нигде
         prov = expect(qa.browser.get("/admin/v1/ai/provider"), 200)
+        # спринт 5: + speech {provider, key_configured, region, last_error} (admin.ts AiProviderStatus.speech)
         check(prov["provider"] == "fake" and prov["key_configured"] is False and prov.get("ai_enabled") is True
-              and set(prov) <= {"provider", "key_configured", "last_error", "ai_enabled"}, f"провайдер: {prov}")
+              and set(prov) <= {"provider", "key_configured", "last_error", "ai_enabled", "speech"}
+              and set(prov.get("speech") or {}) <= {"provider", "key_configured", "region", "last_error"},
+              f"провайдер: {prov}")
         leaks = [f"{mt} {p}" for mt, p, t in ADMIN_BODIES if KEY_RE.search(t) or "x-api-key" in t.lower()]
         check(not leaks, f"строка вида ключа провайдера в ответах admin API: {leaks[:5]}")
         c.data["agents_done"] = (vd, vc)
@@ -1857,8 +1855,7 @@ def s_budget(c: s2.Ctx) -> None:
         rb = expect(ops.browser.request("PUT", "/admin/v1/ai/budget", json_body=budget_body(
             b0, "e2e: прежние лимиты", ai_enabled=b0["ai_enabled"], updated_at=cur_b["updated_at"]),
             headers=idem()), 200)
-        check(all(rb[k] == b0[k] for k in ("monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd",
-                                           "alert_percent", "ai_enabled"))
+        check(all(rb.get(k) == b0.get(k) for k in (*BUDGET_FIELDS, "ai_enabled"))
               and fm["input_usd_per_mtok"] == fake0["input_usd_per_mtok"], f"бюджет не возвращён: {rb} / {fm}")
         drop_restore("budget", "fake_model")
 
@@ -1891,8 +1888,9 @@ def s_costs(c: s2.Ctx) -> None:
     bad = {k: d[k].get("service") for k in ("lessons", "ai") if not (d[k]["available"] and d[k]["data"])}
     check(not bad, f"блоки обзора недоступны: {bad}")
     ls, ai = d["lessons"]["data"], d["ai"]["data"]
+    # спринт 5: by_kind + reading (SessionKind)
     check(ls["started"] >= 5 and ls["completed"] >= 5 and set(ls["by_kind"]) == {"lesson", "scenario", "media",
-                                                                                   "review"}
+                                                                                   "review", "reading"}
           and ls["by_kind"]["lesson"] >= 3 and (ls["completion_pct"] is None or 0 <= ls["completion_pct"] <= 100)
           and ls["ai_degraded_pct"] is not None and ls["ai_degraded_pct"] > 0, f"блок lessons: {ls}")
     check(ai["calls"] > 0 and ai["monthly_cap_usd"] == budget["monthly_cap_usd"] and ai["unavailable"] >= 1,

@@ -39,12 +39,15 @@ LANG = _actor("super_admin", "content.read", "lang.manage")
 READER = _actor("analyst", "content.read")
 DASHBOARD = _actor("analyst", "dashboard.read")
 SUPPORT = _actor("support", "support.reply", "users.read")
+# спринт 5: словарь курса — methodist и content_manager (glossary.manage)
+GLOSSARIST = _actor("methodist", "content.read", "glossary.manage")
+GLOSSARIST2 = _actor("content_manager", "content.read", "content.edit", "glossary.manage")
 
 
 def seed(kind: str, key: str) -> dict[str, Any]:
     """Тело из сида миграции 0003 (копия) — основа валидных тел тестов."""
     name = {"course": "course", "skill": "skills", "module": "modules", "lesson": "lessons", "rubric": "rubrics",
-            "scenario": "scenarios", "media_asset": "media"}[kind]
+            "scenario": "scenarios", "media_asset": "media", "reading": "readings"}[kind]
     data = json.loads((SEED_DIR / f"{name}.json").read_text(encoding="utf-8"))
     items = data if isinstance(data, list) else [data]
     for item in items:
@@ -105,6 +108,14 @@ def exercise(exercise_id: str, *, asset_id: str = "m-own-coffee-order", kind: st
     return base
 
 
+def reading(reading_id: str, *, kids: bool = False, **changes: Any) -> dict[str, Any]:
+    """Текст для чтения из фикстуры сида (r-a1-coffee-shop или детский r-a0-my-cat) с новым ключом."""
+    p = seed("reading", "r-a0-my-cat" if kids else "r-a1-coffee-shop")
+    p["reading_id"] = reading_id
+    p.update(changes)
+    return p
+
+
 def module(module_id: str, lesson_ids: list[str]) -> dict[str, Any]:
     p = seed("module", "m1-meet")
     p.update(module_id=module_id, lesson_ids=lesson_ids)
@@ -132,6 +143,10 @@ class Env:
 
     def learner(self, user_id: uuid.UUID | str, **claims: Any) -> dict[str, str]:
         return self.svc("telegram-bff", str(user_id), **claims)
+
+    def memory(self, user_id: uuid.UUID | str | None = None, **claims: Any) -> dict[str, str]:
+        """Вызывающий memory (спринт 5): словарь курса, версии, проверки удержания."""
+        return self.svc("memory", str(user_id or uuid.uuid4()), **claims)
 
     def set_today(self, day: date) -> None:
         """«Сегодня» сервиса (11:00 по Ташкенту выбранного дня)."""

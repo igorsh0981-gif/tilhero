@@ -23,6 +23,9 @@
 - assessment.appeal.decided.v1 (спринт 4, только от assessment) → appeal_decided(.kid) → ученику, ребёнку —
   опекуну, категория support (appeal_decided:<appeal>; одно сообщение на апелляцию, повтор — без дубля); текст
   решения сотрудника не включается; кнопка → «Уроки» (route_lessons);
+- memory.reviews.due.v1 (спринт 5, только от memory) → reviews_due(.kid) → ученику, ребёнку — опекуну, категория
+  reminders (reviews_due:<user>:<date>; одно в местный день); позже 19:00 + 3 ч — только центр; кнопка →
+  «Повторение» (route_review);
 - user.deletion.requested.v1 (только от identity-consent) → удаление → user.domain.deleted.v1 {domain: notifications};
 - user.status.changed / consent.revoked / user.notification_settings.changed / user.profile.updated — сброс кэша
   адресации.
@@ -70,6 +73,10 @@ CATALOG_PRODUCERS = frozenset({"catalog"})
 APPEAL_DECIDED = "assessment.appeal.decided.v1"
 # Решения по апелляциям публикует только assessment (спринт 4)
 ASSESSMENT_PRODUCERS = frozenset({"assessment"})
+REVIEWS_DUE = "memory.reviews.due.v1"
+# Вечернее напоминание о повторении публикует только memory (спринт 5)
+MEMORY_PRODUCERS = frozenset({"memory"})
+REVIEWS_DUE_TIME = "19:00"  # местное время напоминания memory (окно 19:00–19:14) — «слот» для устаревания
 # Сагу удаления ведёт только identity-consent: запрос от другого издателя не исполняется (защита в глубину, P-7)
 DELETION_PRODUCERS = frozenset({"identity-consent"})
 CACHE_EVENTS = [
@@ -157,6 +164,13 @@ class MediaRequestDecided(_Payload):
     title: Annotated[str, Field(min_length=1, max_length=200)]
     linked_asset_id: Annotated[str, Field(max_length=200)] | None = None
     decided_at: datetime
+
+
+class ReviewsDue(_Payload):
+    user_id: uuid.UUID
+    local_date: date
+    due_count: Annotated[int, Field(ge=1, le=2000)]
+    timezone: Annotated[str, Field(max_length=200)]
 
 
 class AppealDecided(_Payload):
@@ -454,6 +468,28 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
             dedup_key=f"appeal_decided:{d.appeal_id}",
         )
 
+    # ---------------------------------------------------------------- memory (спринт 5)
+
+    async def on_memory(session: AsyncSession, env: Envelope) -> None:
+        """Слова к повторению (AT-59) → reviews_due ученику (ребёнку 6–13 — reviews_due.kid опекуну), категория
+        reminders: тихие часы, окно детей, выключатель, лимит дня — общая политика, как у lesson.reminder. Одно
+        напоминание в местный день; позже 19:00 + REMINDER_STALE_HOURS — только центр."""
+        if env.producer not in MEMORY_PRODUCERS:
+            log.warning("reviews due from unexpected producer ignored",
+                        extra={"event_type": env.event_type, "producer": env.producer[:64]})
+            return
+        r = ReviewsDue.model_validate(env.payload)
+        slot = at_local(r.local_date, REVIEWS_DUE_TIME, zone(r.timezone, settings.default_timezone))
+        await accept(
+            session,
+            env,
+            user_id=r.user_id,
+            template="reviews_due",
+            params={"local_date": r.local_date.isoformat(), "due_count": r.due_count},
+            dedup_key=f"reviews_due:{r.user_id}:{r.local_date.isoformat()}",
+            stale_after=slot + timedelta(hours=settings.reminder_stale_hours),
+        )
+
     # ---------------------------------------------------------------- identity-consent
 
     async def on_user_deleted(session: AsyncSession, env: Envelope) -> None:
@@ -488,6 +524,7 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
         "notifications.product": ([RELEASE_NOTE], on_release_note),
         "notifications.catalog": ([MEDIA_REQUEST_DECIDED], on_catalog),
         "notifications.assessment": ([APPEAL_DECIDED], on_assessment),
+        "notifications.memory": ([REVIEWS_DUE], on_memory),
         "notifications.user_deleted": ([DELETION_REQUESTED], on_user_deleted),
         "notifications.delivery_cache": (CACHE_EVENTS, on_user_changed),
     }

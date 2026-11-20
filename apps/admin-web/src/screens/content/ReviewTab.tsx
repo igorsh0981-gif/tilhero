@@ -21,7 +21,7 @@ import { useIssueText } from "./fields";
 import { diffPayload, KINDS, type Issue } from "./model";
 import { STATUS_TONE } from "./Workspace";
 
-const TAB_OF: Record<ContentKind, string> = { course: "course", module: "course", skill: "course", lesson: "lessons", scenario: "scenarios", rubric: "rubrics", media_asset: "media", media_exercise: "exercises" };
+const TAB_OF: Record<ContentKind, string> = { course: "course", module: "course", skill: "course", lesson: "lessons", scenario: "scenarios", rubric: "rubrics", media_asset: "media", media_exercise: "exercises", reading: "readings" };
 
 export function ReviewTab({ route }: { route: string | null }) {
   const [kind, key] = (route ?? "").split("/");

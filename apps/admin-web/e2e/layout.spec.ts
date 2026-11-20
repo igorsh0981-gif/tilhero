@@ -1,6 +1,6 @@
 /**
  * QA D2-02: the shell on laptop screens. Playwright scrolls to an element by itself, so ordinary clicks never notice
- * a cut-off menu — these tests measure the boxes instead: at 1440×900 and 1280×720 all 15 sections of super_admin and
+ * a cut-off menu — these tests measure the boxes instead: at 1440×900 and 1280×720 all 16 sections of super_admin and
  * the footer are inside the window with no scrolling of the panel and nothing covered by the footer; on a shorter
  * window the panel scrolls inside, the footer stays pinned. KPI notes («… детских профилей N») wrap instead of being
  * cut. Screenshots: SHOTS_DIR (default /tmp/admin-shots).
@@ -40,7 +40,7 @@ for (const vp of [
   { width: 1440, height: 900 },
   { width: 1280, height: 720 },
 ]) {
-  test(`shell ${vp.width}×${vp.height}: all 15 sections and the footer are visible without scrolling; KPI notes are not cut`, async ({ page }) => {
+  test(`shell ${vp.width}×${vp.height}: all 16 sections and the footer are visible without scrolling; KPI notes are not cut`, async ({ page }) => {
     await page.setViewportSize(vp);
     await openAs(page, "admin@tilhero.local", "#/overview");
     await expect(page.getByTestId("block-learners")).toBeVisible();
@@ -58,7 +58,7 @@ for (const vp of [
 
 async function expectAllVisible(page: Page): Promise<void> {
   const m = await navMetrics(page);
-  expect(m.items.map((i) => i.id)).toHaveLength(15);
+  expect(m.items.map((i) => i.id)).toHaveLength(16);
   expect(m.scroll.scrollHeight, "the menu panel needs no scrolling").toBeLessThanOrEqual(m.scroll.clientHeight + 1);
   for (const it of m.items) {
     expect(it.top, `${it.id} top`).toBeGreaterThanOrEqual(m.scroll.top - 0.5);

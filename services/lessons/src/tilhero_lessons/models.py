@@ -1,4 +1,4 @@
-"""Модели lessons — зеркало миграции 0001 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
+"""Модели lessons — зеркало миграций 0001–0002 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
 
 user_id везде — ученик (`lrn` внутреннего токена), account_id — аккаунт (`sub`). PII сервис не хранит; тексты
 учеников (свободные реплики и открытые ответы) хранятся 90 дней и стираются `lessons-tick` (redacted_at).
@@ -28,11 +28,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 TS = DateTime(timezone=True)
 BAND_CHECK = "IN ('A0','A1','A2','B1','B2')"
-KINDS = ("lesson", "scenario", "media", "review")
+KINDS = ("lesson", "scenario", "media", "review", "reading")
 STATUSES = ("ready", "in_progress", "paused", "completed", "failed", "cancelled")
 ACTIVE_STATUSES = ("ready", "in_progress", "paused")
-STAGES = ("retrieval", "explanation", "roleplay", "assessment", "summary", "listen", "exercises")
-STEP_TYPES = ("notice", "explanation", "item", "roleplay", "roleplay_end", "listen", "open_answer", "done")
+STAGES = ("retrieval", "explanation", "roleplay", "assessment", "summary", "listen", "exercises", "reading",
+          "questions")
+STEP_TYPES = ("notice", "explanation", "item", "roleplay", "roleplay_end", "listen", "open_answer", "reading", "done")
 HISTORY_REASONS = ("started", "pause", "resume", "auto_pause", "finish", "fail", "cancel", "expired",
                    "content_unpublished")
 
@@ -46,8 +47,9 @@ class Base(DeclarativeBase):
 
 
 class Session(Base):
-    """Сессия урока, сценария, медиа или повтора (INTERNAL_API §2.1). Статус меняет только сервер (машина
-    состояний domain/machine.py); у ученика не больше одной незавершённой сессии (частичный UNIQUE).
+    """Сессия урока, сценария, медиа, повтора или чтения (INTERNAL_API §2.1 спринта 4, §4 спринта 5). Статус меняет
+    только сервер (машина состояний domain/machine.py); у ученика не больше одной незавершённой сессии (частичный
+    UNIQUE).
     content_versions — версии контента, зафиксированные при старте; plan — этапы и задания (без ключей);
     state — положение в плане и ролевой ситуации."""
 
@@ -66,7 +68,8 @@ class Session(Base):
         CheckConstraint("active_seconds >= 0 AND hints_used >= 0 AND step_index >= 0", name="ck_sessions_counters"),
         CheckConstraint("(kind <> 'lesson' OR lesson_id IS NOT NULL) AND (kind <> 'scenario' OR scenario_id IS NOT "
                         "NULL) AND (kind <> 'media' OR asset_id IS NOT NULL) AND (kind <> 'review' OR "
-                        "source_session_id IS NOT NULL)", name="ck_sessions_target"),
+                        "source_session_id IS NOT NULL) AND (kind <> 'reading' OR reading_id IS NOT NULL)",
+                        name="ck_sessions_target"),
         UniqueConstraint("user_id", "idempotency_key", name="uq_sessions_user_idempotency"),
         Index("uq_sessions_active", "user_id", unique=True,
               postgresql_where=sql_text("status IN ('ready','in_progress','paused')")),
@@ -76,6 +79,8 @@ class Session(Base):
         Index("ix_sessions_status_activity", "status", "last_activity_at"),
         Index("ix_sessions_evaluation_pending", "finished_at",
               postgresql_where=sql_text("evaluation_status = 'pending'")),
+        Index("ix_sessions_reading_results", "user_id", "reading_id", "finished_at",
+              postgresql_where=sql_text("kind = 'reading' AND status = 'completed'")),
     )
 
     session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
@@ -87,6 +92,8 @@ class Session(Base):
     lesson_id: Mapped[str | None] = mapped_column(String(64))
     scenario_id: Mapped[str | None] = mapped_column(String(64))
     asset_id: Mapped[str | None] = mapped_column(String(64))
+    # спринт 5: текст для чтения (kind reading; миграция 0002)
+    reading_id: Mapped[str | None] = mapped_column(String(64))
     source_session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     title: Mapped[dict[str, Any]] = mapped_column(JSONB(), nullable=False)
     level: Mapped[str | None] = mapped_column(String(2))

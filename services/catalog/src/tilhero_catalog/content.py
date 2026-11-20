@@ -27,6 +27,7 @@ TopicCode = Literal[
 ]
 ContentKind = Literal[
     "course", "skill", "module", "lesson", "rubric", "scenario", "media_asset", "media_exercise",
+    "reading",  # спринт 5
 ]
 CONTENT_KINDS: Final[tuple[str, ...]] = get_args(ContentKind)
 VersionStatus = Literal["draft", "in_review", "approved", "published", "suspended", "archived"]
@@ -48,8 +49,19 @@ ScenarioIssueCode = Literal[
 LicenseType = Literal["own", "cc0", "cc_by", "cc_by_sa", "public_domain", "contract"]
 Outcome = Literal["success", "alt_success", "fail"]
 RubricCode = Literal["task", "vocabulary", "grammar", "independence", "pronunciation", "fluency", "comprehension"]
+# спринт 5: чтение и словарь курса
+ReadingQuestionType = Literal["single_choice", "true_false", "gap_fill"]
+GlossarySource = Literal["course", "methodist", "ai"]
+GlossaryReviewStatus = Literal["not_required", "pending", "approved", "rejected"]
+PartOfSpeech = Literal[
+    "noun", "verb", "adjective", "adverb", "pronoun", "preposition", "conjunction", "interjection", "determiner",
+    "phrase", "other",
+]
+GlossaryRefKind = Literal["lesson", "media_asset", "reading", "scenario"]
 
 ID_PATTERN: Final = r"^[a-z0-9][a-z0-9._-]{1,63}$"
+SENTENCE_ID_PATTERN: Final = r"^[a-z0-9]{1,8}$"
+PARAGRAPH_ID_PATTERN: Final = r"^[a-z0-9][a-z0-9_-]{0,15}$"
 INTENT_PATTERN: Final = r"^[a-z][a-z0-9_]{0,39}$"
 LANG_PATTERN: Final = r"^[a-z]{2,3}(-[A-Z]{2})?$"
 TERRITORY_PATTERN: Final = r"^[A-Z]{2}$"
@@ -407,6 +419,87 @@ class MediaExercisePayload(_Model):
     rubric_id: Id | None
 
 
+# ---------------------------------------------------------------------------------- спринт 5: тексты для чтения
+
+
+class ReadingSentence(_Model):
+    s_id: Annotated[str, Field(pattern=SENTENCE_ID_PATTERN)]
+    text_en: Annotated[Text, Field(max_length=240)]
+    gloss: Localized
+
+
+class ReadingParagraph(_Model):
+    p_id: Annotated[str, Field(pattern=PARAGRAPH_ID_PATTERN)]
+    sentences: list[ReadingSentence] = Field(max_length=20)
+
+
+class ReadingQuestion(_Model):
+    question_id: Id
+    type: ReadingQuestionType
+    instruction: Localized
+    prompt_en: Annotated[Text, Field(max_length=200)]
+    options: list[Annotated[Text, Field(max_length=200)]] = Field(max_length=8)
+    answer: Annotated[int, Field(ge=0)] | list[Annotated[Text, Field(max_length=200)]]
+
+
+class ReadingGlossaryItem(_Model):
+    en: Annotated[Text, Field(max_length=60)]
+    gloss: Localized
+    note: Localized | None
+
+
+class ReadingPayload(_Model):
+    reading_id: Id
+    title: Localized
+    level: Band
+    audience: list[AudienceSegment] = Field(max_length=3)
+    topics: list[TopicCode] = Field(max_length=12)
+    skill_ids: list[Id] = Field(max_length=10)
+    paragraphs: list[ReadingParagraph] = Field(max_length=20)
+    glossary: list[ReadingGlossaryItem] = Field(max_length=LIST_CAP)
+    questions: list[ReadingQuestion] = Field(max_length=20)
+    voice: Literal["en-GB", "en-US"]
+    est_minutes: Annotated[int, Field(ge=0, le=120)]
+
+
+# ------------------------------------------------------------------------ спринт 5: словарь курса (не версия)
+
+
+class GlossaryRef(_Model):
+    kind: GlossaryRefKind
+    key: Id
+    version: Annotated[int, Field(ge=1)]
+
+
+class GlossaryOverride(_Model):
+    gloss: Localized
+    example_en: Annotated[Text, Field(max_length=200)] | None
+    by: Annotated[str, Field(max_length=64)]
+    at: str
+
+
+class GlossaryEntry(_Model):
+    """Статья словаря курса — форма ответа (строится сервисом, см. domain/glossary.py); не тело версии контента."""
+
+    entry_id: str
+    pair_id: str
+    lemma: Annotated[Text, Field(max_length=60)]
+    forms: list[Annotated[str, Field(max_length=120)]] = Field(min_length=1, max_length=8)
+    part_of_speech: PartOfSpeech | None
+    gloss: Localized
+    example_en: Annotated[Text, Field(max_length=200)] | None
+    source: GlossarySource
+    review_status: GlossaryReviewStatus
+    confidence: float | None
+    agent_version: Annotated[str, Field(max_length=64)] | None
+    refs: list[GlossaryRef] = Field(max_length=LIST_CAP)
+    override: GlossaryOverride | None
+    corrected: bool
+    archived_at: str | None
+    updated_by: str | None
+    updated_at: str
+
+
 # --------------------------------------------------------------------------------------------- вид → модель и ключ
 
 PAYLOAD_MODELS: Final[dict[str, type[BaseModel]]] = {
@@ -418,6 +511,7 @@ PAYLOAD_MODELS: Final[dict[str, type[BaseModel]]] = {
     "scenario": ScenarioPayload,
     "media_asset": MediaPayload,
     "media_exercise": MediaExercisePayload,
+    "reading": ReadingPayload,
 }
 
 KEY_FIELDS: Final[dict[str, str]] = {
@@ -429,6 +523,7 @@ KEY_FIELDS: Final[dict[str, str]] = {
     "scenario": "scenario_id",
     "media_asset": "asset_id",
     "media_exercise": "exercise_id",
+    "reading": "reading_id",
 }
 
 

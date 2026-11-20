@@ -114,6 +114,13 @@ class LearnerPatch(_In):
     settings: NotificationSettingsPatch | None = None
 
 
+class VoiceConsentRequest(_In):
+    """PUT /me/learners/{child_id}/voice-consent (спринт 5, bff.ts VoiceConsentRequest): опекун разрешает или
+    запрещает запись голоса детского профиля."""
+
+    granted: StrictBool
+
+
 class PinSetRequest(_In):
     pin: str = Field(max_length=16)
     current_pin: str | None = Field(default=None, max_length=16)
@@ -187,6 +194,9 @@ class LearnerSummary(BaseModel):
     age_band: AgeBand | None
     is_active: bool
     onboarding_completed: bool
+    # спринт 5: запись голоса разрешена (аккаунт — своё согласие с voice_recording, подросток — после согласия
+    # родителя; детский профиль — согласие опекуна)
+    voice_consent: bool
 
 
 class LearnerList(BaseModel):
@@ -437,7 +447,8 @@ class PublicProfile(BaseModel):
     """Для social и notifications: имя без username и Telegram ID; guardian_consent — чтобы social решал, может ли
     подросток 14–17 приглашать и принимать приглашения. `consent_accepted` — действующее согласие с terms и privacy
     (у детского профиля — согласие родителя с основанием guardian), `purposes` — его цели; необязательные — только
-    если они сейчас разрешены (18+ или 14–17 с согласием родителя), INTERNAL_API §11."""
+    если они сейчас разрешены (18+ или 14–17 с согласием родителя; детский профиль — только voice_recording, если её
+    дал опекун, спринт 5), INTERNAL_API §11."""
 
     user_id: uuid.UUID
     display_name: str

@@ -62,9 +62,13 @@ class GoldenCasePatch(BaseModel):
 
 
 class ModelUpdateIn(BaseModel):
+    """PUT /admin/v1/ai/models/{model_id}: цены токенов (LLM) и, для модели речи, цена часа аудио (спринт 5,
+    ai.ts AiModel.audio_usd_per_hour; у речи цены токенов — 0; не передана — прежняя)."""
+
     model_config = _IN
     input_usd_per_mtok: float = Field(ge=0, le=1000)
     output_usd_per_mtok: float = Field(ge=0, le=1000)
+    audio_usd_per_hour: float | None = Field(default=None, ge=0, le=1000)
     active: bool
     reason: Reason
 
@@ -76,6 +80,8 @@ class BudgetIn(BaseModel):
     monthly_cap_usd: float = Field(ge=0, le=100_000)
     learner_daily_cap_usd: float = Field(ge=0, le=1000)
     lesson_cap_usd: float = Field(ge=0, le=1000)
+    # подлимит речи (спринт 5, решение владельца 20.11.2026): обязателен, 0..monthly_cap_usd (проверка — в домене)
+    speech_monthly_cap_usd: float = Field(ge=0, le=100_000)
     alert_percent: int = Field(ge=1, le=100)
     ai_enabled: bool | None = None
     updated_at: str | None = Field(default=None, max_length=40)

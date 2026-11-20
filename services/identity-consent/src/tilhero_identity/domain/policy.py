@@ -3,8 +3,12 @@
 Тексты версионируются: опубликованная версия не меняется (её sha256 входит в evidence_hash согласия).
 Новая редакция = новая версия + CURRENT_POLICY_VERSION; старые согласия остаются проверяемыми.
 
-Версия 1.0 — ЧЕРНОВИК: короткие заглушки RU/UZ (латиница), окончательный текст готовят юристы. До публикации
-окончательной редакции её текст не меняется задним числом — юристы выпускают версию 1.1.
+Версия 1.0 — ЧЕРНОВИК: короткие заглушки RU/UZ (латиница), окончательный текст готовят юристы. Тексты опубликованных
+версий не меняются задним числом.
+
+Версия 1.1 (спринт 5, решение владельца 20.11.2026) — тот же черновик, исправлена цель voice_recording: это оценка
+произношения по записи голоса, звук не сохраняется (раньше — «Хранить записи голоса 30 дней»); детскому профилю — только
+с согласия родителя. Окончательный текст юристов — следующая версия.
 """
 
 from __future__ import annotations
@@ -165,8 +169,56 @@ taʼlimni cheklamaydi.
 rozilik haqidagi yozuv shaxsiy maʼlumotlarsiz qonuniylik dalili sifatida saqlanadi.
 """
 
+# ---------------------------------------------------------------- 1.1: цель voice_recording — оценка произношения
+
+_VOICE_V11 = Purpose(
+    code="voice_recording",
+    required=False,
+    title={"ru": "Оценка произношения по записи голоса", "uz": "Ovoz yozuvi orqali talaffuzni baholash"},
+    description={
+        "ru": "Запись голоса нужна только для оценки произношения и не сохраняется — хранятся лишь баллы по словам. "
+              "Детскому профилю включает родитель.",
+        "uz": "Ovoz yozuvi faqat talaffuzni baholash uchun kerak va saqlanmaydi — faqat soʻzlar boʻyicha ballar "
+              "saqlanadi. Bolalar profili uchun ota-ona yoqadi.",
+    },
+)
+_PURPOSES_V11 = tuple(_VOICE_V11 if p.code == "voice_recording" else p for p in _PURPOSES_V1)
+
+
+def _v11(text: str, replacements: tuple[tuple[str, str], ...]) -> str:
+    for old, new in replacements:
+        if old not in text:  # защита от тихого расхождения с текстом 1.0
+            raise RuntimeError(f"policy 1.1: fragment not found: {old[:40]!r}")
+        text = text.replace(old, new)
+    return text
+
+
+_TEXT_V11_RU = _v11(_TEXT_V1_RU, (
+    ("Версия 1.0 · черновик", "Версия 1.1 · черновик"),
+    ("- Настройки уведомлений и код родителя (хранится только в виде хеша).",
+     "- Настройки уведомлений и код родителя (хранится только в виде хеша).\n"
+     "- Запись голоса — только если вы включили оценку произношения: запись передаётся сервису распознавания речи "
+     "(Microsoft Azure) лишь для оценки и не сохраняется ни у нас, ни у сервиса; хранятся только баллы по словам."),
+    ("Записи голоса детей не хранятся.",
+     "Оценку произношения ребёнку включает только родитель; запись голоса не сохраняется."),
+    ("Хранение записей голоса 30 дней", "Оценка произношения по записи голоса"),
+))
+
+_TEXT_V11_UZ = _v11(_TEXT_V1_UZ, (
+    ("Versiya 1.0 · qoralama", "Versiya 1.1 · qoralama"),
+    ("- Bildirishnoma sozlamalari va ota-ona kodi (faqat xesh koʻrinishida saqlanadi).",
+     "- Bildirishnoma sozlamalari va ota-ona kodi (faqat xesh koʻrinishida saqlanadi).\n"
+     "- Ovoz yozuvi — faqat talaffuzni baholashni yoqqan boʻlsangiz: yozuv faqat baholash uchun nutqni tanish "
+     "xizmatiga (Microsoft Azure) yuboriladi va na bizda, na xizmatda saqlanadi; faqat soʻzlar boʻyicha ballar "
+     "saqlanadi."),
+    ("Bolalarning ovoz yozuvlari saqlanmaydi.",
+     "Bolaga talaffuzni baholashni faqat ota-ona yoqadi; ovoz yozuvi saqlanmaydi."),
+    ("Ovoz yozuvlarini 30 kun saqlash", "Ovoz yozuvi orqali talaffuzni baholash"),
+))
+
 POLICIES: dict[str, Policy] = {
     "1.0": Policy(version="1.0", purposes=_PURPOSES_V1, text={"ru": _TEXT_V1_RU, "uz": _TEXT_V1_UZ}),
+    "1.1": Policy(version="1.1", purposes=_PURPOSES_V11, text={"ru": _TEXT_V11_RU, "uz": _TEXT_V11_UZ}),
 }
 
 

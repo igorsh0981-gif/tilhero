@@ -9,9 +9,13 @@
 - заявки на песни и фильмы — telegram-bff, sub = аккаунт (детский профиль → 403 KIDS_NOT_ALLOWED на создание и чтение);
   заявка по id — ещё notifications (без ссылки и комментария ученика);
 - упражнения к медиа без ключей — lessons (выбор упражнений сессии, версии для фиксации);
-- версия контента по номеру С КЛЮЧАМИ — только lessons и assessment (оценщик берёт ключи только отсюда); тело версии
-  неизменяемо: `Cache-Control: private, max-age=31536000, immutable`, ETag = payload_hash (If-None-Match → 304);
-  без номера — текущая опубликованная (lessons фиксирует номера при старте сессии): `private, no-cache`.
+- версия контента по номеру С КЛЮЧАМИ — lessons и assessment (оценщик берёт ключи только отсюда), memory — только
+  lesson, media_asset, reading, scenario (спринт 5); тело версии неизменяемо: `Cache-Control: private,
+  max-age=31536000, immutable`, ETag = payload_hash (If-None-Match → 304); без номера — текущая опубликованная
+  (lessons фиксирует номера при старте сессии): `private, no-cache`;
+- тексты для чтения (спринт 5) — telegram-bff и lessons: карточки и текст без ответов на вопросы, детям — только kids;
+- словарь курса для memory (спринт 5, §2.3): поиск слова в опубликованной версии и статьи, переводы ИИ, статьи по
+  формам; задания проверок удержания навыка (§2.4) — с ключами, только memory.
 Ответы ученику — без ключей ответов и полного графа сценария; медиа — только с действующими сегодня правами.
 """
 
@@ -25,12 +29,15 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from tilhero_catalog.api.common import (
+    MEMORY_VERSION_KINDS,
     IdempotencyKey,
     content_readers,
     course_readers,
     exercise_readers,
     is_child_profile,
     learner_auth,
+    memory_auth,
+    now_of,
     policy_of,
     request_readers,
     settings_of,
@@ -38,10 +45,10 @@ from tilhero_catalog.api.common import (
     version_readers,
 )
 from tilhero_catalog.content import CONTENT_KINDS, ID_PATTERN, AudienceSegment, Band, GoalCode, MediaType, TopicCode
-from tilhero_catalog.domain import languages, learner, requests
-from tilhero_catalog.schemas import MediaRequestCreateIn
+from tilhero_catalog.domain import glossary, languages, learner, readings, requests
+from tilhero_catalog.schemas import PAIR_PATTERN, AiEntryIn, GlossaryLookupIn, MediaRequestCreateIn
 from tilhero_common.app import Runtime, get_runtime
-from tilhero_common.errors import forbidden, not_found
+from tilhero_common.errors import forbidden, not_found, unprocessable
 from tilhero_common.internal_auth import Principal
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"])
@@ -58,6 +65,28 @@ def effective_audience(principal: Principal, requested: str) -> str:
 def optional_audience(principal: Principal, requested: str | None) -> str | None:
     """Аудио: без ?audience= детский профиль всё равно ограничен kids."""
     return "kids" if is_child_profile(principal) else requested
+
+
+def version_kind(principal: Principal, kind: str) -> str:
+    """Вид версии: неизвестный → 404; memory читает только lesson, media_asset, reading, scenario (иначе 403)."""
+    if kind not in CONTENT_KINDS:
+        raise not_found("CONTENT_KIND_UNKNOWN", "Неизвестный вид контента")
+    if principal.issuer == "memory" and kind not in MEMORY_VERSION_KINDS:
+        raise forbidden("CALLER_NOT_ALLOWED", "Сервис не имеет доступа к этому виду контента",
+                        {"caller": "memory", "kind": kind})
+    return kind
+
+
+def version_audience(principal: Principal, requested: str | None) -> str | None:
+    """Аудитория версии: memory — ?audience= или детский профиль по claims (kids принудительно); остальным —
+    только явный ?audience= (lessons и assessment его не передают — как раньше)."""
+    return optional_audience(principal, requested) if principal.issuer == "memory" else requested
+
+
+def hide_from_kids(payload: dict[str, Any], audience: str | None) -> None:
+    """Детям — только детский контент (CONVENTIONS §8): иначе 404, как будто версии нет."""
+    if glossary.hidden_for(payload, audience):
+        raise not_found("VERSION_NOT_FOUND", "Нет опубликованной версии")
 
 
 def forbid_child(principal: Principal) -> None:
@@ -221,18 +250,19 @@ async def media_exercises(asset_id: str, principal: Principal = Depends(exercise
 @router.get("/versions/{kind}/{key}",
             responses={304: {"description": "If-None-Match совпал"},
                        404: {"description": "VERSION_NOT_FOUND | CONTENT_KIND_UNKNOWN"}})
-async def current_version(kind: str, key: str, _: Principal = Depends(version_readers),
+async def current_version(kind: str, key: str, principal: Principal = Depends(version_readers),
                           rt: Runtime = Depends(get_runtime),
+                          audience: AudienceSegment | None = Query(default=None),
                           if_none_match: str | None = Header(default=None, alias="If-None-Match",
                                                              max_length=200)) -> Response:
     """Текущая опубликованная версия С КЛЮЧАМИ (lessons фиксирует номера версий при старте сессии; дальше читает по
     номеру). Указатель меняется публикацией — `Cache-Control: private, no-cache`, ETag = «версия.payload_hash»."""
-    if kind not in CONTENT_KINDS:
-        raise not_found("CONTENT_KIND_UNKNOWN", "Неизвестный вид контента")
+    version_kind(principal, kind)
     if not _KEY_RE.match(key):
         raise not_found("VERSION_NOT_FOUND", "Нет опубликованной версии")
     async with rt.transaction() as session:
         row = await learner.current_version(session, kind, key)
+        hide_from_kids(row.payload, version_audience(principal, audience))
         body = learner.released_view(row)
     etag = f'"{row.version}.{row.payload_hash}"'
     headers = {"ETag": etag, "Cache-Control": "private, no-cache"}
@@ -244,21 +274,103 @@ async def current_version(kind: str, key: str, _: Principal = Depends(version_re
 @router.get("/versions/{kind}/{key}/{version}",
             responses={304: {"description": "If-None-Match совпал"},
                        404: {"description": "VERSION_NOT_FOUND | CONTENT_KIND_UNKNOWN"}})
-async def released_version(kind: str, key: str, version: int, _: Principal = Depends(version_readers),
+async def released_version(kind: str, key: str, version: int, principal: Principal = Depends(version_readers),
                            rt: Runtime = Depends(get_runtime),
+                           audience: AudienceSegment | None = Query(default=None),
                            if_none_match: str | None = Header(default=None, alias="If-None-Match",
                                                               max_length=200)) -> Response:
     """Полное тело версии С КЛЮЧАМИ (published или archived, бывшая опубликованной; остальное — 404). Тело версии
     неизменяемо — вызывающие кешируют бессрочно (`immutable`), ETag = payload_hash."""
-    if kind not in CONTENT_KINDS:
-        raise not_found("CONTENT_KIND_UNKNOWN", "Неизвестный вид контента")
+    version_kind(principal, kind)
     if not _KEY_RE.match(key) or not 1 <= version <= 1_000_000:
         raise not_found("VERSION_NOT_FOUND", "Нет опубликованной версии")
     async with rt.transaction() as session:
         row = await learner.released_version(session, kind, key, version)
+        hide_from_kids(row.payload, version_audience(principal, audience))
         body = learner.released_view(row)
     etag = f'"{row.payload_hash}"'
     headers = {"ETag": etag, "Cache-Control": IMMUTABLE_CACHE}
     if if_none_match is not None and etag in [t.strip() for t in if_none_match.split(",")]:
         return Response(status_code=304, headers=headers)
     return JSONResponse(body, headers=headers)
+
+
+# ---------------------------------------------------------------- спринт 5: тексты для чтения (telegram-bff, lessons)
+
+
+@router.get("/readings")
+async def reading_cards(principal: Principal = Depends(content_readers), rt: Runtime = Depends(get_runtime),
+                        audience: AudienceSegment = Query(),
+                        pair_id: str | None = Query(default=None, pattern=PAIR_PATTERN),
+                        level: Band | None = Query(default=None), limit: int = Query(default=20, ge=1, le=100),
+                        cursor: str | None = Query(default=None, max_length=200)) -> dict:
+    """Page<{reading_id, version, title, level, topics, est_minutes, word_count}> опубликованных текстов аудитории."""
+    async with rt.transaction() as session:
+        return await readings.reading_cards(session, audience=effective_audience(principal, audience),
+                                            pair_id=pair_id, level=level, cursor=cursor, limit=limit)
+
+
+@router.get("/readings/{reading_id}", responses={404: {"description": "READING_NOT_AVAILABLE"}})
+async def reading_detail(reading_id: str, principal: Principal = Depends(content_readers),
+                         rt: Runtime = Depends(get_runtime), audience: AudienceSegment = Query()) -> dict:
+    """Опубликованная версия текста без ответов на вопросы (ключи — /versions/reading/{key}/{version})."""
+    if not _KEY_RE.match(reading_id):
+        raise readings.reading_not_available()
+    async with rt.transaction() as session:
+        return await readings.reading_detail(session, reading_id, effective_audience(principal, audience))
+
+
+# ---------------------------------------------------------------- спринт 5: словарь курса и проверки (memory)
+
+
+@router.post("/glossary/lookup", responses={404: {"description": "CONTENT_NOT_FOUND"},
+                                            422: {"description": "WORD_NOT_IN_CONTENT"}})
+async def glossary_lookup(body: GlossaryLookupIn, principal: Principal = Depends(memory_auth),
+                          rt: Runtime = Depends(get_runtime)) -> dict:
+    """{in_content, sentence_en, locator, entry: GlossaryEntry | null, rejected, note}: слово есть в этой
+    опубликованной (или бывшей опубликованной) версии — по границам слов, в предложении locator или где угодно.
+    audience=kids (или детский профиль в claims) — недетский контент → 404 CONTENT_NOT_FOUND."""
+    async with rt.transaction() as session:
+        return await glossary.lookup(session, body.pair_id, body.text, body.content_ref,
+                                     optional_audience(principal, body.audience))
+
+
+@router.post("/glossary/ai-entries", status_code=201,
+             responses={200: {"description": "форма уже занята — существующая статья"},
+                        404: {"description": "CONTENT_NOT_FOUND | PAIR_NOT_FOUND"},
+                        422: {"description": "WORD_NOT_IN_CONTENT"}})
+async def glossary_ai_entry(body: AiEntryIn, principal: Principal = Depends(memory_auth),
+                            rt: Runtime = Depends(get_runtime)) -> JSONResponse:
+    """Перевод ИИ → статья ai pending (201) или уже существующая статья с этой формой (200). audience=kids —
+    только детский контент (иначе 404 CONTENT_NOT_FOUND)."""
+    async with rt.transaction() as session:
+        view, created = await glossary.ai_entry(session, body, now_of(rt), optional_audience(principal, body.audience))
+    return JSONResponse(view, status_code=201 if created else 200)
+
+
+@router.get("/glossary/forms")
+async def glossary_forms(_: Principal = Depends(memory_auth), rt: Runtime = Depends(get_runtime),
+                         pair_id: str = Query(pattern=PAIR_PATTERN),
+                         forms: list[str] = Query()) -> dict:
+    """{items: [{form, entry | null}]} — статьи по формам (для answers_en карточек). `forms` — повторяемый параметр
+    (формы с запятыми: «got it, thanks»); одно значение через запятую тоже понимается — тогда в ответе и части."""
+    values = [f.strip() for f in forms if f.strip()]
+    if len(values) == 1 and "," in values[0]:
+        values = list(dict.fromkeys([values[0], *(v.strip() for v in values[0].split(",") if v.strip())]))
+    if not values or len(values) > 50 or any(len(v) > 120 for v in values):
+        raise unprocessable("VALIDATION_ERROR", "forms: от 1 до 50 форм до 120 знаков",
+                            {"field": "forms"})
+    async with rt.transaction() as session:
+        return await glossary.by_forms(session, pair_id, values)
+
+
+@router.get("/skills/{skill_id}/check-items", responses={404: {"description": "SKILL_NOT_FOUND"}})
+async def skill_check_items(skill_id: str, principal: Principal = Depends(memory_auth),
+                            rt: Runtime = Depends(get_runtime), audience: AudienceSegment = Query(),
+                            pair_id: str | None = Query(default=None, pattern=PAIR_PATTERN)) -> dict:
+    """{skill_id, title, items: [{lesson_id, version, item}]} — контрольные задания опубликованных уроков навыка
+    (с ключами: оценка проверки удержания — в memory), не больше 20, порядок стабильный."""
+    if not _KEY_RE.match(skill_id):
+        raise not_found("SKILL_NOT_FOUND", "Навык не опубликован")
+    async with rt.transaction() as session:
+        return await readings.check_items(session, skill_id, effective_audience(principal, audience), pair_id)

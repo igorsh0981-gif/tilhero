@@ -37,6 +37,10 @@ def lesson_not_available() -> ApiError:
     return not_found("LESSON_NOT_AVAILABLE", "Урок недоступен: не опубликован, не для вашего возраста или пары")
 
 
+def reading_not_available() -> ApiError:
+    return not_found("READING_NOT_AVAILABLE", "Текст недоступен: не опубликован или не для вашего возраста")
+
+
 def session_not_found() -> ApiError:
     return not_found("SESSION_NOT_FOUND", "Сессия не найдена")
 

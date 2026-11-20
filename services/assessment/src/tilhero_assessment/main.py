@@ -1,5 +1,6 @@
 """assessment: независимая оценка по рубрике (закрытые задания — правилами по ключам catalog, свободный текст —
-независимым оценщиком через ai-gateway), исходы навыков, переоценка, апелляции, QA (INTERNAL_API §3)."""
+независимым оценщиком через ai-gateway), исходы навыков, переоценка, апелляции, QA (INTERNAL_API §3 спринта 4);
+чтение и ошибки для memory (memory-feed) — INTERNAL_API §5 спринта 5."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ from fastapi import FastAPI
 from tilhero_assessment.api.admin import router as admin_router
 from tilhero_assessment.api.client import router as client_router
 from tilhero_assessment.api.internal import router as internal_router
+from tilhero_assessment.api.memory import router as memory_router
 from tilhero_assessment.api.scheduler import router as scheduler_router
 from tilhero_assessment.consumers import DELETION_REQUESTED, on_deletion_requested
 from tilhero_assessment.content import CATALOG, ContentGateway
@@ -35,7 +37,7 @@ def build_app(
                            retries=0, transport=ai_transport)
         rt.add_consumer("assessment.user_deletion", [DELETION_REQUESTED], on_deletion_requested)
 
-    app = create_app(settings, routers=[internal_router, client_router, admin_router, scheduler_router],
+    app = create_app(settings, routers=[internal_router, memory_router, client_router, admin_router, scheduler_router],
                      runtime=runtime, configure=configure, title="TilHero assessment-service")
     app.state.content = ContentGateway(runtime, max_entries=settings.content_cache_size)
     app.state.evaluator = EvaluatorGateway(runtime, timeout_seconds=settings.ai_gateway_timeout_seconds)

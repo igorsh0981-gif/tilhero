@@ -2,10 +2,17 @@
 
 `llm` + `active` — агенты спринта через ai-gateway (`teaching_coach`, `conversation_partner`, `independent_evaluator`);
 `code` — логика сервисов (`learning_orchestrator` — lessons, `curriculum_planner` — learning-plan,
-`diagnostic_assessor` — diagnostics); `rules` — детерминированные правила (`safety_quality_gate` — ai-gateway,
-`error_analyst` — часть вывода оценщика в assessment); остальные — `planned` с этапом по docs/SPRINTS.md.
+`diagnostic_assessor` — diagnostics; спринт 5: `spaced_repetition_coach` — memory (FSRS и правила оценки ответа),
+`pronunciation_coach` — ai-gateway (акустическая оценка Azure Speech + советы правилами)); `rules` —
+детерминированные правила (`safety_quality_gate` — ai-gateway, `error_analyst` — часть вывода оценщика в assessment);
+остальные — `planned` с этапом по docs/SPRINTS.md (`evening_review_coach` — planned: вечернее напоминание спринта 5
+делают memory и notifications без агента).
 `free_text` — агент принимает свободный текст ученика (детям 6–13 такие вызовы отклоняются, решение владельца
-19.11.2026).
+19.11.2026). У `pronunciation_coach` свободного текста нет (аудио эталонной фразы из контента; детям — только с
+согласием родителя, проверяют memory и telegram-bff).
+
+Таблица `agents` заполняется миграцией 0001 из `AGENTS`; изменения реестра после неё — миграциями (0004 переводит
+`spaced_repetition_coach` и `pronunciation_coach` в `code`/`active`, снимок прежних значений — `AGENTS_SPRINT4`).
 """
 
 from __future__ import annotations
@@ -68,12 +75,13 @@ AGENTS: Final[tuple[dict[str, Any], ...]] = (
        ("Ошибки с доказательствами — часть вывода оценщика", "Dalilli xatolar — baholovchi natijasining qismi"),
        "methodist", "rules", implemented_in="assessment"),
     _a("spaced_repetition_coach", ("Интервальные повторения", "Oraliqli takrorlash"),
-       ("Готовит задания повторения; сроки считает алгоритм",
-        "Takrorlash topshiriqlarini tayyorlaydi; muddatni algoritm hisoblaydi"),
-       "methodist", "llm", "planned", 5),
+       ("Готовит задания повторения и оценивает ответы правилами; сроки считает FSRS",
+        "Takrorlash topshiriqlarini tayyorlaydi va javoblarni qoidalar bilan baholaydi; muddatni FSRS hisoblaydi"),
+       "methodist", "code", implemented_in="memory"),
     _a("pronunciation_coach", ("Произношение", "Talaffuz"),
-       ("Работает с акустическими данными речи", "Nutqning akustik maʼlumotlari bilan ishlaydi"),
-       "methodist", "llm", "planned", 5, free_text=True),
+       ("Оценивает произношение по акустике (Azure Speech) и даёт 1–2 совета",
+        "Talaffuzni akustika boʻyicha baholaydi (Azure Speech) va 1–2 ta maslahat beradi"),
+       "methodist", "code", implemented_in="ai-gateway"),
     _a("evening_review_coach", ("Вечернее повторение", "Kechki takrorlash"),
        ("Повторение знакомого материала", "Tanish materialni takrorlash"),
        "methodist", "llm", "planned", 5),
@@ -104,6 +112,18 @@ AGENTS: Final[tuple[dict[str, Any], ...]] = (
 LLM_AGENT_IDS: Final[frozenset[str]] = frozenset(a["agent_id"] for a in AGENTS if a["implementation"] == "llm")
 FREE_TEXT_AGENT_IDS: Final[frozenset[str]] = frozenset(a["agent_id"] for a in AGENTS if a["free_text"])
 
+# Снимок строк реестра до миграции 0004 (откат 0004 возвращает их и маршрутизацию версий этих агентов)
+AGENTS_SPRINT4: Final[tuple[dict[str, Any], ...]] = (
+    _a("spaced_repetition_coach", ("Интервальные повторения", "Oraliqli takrorlash"),
+       ("Готовит задания повторения; сроки считает алгоритм",
+        "Takrorlash topshiriqlarini tayyorlaydi; muddatni algoritm hisoblaydi"),
+       "methodist", "llm", "planned", 5),
+    _a("pronunciation_coach", ("Произношение", "Talaffuz"),
+       ("Работает с акустическими данными речи", "Nutqning akustik maʼlumotlari bilan ishlaydi"),
+       "methodist", "llm", "planned", 5, free_text=True),
+)
+SPRINT5_CODE_AGENTS: Final = ("spaced_repetition_coach", "pronunciation_coach")
+
 # Модели и цены по умолчанию (PLAN «Модели по умолчанию», прайс Anthropic на 19.11.2026), $ за 1 млн токенов
 MODELS: Final[tuple[dict[str, Any], ...]] = (
     {"model_id": "claude-haiku-5-5", "provider": "anthropic", "input_usd_per_mtok": "0.10",
@@ -112,6 +132,19 @@ MODELS: Final[tuple[dict[str, Any], ...]] = (
      "output_usd_per_mtok": "10.00", "active": True},
     {"model_id": "fake", "provider": "fake", "input_usd_per_mtok": "0", "output_usd_per_mtok": "0", "active": True},
 )
+
+# Оценка произношения (спринт 5, решение владельца 20.11.2026): цена часа аудио — Azure AI Speech, Pronunciation
+# Assessment в реальном времени ($1,32 за час, ноябрь 2026); fake — стенд и тесты. Сид — миграция 0004 (в 0001 —
+# только LLM-модели: столбца audio_usd_per_hour и провайдеров речи там ещё нет).
+SPEECH_MODELS: Final[tuple[dict[str, Any], ...]] = (
+    {"model_id": "azure-speech-pa", "provider": "azure_speech", "input_usd_per_mtok": "0", "output_usd_per_mtok": "0",
+     "audio_usd_per_hour": "1.32", "active": True},
+    {"model_id": "fake-speech", "provider": "fake_speech", "input_usd_per_mtok": "0", "output_usd_per_mtok": "0",
+     "audio_usd_per_hour": "0", "active": True},
+)
+SPEECH_MODEL_BY_PROVIDER: Final[dict[str, str]] = {"azure_speech": "azure-speech-pa", "fake_speech": "fake-speech"}
+SPEECH_PROVIDERS: Final = ("azure_speech", "fake_speech")
+LLM_PROVIDERS: Final = ("anthropic", "fake")
 
 # Бюджет по умолчанию (решение владельца 19.11.2026): $20 в месяц, $0,05 на ученика в день, $0,03 на урок
 BUDGET_DEFAULTS: Final[dict[str, Any]] = {

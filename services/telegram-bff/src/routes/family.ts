@@ -16,7 +16,7 @@ import type {
   LearnerSummary,
   Page,
 } from "@tilhero/contracts/bff";
-import { learnersState } from "../account.js";
+import { learnersState, loadPlan } from "../account.js";
 import type { BffContext } from "../context.js";
 import {
   BEARER,
@@ -43,9 +43,11 @@ import {
   InviteParamsSchema,
   InvitePreviewSchema,
   InviteSchema,
+  LearnerParamsSchema,
   LearnerSummarySchema,
   PageQuerySchema,
   TeenParamsSchema,
+  VoiceConsentRequestSchema,
   itemsOf,
 } from "../schemas.js";
 import { orNull, upstreamUnavailable } from "../upstream.js";
@@ -65,6 +67,11 @@ const grantNotFound = schemaErrors([
 const inviteNotFound = schemaErrors([
   { context: "params", status: 404, code: "INVITE_NOT_FOUND", message: "Приглашение не найдено" },
   { context: "body", field: "token", keywords: ["pattern"], status: 404, code: "INVITE_NOT_FOUND", message: "Приглашение не найдено" },
+]);
+
+/** Неверный формат learner_id — как чужой ребёнок (404 LEARNER_NOT_FOUND). */
+const learnerNotFound = schemaErrors([
+  { context: "params", status: 404, code: "LEARNER_NOT_FOUND", message: "Профиль ученика не найден" },
 ]);
 
 /** Токен ссылки согласия от identity (base64url) — без префикса gc_ укладывается в 64 символа start_param. */
@@ -121,6 +128,47 @@ export function familyRoutes(app: App, ctx: BffContext): void {
       });
       const view: LearnerSummary = learnerView({ ...child, kind: "child" }, auth.learnerId, false);
       return reply.code(201).send(view);
+    },
+  );
+
+  // ---------- Спринт 5: согласие опекуна на запись голоса детского профиля ----------
+  app.put(
+    "/v1/learners/:learner_id/voice-consent",
+    {
+      config: user,
+      schemaErrorFormatter: learnerNotFound,
+      schema: {
+        tags: ["learners"],
+        summary: "Разрешить или запретить запись голоса (оценка произношения) детскому профилю — решение опекуна",
+        description:
+          "Только из профиля аккаунта 18+ со своим действующим согласием (identity-consent); из детского профиля — 403 ADULT_REQUIRED " +
+          "до вызова identity. Повтор того же значения — без новой записи согласия. 404 LEARNER_NOT_FOUND — не свой ребёнок " +
+          "(и свой аккаунт: своё согласие — POST /v1/profile/consent с целью voice_recording); 403 CONSENT_REQUIRED {purpose}. " +
+          "onboarding_completed — из learning-plan; план недоступен — из identity (иначе false), согласие уже сохранено.",
+        security: BEARER,
+        params: LearnerParamsSchema,
+        body: VoiceConsentRequestSchema,
+        response: { 200: LearnerSummarySchema, ...errorResponses(401, 403, 404, 410, 423) },
+      },
+    },
+    async (req) => {
+      const auth = authOf(req);
+      forbidInChildProfile(auth, "ADULT_REQUIRED");
+      const childId = req.params.learner_id.toLowerCase();
+      const child = await identity.put<IdentityLearner>(`/internal/v1/me/learners/${childId}/voice-consent`, {
+        subject: auth.accountId,
+        body: { granted: req.body.granted },
+      });
+      if (!child || typeof child !== "object" || child.learner_id?.toLowerCase() !== childId) throw upstreamUnavailable("identity-consent");
+      // согласие уже сохранено в identity: сбой learning-plan ответ не валит — онбординг из identity (иначе false)
+      let onboarded = child.onboarding_completed === true;
+      try {
+        onboarded = (await loadPlan(ctx, child.learner_id, clientTimezone(req))).onboarding_completed_at != null;
+      } catch (err) {
+        const e = err as { status?: number; code?: string };
+        ctx.log.warn({ upstream: "learning-plan", check: "voice_consent.onboarding", upstream_status: e.status ?? 0, upstream_code: e.code ?? "UNKNOWN" }, "onboarding unknown, voice consent saved");
+      }
+      return learnerView({ ...child, kind: "child" }, auth.learnerId, onboarded);
     },
   );
 

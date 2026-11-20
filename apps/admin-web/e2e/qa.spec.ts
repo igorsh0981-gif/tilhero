@@ -16,7 +16,7 @@ test.describe.configure({ timeout: 120_000 });
 test("AT-52/AT-47: journal → card (ai-gateway down) → replies with a reason → flag → re-evaluation (step-up) → appeal decided", async ({ page }) => {
   const bff = await openAs(page, "methodist@tilhero.local", "#/qa", { ai: { qaDown: ["ai-gateway"] } });
   await expect(page.getByTestId("qa-journal")).toBeVisible();
-  await expect(page.locator('[data-testid^="qa-row-"]')).toHaveCount(6);
+  await expect(page.locator('[data-testid^="qa-row-"]')).toHaveCount(7);
   // a cost unknown because ai-gateway was down is «—», not $0
   await expect(page.getByTestId(`qa-row-${SID.s4}`).locator('td[title^="Стоимость неизвестна"]')).toHaveText("—");
   // no learner names or ids in the journal

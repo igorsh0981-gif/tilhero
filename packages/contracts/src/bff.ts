@@ -25,10 +25,10 @@
  */
 
 import type {
-  AudienceSegment, Band, ControlItemType, GoalCode, LanguagePair, LessonStageType, Localized, MediaRequestStatus,
-  MediaType, MediaUse, SkillArea, TopicCode,
+  AudienceSegment, Band, ControlItemType, GlossarySource, GoalCode, LanguagePair, LessonStageType, Localized,
+  MediaRequestStatus, MediaType, MediaUse, PartOfSpeech, ReadingQuestionType, SkillArea, TopicCode,
 } from "./content.js";
-import type { ConfirmedError, RubricCriterionCode, SessionKind } from "./ai.js";
+import type { ConfirmedError, PronunciationErrorType, RubricCriterionCode, SessionKind } from "./ai.js";
 
 export interface ErrorBody {
   code: string;
@@ -71,6 +71,9 @@ export interface LearnerSummary {
   age_band: AgeBand | null;
   is_active: boolean;
   onboarding_completed: boolean;
+  /** спринт 5: запись голоса (оценка произношения) разрешена — у аккаунта своё согласие с voice_recording
+   *  (подросток — после согласия родителя), у детского профиля — согласие опекуна (PUT /v1/learners/{id}/voice-consent) */
+  voice_consent: boolean;
 }
 
 export interface SecurityState {
@@ -259,7 +262,8 @@ export interface ConsentRequest {
  *   - social — приглашения и семья (создать, принять приглашение): 403 CONSENT_REQUIRED {purpose: "social"};
  *     открыть и посмотреть приглашение можно после принятия terms и privacy;
  *   - product_news — сообщения категории product (новости в центре и в Telegram);
- *   - voice_recording — запись голоса (уроки, спринт 4).
+ *   - voice_recording — запись голоса: оценка произношения (спринт 5). Детскому профилю — только согласие опекуна
+ *     (PUT /v1/learners/{id}/voice-consent), подростку — после согласия родителя.
  *  Категории уведомлений social и product без соответствующей цели в доставке не учитываются. */
 
 // ---------- Учебный план и график (learning-plan) ----------
@@ -796,8 +800,9 @@ export interface CourseSnapshot {
 // =====================================================================================================================
 
 export type SessionStatus = "ready" | "in_progress" | "paused" | "completed" | "failed" | "cancelled";
-/** media-сессия: listen → exercises → summary; scenario: roleplay → summary; review: assessment → summary */
-export type SessionStage = LessonStageType | "listen" | "exercises";
+/** media-сессия: listen → exercises → summary; scenario: roleplay → summary; review: assessment → summary;
+ *  reading (спринт 5): reading → questions → summary */
+export type SessionStage = LessonStageType | "listen" | "exercises" | "reading" | "questions";
 
 // ---------- Карточка урока (APP-LESS-01) ----------
 /** GET /v1/lessons/{lesson_id} → LessonCardDetail. Награды — спринт 6 (не показываются). */
@@ -841,6 +846,8 @@ export interface LessonSession {
 }
 
 // ---------- Шаги (GET /v1/sessions/{id}/current → LessonStep; авто-продолжение после паузы) ----------
+/** Вопросы к тексту для чтения (спринт 5): single_choice и true_false приходят как single_choice (true_false — варианты
+ *  ["True", "False"]), gap_fill — как gap_fill. */
 export type StepItemType = ControlItemType | "comprehension" | "gap_fill_media" | "order_lines" | "phrase_meaning" | "meaning_check";
 
 export interface StepItem {
@@ -880,6 +887,8 @@ export type LessonStep =
       transcript: Array<{ speaker: string; text_en: string; gloss: Localized | null }> | null;
       voices: Record<string, "en-GB" | "en-US">; can_listen: boolean })
   | (StepBase & { type: "open_answer"; prompt: Localized; max_length: number })
+  /** спринт 5: текст для чтения (перевод по тапу — POST /v1/memory/translate, ContentRef kind reading) */
+  | (StepBase & { type: "reading"; reading: ReadingView })
   | (StepBase & { type: "done" }); // все шаги пройдены — POST /finish
 
 /** POST /v1/sessions/{id}/steps/{step_id} StepAnswer → StepResult. Повтор того же ответа → тот же результат.
@@ -993,4 +1002,291 @@ export interface SpeechRequest {
   text: string; // 1–400 знаков, английский текст контента
   variant: "en-GB" | "en-US"; // голос: en-US — мужской (ryan), en-GB — женский (southern english female)
   speed?: "normal" | "slow"; // slow — для детей 6–13 и повторного прослушивания; по умолчанию normal
+}
+
+// =====================================================================================================================
+// Спринт 5 — память и повторения (APP-MEM-01…05), чтение, перевод по тапу, произношение (APP-ADV-01)
+// Словарь, «Повторение дня», журнал ошибок, проверки удержания, перевод, произношение — memory; чтение — lessons
+// (сессия kind "reading") и catalog (тексты). Срок следующего повторения считает только FSRS в memory.
+// Общие коды: 404 CARD_NOT_FOUND | REVIEW_SESSION_NOT_FOUND | READING_NOT_AVAILABLE | CONTENT_NOT_FOUND;
+// 409 NOTHING_TO_REVIEW {next_due_at}; 409 TASK_NOT_CURRENT {current_task_id}; 409 REVIEW_SESSION_STATE {status};
+// 409 HINTS_NOT_ALLOWED (проверка удержания); 422 CARDS_LIMIT {limit: 2000}; 422 WORD_NOT_IN_CONTENT;
+// 422 GLOSS_UNAVAILABLE; 403 VOICE_CONSENT_REQUIRED {who: "self" | "guardian"}; 422 AUDIO_INVALID {reason};
+// 503 SPEECH_UNAVAILABLE.
+// =====================================================================================================================
+
+/** Ссылка на место в опубликованном контенте (слово для перевода, источник карточки, эталон произношения).
+ *  locator: reading — s_id предложения; media_asset — индекс реплики транскрипта (строкой); lesson — "ex:<i>" пример
+ *  или "kw:<i>" ключевое слово; scenario — node_id. */
+export interface ContentRef {
+  kind: "lesson" | "media_asset" | "reading" | "scenario";
+  key: string;
+  version: number;
+  locator?: string;
+}
+
+// ---------- Обзор (главная, вкладка «Словарь») ----------
+/** GET /v1/memory/overview → MemoryOverview */
+export interface MemoryOverview {
+  /** карточек к сроку до конца местного дня (без новых) */
+  due_count: number;
+  /** новых, которые войдут в сегодняшнее повторение (с учётом дневного лимита: 5, детям 3) */
+  new_available: number;
+  /** проверок удержания со сроком */
+  retention_due: number;
+  /** повторение сегодня уже было (completed) */
+  done_today: boolean;
+  /** незавершённая сессия повторения */
+  active_session_id: string | null;
+  /** ближайший срок, если сегодня повторять нечего */
+  next_due_at: string | null;
+  total_cards: number;
+  /** оценка произношения: available — можно записывать; consent_self — нужно своё согласие (настройки);
+   *  consent_guardian — нужно согласие родителя (подросток — ссылка родителю, ребёнок — родитель в карточке ребёнка);
+   *  unavailable — функция выключена (нет ключа Azure, остановка, бюджет) — кнопку не показывать */
+  pronunciation: "available" | "consent_self" | "consent_guardian" | "unavailable";
+}
+
+// ---------- Словарь (APP-MEM-02, APP-PROG-04 частично) ----------
+export type CardKind = "word" | "phrase" | "error";
+export type CardStatus = "new" | "learning" | "review" | "known" | "frozen";
+/** сила запоминания для ученика: new — ещё не повторялась; weak — R < 0.7 или lapses ≥ 2; ok — S < 21 дня; strong */
+export type CardStrength = "new" | "weak" | "ok" | "strong";
+
+export interface DictionaryCard {
+  card_id: string;
+  kind: CardKind;
+  text_en: string;
+  gloss: Localized;
+  gloss_source: GlossarySource;
+  status: CardStatus;
+  strength: CardStrength;
+  due_at: string | null; // null — known/frozen
+  last_reviewed_at: string | null;
+  created_at: string;
+}
+/** GET /v1/memory/cards?kind=&status=&q=&cursor=&limit= → Page<DictionaryCard> (q — по английскому и переводу, ≤ 60;
+ *  limit необязателен, как у остальных списков; так же /v1/memory/errors и /v1/practice/readings). */
+
+export interface CardSource {
+  kind: "lesson" | "media" | "reading" | "scenario" | "evaluation" | "manual";
+  title: Localized | null; // название урока/текста/медиа; null — источник снят с публикации
+  at: string;
+}
+
+/** GET /v1/memory/cards/{id} → DictionaryCardDetail */
+export interface DictionaryCardDetail extends DictionaryCard {
+  example_en: string | null;
+  /** ошибка (kind error): что исправить; evidence — ваш фрагмент (стирается через 90 дней — null) */
+  error: { correction: string; evidence: string | null; error_code: string; explanation: Localized } | null;
+  sources: CardSource[];
+  /** последние 10 повторений */
+  history: Array<{ at: string; grade: "again" | "hard" | "good" | null; mode: "choice" | "typed" | "assemble" | "listen" | "manual" }>;
+  next_review_in_days: number | null;
+  last_pronunciation: { at: string; intelligibility: "clear" | "mostly_clear" | "needs_practice" | null } | null;
+}
+
+/** POST /v1/memory/cards (Idempotency-Key) AddCardRequest → DictionaryCard (201 новая; 200 — уже была, источник добавлен).
+ *  Только слово или фраза опубликованного контента (проверяется на сервере); свой текст ученика — нельзя.
+ *  422 WORD_NOT_IN_CONTENT, 422 GLOSS_UNAVAILABLE, 422 CARDS_LIMIT.
+ *  POST /v1/memory/cards/{id}/known → DictionaryCard (status known — «Знаю это», в повторение не попадает);
+ *  DELETE /v1/memory/cards/{id}/known → DictionaryCard (вернуть в повторение; срок — сейчас).
+ *  DELETE /v1/memory/cards/{id} → 204 (убрать из словаря). */
+export interface AddCardRequest {
+  /** форма как в тексте (сервер проверяет, что она есть в версии контента; лемму и формы берёт из словаря курса) */
+  text_en: string; // ≤ 120
+  source: ContentRef;
+}
+
+// ---------- Журнал ошибок (APP-MEM-01) ----------
+/** GET /v1/memory/errors?cursor= → Page<ErrorJournalItem>: подтверждённые ошибки из оценок уроков и сценариев
+ *  (только свободный текст; у детей журнала нет). Карточка ошибки живёт 90 дней. */
+export interface ErrorJournalItem {
+  card_id: string;
+  correction: string;
+  error_code: string;
+  explanation: Localized; // «Пропущен глагол be», «Порядок слов»
+  severity: "low" | "medium" | "high";
+  strength: CardStrength;
+  lesson_title: Localized | null;
+  created_at: string;
+}
+
+// ---------- «Повторение дня» (APP-MEM-03/04) ----------
+export type ReviewSessionStatus = "active" | "completed" | "expired" | "cancelled";
+export type ReviewTaskType =
+  | "intro" | "meaning_choice" | "listen_choice" | "typed" | "cloze" | "assemble" | "error_fix" | "check_item";
+
+/** POST /v1/memory/review-sessions (Idempotency-Key) → ReviewSession (201; есть активная — 200 она же).
+ *  409 NOTHING_TO_REVIEW {next_due_at}. GET /v1/memory/review-sessions/active → {session: ReviewSession | null}.
+ *  GET /v1/memory/review-sessions/{id} → ReviewSession. POST …/{id}/cancel → ReviewSession. */
+export interface ReviewSession {
+  session_id: string;
+  status: ReviewSessionStatus;
+  total_tasks: number; // может вырасти на повторы карточек с ошибкой (каждая — один раз)
+  done_tasks: number;
+  cards: number;
+  new_cards: number;
+  checks: number; // блоки проверки удержания
+  started_at: string;
+  finished_at: string | null;
+  minutes: number;
+}
+
+/** GET /v1/memory/review-sessions/{id}/current → ReviewTask. Ключа ответа нет. Все задания пройдены →
+ *  409 TASK_NOT_CURRENT {current_task_id: null} — вызвать POST …/finish. */
+export interface ReviewTask {
+  task_id: string;
+  index: number; // 1-based
+  total: number;
+  type: ReviewTaskType;
+  card_id: string | null;
+  /** проверка удержания: без подсказок, верный ответ — в конце блока */
+  check: { check_id: string; skill_title: Localized; position: number; of: number } | null;
+  /** что показать (по типу):
+   *  intro — text_en, gloss, example_en; meaning_choice — text_en, options (переводы на языке интерфейса);
+   *  listen_choice — speech_text (озвучить через /v1/speech; это и есть стимул задания на слух — принятое отклонение
+   *  от «ключа нет до ответа»: текст виден только в инструментах разработчика), options (английские); typed — gloss, example_gap
+   *  (пример с ___ или null); cloze — example_gap, gloss; assemble — gloss, tiles (буквы или слова, перемешаны);
+   *  error_fix — explanation, evidence (ваш фрагмент) или null, gloss null; check_item — instruction, prompt_en, options */
+  prompt: {
+    text_en: string | null;
+    gloss: Localized | null;
+    example_en: string | null;
+    example_gap: string | null;
+    speech_text: string | null;
+    explanation: Localized | null;
+    evidence: string | null;
+    instruction: Localized | null;
+    prompt_en: string | null;
+  };
+  options: string[];
+  tiles: string[];
+  /** вид ответа: none — только «Понятно»/«Знаю это» (intro); choice — индекс; text — ввод (≤ 200); order — порядок tiles/options */
+  answer_kind: "none" | "choice" | "text" | "order";
+  hints: Array<"first_letter" | "reveal">; // check_item — []
+  hints_used: Array<"first_letter" | "reveal">;
+  voice: "en-GB" | "en-US";
+}
+
+/** POST /v1/memory/review-sessions/{id}/tasks/{task_id} ReviewAnswer → ReviewTaskResult. Повтор — тот же результат.
+ *  intro: {} («Понятно») или {known: true} («Знаю это»). */
+export interface ReviewAnswer {
+  choice?: number;
+  text?: string; // ≤ 200
+  order?: number[];
+  known?: boolean;
+}
+/** POST …/tasks/{task_id}/hint {kind: "first_letter" | "reveal"} → ReviewHint. reveal = «Не помню» (ответ показан,
+ *  оценка again). check_item → 409 HINTS_NOT_ALLOWED. */
+export interface ReviewHint {
+  kind: "first_letter" | "reveal";
+  text: string; // первая буква («r…») или ответ
+}
+export interface ReviewTaskResult {
+  /** check_item — null до конца блока проверки */
+  result: "correct" | "almost" | "incorrect" | null;
+  correct_answer: string | null; // кроме check_item
+  /** когда эта карточка вернётся (дни); null — проверка, intro или known */
+  next_review_in_days: number | null;
+  /** карточка с ошибкой вернётся в конце этой сессии */
+  requeued: boolean;
+  /** конец блока проверки: итог по каждому заданию */
+  check_result: { passed: boolean; correct: number; total: number;
+                  items: Array<{ prompt_en: string; your_answer: string | null; correct_answer: string; correct: boolean }> } | null;
+  next: ReviewTask | null; // null — все задания пройдены, POST …/finish
+}
+
+/** POST /v1/memory/review-sessions/{id}/finish → ReviewSummary (повтор — тот же итог). */
+export interface ReviewSummary {
+  session_id: string;
+  status: "completed" | "expired" | "cancelled";
+  minutes: number;
+  reviewed: number; // карточек с оценкой
+  correct: number; // с первого раза верно (good/hard)
+  again: number;
+  new_learned: number;
+  checks: Array<{ skill_title: Localized; stage: "d7" | "d30"; passed: boolean;
+                  /** d30 пройдена — навык «закреплён» */ skill_retained: boolean }>;
+  next_due_at: string | null;
+  due_tomorrow: number;
+}
+
+// ---------- Перевод по тапу ----------
+/** POST /v1/memory/translate TranslateRequest → WordGloss. Только слово/выражение из этого опубликованного текста
+ *  (422 WORD_NOT_IN_CONTENT); свободный ввод не переводится. Источник: словарь курса → перевод ИИ (помечен). */
+export interface TranslateRequest {
+  text: string; // ≤ 60
+  content: ContentRef;
+}
+export interface WordGloss {
+  text: string;
+  lemma: string | null;
+  part_of_speech: PartOfSpeech | null;
+  /** null — перевода нет (ИИ недоступен или перевод отклонён методистом): показать перевод предложения */
+  gloss: Localized | null;
+  source: GlossarySource | null;
+  /** «Перевод сделан ИИ и проверяется методистом» (source ai, ещё не проверен) */
+  ai_unreviewed: boolean;
+  note: Localized | null;
+  in_dictionary: string | null; // card_id
+  reason: "not_available" | null;
+}
+
+// ---------- Произношение (APP-ADV-01; APP-VOICE-04 — микрофон по потребности) ----------
+/** POST /v1/memory/pronunciation?target=<card:<card_id> | sentence:<kind>:<key>:<version>:<locator>>
+ *  Тело — audio/wav (PCM 16 бит, моно, 16 000 Гц, 0,5..15 с, ≤ 600 000 байт) → PronunciationView.
+ *  Эталонный текст подставляет сервер (карточка или предложение контента). Аудио не сохраняется.
+ *  403 VOICE_CONSENT_REQUIRED {who}; 422 AUDIO_INVALID {reason: format | too_short | too_long | too_large};
+ *  503 SPEECH_UNAVAILABLE; 429 RATE_LIMITED (20 за 10 минут). */
+export interface PronunciationView {
+  attempt_id: string | null; // null — unavailable
+  status: "ok" | "insufficient_evidence" | "unavailable";
+  reference_text: string;
+  /** разборчивость, не «акцент» */
+  intelligibility: "clear" | "mostly_clear" | "needs_practice" | null;
+  score: number | null; // 0..100 (общий балл произношения), null — не оценено
+  words: Array<{ word: string; accuracy: number | null; error_type: PronunciationErrorType }>;
+  tips: Array<{ word: string; text: string }>; // ≤ 2, на языке интерфейса
+  /** insufficient_evidence: «Не удалось оценить — говорите ближе к микрофону»; unavailable — «Сейчас недоступно» */
+  message: Localized | null;
+}
+
+// ---------- Согласие на запись голоса для детского профиля ----------
+/** PUT /v1/learners/{learner_id}/voice-consent VoiceConsentRequest → LearnerSummary. Только аккаунт 18+ (опекун
+ *  ребёнка, из своего профиля), со своим действующим согласием. 403 ADULT_REQUIRED; 404 LEARNER_NOT_FOUND (чужой).
+ *  Своё согласие (аккаунт) — POST /v1/profile/consent с целью voice_recording. */
+export interface VoiceConsentRequest {
+  granted: boolean;
+}
+
+// ---------- Чтение (практика) ----------
+/** GET /v1/practice/readings?level=&cursor= → Page<ReadingCard> (по аудитории активного ученика, пара курса) */
+export interface ReadingCard {
+  reading_id: string;
+  title: Localized;
+  level: Band;
+  topics: TopicCode[];
+  est_minutes: number;
+  word_count: number;
+  /** последняя сессия чтения: доля верных ответов */
+  last_result: { correct: number; total: number; finished_at: string } | null;
+}
+
+/** GET /v1/practice/readings/{id} → ReadingView (без ответов на вопросы).
+ *  POST /v1/practice/readings/{id}/sessions (Idempotency-Key) → LessonSession (201, kind "reading"); дальше — общие
+ *  маршруты сессий спринта 4: шаг "reading" (StepReading), затем вопросы (LessonStep type "item", graded_later), "done",
+ *  POST /finish → LessonSummary (practice_only; навыки не меняются). */
+export interface ReadingView {
+  reading_id: string;
+  version: number;
+  title: Localized;
+  level: Band;
+  voice: "en-GB" | "en-US";
+  paragraphs: Array<{ p_id: string; sentences: Array<{ s_id: string; text_en: string; gloss: Localized }> }>;
+  /** подсвеченные слова: перевод по тапу берётся из словаря курса (POST /v1/memory/translate) */
+  glossary: Array<{ en: string; gloss: Localized; note: Localized | null; in_dictionary: string | null }>;
+  questions_count: number;
+  question_types: ReadingQuestionType[];
+  est_minutes: number;
 }

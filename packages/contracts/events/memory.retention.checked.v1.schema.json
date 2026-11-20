@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "memory.retention.checked.v1.schema.json",
+  "title": "memory.retention.checked.v1",
+  "type": "object",
+  "required": [
+    "check_id",
+    "user_id",
+    "pair_id",
+    "skill_id",
+    "stage",
+    "passed",
+    "consecutive_failures",
+    "checked_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "check_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "pair_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "skill_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "d7",
+        "d30"
+      ]
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "consecutive_failures": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2
+    },
+    "evidence_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "checked_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

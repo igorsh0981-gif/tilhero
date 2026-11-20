@@ -1,12 +1,14 @@
 import type { MessageKey } from "./ru";
 import { uzContent } from "./uz.content";
 import { uzLessons } from "./uz.lessons";
+import { uzMemory } from "./uz.memory";
 
 /** Oʻzbekcha (lotin yozuvi). Exactly the keys of ru.ts; no Cyrillic (test/i18n.test.ts). Apostrophes: ʻ (U+02BB) in
  *  oʻ / gʻ, ʼ (U+02BC) for the tutuq belgisi. Draft translation — checked by the methodologist (prototype note). */
 export const uz: Record<MessageKey, string> = {
   ...uzContent,
   ...uzLessons,
+  ...uzMemory,
   // ---- common ----
   "c.continue": "Davom etish",
   "c.back": "Orqaga",
@@ -32,7 +34,7 @@ export const uz: Record<MessageKey, string> = {
   "nav.tabs": "Boʻlimlar",
   "tab.home": "Bosh sahifa",
   "tab.lessons": "Darslar",
-  "tab.review": "Takrorlash",
+  "tab.review": "Lugʻat",
   "tab.progress": "Natijalar",
   "tab.profile": "Profil",
   "bar.inbox": "Bildirishnomalar",

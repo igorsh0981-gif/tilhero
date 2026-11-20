@@ -26,6 +26,9 @@ export interface RequestOptions {
   issuing?: boolean;
   /** background request (e.g. «Что нового», unread counter) — its failure never toggles the «Нет связи» banner */
   quiet?: boolean;
+  /** a binary body instead of JSON (sprint 5: the WAV of «Произнести», POST /v1/memory/pronunciation) — sent as is, never
+   *  logged or stored by the client */
+  raw?: { body: Blob | ArrayBuffer; contentType: string };
 }
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -317,7 +320,8 @@ export class ApiClient {
   /** One HTTP call: a successful Response (unread), or ApiError for the error body / the network. */
   private async send(method: string, path: string, opts: RequestOptions, accept: string): Promise<Response> {
     const headers: Record<string, string> = { ...(opts.headers ?? {}), Accept: accept };
-    if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+    if (opts.raw) headers["Content-Type"] = opts.raw.contentType;
+    else if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (opts.auth !== false && this.access) headers.Authorization = `Bearer ${this.access}`;
     if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
     const lang = this.opts.lang?.();
@@ -332,7 +336,7 @@ export class ApiClient {
       res = await this.fetchImpl(this.url(path, opts.query), {
         method,
         headers,
-        body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+        body: opts.raw ? opts.raw.body : opts.body === undefined ? undefined : JSON.stringify(opts.body),
         signal: opts.signal,
         credentials: "omit",
         cache: "no-store",

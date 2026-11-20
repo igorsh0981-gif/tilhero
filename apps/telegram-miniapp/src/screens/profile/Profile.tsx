@@ -93,6 +93,15 @@ export function Profile() {
             <NavRow title={t("profile.theme")} value={t(`theme.${themePref}` as MessageKey)} onClick={() => nav.push({ name: "theme" })} testId="row-theme" />
             <HomeScreenRow />
             {!kid ? <NavRow title={t("profile.family")} onClick={() => nav.push({ name: "family" })} testId="row-family" /> : null}
+            {!kid ? (
+              <NavRow
+                title={t("vc.title")}
+                value={session.consent.purposes.includes("voice_recording") ? t("c.on") : t("c.off")}
+                icon="mic"
+                onClick={() => nav.push({ name: "voiceConsent" })}
+                testId="row-voice"
+              />
+            ) : null}
             {!kid && acc.age_band === "18+" ? (
               <NavRow
                 title={t("profile.pin")}

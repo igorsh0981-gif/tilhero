@@ -167,7 +167,10 @@ export const CAMPAIGN_SCHEDULE = obj(
 
 // ---------------------------------------------------------------- контент и диагностика (спринт 3, admin.ts)
 
-export const CONTENT_KINDS = ["course", "skill", "module", "lesson", "rubric", "scenario", "media_asset", "media_exercise"] as const;
+/** ContentKind (content.ts); спринт 5 — + reading (тексты для чтения, общий API контента). */
+export const CONTENT_KINDS = [
+  "course", "skill", "module", "lesson", "rubric", "scenario", "media_asset", "media_exercise", "reading",
+] as const;
 export const VERSION_STATUSES = ["draft", "in_review", "approved", "published", "suspended", "archived"] as const;
 export const BANDS = ["A0", "A1", "A2", "B1", "B2"] as const;
 export const LOCALE_CHECKS = ["missing", "draft", "checked"] as const;
@@ -275,7 +278,8 @@ export const AGENT_IDS = [
 ] as const;
 export const AUDIENCE_SEGMENTS = ["kids", "teens", "adults"] as const;
 export const RUBRIC_CRITERIA = ["task", "vocabulary", "grammar", "independence", "pronunciation", "fluency", "comprehension"] as const;
-export const SESSION_KINDS = ["lesson", "scenario", "media", "review"] as const;
+/** SessionKind (ai.ts); спринт 5 — + reading (сессия чтения в журнале «Контроля диалогов»). */
+export const SESSION_KINDS = ["lesson", "scenario", "media", "review", "reading"] as const;
 export const SESSION_STATUSES = ["ready", "in_progress", "paused", "completed", "failed", "cancelled"] as const;
 export const SESSION_OUTCOMES = ["success", "alt_success", "fail"] as const;
 export const SESSION_FLAGS = ["ai_used", "ai_unavailable", "hints", "human_review", "appealed", "flagged", "failed"] as const;
@@ -352,13 +356,22 @@ export const GOLDEN_CASE_CREATE = obj(GOLDEN_PROPS, ["title", "input", "checks",
 export const GOLDEN_CASE_PATCH = obj(GOLDEN_PROPS, [], { minProperties: 1 });
 
 const USD = (max: number): Schema => ({ type: "number", minimum: 0, maximum: max });
+/** Правка модели и цен; спринт 5 — + `audio_usd_per_hour` для модели речи (azure-speech-pa; не передана — прежняя,
+ *  у LLM — null; цена > 0 у azure_speech и «снижение — только с costs.manage» проверяет ai-gateway). */
 export const MODEL_UPDATE = obj(
-  { input_usd_per_mtok: USD(1000), output_usd_per_mtok: USD(1000), active: { type: "boolean" }, reason: REASON },
+  {
+    input_usd_per_mtok: USD(1000),
+    output_usd_per_mtok: USD(1000),
+    audio_usd_per_hour: nullable(USD(1000)),
+    active: { type: "boolean" },
+    reason: REASON,
+  },
   ["input_usd_per_mtok", "output_usd_per_mtok", "active", "reason"],
 );
 /**
  * PUT budget: поля AiBudget & {reason}; ai_enabled — необязательно (аварийная остановка — своя команда), updated_at —
- * необязательно (защита ai-gateway от гонки правок → 409 BUDGET_CONFLICT {updated_at}).
+ * необязательно (защита ai-gateway от гонки правок → 409 BUDGET_CONFLICT {updated_at}). Спринт 5: подлимит речи
+ * `speech_monthly_cap_usd` — обязателен, 0..monthly_cap_usd (сравнение полей — в маршруте, до домена).
  */
 export const BUDGET_UPDATE = obj(
   {
@@ -367,10 +380,11 @@ export const BUDGET_UPDATE = obj(
     monthly_cap_usd: USD(100_000),
     learner_daily_cap_usd: USD(1000),
     lesson_cap_usd: USD(1000),
+    speech_monthly_cap_usd: USD(100_000),
     alert_percent: integer(1, 100),
     reason: REASON,
   },
-  ["monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "alert_percent", "reason"],
+  ["monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd", "speech_monthly_cap_usd", "alert_percent", "reason"],
 );
 export const EMERGENCY_STOP = obj({ enabled: { type: "boolean" }, reason: REASON }, ["enabled", "reason"]);
 
@@ -407,3 +421,79 @@ export const APPEAL_DECISION = obj(
   { decision: enumOf(["upheld", "corrected"]), note: str(10, 500), new_evaluation_id: nullable(UUID) },
   ["decision", "note"],
 );
+
+// ---------------------------------------------------------------- память, словарь курса (спринт 5, admin.ts)
+
+export const PART_OF_SPEECH_VALUES = [
+  "noun", "verb", "adjective", "adverb", "pronoun", "preposition", "conjunction", "interjection", "determiner", "phrase", "other",
+] as const;
+export const GLOSSARY_SOURCES = ["course", "methodist", "ai"] as const;
+export const GLOSSARY_REVIEW_STATUSES = ["not_required", "pending", "approved", "rejected"] as const;
+export const GLOSSARY_REF_KINDS = ["lesson", "media_asset", "reading", "scenario"] as const;
+export const GLOSSARY_ACTIONS = ["created", "updated", "reviewed", "archived", "overridden"] as const;
+export const CARD_STATUSES = ["new", "learning", "review", "known", "frozen", "archived"] as const;
+export const CARD_KINDS = ["word", "phrase", "error"] as const;
+export const CHECK_STAGES = ["d7", "d30"] as const;
+export const CHECK_STATUSES = ["scheduled", "in_session", "passed", "failed", "cancelled"] as const;
+export const FSRS_STATES = ["new", "learning", "review"] as const;
+export const ANSWER_MODES = ["choice", "typed", "assemble", "listen", "manual"] as const;
+export const GRADES = ["again", "hard", "good"] as const;
+export const LOG_ACTORS = ["learner", "system", "staff"] as const;
+export const ANALYTICS_PERIODS = ["30d", "90d"] as const;
+export const CARD_ACTIONS = ["reschedule", "reset", "freeze", "unfreeze"] as const;
+
+const PART_OF_SPEECH = nullable(enumOf(PART_OF_SPEECH_VALUES));
+/** Перевод статьи RU/UZ ≤ 80 (catalog GlossIn: оба непустые). */
+const GLOSS = obj({ ru: str(1, 80), uz: str(1, 80) }, ["ru", "uz"]);
+/** Лемма ≤ 60; формы 1..8 по ≤ 120 (catalog FormText; нормализует домен); пример ≤ 200. */
+const LEMMA = str(1, 60);
+const FORMS = arrayOf(str(1, 120), 1, 8);
+const EXAMPLE_EN = nullable(str(1, 200));
+const GLOSSARY_REASON = nullable(str(0, 500));
+
+/** GlossaryCreate (admin.ts) — все ключи обязательны (nullable — null). */
+export const GLOSSARY_CREATE = obj(
+  { pair_id: PAIR_ID, lemma: LEMMA, forms: FORMS, part_of_speech: PART_OF_SPEECH, gloss: GLOSS, example_en: EXAMPLE_EN, reason: GLOSSARY_REASON },
+  ["pair_id", "lemma", "forms", "part_of_speech", "gloss", "example_en", "reason"],
+);
+/** GlossaryPatch (admin.ts): хотя бы одно поле; override — только статьи course (null — снять; решает домен). */
+export const GLOSSARY_PATCH = obj(
+  {
+    lemma: LEMMA,
+    forms: FORMS,
+    part_of_speech: PART_OF_SPEECH,
+    gloss: GLOSS,
+    example_en: EXAMPLE_EN,
+    override: nullable(obj({ gloss: GLOSS, example_en: EXAMPLE_EN }, ["gloss", "example_en"])),
+    reason: GLOSSARY_REASON,
+  },
+  [],
+  { minProperties: 1 },
+);
+/** GlossaryReview (admin.ts): correct — с новым переводом (gloss обязателен); note ≤ 300. */
+export const GLOSSARY_REVIEW = obj(
+  { decision: enumOf(["approve", "correct", "reject"]), gloss: GLOSS, note: nullable(str(0, 300)) },
+  ["decision"],
+  { if: { properties: { decision: { const: "correct" } } }, then: { required: ["gloss"] } },
+);
+export const GLOSSARY_SOURCE = enumOf(GLOSSARY_SOURCES);
+export const GLOSSARY_REVIEW_STATUS = enumOf(GLOSSARY_REVIEW_STATUSES);
+
+/** Причина ручной правки карточки памяти: ≥ 10 (admin.ts), ≤ 300 (memory review_log.reason). */
+export const MEMORY_REASON = str(10, 300);
+/**
+ * CardAction (admin.ts): reschedule — с due_at (ISO-8601 с зоной; 1..365 дней от сейчас проверяет memory → 422
+ * DUE_AT_RANGE), остальные — без due_at. Плоская схема с условием — ошибка указывает на поле, а не на ветку oneOf.
+ */
+export const CARD_ACTION = obj(
+  { action: enumOf(CARD_ACTIONS), due_at: DATETIME, reason: MEMORY_REASON },
+  ["action", "reason"],
+  {
+    if: { properties: { action: { const: "reschedule" } } },
+    then: { required: ["due_at"] },
+    else: { not: { required: ["due_at"] } },
+  },
+);
+export const CARD_STATUS = enumOf(CARD_STATUSES);
+export const CARD_KIND = enumOf(CARD_KINDS);
+export const ANALYTICS_PERIOD = enumOf(ANALYTICS_PERIODS);

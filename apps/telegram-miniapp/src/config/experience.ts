@@ -19,6 +19,7 @@ export const FALLBACK_CONFIG: ExperienceConfig = {
     sections: [
       { type: "today_plan", key: "today", variant: "large", enabled: true },
       { type: "lesson_of_day", key: "lesson", variant: "large", enabled: true },
+      { type: "review", key: "review", variant: "compact", enabled: true },
       { type: "whats_new", key: "whats_new", variant: "compact", enabled: true },
       { type: "family", key: "family", variant: "compact", enabled: true },
     ],

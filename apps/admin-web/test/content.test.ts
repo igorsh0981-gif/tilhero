@@ -439,14 +439,17 @@ describe("skills, review diff, requests, routes", () => {
     expect(parseContentRoute("review/scenario/sc-cafe")).toEqual({ tab: "review", sub: "assets", rest: "scenario/sc-cafe" });
     expect(parseContentRoute("exercises/mx-1")).toEqual({ tab: "media", sub: "exercises", rest: "mx-1" });
     expect(parseContentRoute("bogus/x")).toEqual({ tab: null, sub: "assets", rest: null });
+    expect(parseContentRoute("readings/r-a1-market")).toEqual({ tab: "readings", sub: "assets", rest: "r-a1-market" });
+    expect(parseContentRoute("glossary/queue")).toEqual({ tab: "glossary", sub: "assets", rest: "queue" });
   });
   it("content tabs by role: the requests register needs media.rights, review needs content.review", () => {
     const tabs = (ps: Permission[]) => contentTabs((p) => ps.includes(p));
-    const READ = ["course", "lessons", "scenarios", "rubrics", "media", "diagnostics"];
+    // sprint 5: «Чтение» and «Словарь курса» are content.read tabs
+    const READ = ["course", "lessons", "scenarios", "rubrics", "media", "readings", "glossary", "diagnostics"];
     for (const role of [["dashboard.read", "users.read", "content.read"], ["dashboard.read", "audit.read", "content.read"], ["dashboard.read", "users.read", "support.read", "config.read", "audit.read", "content.read"]] as Permission[][])
       expect(tabs(role)).toEqual(READ); // analyst, auditor, operations
-    expect(tabs(["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish"])).toEqual([...READ.slice(0, 5), "review", "diagnostics"]); // methodist
-    expect(tabs(["dashboard.read", "content.read", "content.edit", "media.rights"])).toEqual([...READ.slice(0, 5), "requests", "diagnostics"]); // content_manager
+    expect(tabs(["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish"])).toEqual([...READ.slice(0, 7), "review", "diagnostics"]); // methodist
+    expect(tabs(["dashboard.read", "content.read", "content.edit", "media.rights"])).toEqual([...READ.slice(0, 7), "requests", "diagnostics"]); // content_manager
     expect(tabs(["media.rights"])).toEqual([]); // no content.read — no section
   });
   it("coverage cells: none / one / enough", () => {

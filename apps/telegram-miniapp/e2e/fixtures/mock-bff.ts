@@ -25,6 +25,7 @@ import type {
 } from "@tilhero/contracts/bff";
 import { MockContent, type ContentScenario } from "./content";
 import { MockLessons, type LessonsScenario } from "./lessons";
+import { MockMemory, type MemoryScenario } from "./memory";
 import * as F from "./data";
 
 /**
@@ -77,6 +78,12 @@ export interface Scenario {
   lateResponseOnce?: Record<string, [number, string]>;
   /** release 4.1, POST /v1/speech: ok (default) — a small MP3; down — 503 SPEECH_UNAVAILABLE; delayMs — answer later */
   speech?: { mode?: "ok" | "down"; delayMs?: number };
+  /** sprint 5: dictionary, «Повторение дня», reading, pronunciation */
+  memory?: MemoryScenario;
+  /** with `child` / `withChild`: the parent has switched on the voice recording of the child profile */
+  childVoice?: boolean;
+  /** the account (18+) has a child profile but stays in its own (the parent's view of «Семья») */
+  withChild?: boolean;
 }
 
 /** ~0.1 s of silent MP3 (4 frames of MPEG-1 Layer III, 32 kbit/s, 48 kHz, mono) — the body of the mock speech. */
@@ -135,6 +142,7 @@ export class MockBff {
   pendingPin: string | null;
   readonly content: MockContent;
   readonly lessons: MockLessons;
+  readonly memory: MockMemory;
   private dropOnce: Set<string>;
   private lateOnce: Record<string, [number, string]>;
   private access = 0;
@@ -167,15 +175,26 @@ export class MockBff {
     this.content = new MockContent(sc.content ?? {});
     this.dropOnce = new Set(sc.dropResponseOnce ?? []);
     this.lateOnce = { ...(sc.lateResponseOnce ?? {}) };
-    if (sc.child) {
+    if (sc.child || sc.withChild) {
       const id = "7a1c2b3a-2222-4a2b-9c3d-000000000777";
-      this.learners.push({ learner_id: id, kind: "child", display_name: "Мадина", age_band: "6-9", is_active: true, onboarding_completed: true });
+      this.learners.push({ learner_id: id, kind: "child", display_name: "Мадина", age_band: "6-9", is_active: true, onboarding_completed: true, voice_consent: !!sc.childVoice });
       this.plans[id] = F.onboardedPlan(id);
       this.settings[id] = F.settings();
       this.seen[id] = new Set([F.WELCOME.id, F.UPDATE_1.id, F.UPDATE_2.id]);
-      this.active = id;
+      if (sc.child) this.active = id;
+      else this.learners[1]!.is_active = false;
     }
     this.lessons = new MockLessons(sc.lessons ?? {}, { self: this.active });
+    this.memory = new MockMemory(sc.memory ?? {}, this.lessons, { self: F.ACCOUNT_ID, kid: this.learners.find((l) => l.kind === "child")?.learner_id });
+    this.syncVoice();
+  }
+
+  /** LearnerSummary.voice_consent of the account: its own consent with voice_recording (a teen — after the parent). */
+  private syncVoice(): void {
+    const self = this.learners.find((l) => l.kind === "self");
+    if (!self) return;
+    const teenOk = this.account.age_band !== "14-17" || this.account.guardian_consent === "granted";
+    self.voice_consent = teenOk && this.consent.purposes.includes("voice_recording");
   }
 
   async install(page: Page): Promise<void> {
@@ -360,7 +379,7 @@ export class MockBff {
       const k = `learners:${headers["idempotency-key"]}`;
       if (this.idem.has(k)) return this.ok(route, this.idem.get(k), 201);
       const id = `7a1c2b3a-2222-4a2b-9c3d-${String(this.seq++).padStart(12, "0")}`;
-      const l: LearnerSummary = { learner_id: id, kind: "child", display_name: String(b.display_name), age_band: b.age_band as AgeBand, is_active: false, onboarding_completed: false };
+      const l: LearnerSummary = { learner_id: id, kind: "child", display_name: String(b.display_name), age_band: b.age_band as AgeBand, is_active: false, onboarding_completed: false, voice_consent: false };
       this.learners.push(l);
       this.plans[id] = F.plan(id);
       this.settings[id] = F.settings();
@@ -439,6 +458,7 @@ export class MockBff {
       if (this.account.age_band === "14-17" && this.account.guardian_consent !== "granted" && purposes.some((p) => !["terms", "privacy", "learning"].includes(p)))
         return this.err(route, 403, "GUARDIAN_CONSENT_REQUIRED");
       this.consent = { ...F.consent(true, purposes), accepted_at: new Date().toISOString() };
+      this.syncVoice();
       return this.ok(route, this.consent);
     }
 
@@ -624,6 +644,35 @@ export class MockBff {
       if (sp.mode === "down") return this.err(route, 503, "SPEECH_UNAVAILABLE", { service: "tts" });
       if (typeof b.text !== "string" || !/[A-Za-z]/.test(b.text) || (b.variant !== "en-GB" && b.variant !== "en-US")) return this.err(route, 422, "TEXT_INVALID", { field: "text" });
       return route.fulfill({ status: 200, contentType: "audio/mpeg", body: SPEECH_MP3, headers: { "cache-control": "private, max-age=86400" } });
+    }
+
+    // ---- sprint 5 ----
+    const lang = (headers["accept-language"] ?? "ru").startsWith("uz") ? "uz" : "ru";
+    const s5 = this.memory.handle(method, path, url.searchParams, b, headers, {
+      owner: this.active,
+      kid: this.learner().kind === "child",
+      lang,
+      account: { age_band: this.account.age_band, guardian_consent: this.account.guardian_consent },
+      purposes: this.consent.purposes,
+      childVoice: (id) => this.learners.find((l) => l.learner_id === id && l.kind === "child")?.voice_consent ?? null,
+      setChildVoice: (id, granted) => {
+        const l = this.learners.find((x) => x.learner_id === id && x.kind === "child");
+        if (!l) return null;
+        l.voice_consent = granted;
+        return { ...l, is_active: l.learner_id === this.active };
+      },
+      raw: method === "POST" && path === "/v1/memory/pronunciation" ? req.postDataBuffer() : null,
+    });
+    if (s5) {
+      // "POST /v1/memory/review-sessions/*/tasks/*": the answer is handled, then the response is lost (once)
+      const p5 = key.replace(/[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}/g, "*");
+      if (this.dropOnce.has(key) || this.dropOnce.has(p5)) {
+        this.dropOnce.delete(key);
+        this.dropOnce.delete(p5);
+        return route.abort("failed");
+      }
+      if (s5.code) return this.err(route, s5.status, s5.code, s5.details ?? {});
+      return this.ok(route, s5.body, s5.status);
     }
 
     // ---- sprint 4 ----

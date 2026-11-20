@@ -8,6 +8,7 @@ import type { PracticeTab } from "../../state/nav";
 import { Icon, type IconName } from "../../ui/Icon";
 import { Btn, Chip, ErrorLine, NavRow, Pill, Seg, Skeleton } from "../../ui/kit";
 import { Bar } from "../../ui/shell";
+import { ReadingList } from "../reading/ReadingScreen";
 
 const GOALS: readonly GoalCode[] = ["work", "career", "travel", "daily", "study", "exam"];
 const LEVELS: readonly Band[] = ["A0", "A1", "A2", "B1", "B2"];
@@ -24,7 +25,7 @@ const memory: { tab: PracticeTab; goal: GoalCode | null; scLevel: Band | null; t
 };
 
 /** A paged list that restarts when the filters change; «Показать ещё» appends the next page. */
-function usePaged<T>(load: (cursor: string | null) => Promise<Page<T>>, key: string) {
+export function usePaged<T>(load: (cursor: string | null) => Promise<Page<T>>, key: string) {
   const { t, fmt } = useI18n();
   const [items, setItems] = useState<T[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
@@ -55,12 +56,12 @@ function usePaged<T>(load: (cursor: string | null) => Promise<Page<T>>, key: str
     setItems(null);
     void fetchPage(null);
   }, [key, fetchPage]);
-  return { items, next, busy, error, more: () => void fetchPage(next), retry: () => void fetchPage(null) };
+  return { items, next, busy, error, more: () => void fetchPage(next), retry: () => void fetchPage(null), setItems };
 }
 
 /**
- * Practice (APP-PLAN-04, APP-MEDIA-01): the catalogue of conversation scenarios (goal and level filters) and the media
- * library (type and level filters), the request for a song or a film. A child profile sees only children's content
+ * Practice (APP-PLAN-04, APP-MEDIA-01): the catalogue of conversation scenarios (goal and level filters), the media
+ * library (type and level filters), the request for a song or a film, and (sprint 5) reading texts. A child profile sees only children's content
  * (the BFF passes audience=kids) and no external links anywhere.
  */
 export function Practice({ tab: initial }: { tab?: PracticeTab }) {
@@ -90,18 +91,19 @@ export function Practice({ tab: initial }: { tab?: PracticeTab }) {
               options={[
                 { value: "scenarios", label: t("pr.tab.scenarios") },
                 { value: "media", label: t("pr.tab.media") },
+                { value: "reading", label: t("pr.tab.reading") },
               ]}
               testId="pr-tabs"
             />
           </div>
-          {tab === "scenarios" ? <Scenarios /> : <Media />}
+          {tab === "scenarios" ? <Scenarios /> : tab === "media" ? <Media /> : <ReadingList />}
         </div>
       </main>
     </>
   );
 }
 
-function LevelFilter({ value, onChange, id }: { value: Band | null; onChange: (b: Band | null) => void; id: string }) {
+export function LevelFilter({ value, onChange, id }: { value: Band | null; onChange: (b: Band | null) => void; id: string }) {
   const { t } = useI18n();
   return (
     <div className="stack tight">
@@ -116,7 +118,7 @@ function LevelFilter({ value, onChange, id }: { value: Band | null; onChange: (b
   );
 }
 
-function ListState(props: { busy: boolean; error: string | null; count: number | null; more: boolean; onMore: () => void; onRetry: () => void }) {
+export function ListState(props: { busy: boolean; error: string | null; count: number | null; more: boolean; onMore: () => void; onRetry: () => void; empty?: string | false }) {
   const { t } = useI18n();
   if (props.count === null && props.busy) return <div className="pad"><Skeleton lines={3} /></div>;
   if (props.error && props.count === null) {
@@ -129,7 +131,7 @@ function ListState(props: { busy: boolean; error: string | null; count: number |
   }
   return (
     <div className="pad stack tight">
-      {props.count === 0 ? <p className="sub" data-testid="pr-empty">{t("pr.empty")}</p> : null}
+      {props.count === 0 && props.empty !== false ? <p className="sub" data-testid="pr-empty">{props.empty ?? t("pr.empty")}</p> : null}
       <ErrorLine text={props.count !== null ? props.error : null} />
       {props.more ? (
         <Btn variant="secondary" busy={props.busy} onClick={props.onMore}>{t("c.more")}</Btn>

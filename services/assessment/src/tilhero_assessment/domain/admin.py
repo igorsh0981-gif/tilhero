@@ -178,7 +178,7 @@ async def reevaluate(session: AsyncSession, *, actor: Actor, evaluation_id: uuid
     rubric = rules.rubric_from_snapshot(ev.rubric_id, ev.rubric_version, ev.rubric)
     scores = _new_scores(ev, rubric, body)
     weighted, passed, evaluated = rules.verdict(rubric, scores)
-    status = "ok" if evaluated >= 2 else "insufficient_evidence"
+    status = "ok" if evaluated >= rules.min_evaluated(rubric) else "insufficient_evidence"
     if ev.practice_only:
         if body.skill_outcomes:
             raise _invalid("SKILL_OUTCOMES_INVALID", "Тренировка без влияния на освоение — без исходов навыков")

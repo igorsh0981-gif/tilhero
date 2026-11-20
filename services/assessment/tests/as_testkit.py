@@ -18,7 +18,7 @@ ID_FIELD = {"lesson": "lesson_id", "scenario": "scenario_id", "rubric": "rubric_
             "media_exercise": "exercise_id"}
 SEED_FILES = {"lesson": "lessons.json", "scenario": "scenarios.json", "rubric": "rubrics.json",
               "media_asset": "media.json", "media_exercise": "media_exercises.json"}
-CHOICE = {"single_choice", "translate_choice", "comprehension", "phrase_meaning"}
+CHOICE = {"single_choice", "translate_choice", "comprehension", "phrase_meaning", "true_false"}
 
 
 def load_seed() -> dict[str, dict[str, dict[str, Any]]]:
@@ -30,6 +30,45 @@ def load_seed() -> dict[str, dict[str, dict[str, Any]]]:
 
 
 SEED_CONTENT = load_seed()
+
+
+def load_seed_readings() -> dict[str, dict[str, Any]]:
+    """Сид текстов catalog спринта 5 (исполнитель B), если уже есть — проверка, что все вопросы оцениваются."""
+    path = SEED / "readings.json"
+    if not path.exists():
+        return {}
+    return {str(x["reading_id"]): x for x in json.loads(path.read_text())}
+
+
+SEED_READINGS = load_seed_readings()
+
+
+def _loc(ru: str, uz: str) -> dict[str, str]:
+    return {"ru": ru, "uz": uz}
+
+
+# Текст для чтения (ReadingPayload, content.ts спринта 5) — сид catalog делает исполнитель B; здесь — свой.
+READINGS: dict[str, dict[str, Any]] = {
+    "r-a1-coffee-shop": {
+        "reading_id": "r-a1-coffee-shop", "title": _loc("В кофейне", "Qahvaxonada"), "level": "A1",
+        "audience": ["teens", "adults"], "topics": ["food"], "skill_ids": ["read-a1-short-texts"],
+        "paragraphs": [{"p_id": "p1", "sentences": [
+            {"s_id": "s1", "text_en": "Every morning Anna orders a latte.", "gloss": _loc("…", "…")},
+            {"s_id": "s2", "text_en": "On Fridays she pays for her friend too.", "gloss": _loc("…", "…")}]}],
+        "glossary": [{"en": "orders", "gloss": _loc("заказывает", "buyurtma qiladi"), "note": None},
+                     {"en": "pays for", "gloss": _loc("платит за", "toʻlaydi"), "note": None},
+                     {"en": "latte", "gloss": _loc("латте", "latte"), "note": None}],
+        "questions": [
+            {"question_id": "rq-coffee-1", "type": "single_choice", "instruction": _loc("Выберите", "Tanlang"),
+             "prompt_en": "What does Anna order?", "options": ["Tea", "A latte", "Juice"], "answer": 1},
+            {"question_id": "rq-coffee-2", "type": "true_false", "instruction": _loc("Верно?", "Toʻgʻrimi?"),
+             "prompt_en": "Anna pays for her friend on Mondays.", "options": ["True", "False"], "answer": 1},
+            {"question_id": "rq-coffee-3", "type": "gap_fill", "instruction": _loc("Вставьте", "Qoʻying"),
+             "prompt_en": "On Fridays she ___ for her friend.", "options": [], "answer": ["pays", "paid"]},
+        ],
+        "voice": "en-GB", "est_minutes": 4,
+    },
+}
 
 
 def lesson(lesson_id: str) -> dict[str, Any]:
@@ -55,6 +94,7 @@ class FakeCatalog:
 
     def __init__(self) -> None:
         self.content = copy.deepcopy(SEED_CONTENT)
+        self.content["reading"] = copy.deepcopy({**SEED_READINGS, **READINGS})
         self.extra: dict[tuple[str, str, int], dict[str, Any]] = {}
         self.statuses: dict[tuple[str, str, int], str] = {}
         self.down = False
@@ -240,6 +280,20 @@ def media_request(asset_id: str, *, policy: Policy = always("correct"), audience
                          *({"kind": "media_exercise", "key": e["exercise_id"], "version": 1} for e in exercises),
                          {"kind": "rubric", "key": rubric, "version": 1}],
         "answers": answers_for(exercises, policy, id_field="exercise_id"),
+    }
+    body.update(kw)
+    return body
+
+
+def reading_request(reading_id: str = "r-a1-coffee-shop", *, policy: Policy = always("correct"),
+                    audience: str = "adults", **kw: Any) -> dict[str, Any]:
+    """EvaluationRequest чтения (lessons, спринт 5): только ссылка на версию текста, ответы на вопросы."""
+    body: dict[str, Any] = {
+        "session_id": str(uuid.uuid4()), "kind": "reading", "pair_id": "ru-en", "audience": audience,
+        "content_refs": {"reading": {"key": reading_id, "version": 1}},
+        "answers": answers_for({**SEED_READINGS, **READINGS}[reading_id]["questions"], policy,
+                               id_field="question_id"),
+        "turns": [], "roleplay": None, "open_answer": None, "practice_only": True,
     }
     body.update(kw)
     return body

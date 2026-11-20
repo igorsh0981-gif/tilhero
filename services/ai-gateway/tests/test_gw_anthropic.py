@@ -15,6 +15,7 @@ from gw_kit import ANALYST, CP_OK, tc_context
 from tilhero_ai_gateway.providers import AnthropicProvider
 
 KEY = "sk-ant-api03-TESTKEY-0123456789abcdefghijklmnopqrstuvwxyz"
+FAKE_SPEECH = {"provider": "fake_speech", "key_configured": False, "region": None, "last_error": None}
 
 
 class Recorder:
@@ -83,7 +84,8 @@ async def test_key_never_in_logs_or_responses_on_provider_error(anth, caplog, ca
     assert [q.url.path for q in anth.recorder.requests] == ["/v1/messages", "/v1/messages"]  # + резервная модель
     status = await anth.c.get("/admin/v1/ai/provider", headers=anth.h(ANALYST))
     assert status.json() == {"provider": "anthropic", "key_configured": True, "ai_enabled": True,
-                             "last_error": {"code": "http_401", "at": "2026-11-19T07:00:00.000Z"}}
+                             "last_error": {"code": "http_401", "at": "2026-11-19T07:00:00.000Z"},
+                             "speech": FAKE_SPEECH}
     assert KEY not in status.text
     anth.recorder.reply = httpx.ConnectError(f"connect failed with header x-api-key={KEY}")
     assert (await anth.ok())["reason"] == "provider_error"
@@ -128,7 +130,8 @@ async def test_no_key_means_ai_disabled() -> None:
         assert (res["status"], res["reason"]) == ("unavailable", "ai_disabled")
         assert not recorder.requests
         status = (await env.c.get("/admin/v1/ai/provider", headers=env.h(ANALYST))).json()
-        assert status == {"provider": "anthropic", "key_configured": False, "last_error": None, "ai_enabled": True}
+        assert status == {"provider": "anthropic", "key_configured": False, "last_error": None, "ai_enabled": True,
+                          "speech": FAKE_SPEECH}
 
 
 def test_settings_guards() -> None:
@@ -146,6 +149,6 @@ def test_settings_guards() -> None:
                       internal_jwt_private_key="A" * 43)
     assert KEY not in str(exc.value)
     ok = make_settings(env="prod", ai_provider="anthropic", anthropic_api_key=KEY, internal_jwt_secret="p" * 40,
-                       internal_jwt_private_key="A" * 43, ai_allow_fake_test_publish=False)
+                       internal_jwt_private_key="A" * 43, ai_allow_fake_test_publish=False, speech_provider="azure")
     assert ok.publish_providers == ("anthropic",) and ok.api_key == KEY
     assert make_settings(ai_allow_fake_test_publish=True).publish_providers == ("anthropic", "fake")

@@ -1,14 +1,20 @@
-"""Контексты и выводы агентов спринта, золотые проверки — pydantic-модели, повторяющие `packages/contracts/src/ai.ts`
-1:1 (контрактный тест tests/test_gw_contract.py сверяет поля и перечисления).
+"""Контексты и выводы агентов спринта, золотые проверки, оценка произношения — pydantic-модели, повторяющие
+`packages/contracts/src/ai.ts` 1:1 (контрактный тест tests/test_gw_contract.py сверяет поля и перечисления).
 
 Контексты (вход вызова и золотого кейса) проверяются с `extra="forbid"`; длинная реплика ученика не отклоняется, а
 обрезается до 500 символов при сборке сообщения (INTERNAL_API §1.2). Выводы — строгие (`strict`): то, что вернула
 модель, не приводится к типам «по-доброму» («3» ≠ 3) — нарушение контракта = повтор с ограничениями.
+
+`teaching_coach` (спринт 5) — два вида запроса с одним agent_id: `simpler_example | explain_again`
+(TeachingCoachContext → TeachingCoachOutput) и `gloss_word` (TeachingCoachGlossContext → TeachingCoachGlossOutput).
+Вид выбирается по `context.request`; контракт вывода — по виду запроса (схема версии v2 — объединённая, anyOf).
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
+import uuid
 from typing import Annotated, Any, Final, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
@@ -24,11 +30,13 @@ AgentIdLit = Literal[
 ]
 Band = Literal["A0", "A1", "A2", "B1", "B2"]
 AudienceSegment = Literal["kids", "teens", "adults"]
-SessionKind = Literal["lesson", "scenario", "media", "review"]
+SessionKind = Literal["lesson", "scenario", "media", "review", "reading"]
+# ai.ts AiSessionKind = SessionKind | "memory" (перевод по тапу и произношение — вызывающий memory)
+AiSessionKind = Literal["lesson", "scenario", "media", "review", "reading", "memory"]
 AgentImplementation = Literal["llm", "rules", "code"]
 AgentVersionStatus = Literal["draft", "published", "archived"]
-AgentUnavailableReason = Literal["ai_disabled", "budget_exceeded", "cost_limit", "provider_error", "timeout",
-                                 "invalid_output"]
+AgentUnavailableReason = Literal["ai_disabled", "not_configured", "budget_exceeded", "cost_limit", "provider_error",
+                                 "timeout", "invalid_output"]
 AgentRefusedReason = Literal["kids_not_allowed", "agent_not_active"]
 RubricCriterionCode = Literal["task", "vocabulary", "grammar", "independence", "pronunciation", "fluency",
                               "comprehension"]
@@ -140,6 +148,57 @@ class TeachingCoachOutput(BaseModel):
     example_gloss: str = Field(min_length=1, max_length=200)
 
 
+GLOSS_REQUEST: Final = "gloss_word"
+PartOfSpeech = Literal["noun", "verb", "adjective", "adverb", "pronoun", "preposition", "conjunction", "interjection",
+                       "determiner", "phrase", "other"]
+_APOSTROPHES = str.maketrans({"’": "'", "‘": "'", "`": "'", "ʼ": "'", "ʻ": "'"})
+WORD_EDGES: Final = " .,!?…:;\"'«»“”„()[]—–-"
+
+
+def norm_text(value: str) -> str:
+    """Нормализация для сравнения слова с предложением (как §1.6 memory): NFC, нижний регистр, апострофы → ',
+    пробелы схлопнуты."""
+    text = unicodedata.normalize("NFC", value).translate(_APOSTROPHES).lower()
+    return " ".join(text.split())
+
+
+class TeachingCoachGlossContext(BaseModel):
+    """Перевод слова из опубликованного контента (вызывающий memory; INTERNAL_API §3.1). Слово обязано встречаться в
+    sentence_en (защита в глубину: memory проверяет «слово есть в контенте» через catalog) — иначе 422."""
+
+    model_config = _IN
+    request: Literal["gloss_word"]
+    word: Annotated[str, Field(min_length=1, max_length=60)]
+    sentence_en: Annotated[str, Field(min_length=1, max_length=300)]
+    level: Band
+    content_kind: Literal["lesson", "media_asset", "reading", "scenario"]
+
+    @model_validator(mode="after")
+    def _word_in_sentence(self) -> TeachingCoachGlossContext:
+        # как §1.6: концевая пунктуация и кавычки по краям слова не мешают («book.» в «… to book.»)
+        word = norm_text(self.word).strip(WORD_EDGES)
+        if not word or CONTROL_RE.search(self.word):
+            raise ValueError("word — непустое слово без управляющих символов")
+        if word not in norm_text(self.sentence_en):
+            raise ValueError("word не встречается в sentence_en")
+        return self
+
+
+class GlossPair(BaseModel):
+    model_config = _OUT
+    ru: str = Field(min_length=1, max_length=80)
+    uz: str = Field(min_length=1, max_length=80)
+
+
+class TeachingCoachGlossOutput(BaseModel):
+    model_config = _OUT
+    lemma: str = Field(min_length=1, max_length=60)
+    part_of_speech: PartOfSpeech
+    gloss: GlossPair
+    forms: list[Annotated[str, Field(min_length=1, max_length=60)]] = Field(max_length=6)
+    confidence: float = Field(ge=0, le=1)
+
+
 # ---------------------------------------------------------------- independent_evaluator
 
 
@@ -247,6 +306,29 @@ OUTPUT_MODELS: Final[dict[str, type[BaseModel]]] = {
     "teaching_coach": TeachingCoachOutput,
     "independent_evaluator": IndependentEvaluatorOutput,
 }
+# Вид запроса агента с несколькими контрактами (agent_id, context.request) → контекст и вывод
+REQUEST_MODELS: Final[dict[tuple[str, str], tuple[type[BaseModel], type[BaseModel]]]] = {
+    ("teaching_coach", GLOSS_REQUEST): (TeachingCoachGlossContext, TeachingCoachGlossOutput),
+}
+
+
+def request_kind(agent_id: str, context: Any) -> str | None:
+    """Вид запроса с отдельным контрактом (`gloss_word`) или None — основной контракт агента."""
+    if isinstance(context, dict):
+        request = context.get("request")
+        if isinstance(request, str) and (agent_id, request) in REQUEST_MODELS:
+            return request
+    return None
+
+
+def context_model(agent_id: str, context: Any) -> type[BaseModel] | None:
+    kind = request_kind(agent_id, context)
+    return REQUEST_MODELS[(agent_id, kind)][0] if kind is not None else CONTEXT_MODELS.get(agent_id)
+
+
+def output_model(agent_id: str, context: Any) -> type[BaseModel] | None:
+    kind = request_kind(agent_id, context)
+    return REQUEST_MODELS[(agent_id, kind)][1] if kind is not None else OUTPUT_MODELS.get(agent_id)
 
 
 def error_list(exc: ValidationError, prefix: str = "") -> list[dict[str, str]]:
@@ -259,8 +341,9 @@ def error_list(exc: ValidationError, prefix: str = "") -> list[dict[str, str]]:
 
 
 def validate_context(agent_id: str, context: Any) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
-    """Контекст агента по ai.ts → (нормализованный dict, ошибки). Агент без контракта — контекст как есть (объект)."""
-    model = CONTEXT_MODELS.get(agent_id)
+    """Контекст агента по ai.ts → (нормализованный dict, ошибки). Агент без контракта — контекст как есть (объект).
+    teaching_coach: `request: gloss_word` — TeachingCoachGlossContext, иначе TeachingCoachContext."""
+    model = context_model(agent_id, context)
     if model is None:
         if isinstance(context, dict):
             return context, []
@@ -271,8 +354,10 @@ def validate_context(agent_id: str, context: Any) -> tuple[dict[str, Any] | None
         return None, error_list(exc, "context.")
 
 
-def output_contract_errors(agent_id: str, output: Any) -> list[str]:
-    model = OUTPUT_MODELS.get(agent_id)
+def output_contract_errors(agent_id: str, output: Any, context: Any = None) -> list[str]:
+    """Вывод по контракту ai.ts для вида запроса (схема версии v2 teaching_coach — объединённая: вывод «не того» вида
+    проходит схему, но не контракт → повтор с ограничениями)."""
+    model = output_model(agent_id, context)
     if model is None:
         return []
     try:
@@ -280,6 +365,78 @@ def output_contract_errors(agent_id: str, output: Any) -> list[str]:
     except ValidationError as exc:
         return [f"{e['path']}: {e['message']}" for e in error_list(exc)]
     return []
+
+
+# ---------------------------------------------------------------- оценка произношения (ai.ts SpeechAssessMeta, …)
+
+PronunciationErrorType = Literal["none", "omission", "insertion", "mispronunciation"]
+
+
+def _reference(value: str) -> str:
+    text = " ".join(value.split())
+    if not text or CONTROL_RE.search(text):
+        raise ValueError("reference_text — 1..200 символов без управляющих символов")
+    return text
+
+
+class SpeechAssessMeta(BaseModel):
+    """Заголовок X-Speech-Meta = base64url(JSON) — эталон и ученик (подставляет memory: текст только из контента или
+    карточки)."""
+
+    model_config = _IN
+    request_id: uuid.UUID
+    user_id: uuid.UUID
+    audience: AudienceSegment
+    locale: Literal["ru", "uz"]
+    reference_text: Annotated[str, Field(min_length=1, max_length=200), AfterValidator(_reference)]
+    language: Literal["en-US"]
+
+
+class PronunciationScores(BaseModel):
+    model_config = _OUT
+    accuracy: float = Field(ge=0, le=100)
+    fluency: float = Field(ge=0, le=100)
+    completeness: float = Field(ge=0, le=100)
+    pron: float = Field(ge=0, le=100)
+
+
+class PronunciationWord(BaseModel):
+    model_config = _OUT
+    word: str = Field(min_length=1, max_length=60)
+    accuracy: float | None = Field(ge=0, le=100)
+    error_type: PronunciationErrorType
+
+
+class PronunciationTip(BaseModel):
+    model_config = _OUT
+    word: str = Field(min_length=1, max_length=60)
+    text: str = Field(min_length=1, max_length=200)
+
+
+class PronunciationResult(BaseModel):
+    """Ответ POST /internal/v1/speech/pronunciation (ai.ts PronunciationResult) — проверяется перед отдачей."""
+
+    model_config = _OUT
+    status: Literal["ok", "insufficient_evidence", "unavailable"]
+    reason: str | None
+    reference_text: str
+    scores: PronunciationScores | None
+    words: list[PronunciationWord] = Field(max_length=40)
+    intelligibility: Literal["clear", "mostly_clear", "needs_practice"] | None
+    tips: list[PronunciationTip] = Field(max_length=2)
+    confidence: float | None = Field(ge=0, le=1)
+    audio_ms: int = Field(ge=0)
+    provider: Literal["azure_speech", "fake_speech"] | None
+    cost_usd: float = Field(ge=0)
+    latency_ms: int = Field(ge=0)
+
+
+class AiStatus(BaseModel):
+    """GET /internal/v1/status (ai.ts AiStatus)."""
+
+    model_config = _OUT
+    ai_available: bool
+    speech_available: bool
 
 
 # ---------------------------------------------------------------- тело версии (ai.ts AgentVersion, AgentVersionPatch)

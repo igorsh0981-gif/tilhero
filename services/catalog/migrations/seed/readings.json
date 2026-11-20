@@ -1,0 +1,3746 @@
+[
+  {
+    "reading_id": "r-a0-new-group",
+    "title": {
+      "ru": "Знакомство в новой группе",
+      "uz": "Yangi guruhda tanishuv"
+    },
+    "level": "A0",
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "topics": [
+      "small_talk",
+      "study"
+    ],
+    "skill_ids": [
+      "en.func.introduce",
+      "en.gram.to-be",
+      "en.gram.pronouns-possessives"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "Hello, everyone!",
+            "gloss": {
+              "ru": "Всем привет!",
+              "uz": "Hammaga salom!"
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "My name is Dilnoza.",
+            "gloss": {
+              "ru": "Меня зовут Дилноза.",
+              "uz": "Mening ismim Dilnoza."
+            }
+          },
+          {
+            "s_id": "s3",
+            "text_en": "I am from Bukhara, but I live in Tashkent now.",
+            "gloss": {
+              "ru": "Я из Бухары, но сейчас живу в Ташкенте.",
+              "uz": "Men Buxorodanman, lekin hozir Toshkentda yashayman."
+            }
+          },
+          {
+            "s_id": "s4",
+            "text_en": "I am a nurse, and I work at a big hospital.",
+            "gloss": {
+              "ru": "Я медсестра и работаю в большой больнице.",
+              "uz": "Men hamshiraman va katta shifoxonada ishlayman."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s5",
+            "text_en": "This is my new English group.",
+            "gloss": {
+              "ru": "Это моя новая группа по английскому.",
+              "uz": "Bu mening yangi ingliz tili guruhim."
+            }
+          },
+          {
+            "s_id": "s6",
+            "text_en": "Our group is small and friendly.",
+            "gloss": {
+              "ru": "Наша группа маленькая и дружная.",
+              "uz": "Guruhimiz kichik va inoq."
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "Our teacher is Kamola, and she is very kind.",
+            "gloss": {
+              "ru": "Наша преподавательница — Камола, она очень добрая.",
+              "uz": "Oʻqituvchimiz — Kamola, u juda mehribon."
+            }
+          },
+          {
+            "s_id": "s8",
+            "text_en": "The lessons are on Monday and Thursday evenings.",
+            "gloss": {
+              "ru": "Занятия проходят по понедельникам и четвергам вечером.",
+              "uz": "Darslar dushanba va payshanba kunlari kechqurun boʻladi."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s9",
+            "text_en": "This is my friend Rustam.",
+            "gloss": {
+              "ru": "Это мой друг Рустам.",
+              "uz": "Bu mening doʻstim Rustam."
+            }
+          },
+          {
+            "s_id": "s10",
+            "text_en": "He is an engineer from Samarkand.",
+            "gloss": {
+              "ru": "Он инженер из Самарканда.",
+              "uz": "U samarqandlik muhandis."
+            }
+          },
+          {
+            "s_id": "s11",
+            "text_en": "Rustam is very funny, and he likes music.",
+            "gloss": {
+              "ru": "Рустам очень весёлый и любит музыку.",
+              "uz": "Rustam juda quvnoq va musiqani yaxshi koʻradi."
+            }
+          },
+          {
+            "s_id": "s12",
+            "text_en": "We are happy in this group!",
+            "gloss": {
+              "ru": "Нам очень хорошо в этой группе!",
+              "uz": "Bu guruhda bizga juda yaxshi!"
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "My name is",
+        "gloss": {
+          "ru": "Меня зовут …",
+          "uz": "Mening ismim …"
+        },
+        "note": null
+      },
+      {
+        "en": "live",
+        "gloss": {
+          "ru": "жить",
+          "uz": "yashamoq"
+        },
+        "note": null
+      },
+      {
+        "en": "nurse",
+        "gloss": {
+          "ru": "медсестра, медбрат",
+          "uz": "hamshira"
+        },
+        "note": null
+      },
+      {
+        "en": "friendly",
+        "gloss": {
+          "ru": "дружелюбный, дружный",
+          "uz": "samimiy, inoq"
+        },
+        "note": null
+      },
+      {
+        "en": "very kind",
+        "gloss": {
+          "ru": "очень добрый",
+          "uz": "juda mehribon"
+        },
+        "note": null
+      },
+      {
+        "en": "evenings",
+        "gloss": {
+          "ru": "вечера; по вечерам",
+          "uz": "kechqurunlari"
+        },
+        "note": {
+          "ru": "on Monday evenings — по понедельникам вечером.",
+          "uz": "on Monday evenings — dushanba kunlari kechqurun."
+        }
+      },
+      {
+        "en": "engineer",
+        "gloss": {
+          "ru": "инженер",
+          "uz": "muhandis"
+        },
+        "note": null
+      },
+      {
+        "en": "funny",
+        "gloss": {
+          "ru": "весёлый, забавный",
+          "uz": "quvnoq, kulgili"
+        },
+        "note": null
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "Where does Dilnoza live now?",
+        "options": [
+          "In Bukhara",
+          "In Samarkand",
+          "In Tashkent"
+        ],
+        "answer": 2
+      },
+      {
+        "question_id": "q2",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "Dilnoza is a teacher.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q3",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "Who is Kamola?",
+        "options": [
+          "the teacher",
+          "a nurse",
+          "Rustam's sister"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q4",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впишите пропущенное слово из текста.",
+          "uz": "Matndan tushib qolgan soʻzni yozing."
+        },
+        "prompt_en": "Rustam is an ___ from Samarkand.",
+        "options": [],
+        "answer": [
+          "engineer"
+        ]
+      },
+      {
+        "question_id": "q5",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "The lessons are in the evening.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 0
+      }
+    ],
+    "voice": "en-GB",
+    "est_minutes": 4
+  },
+  {
+    "reading_id": "r-a0-note-neighbor",
+    "title": {
+      "ru": "Записка соседу",
+      "uz": "Qoʻshniga qisqa xat"
+    },
+    "level": "A0",
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "topics": [
+      "home",
+      "small_talk"
+    ],
+    "skill_ids": [
+      "en.func.introduce",
+      "en.gram.to-be",
+      "en.voc.numbers"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "Hello, neighbor!",
+            "gloss": {
+              "ru": "Здравствуйте, сосед!",
+              "uz": "Assalomu alaykum, qoʻshni!"
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "My name is Anvar, and I am your new neighbor.",
+            "gloss": {
+              "ru": "Меня зовут Анвар, я ваш новый сосед.",
+              "uz": "Mening ismim Anvar, men sizning yangi qoʻshningizman."
+            }
+          },
+          {
+            "s_id": "s3",
+            "text_en": "I live in apartment 14.",
+            "gloss": {
+              "ru": "Я живу в квартире 14.",
+              "uz": "Men 14-xonadonda yashayman."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s4",
+            "text_en": "My wife is Zarina, and she is a doctor.",
+            "gloss": {
+              "ru": "Мою жену зовут Зарина, она врач.",
+              "uz": "Rafiqamning ismi Zarina, u shifokor."
+            }
+          },
+          {
+            "s_id": "s5",
+            "text_en": "We have a little son.",
+            "gloss": {
+              "ru": "У нас есть маленький сын.",
+              "uz": "Bizning kichkina oʻgʻlimiz bor."
+            }
+          },
+          {
+            "s_id": "s6",
+            "text_en": "His name is Timur, and he is two years old.",
+            "gloss": {
+              "ru": "Его зовут Тимур, ему два года.",
+              "uz": "Uning ismi Timur, u ikki yoshda."
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "Timur is sometimes loud in the morning, sorry!",
+            "gloss": {
+              "ru": "Тимур иногда шумит по утрам — извините!",
+              "uz": "Timur baʼzan ertalab shovqin qiladi — uzr!"
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s8",
+            "text_en": "Please come to our home for tea on Sunday at five o'clock.",
+            "gloss": {
+              "ru": "Приходите, пожалуйста, к нам на чай в воскресенье в пять часов.",
+              "uz": "Yakshanba kuni soat beshda bizga choyga marhamat qiling."
+            }
+          },
+          {
+            "s_id": "s9",
+            "text_en": "My phone number is 555 0147.",
+            "gloss": {
+              "ru": "Мой номер телефона — 555 0147.",
+              "uz": "Mening telefon raqamim — 555 0147."
+            }
+          },
+          {
+            "s_id": "s10",
+            "text_en": "See you soon!",
+            "gloss": {
+              "ru": "До скорой встречи!",
+              "uz": "Tez orada koʻrishamiz!"
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "neighbor",
+        "gloss": {
+          "ru": "сосед, соседка",
+          "uz": "qoʻshni"
+        },
+        "note": {
+          "ru": "В британском английском пишется neighbour.",
+          "uz": "Britaniya inglizchasida neighbour deb yoziladi."
+        }
+      },
+      {
+        "en": "apartment",
+        "gloss": {
+          "ru": "квартира",
+          "uz": "kvartira, xonadon"
+        },
+        "note": {
+          "ru": "В британском английском — flat.",
+          "uz": "Britaniya inglizchasida — flat."
+        }
+      },
+      {
+        "en": "wife",
+        "gloss": {
+          "ru": "жена",
+          "uz": "rafiqa, xotin"
+        },
+        "note": null
+      },
+      {
+        "en": "little",
+        "gloss": {
+          "ru": "маленький",
+          "uz": "kichkina"
+        },
+        "note": null
+      },
+      {
+        "en": "sometimes",
+        "gloss": {
+          "ru": "иногда",
+          "uz": "baʼzan"
+        },
+        "note": null
+      },
+      {
+        "en": "loud",
+        "gloss": {
+          "ru": "громкий, шумный",
+          "uz": "shovqinli, baland ovozli"
+        },
+        "note": null
+      },
+      {
+        "en": "See you soon",
+        "gloss": {
+          "ru": "До скорой встречи!",
+          "uz": "Tez orada koʻrishamiz!"
+        },
+        "note": null
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "Who is Anvar?",
+        "options": [
+          "Timur's friend",
+          "a new neighbor",
+          "a doctor"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q2",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "Zarina is a teacher.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q3",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впишите число из текста — цифрами или словом.",
+          "uz": "Matndagi sonni yozing — raqam yoki soʻz bilan."
+        },
+        "prompt_en": "Timur is ___ years old.",
+        "options": [],
+        "answer": [
+          "two",
+          "2"
+        ]
+      },
+      {
+        "question_id": "q4",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "When is the tea?",
+        "options": [
+          "on Sunday at five o'clock",
+          "on Saturday at five o'clock",
+          "on Sunday at two o'clock"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q5",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "Anvar lives in apartment 14.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 0
+      }
+    ],
+    "voice": "en-US",
+    "est_minutes": 4
+  },
+  {
+    "reading_id": "r-a1-cafe-menu",
+    "title": {
+      "ru": "Меню кафе",
+      "uz": "Kafe menyusi"
+    },
+    "level": "A1",
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "topics": [
+      "food"
+    ],
+    "skill_ids": [
+      "en.read.signs-menus",
+      "en.voc.food-drink",
+      "en.gram.would-like"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "Welcome to Bahor Cafe!",
+            "gloss": {
+              "ru": "Добро пожаловать в кафе «Бахор»!",
+              "uz": "«Bahor» kafesiga xush kelibsiz!"
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "We are open every day from 8 a.m. to 10 p.m.",
+            "gloss": {
+              "ru": "Мы работаем каждый день с 8 утра до 10 вечера.",
+              "uz": "Biz har kuni soat 8:00 dan 22:00 gacha ishlaymiz."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s3",
+            "text_en": "For breakfast, there is fresh bread with butter and honey.",
+            "gloss": {
+              "ru": "На завтрак есть свежий хлеб с маслом и мёдом.",
+              "uz": "Nonushtaga sariyogʻ va asal bilan yangi non bor."
+            }
+          },
+          {
+            "s_id": "s4",
+            "text_en": "You can also order eggs with tomatoes for 28,000 soum.",
+            "gloss": {
+              "ru": "Ещё можно заказать яичницу с помидорами за 28 000 сумов.",
+              "uz": "Shuningdek, pomidorli tuxum qovurmasini 28 000 soʻmga buyurtma qilishingiz mumkin."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s5",
+            "text_en": "For lunch, we have plov, soup and a big green salad.",
+            "gloss": {
+              "ru": "На обед у нас плов, суп и большой зелёный салат.",
+              "uz": "Tushlikka bizda palov, shoʻrva va katta koʻkatli salat bor."
+            }
+          },
+          {
+            "s_id": "s6",
+            "text_en": "Our plov costs 45,000 soum, and the soup costs 30,000 soum.",
+            "gloss": {
+              "ru": "Наш плов стоит 45 000 сумов, а суп — 30 000 сумов.",
+              "uz": "Palovimiz 45 000 soʻm, shoʻrva esa 30 000 soʻm turadi."
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "There is a vegetarian soup, too.",
+            "gloss": {
+              "ru": "Есть и вегетарианский суп.",
+              "uz": "Goʻshtsiz shoʻrva ham bor."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p4",
+        "sentences": [
+          {
+            "s_id": "s8",
+            "text_en": "Green tea and black tea are free with every lunch.",
+            "gloss": {
+              "ru": "Зелёный и чёрный чай к каждому обеду — бесплатно.",
+              "uz": "Har bir tushlikka koʻk choy va qora choy bepul."
+            }
+          },
+          {
+            "s_id": "s9",
+            "text_en": "A cup of coffee is 18,000 soum, and fresh orange juice is 22,000 soum.",
+            "gloss": {
+              "ru": "Чашка кофе стоит 18 000 сумов, а свежевыжатый апельсиновый сок — 22 000 сумов.",
+              "uz": "Bir finjon qahva 18 000 soʻm, yangi siqilgan apelsin sharbati esa 22 000 soʻm."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p5",
+        "sentences": [
+          {
+            "s_id": "s10",
+            "text_en": "Please order and pay at the counter.",
+            "gloss": {
+              "ru": "Пожалуйста, делайте заказ и оплачивайте его у стойки.",
+              "uz": "Iltimos, buyurtmani peshtaxtada bering va oʻsha yerda toʻlang."
+            }
+          },
+          {
+            "s_id": "s11",
+            "text_en": "We can bring your food to your table.",
+            "gloss": {
+              "ru": "Мы можем принести еду к вашему столику.",
+              "uz": "Taomingizni stolingizga olib kelishimiz mumkin."
+            }
+          },
+          {
+            "s_id": "s12",
+            "text_en": "Would you like a dessert?",
+            "gloss": {
+              "ru": "Не хотите ли десерт?",
+              "uz": "Shirinlik xohlaysizmi?"
+            }
+          },
+          {
+            "s_id": "s13",
+            "text_en": "Try our apple cake — it is very sweet and soft!",
+            "gloss": {
+              "ru": "Попробуйте наш яблочный пирог — он очень сладкий и мягкий!",
+              "uz": "Olmali pirogimizni tatib koʻring — u juda shirin va yumshoq!"
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "fresh",
+        "gloss": {
+          "ru": "свежий",
+          "uz": "yangi, yangi tayyorlangan"
+        },
+        "note": null
+      },
+      {
+        "en": "order",
+        "gloss": {
+          "ru": "заказывать; заказ",
+          "uz": "buyurtma qilmoq; buyurtma"
+        },
+        "note": null
+      },
+      {
+        "en": "costs",
+        "gloss": {
+          "ru": "стоит",
+          "uz": "turadi (narxi)"
+        },
+        "note": {
+          "ru": "cost — стоить; costs — форма для he, she, it.",
+          "uz": "cost — turmoq (narx haqida); costs — he, she, it uchun shakl."
+        }
+      },
+      {
+        "en": "vegetarian",
+        "gloss": {
+          "ru": "без мяса, вегетарианский",
+          "uz": "goʻshtsiz, vegetarian"
+        },
+        "note": null
+      },
+      {
+        "en": "free",
+        "gloss": {
+          "ru": "бесплатный; свободный",
+          "uz": "bepul; boʻsh"
+        },
+        "note": {
+          "ru": "Здесь free — «бесплатно».",
+          "uz": "Bu yerda free — «bepul» maʼnosida."
+        }
+      },
+      {
+        "en": "pay",
+        "gloss": {
+          "ru": "платить",
+          "uz": "toʻlamoq"
+        },
+        "note": null
+      },
+      {
+        "en": "counter",
+        "gloss": {
+          "ru": "стойка, прилавок",
+          "uz": "peshtaxta"
+        },
+        "note": null
+      },
+      {
+        "en": "Would you like",
+        "gloss": {
+          "ru": "Не хотите …?",
+          "uz": "… istaysizmi?"
+        },
+        "note": {
+          "ru": "Вежливая форма предложения или вопроса.",
+          "uz": "Taklif yoki savolning odobli shakli."
+        }
+      },
+      {
+        "en": "dessert",
+        "gloss": {
+          "ru": "десерт",
+          "uz": "shirinlik, desert"
+        },
+        "note": null
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "When does the cafe close?",
+        "options": [
+          "at 8 a.m.",
+          "at 11 p.m.",
+          "at 10 p.m.",
+          "at 10 a.m."
+        ],
+        "answer": 2
+      },
+      {
+        "question_id": "q2",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "Tea is free with lunch.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q3",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "How much is the plov?",
+        "options": [
+          "28,000 soum",
+          "30,000 soum",
+          "45,000 soum"
+        ],
+        "answer": 2
+      },
+      {
+        "question_id": "q4",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впишите пропущенное слово из текста.",
+          "uz": "Matndan tushib qolgan soʻzni yozing."
+        },
+        "prompt_en": "Please order and pay at the ___.",
+        "options": [],
+        "answer": [
+          "counter"
+        ]
+      },
+      {
+        "question_id": "q5",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "Orange juice costs 18,000 soum.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q6",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впишите пропущенное слово из текста.",
+          "uz": "Matndan tushib qolgan soʻzni yozing."
+        },
+        "prompt_en": "For breakfast, there is fresh bread with butter and ___.",
+        "options": [],
+        "answer": [
+          "honey"
+        ]
+      }
+    ],
+    "voice": "en-GB",
+    "est_minutes": 6
+  },
+  {
+    "reading_id": "r-a1-station-announcement",
+    "title": {
+      "ru": "Объявление на вокзале",
+      "uz": "Vokzaldagi eʼlon"
+    },
+    "level": "A1",
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "topics": [
+      "travel"
+    ],
+    "skill_ids": [
+      "en.read.signs-menus",
+      "en.gram.prepositions-place-time",
+      "en.voc.numbers"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "Jamshid is at the train station in Tashkent.",
+            "gloss": {
+              "ru": "Джамшид на железнодорожном вокзале в Ташкенте.",
+              "uz": "Jamshid Toshkentdagi temir yoʻl vokzalida."
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "He is traveling to Samarkand today.",
+            "gloss": {
+              "ru": "Сегодня он едет в Самарканд.",
+              "uz": "U bugun Samarqandga ketyapti."
+            }
+          },
+          {
+            "s_id": "s3",
+            "text_en": "He has a small bag and a ticket.",
+            "gloss": {
+              "ru": "У него маленькая сумка и билет.",
+              "uz": "Uning kichkina sumkasi va chiptasi bor."
+            }
+          },
+          {
+            "s_id": "s4",
+            "text_en": "His train leaves at 9:40.",
+            "gloss": {
+              "ru": "Его поезд отправляется в 9:40.",
+              "uz": "Uning poyezdi soat 9:40 da joʻnaydi."
+            }
+          },
+          {
+            "s_id": "s5",
+            "text_en": "Now he is listening to an announcement.",
+            "gloss": {
+              "ru": "Сейчас он слушает объявление.",
+              "uz": "Hozir u eʼlonni tinglayapti."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s6",
+            "text_en": "Good morning, passengers.",
+            "gloss": {
+              "ru": "Доброе утро, уважаемые пассажиры.",
+              "uz": "Xayrli tong, hurmatli yoʻlovchilar."
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "The fast train to Samarkand is now at platform 3, not platform 1.",
+            "gloss": {
+              "ru": "Скоростной поезд до Самарканда сейчас стоит у платформы 3, а не у платформы 1.",
+              "uz": "Samarqandga ketadigan tezyurar poyezd hozir 1-platformada emas, 3-platformada turibdi."
+            }
+          },
+          {
+            "s_id": "s8",
+            "text_en": "The train to Bukhara is 20 minutes late.",
+            "gloss": {
+              "ru": "Поезд до Бухары опаздывает на 20 минут.",
+              "uz": "Buxoroga ketadigan poyezd 20 daqiqaga kechikmoqda."
+            }
+          },
+          {
+            "s_id": "s9",
+            "text_en": "There is a cafe and a waiting room on the first floor.",
+            "gloss": {
+              "ru": "На первом этаже есть кафе и зал ожидания.",
+              "uz": "Birinchi qavatda kafe va kutish zali bor."
+            }
+          },
+          {
+            "s_id": "s10",
+            "text_en": "Please keep your bags with you.",
+            "gloss": {
+              "ru": "Пожалуйста, держите сумки при себе.",
+              "uz": "Iltimos, sumkalaringizni yoningizda saqlang."
+            }
+          },
+          {
+            "s_id": "s11",
+            "text_en": "Thank you.",
+            "gloss": {
+              "ru": "Спасибо.",
+              "uz": "Rahmat."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s12",
+            "text_en": "Jamshid looks at the information board.",
+            "gloss": {
+              "ru": "Джамшид смотрит на информационное табло.",
+              "uz": "Jamshid maʼlumot tablosiga qaraydi."
+            }
+          },
+          {
+            "s_id": "s13",
+            "text_en": "The board says: \"Samarkand, 9:40, Platform 3, On time.\"",
+            "gloss": {
+              "ru": "На табло написано: «Самарканд, 9:40, платформа 3, по расписанию».",
+              "uz": "Tabloda «Samarqand, 9:40, 3-platforma, oʻz vaqtida» deb yozilgan."
+            }
+          },
+          {
+            "s_id": "s14",
+            "text_en": "He is walking to platform 3 now.",
+            "gloss": {
+              "ru": "Теперь он идёт к платформе 3.",
+              "uz": "Endi u 3-platformaga ketyapti."
+            }
+          },
+          {
+            "s_id": "s15",
+            "text_en": "He has twenty minutes, so he can buy a cup of tea.",
+            "gloss": {
+              "ru": "У него есть двадцать минут, так что он может купить чашку чая.",
+              "uz": "Uning yigirma daqiqa vaqti bor, shuning uchun bir piyola choy sotib olishi mumkin."
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "traveling",
+        "gloss": {
+          "ru": "путешествовать, ехать",
+          "uz": "sayohat qilmoq, safarga ketmoq"
+        },
+        "note": {
+          "ru": "В британском английском пишется travelling.",
+          "uz": "Britaniya inglizchasida travelling deb yoziladi."
+        }
+      },
+      {
+        "en": "train leaves",
+        "gloss": {
+          "ru": "поезд отправляется",
+          "uz": "poyezd joʻnaydi"
+        },
+        "note": {
+          "ru": "leave — уезжать, отправляться; leaves — форма для he, she, it.",
+          "uz": "leave — joʻnab ketmoq; leaves — he, she, it uchun shakl."
+        }
+      },
+      {
+        "en": "announcement",
+        "gloss": {
+          "ru": "объявление",
+          "uz": "eʼlon"
+        },
+        "note": null
+      },
+      {
+        "en": "passengers",
+        "gloss": {
+          "ru": "пассажиры",
+          "uz": "yoʻlovchilar"
+        },
+        "note": null
+      },
+      {
+        "en": "platform",
+        "gloss": {
+          "ru": "платформа",
+          "uz": "platforma"
+        },
+        "note": null
+      },
+      {
+        "en": "late",
+        "gloss": {
+          "ru": "с опозданием; поздно",
+          "uz": "kechikkan; kech"
+        },
+        "note": {
+          "ru": "be 20 minutes late — опаздывать на 20 минут.",
+          "uz": "be 20 minutes late — 20 daqiqa kechikmoq."
+        }
+      },
+      {
+        "en": "waiting room",
+        "gloss": {
+          "ru": "зал ожидания",
+          "uz": "kutish zali"
+        },
+        "note": null
+      },
+      {
+        "en": "first floor",
+        "gloss": {
+          "ru": "первый этаж",
+          "uz": "birinchi qavat"
+        },
+        "note": {
+          "ru": "Так в американском английском; в британском первый этаж — ground floor.",
+          "uz": "Amerika inglizchasida shunday; Britaniyada birinchi qavat — ground floor."
+        }
+      },
+      {
+        "en": "information board",
+        "gloss": {
+          "ru": "информационное табло",
+          "uz": "maʼlumot tablosi"
+        },
+        "note": null
+      },
+      {
+        "en": "on time",
+        "gloss": {
+          "ru": "вовремя, по расписанию",
+          "uz": "oʻz vaqtida"
+        },
+        "note": null
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "Where is Jamshid traveling today?",
+        "options": [
+          "to Samarkand",
+          "to Bukhara",
+          "to Khiva"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q2",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "Which platform is the Samarkand train at now?",
+        "options": [
+          "platform 1",
+          "platform 2",
+          "platform 3"
+        ],
+        "answer": 2
+      },
+      {
+        "question_id": "q3",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "The train to Samarkand is late.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q4",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впишите число из текста — цифрами или словом.",
+          "uz": "Matndagi sonni yozing — raqam yoki soʻz bilan."
+        },
+        "prompt_en": "The train to Bukhara is ___ minutes late.",
+        "options": [],
+        "answer": [
+          "20",
+          "twenty"
+        ]
+      },
+      {
+        "question_id": "q5",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "There is a cafe on the first floor.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q6",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "What can Jamshid do before his train?",
+        "options": [
+          "go back home",
+          "take the train to Bukhara",
+          "buy a cup of tea"
+        ],
+        "answer": 2
+      }
+    ],
+    "voice": "en-US",
+    "est_minutes": 6
+  },
+  {
+    "reading_id": "r-a1-city-signs",
+    "title": {
+      "ru": "Вывески и расписание в городе",
+      "uz": "Shahardagi yozuvlar va jadval"
+    },
+    "level": "A1",
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "topics": [
+      "travel"
+    ],
+    "skill_ids": [
+      "en.read.signs-menus",
+      "en.voc.city-places",
+      "en.gram.there-is"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "Sara is a tourist, and today she is walking in the centre of Tashkent.",
+            "gloss": {
+              "ru": "Сара — туристка, и сегодня она гуляет по центру Ташкента.",
+              "uz": "Sara — sayyoh, bugun u Toshkent markazida sayr qilyapti."
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "There are a lot of signs in English and Uzbek.",
+            "gloss": {
+              "ru": "Здесь много вывесок на английском и узбекском.",
+              "uz": "Bu yerda ingliz va oʻzbek tillarida yozuvlar koʻp."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s3",
+            "text_en": "The museum sign says: \"Open 10 a.m. to 6 p.m.\"",
+            "gloss": {
+              "ru": "На вывеске музея написано: «Открыто с 10:00 до 18:00».",
+              "uz": "Muzey yozuvida «Soat 10:00 dan 18:00 gacha ochiq» deb yozilgan."
+            }
+          },
+          {
+            "s_id": "s4",
+            "text_en": "Under it, there is another line: \"Closed on Mondays.\"",
+            "gloss": {
+              "ru": "Под ней ещё одна строка: «По понедельникам закрыто».",
+              "uz": "Uning ostida yana bir qator bor: «Dushanba kunlari yopiq»."
+            }
+          },
+          {
+            "s_id": "s5",
+            "text_en": "Today is Saturday, so Sara can visit the museum.",
+            "gloss": {
+              "ru": "Сегодня суббота, поэтому Сара может пойти в музей.",
+              "uz": "Bugun shanba, shuning uchun Sara muzeyga borishi mumkin."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s6",
+            "text_en": "At the bus stop, there is a timetable.",
+            "gloss": {
+              "ru": "На автобусной остановке висит расписание.",
+              "uz": "Avtobus bekatida qatnov jadvali bor."
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "Bus 51 goes to the Old City every 15 minutes, from 6 a.m. to 11 p.m.",
+            "gloss": {
+              "ru": "Автобус 51 ходит в Старый город каждые 15 минут, с 6 утра до 11 вечера.",
+              "uz": "51-avtobus Eski shaharga har 15 daqiqada, ertalab soat 6 dan kechqurun soat 11 gacha qatnaydi."
+            }
+          },
+          {
+            "s_id": "s8",
+            "text_en": "The next bus is at 10:20.",
+            "gloss": {
+              "ru": "Следующий автобус — в 10:20.",
+              "uz": "Keyingi avtobus soat 10:20 da."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p4",
+        "sentences": [
+          {
+            "s_id": "s9",
+            "text_en": "In the park, a sign says: \"Please do not walk on the grass.\"",
+            "gloss": {
+              "ru": "В парке на табличке написано: «Пожалуйста, не ходите по газону».",
+              "uz": "Bogʻdagi lavhada «Iltimos, maysa ustida yurmang» deb yozilgan."
+            }
+          },
+          {
+            "s_id": "s10",
+            "text_en": "Near the park, there is a pharmacy with a green cross.",
+            "gloss": {
+              "ru": "Рядом с парком есть аптека с зелёным крестом.",
+              "uz": "Bogʻ yaqinida yashil xoch belgili dorixona bor."
+            }
+          },
+          {
+            "s_id": "s11",
+            "text_en": "Its sign says: \"Open 24 hours.\"",
+            "gloss": {
+              "ru": "На её вывеске написано: «Круглосуточно».",
+              "uz": "Uning yozuvida «Kecha-kunduz ochiq» deb yozilgan."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p5",
+        "sentences": [
+          {
+            "s_id": "s12",
+            "text_en": "Sara is happy because she can read the signs and find her way.",
+            "gloss": {
+              "ru": "Сара рада: она понимает вывески и может найти дорогу.",
+              "uz": "Sara xursand, chunki u yozuvlarni oʻqiy oladi va yoʻlini topa oladi."
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "centre",
+        "gloss": {
+          "ru": "центр",
+          "uz": "markaz"
+        },
+        "note": {
+          "ru": "В американском английском пишется center.",
+          "uz": "Amerika inglizchasida center deb yoziladi."
+        }
+      },
+      {
+        "en": "sign",
+        "gloss": {
+          "ru": "вывеска, табличка; (глагол) подписать",
+          "uz": "yozuv, lavha; (feʼl) imzolamoq"
+        },
+        "note": null
+      },
+      {
+        "en": "Closed",
+        "gloss": {
+          "ru": "закрыто",
+          "uz": "yopiq"
+        },
+        "note": null
+      },
+      {
+        "en": "timetable",
+        "gloss": {
+          "ru": "расписание",
+          "uz": "jadval, qatnov jadvali"
+        },
+        "note": {
+          "ru": "В американском английском чаще schedule.",
+          "uz": "Amerika inglizchasida koʻpincha schedule deyiladi."
+        }
+      },
+      {
+        "en": "every",
+        "gloss": {
+          "ru": "каждый",
+          "uz": "har bir"
+        },
+        "note": {
+          "ru": "every 15 minutes — каждые 15 минут.",
+          "uz": "every 15 minutes — har 15 daqiqada."
+        }
+      },
+      {
+        "en": "next",
+        "gloss": {
+          "ru": "следующий",
+          "uz": "keyingi"
+        },
+        "note": null
+      },
+      {
+        "en": "Please do not",
+        "gloss": {
+          "ru": "Пожалуйста, не…",
+          "uz": "Iltimos, …mang"
+        },
+        "note": {
+          "ru": "Вежливый запрет на табличках.",
+          "uz": "Yozuvlardagi odobli taqiq."
+        }
+      },
+      {
+        "en": "grass",
+        "gloss": {
+          "ru": "трава, газон",
+          "uz": "maysa"
+        },
+        "note": null
+      },
+      {
+        "en": "pharmacy",
+        "gloss": {
+          "ru": "аптека",
+          "uz": "dorixona"
+        },
+        "note": null
+      },
+      {
+        "en": "Open 24 hours",
+        "gloss": {
+          "ru": "круглосуточно",
+          "uz": "kecha-kunduz ochiq"
+        },
+        "note": null
+      },
+      {
+        "en": "find her way",
+        "gloss": {
+          "ru": "найти дорогу",
+          "uz": "yoʻlini topmoq"
+        },
+        "note": {
+          "ru": "find your way — найти дорогу; her — её (о женщине).",
+          "uz": "find your way — yoʻl topmoq; her — uning (ayol haqida)."
+        }
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "Why can Sara visit the museum today?",
+        "options": [
+          "Because it is Monday.",
+          "Because it is Saturday and the museum is open.",
+          "Because the museum is open 24 hours."
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q2",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "The museum is closed on Mondays.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q3",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впишите число из текста — цифрами или словом.",
+          "uz": "Matndagi sonni yozing — raqam yoki soʻz bilan."
+        },
+        "prompt_en": "Bus 51 goes to the Old City every ___ minutes.",
+        "options": [],
+        "answer": [
+          "15",
+          "fifteen"
+        ]
+      },
+      {
+        "question_id": "q4",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "What is open 24 hours?",
+        "options": [
+          "the museum",
+          "the bus stop",
+          "the park",
+          "the pharmacy"
+        ],
+        "answer": 3
+      },
+      {
+        "question_id": "q5",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "In the park, you can walk on the grass.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      }
+    ],
+    "voice": "en-GB",
+    "est_minutes": 6
+  },
+  {
+    "reading_id": "r-a2-meeting-message",
+    "title": {
+      "ru": "Сообщение коллеге о встрече",
+      "uz": "Hamkasbga uchrashuv haqida xabar"
+    },
+    "level": "A2",
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "topics": [
+      "work"
+    ],
+    "skill_ids": [
+      "en.read.short-messages",
+      "en.voc.work",
+      "en.gram.future-going-to"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "Nodira works for a small travel company in Tashkent.",
+            "gloss": {
+              "ru": "Нодира работает в небольшой туристической компании в Ташкенте.",
+              "uz": "Nodira Toshkentdagi kichik sayyohlik kompaniyasida ishlaydi."
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "On Tuesday evening, she sent this message to her colleague Sherzod.",
+            "gloss": {
+              "ru": "Во вторник вечером она отправила это сообщение своему коллеге Шерзоду.",
+              "uz": "Seshanba kuni kechqurun u hamkasbi Sherzodga ushbu xabarni yubordi."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s3",
+            "text_en": "Hi, Sherzod!",
+            "gloss": {
+              "ru": "Привет, Шерзод!",
+              "uz": "Salom, Sherzod!"
+            }
+          },
+          {
+            "s_id": "s4",
+            "text_en": "I'm sorry, but I can't come to our meeting tomorrow at 10 a.m.",
+            "gloss": {
+              "ru": "Извини, но я не смогу прийти на нашу встречу завтра в 10 утра.",
+              "uz": "Kechirasiz, lekin ertaga soat 10:00 dagi uchrashuvimizga kela olmayman."
+            }
+          },
+          {
+            "s_id": "s5",
+            "text_en": "My little son got sick last night, so tomorrow I'm going to stay at home with him.",
+            "gloss": {
+              "ru": "Мой младший сын вчера вечером заболел, поэтому завтра я останусь с ним дома.",
+              "uz": "Kichkina oʻgʻlim kecha kechqurun kasal boʻlib qoldi, shuning uchun ertaga u bilan uyda qolmoqchiman."
+            }
+          },
+          {
+            "s_id": "s6",
+            "text_en": "Can we move the meeting to Thursday at 2 p.m.?",
+            "gloss": {
+              "ru": "Можем перенести встречу на четверг, на 14:00?",
+              "uz": "Uchrashuvni payshanba kuni soat 14:00 ga koʻchira olamizmi?"
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "I'm going to send you the new plan for the Bukhara tour tonight.",
+            "gloss": {
+              "ru": "Сегодня вечером я пришлю тебе новый план тура в Бухару.",
+              "uz": "Bugun kechqurun sizga Buxoro sayohatining yangi rejasini yuboraman."
+            }
+          },
+          {
+            "s_id": "s8",
+            "text_en": "Please check the hotel prices on page 4 before we meet.",
+            "gloss": {
+              "ru": "Пожалуйста, проверь цены на гостиницы на странице 4 до нашей встречи.",
+              "uz": "Iltimos, uchrashishimizdan oldin 4-sahifadagi mehmonxona narxlarini tekshirib chiqing."
+            }
+          },
+          {
+            "s_id": "s9",
+            "text_en": "Thanks a lot!",
+            "gloss": {
+              "ru": "Большое спасибо!",
+              "uz": "Katta rahmat!"
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s10",
+            "text_en": "Hi, Nodira!",
+            "gloss": {
+              "ru": "Привет, Нодира!",
+              "uz": "Salom, Nodira!"
+            }
+          },
+          {
+            "s_id": "s11",
+            "text_en": "I'm sorry about your son, and I hope he feels better soon.",
+            "gloss": {
+              "ru": "Жаль, что твой сын заболел; надеюсь, ему скоро станет лучше.",
+              "uz": "Oʻgʻlingiz kasal boʻlib qolganiga achindim, umid qilamanki, tez orada tuzalib ketadi."
+            }
+          },
+          {
+            "s_id": "s12",
+            "text_en": "Thursday at 2 p.m. is fine for me.",
+            "gloss": {
+              "ru": "Четверг, 14:00, мне подходит.",
+              "uz": "Payshanba, soat 14:00 menga maʼqul."
+            }
+          },
+          {
+            "s_id": "s13",
+            "text_en": "I booked the small meeting room on the second floor.",
+            "gloss": {
+              "ru": "Я забронировал маленькую переговорную на втором этаже.",
+              "uz": "Ikkinchi qavatdagi kichik majlislar xonasini band qildim."
+            }
+          },
+          {
+            "s_id": "s14",
+            "text_en": "I'm also going to invite Malika from the sales team, because she knows the hotels in Bukhara well.",
+            "gloss": {
+              "ru": "Ещё я собираюсь пригласить Малику из отдела продаж: она хорошо знает гостиницы Бухары.",
+              "uz": "Savdo boʻlimidan Malikani ham taklif qilmoqchiman, chunki u Buxorodagi mehmonxonalarni yaxshi biladi."
+            }
+          },
+          {
+            "s_id": "s15",
+            "text_en": "See you on Thursday!",
+            "gloss": {
+              "ru": "До встречи в четверг!",
+              "uz": "Payshanba kuni koʻrishamiz!"
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p4",
+        "sentences": [
+          {
+            "s_id": "s16",
+            "text_en": "On Thursday, the meeting started on time and finished at 3:30.",
+            "gloss": {
+              "ru": "В четверг встреча началась вовремя и закончилась в 15:30.",
+              "uz": "Payshanba kuni uchrashuv oʻz vaqtida boshlanib, soat 15:30 da tugadi."
+            }
+          },
+          {
+            "s_id": "s17",
+            "text_en": "They chose two hotels for the tour.",
+            "gloss": {
+              "ru": "Они выбрали для тура две гостиницы.",
+              "uz": "Ular sayohat uchun ikkita mehmonxonani tanlashdi."
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "colleague",
+        "gloss": {
+          "ru": "коллега",
+          "uz": "hamkasb"
+        },
+        "note": null
+      },
+      {
+        "en": "sent",
+        "gloss": {
+          "ru": "отправил(а)",
+          "uz": "yubordi"
+        },
+        "note": {
+          "ru": "send — отправлять; sent — прошедшее время.",
+          "uz": "send — yubormoq; sent — oʻtgan zamon shakli."
+        }
+      },
+      {
+        "en": "got sick",
+        "gloss": {
+          "ru": "заболел(а)",
+          "uz": "kasal boʻlib qoldi"
+        },
+        "note": {
+          "ru": "get sick — заболеть; got — прошедшее время от get.",
+          "uz": "get sick — kasal boʻlmoq; got — get feʼlining oʻtgan zamon shakli."
+        }
+      },
+      {
+        "en": "going to",
+        "gloss": {
+          "ru": "собираться (план); идти, ехать куда-то",
+          "uz": "…moqchi (reja); biror joyga ketmoq"
+        },
+        "note": {
+          "ru": "be going to + глагол — план или намерение.",
+          "uz": "be going to + feʼl — reja yoki niyat."
+        }
+      },
+      {
+        "en": "move the meeting",
+        "gloss": {
+          "ru": "перенести встречу",
+          "uz": "uchrashuvni koʻchirmoq"
+        },
+        "note": {
+          "ru": "Здесь move — перенести на другое время.",
+          "uz": "Bu yerda move — boshqa vaqtga koʻchirish."
+        }
+      },
+      {
+        "en": "booked",
+        "gloss": {
+          "ru": "забронировал(а)",
+          "uz": "band qildi, bron qildi"
+        },
+        "note": {
+          "ru": "book — бронировать; booked — прошедшее время.",
+          "uz": "book — band qilmoq; booked — oʻtgan zamon shakli."
+        }
+      },
+      {
+        "en": "meeting room",
+        "gloss": {
+          "ru": "переговорная",
+          "uz": "majlislar xonasi"
+        },
+        "note": null
+      },
+      {
+        "en": "invite",
+        "gloss": {
+          "ru": "пригласить",
+          "uz": "taklif qilmoq"
+        },
+        "note": null
+      },
+      {
+        "en": "sales team",
+        "gloss": {
+          "ru": "отдел продаж",
+          "uz": "savdo boʻlimi"
+        },
+        "note": null
+      },
+      {
+        "en": "on time",
+        "gloss": {
+          "ru": "вовремя, по расписанию",
+          "uz": "oʻz vaqtida"
+        },
+        "note": null
+      },
+      {
+        "en": "chose",
+        "gloss": {
+          "ru": "выбрали",
+          "uz": "tanlashdi"
+        },
+        "note": {
+          "ru": "choose — выбирать; chose — форма прошедшего времени неправильного глагола.",
+          "uz": "choose — tanlamoq; chose — notoʻgʻri feʼlning oʻtgan zamon shakli."
+        }
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "Why can't Nodira come to the meeting?",
+        "options": [
+          "She is in Bukhara.",
+          "Her son got sick.",
+          "She has another meeting."
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q2",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "When is the new meeting?",
+        "options": [
+          "Wednesday at 10 a.m.",
+          "Thursday at 10 a.m.",
+          "Tuesday at 2 p.m.",
+          "Thursday at 2 p.m."
+        ],
+        "answer": 3
+      },
+      {
+        "question_id": "q3",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "Sherzod booked a meeting room on the second floor.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q4",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впишите пропущенное слово из текста.",
+          "uz": "Matndan tushib qolgan soʻzni yozing."
+        },
+        "prompt_en": "Nodira is going to send the new ___ for the Bukhara tour.",
+        "options": [],
+        "answer": [
+          "plan"
+        ]
+      },
+      {
+        "question_id": "q5",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "The meeting on Thursday finished at 2 p.m.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q6",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "Who knows the hotels in Bukhara well?",
+        "options": [
+          "Malika",
+          "Sherzod",
+          "Nodira's son"
+        ],
+        "answer": 0
+      }
+    ],
+    "voice": "en-US",
+    "est_minutes": 8
+  },
+  {
+    "reading_id": "r-a2-hotel-review",
+    "title": {
+      "ru": "Отзыв о гостинице",
+      "uz": "Mehmonxona haqida sharh"
+    },
+    "level": "A2",
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "topics": [
+      "travel"
+    ],
+    "skill_ids": [
+      "en.read.short-messages",
+      "en.gram.past-simple",
+      "en.voc.travel"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "My husband and I stayed at the Old Garden Guest House in Samarkand for three nights in May.",
+            "gloss": {
+              "ru": "Мы с мужем жили в гостевом доме «Старый сад» в Самарканде три ночи в мае.",
+              "uz": "Turmush oʻrtogʻim bilan may oyida Samarqanddagi «Eski bogʻ» mehmon uyida uch kecha qoldik."
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "It is in a quiet street, only ten minutes on foot from the Registan.",
+            "gloss": {
+              "ru": "Он находится на тихой улице, всего в десяти минутах пешком от Регистана.",
+              "uz": "U tinch koʻchada, Registondan piyoda atigi oʻn daqiqalik masofada joylashgan."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s3",
+            "text_en": "Our room was clean and bright, and the bed was very comfortable.",
+            "gloss": {
+              "ru": "Наш номер был чистым и светлым, а кровать — очень удобной.",
+              "uz": "Xonamiz toza va yorugʻ edi, karavot esa juda qulay edi."
+            }
+          },
+          {
+            "s_id": "s4",
+            "text_en": "The staff were friendly and helpful.",
+            "gloss": {
+              "ru": "Персонал был дружелюбным и отзывчивым.",
+              "uz": "Xodimlar samimiy va yordamga tayyor edi."
+            }
+          },
+          {
+            "s_id": "s5",
+            "text_en": "On the first day, the manager, Bekzod, gave us a free map and told us about the best places for dinner.",
+            "gloss": {
+              "ru": "В первый день управляющий Бекзод дал нам бесплатную карту и рассказал о лучших местах для ужина.",
+              "uz": "Birinchi kuni boshqaruvchi Bekzod bizga bepul xarita berdi va kechki ovqat uchun eng yaxshi joylar haqida aytib berdi."
+            }
+          },
+          {
+            "s_id": "s6",
+            "text_en": "Breakfast was the best part: fresh bread, fruit, eggs and hot green tea in the garden.",
+            "gloss": {
+              "ru": "Лучшим был завтрак: свежий хлеб, фрукты, яйца и горячий зелёный чай в саду.",
+              "uz": "Eng yaxshisi nonushta boʻldi: yangi non, mevalar, tuxum va bogʻda issiq koʻk choy."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s7",
+            "text_en": "There were two small problems.",
+            "gloss": {
+              "ru": "Было две небольшие проблемы.",
+              "uz": "Ikkita kichik muammo boʻldi."
+            }
+          },
+          {
+            "s_id": "s8",
+            "text_en": "The internet in our room was slow, and on Saturday night there was loud music from a wedding next door.",
+            "gloss": {
+              "ru": "Интернет в номере был медленным, а в субботу вечером по соседству громко играла музыка на свадьбе.",
+              "uz": "Xonamizda internet sekin ishladi, shanba kuni kechasi esa qoʻshni hovlidagi toʻydan baland musiqa eshitildi."
+            }
+          },
+          {
+            "s_id": "s9",
+            "text_en": "We told the manager, and he gave us a different room for the last night.",
+            "gloss": {
+              "ru": "Мы сказали об этом управляющему, и он дал нам другой номер на последнюю ночь.",
+              "uz": "Biz boshqaruvchiga aytdik, u esa oxirgi kechaga bizga boshqa xona berdi."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p4",
+        "sentences": [
+          {
+            "s_id": "s10",
+            "text_en": "The price was fair: 500,000 soum per night for two people with breakfast.",
+            "gloss": {
+              "ru": "Цена была разумной: 500 000 сумов за ночь на двоих с завтраком.",
+              "uz": "Narx maqbul edi: ikki kishi uchun nonushta bilan bir kecha 500 000 soʻm."
+            }
+          },
+          {
+            "s_id": "s11",
+            "text_en": "We are going to come back next year, and we recommend this place to families and couples.",
+            "gloss": {
+              "ru": "В следующем году мы собираемся приехать снова и советуем это место семьям и парам.",
+              "uz": "Kelasi yili yana kelmoqchimiz va bu joyni oilalar hamda juftliklarga tavsiya qilamiz."
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "stayed",
+        "gloss": {
+          "ru": "останавливались, жили",
+          "uz": "qoldik, turdik"
+        },
+        "note": {
+          "ru": "stay — останавливаться (в гостинице); stayed — прошедшее время.",
+          "uz": "stay — (mehmonxonada) qolmoq; stayed — oʻtgan zamon shakli."
+        }
+      },
+      {
+        "en": "guest house",
+        "gloss": {
+          "ru": "гостевой дом",
+          "uz": "mehmon uyi"
+        },
+        "note": null
+      },
+      {
+        "en": "on foot",
+        "gloss": {
+          "ru": "пешком",
+          "uz": "piyoda"
+        },
+        "note": null
+      },
+      {
+        "en": "comfortable",
+        "gloss": {
+          "ru": "удобный",
+          "uz": "qulay"
+        },
+        "note": null
+      },
+      {
+        "en": "staff",
+        "gloss": {
+          "ru": "персонал, сотрудники",
+          "uz": "xodimlar"
+        },
+        "note": {
+          "ru": "В британском английском staff часто с глаголом во множественном числе: the staff were.",
+          "uz": "Britaniya inglizchasida staff koʻpincha koʻplikdagi feʼl bilan keladi: the staff were."
+        }
+      },
+      {
+        "en": "helpful",
+        "gloss": {
+          "ru": "отзывчивый, готовый помочь",
+          "uz": "yordamga tayyor"
+        },
+        "note": null
+      },
+      {
+        "en": "gave",
+        "gloss": {
+          "ru": "дал(а)",
+          "uz": "berdi"
+        },
+        "note": {
+          "ru": "give — давать; gave — форма прошедшего времени неправильного глагола.",
+          "uz": "give — bermoq; gave — notoʻgʻri feʼlning oʻtgan zamon shakli."
+        }
+      },
+      {
+        "en": "next door",
+        "gloss": {
+          "ru": "по соседству, в соседнем доме",
+          "uz": "qoʻshni uyda, yonida"
+        },
+        "note": null
+      },
+      {
+        "en": "different",
+        "gloss": {
+          "ru": "другой",
+          "uz": "boshqa"
+        },
+        "note": null
+      },
+      {
+        "en": "fair",
+        "gloss": {
+          "ru": "разумный, справедливый (о цене)",
+          "uz": "maqbul, adolatli (narx haqida)"
+        },
+        "note": null
+      },
+      {
+        "en": "per night",
+        "gloss": {
+          "ru": "за ночь",
+          "uz": "bir kecha uchun"
+        },
+        "note": null
+      },
+      {
+        "en": "going to",
+        "gloss": {
+          "ru": "собираться (план); идти, ехать куда-то",
+          "uz": "…moqchi (reja); biror joyga ketmoq"
+        },
+        "note": {
+          "ru": "be going to + глагол — план или намерение.",
+          "uz": "be going to + feʼl — reja yoki niyat."
+        }
+      },
+      {
+        "en": "recommend",
+        "gloss": {
+          "ru": "рекомендовать, советовать",
+          "uz": "tavsiya qilmoq"
+        },
+        "note": null
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "How long did they stay at the guest house?",
+        "options": [
+          "one night",
+          "three nights",
+          "one week",
+          "ten days"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q2",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "The guest house is far from the Registan.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q3",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "What was the best part of the stay?",
+        "options": [
+          "the breakfast",
+          "the internet",
+          "the music",
+          "the map"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q4",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впишите пропущенное слово из текста.",
+          "uz": "Matndan tushib qolgan soʻzni yozing."
+        },
+        "prompt_en": "On Saturday night, there was loud music from a ___ next door.",
+        "options": [],
+        "answer": [
+          "wedding"
+        ]
+      },
+      {
+        "question_id": "q5",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "The manager gave them a different room.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q6",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "What are they going to do next year?",
+        "options": [
+          "stay at a hotel in Bukhara",
+          "work at the guest house",
+          "come back to this guest house"
+        ],
+        "answer": 2
+      }
+    ],
+    "voice": "en-GB",
+    "est_minutes": 8
+  },
+  {
+    "reading_id": "r-a2-interview-email",
+    "title": {
+      "ru": "Письмо о собеседовании",
+      "uz": "Ish suhbati haqida xat"
+    },
+    "level": "A2",
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "topics": [
+      "interview",
+      "work"
+    ],
+    "skill_ids": [
+      "en.read.short-messages",
+      "en.voc.work",
+      "en.gram.future-going-to"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "Dear Aziz,",
+            "gloss": {
+              "ru": "Уважаемый Азиз!",
+              "uz": "Hurmatli Aziz!"
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s2",
+            "text_en": "Thank you for your application for the job of receptionist at our hotel.",
+            "gloss": {
+              "ru": "Благодарим вас за заявку на должность администратора в нашей гостинице.",
+              "uz": "Mehmonxonamizdagi administrator lavozimiga yuborgan arizangiz uchun rahmat."
+            }
+          },
+          {
+            "s_id": "s3",
+            "text_en": "We read your letter, and we liked your experience at a guest house in Khiva.",
+            "gloss": {
+              "ru": "Мы прочитали ваше письмо, и нам понравился ваш опыт работы в гостевом доме в Хиве.",
+              "uz": "Xatingizni oʻqib chiqdik va Xivadagi mehmon uyidagi ish tajribangiz bizga maʼqul boʻldi."
+            }
+          },
+          {
+            "s_id": "s4",
+            "text_en": "We would like to invite you to an interview on Friday at 11 a.m.",
+            "gloss": {
+              "ru": "Приглашаем вас на собеседование в пятницу в 11:00.",
+              "uz": "Sizni juma kuni soat 11:00 da ish suhbatiga taklif qilmoqchimiz."
+            }
+          },
+          {
+            "s_id": "s5",
+            "text_en": "The interview is going to take about 40 minutes.",
+            "gloss": {
+              "ru": "Собеседование займёт около 40 минут.",
+              "uz": "Suhbat taxminan 40 daqiqa davom etadi."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s6",
+            "text_en": "First, the hotel manager is going to ask you some questions about your work and your English.",
+            "gloss": {
+              "ru": "Сначала управляющий гостиницей задаст вам несколько вопросов о вашей работе и вашем английском.",
+              "uz": "Avval mehmonxona boshqaruvchisi sizga ishingiz va ingliz tilingiz haqida bir nechta savol beradi."
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "Then you are going to have a short role play: you are at the front desk, and a guest has a problem.",
+            "gloss": {
+              "ru": "Затем будет короткая ролевая игра: вы стоите за стойкой регистрации, а у гостя возникла проблема.",
+              "uz": "Keyin qisqa rolli oʻyin boʻladi: siz qabul peshtaxtasida turibsiz, mehmonning esa muammosi bor."
+            }
+          },
+          {
+            "s_id": "s8",
+            "text_en": "Please bring your passport and a copy of your diploma.",
+            "gloss": {
+              "ru": "Пожалуйста, возьмите с собой паспорт и копию диплома.",
+              "uz": "Iltimos, pasportingiz va diplomingiz nusxasini olib keling."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p4",
+        "sentences": [
+          {
+            "s_id": "s9",
+            "text_en": "The interview is in our office on the third floor.",
+            "gloss": {
+              "ru": "Собеседование пройдёт в нашем офисе на третьем этаже.",
+              "uz": "Suhbat uchinchi qavatdagi ofisimizda boʻlib oʻtadi."
+            }
+          },
+          {
+            "s_id": "s10",
+            "text_en": "If you can't come on Friday, please call me at 555 0162.",
+            "gloss": {
+              "ru": "Если вы не сможете прийти в пятницу, пожалуйста, позвоните мне по номеру 555 0162.",
+              "uz": "Agar juma kuni kela olmasangiz, iltimos, menga 555 0162 raqamiga qoʻngʻiroq qiling."
+            }
+          },
+          {
+            "s_id": "s11",
+            "text_en": "Best regards, Gulnora",
+            "gloss": {
+              "ru": "С уважением, Гульнора",
+              "uz": "Hurmat bilan, Gulnora"
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p5",
+        "sentences": [
+          {
+            "s_id": "s12",
+            "text_en": "Dear Gulnora, thank you for your email.",
+            "gloss": {
+              "ru": "Уважаемая Гульнора, спасибо за ваше письмо.",
+              "uz": "Hurmatli Gulnora, xatingiz uchun rahmat."
+            }
+          },
+          {
+            "s_id": "s13",
+            "text_en": "I am happy to come to the interview on Friday at 11 a.m.",
+            "gloss": {
+              "ru": "Я с радостью приду на собеседование в пятницу в 11:00.",
+              "uz": "Juma kuni soat 11:00 da suhbatga mamnuniyat bilan kelaman."
+            }
+          },
+          {
+            "s_id": "s14",
+            "text_en": "I am going to bring my passport and a copy of my diploma.",
+            "gloss": {
+              "ru": "Я возьму с собой паспорт и копию диплома.",
+              "uz": "Pasportim va diplomim nusxasini olib kelaman."
+            }
+          },
+          {
+            "s_id": "s15",
+            "text_en": "Best regards, Aziz",
+            "gloss": {
+              "ru": "С уважением, Азиз",
+              "uz": "Hurmat bilan, Aziz"
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "Dear",
+        "gloss": {
+          "ru": "уважаемый, дорогой (обращение в письме)",
+          "uz": "hurmatli, aziz (xatdagi murojaat)"
+        },
+        "note": null
+      },
+      {
+        "en": "application",
+        "gloss": {
+          "ru": "заявка, заявление (на работу)",
+          "uz": "ariza"
+        },
+        "note": null
+      },
+      {
+        "en": "receptionist",
+        "gloss": {
+          "ru": "администратор на ресепшене",
+          "uz": "administrator, qabulxona xodimi"
+        },
+        "note": null
+      },
+      {
+        "en": "experience",
+        "gloss": {
+          "ru": "опыт",
+          "uz": "tajriba"
+        },
+        "note": null
+      },
+      {
+        "en": "would like to",
+        "gloss": {
+          "ru": "хотели бы",
+          "uz": "…moqchimiz, istardik"
+        },
+        "note": {
+          "ru": "Вежливая форма: would like to + глагол.",
+          "uz": "Odobli shakl: would like to + feʼl."
+        }
+      },
+      {
+        "en": "interview",
+        "gloss": {
+          "ru": "собеседование; интервью",
+          "uz": "ish suhbati; intervyu"
+        },
+        "note": null
+      },
+      {
+        "en": "going to",
+        "gloss": {
+          "ru": "собираться (план); идти, ехать куда-то",
+          "uz": "…moqchi (reja); biror joyga ketmoq"
+        },
+        "note": {
+          "ru": "be going to + глагол — план или намерение.",
+          "uz": "be going to + feʼl — reja yoki niyat."
+        }
+      },
+      {
+        "en": "role play",
+        "gloss": {
+          "ru": "ролевая игра",
+          "uz": "rolli oʻyin"
+        },
+        "note": null
+      },
+      {
+        "en": "front desk",
+        "gloss": {
+          "ru": "стойка регистрации, ресепшен",
+          "uz": "qabul peshtaxtasi"
+        },
+        "note": null
+      },
+      {
+        "en": "bring",
+        "gloss": {
+          "ru": "принести, взять с собой",
+          "uz": "olib kelmoq"
+        },
+        "note": null
+      },
+      {
+        "en": "copy",
+        "gloss": {
+          "ru": "копия",
+          "uz": "nusxa"
+        },
+        "note": null
+      },
+      {
+        "en": "Best regards",
+        "gloss": {
+          "ru": "С уважением",
+          "uz": "Hurmat bilan"
+        },
+        "note": {
+          "ru": "Вежливое завершение письма.",
+          "uz": "Xatning odobli yakuni."
+        }
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "What job does Aziz want?",
+        "options": [
+          "hotel manager",
+          "receptionist",
+          "English teacher",
+          "tour guide"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q2",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "The interview is on Friday at 11 a.m.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q3",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впишите число из текста — цифрами или словом.",
+          "uz": "Matndagi sonni yozing — raqam yoki soʻz bilan."
+        },
+        "prompt_en": "The interview is going to take about ___ minutes.",
+        "options": [],
+        "answer": [
+          "40",
+          "forty"
+        ]
+      },
+      {
+        "question_id": "q4",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "What does Aziz need to bring?",
+        "options": [
+          "a photo and a letter",
+          "a letter from the guest house in Khiva",
+          "his passport and a copy of his diploma"
+        ],
+        "answer": 2
+      },
+      {
+        "question_id": "q5",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно ли это по тексту?",
+          "uz": "Matnga koʻra bu toʻgʻrimi?"
+        },
+        "prompt_en": "Aziz can't come on Friday.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q6",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите верный ответ по тексту.",
+          "uz": "Matn boʻyicha toʻgʻri javobni tanlang."
+        },
+        "prompt_en": "Who is going to ask Aziz questions first?",
+        "options": [
+          "Gulnora",
+          "the hotel manager",
+          "a guest"
+        ],
+        "answer": 1
+      }
+    ],
+    "voice": "en-US",
+    "est_minutes": 8
+  },
+  {
+    "reading_id": "r-a0-kids-my-cat",
+    "title": {
+      "ru": "Мой питомец",
+      "uz": "Mening uy hayvonim"
+    },
+    "level": "A0",
+    "audience": [
+      "kids"
+    ],
+    "topics": [
+      "home"
+    ],
+    "skill_ids": [
+      "en.gram.to-be",
+      "en.gram.pronouns-possessives",
+      "en.func.introduce"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "Hi, I am Lola, and I am seven.",
+            "gloss": {
+              "ru": "Привет, я Лола, мне семь лет.",
+              "uz": "Salom, men Lolaman, yetti yoshdaman."
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "I have a cat.",
+            "gloss": {
+              "ru": "У меня есть кошка.",
+              "uz": "Mening mushugim bor."
+            }
+          },
+          {
+            "s_id": "s3",
+            "text_en": "Her name is Mimi.",
+            "gloss": {
+              "ru": "Её зовут Мими.",
+              "uz": "Uning ismi Mimi."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s4",
+            "text_en": "Mimi is small and white.",
+            "gloss": {
+              "ru": "Мими маленькая и белая.",
+              "uz": "Mimi kichkina va oppoq."
+            }
+          },
+          {
+            "s_id": "s5",
+            "text_en": "She is very soft.",
+            "gloss": {
+              "ru": "Она очень мягкая.",
+              "uz": "U juda yumshoq."
+            }
+          },
+          {
+            "s_id": "s6",
+            "text_en": "She has green eyes and a long tail.",
+            "gloss": {
+              "ru": "У неё зелёные глаза и длинный хвост.",
+              "uz": "Uning koʻzlari yashil, dumi esa uzun."
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "Mimi likes milk and fish.",
+            "gloss": {
+              "ru": "Мими любит молоко и рыбу.",
+              "uz": "Mimi sut va baliqni yaxshi koʻradi."
+            }
+          },
+          {
+            "s_id": "s8",
+            "text_en": "She sleeps on my bed.",
+            "gloss": {
+              "ru": "Она спит на моей кровати.",
+              "uz": "U mening karavotimda uxlaydi."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s9",
+            "text_en": "Every day after school, I play with Mimi.",
+            "gloss": {
+              "ru": "Каждый день после школы я играю с Мими.",
+              "uz": "Har kuni maktabdan keyin Mimi bilan oʻynayman."
+            }
+          },
+          {
+            "s_id": "s10",
+            "text_en": "We play with a red ball.",
+            "gloss": {
+              "ru": "Мы играем с красным мячиком.",
+              "uz": "Biz qizil koptok bilan oʻynaymiz."
+            }
+          },
+          {
+            "s_id": "s11",
+            "text_en": "My brother Akmal likes Mimi too.",
+            "gloss": {
+              "ru": "Мой брат Акмал тоже любит Мими.",
+              "uz": "Akam Akmal ham Mimini yaxshi koʻradi."
+            }
+          },
+          {
+            "s_id": "s12",
+            "text_en": "Mimi is my best friend!",
+            "gloss": {
+              "ru": "Мими — моя лучшая подруга!",
+              "uz": "Mimi — mening eng yaqin doʻstim!"
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "cat",
+        "gloss": {
+          "ru": "кошка, кот",
+          "uz": "mushuk"
+        },
+        "note": null
+      },
+      {
+        "en": "Her name is",
+        "gloss": {
+          "ru": "Её зовут",
+          "uz": "Uning ismi"
+        },
+        "note": {
+          "ru": "О девочке или о кошке говорят her — «её».",
+          "uz": "Qiz bola yoki urgʻochi hayvon haqida her deyiladi."
+        }
+      },
+      {
+        "en": "soft",
+        "gloss": {
+          "ru": "мягкий",
+          "uz": "yumshoq"
+        },
+        "note": null
+      },
+      {
+        "en": "eyes",
+        "gloss": {
+          "ru": "глаза",
+          "uz": "koʻzlar"
+        },
+        "note": null
+      },
+      {
+        "en": "tail",
+        "gloss": {
+          "ru": "хвост",
+          "uz": "dum"
+        },
+        "note": null
+      },
+      {
+        "en": "sleeps",
+        "gloss": {
+          "ru": "спит",
+          "uz": "uxlaydi"
+        },
+        "note": null
+      },
+      {
+        "en": "best friend",
+        "gloss": {
+          "ru": "лучший друг, лучшая подруга",
+          "uz": "eng yaqin doʻst"
+        },
+        "note": null
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выбери правильный ответ.",
+          "uz": "Toʻgʻri javobni tanla."
+        },
+        "prompt_en": "What colour is Mimi?",
+        "options": [
+          "black",
+          "white",
+          "red"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q2",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Это правда? Посмотри в тексте.",
+          "uz": "Bu toʻgʻrimi? Matnga qara."
+        },
+        "prompt_en": "Mimi likes milk.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q3",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впиши пропущенное слово из текста.",
+          "uz": "Matndan tushib qolgan soʻzni yoz."
+        },
+        "prompt_en": "Mimi sleeps on Lola's ___.",
+        "options": [],
+        "answer": [
+          "bed"
+        ]
+      },
+      {
+        "question_id": "q4",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выбери правильный ответ.",
+          "uz": "Toʻgʻri javobni tanla."
+        },
+        "prompt_en": "How old is Lola?",
+        "options": [
+          "seven",
+          "six",
+          "eight"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q5",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Это правда? Посмотри в тексте.",
+          "uz": "Bu toʻgʻrimi? Matnga qara."
+        },
+        "prompt_en": "Mimi has blue eyes.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      }
+    ],
+    "voice": "en-GB",
+    "est_minutes": 3
+  },
+  {
+    "reading_id": "r-a0-kids-school-day",
+    "title": {
+      "ru": "Мой день в школе",
+      "uz": "Maktabdagi bir kunim"
+    },
+    "level": "A0",
+    "audience": [
+      "kids"
+    ],
+    "topics": [
+      "study"
+    ],
+    "skill_ids": [
+      "en.gram.to-be",
+      "en.voc.numbers",
+      "en.func.introduce"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "My name is Bobur, and I am eight years old.",
+            "gloss": {
+              "ru": "Меня зовут Бобур, мне восемь лет.",
+              "uz": "Mening ismim Bobur, men sakkiz yoshdaman."
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "I am in the second grade.",
+            "gloss": {
+              "ru": "Я учусь во втором классе.",
+              "uz": "Men ikkinchi sinfda oʻqiyman."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s3",
+            "text_en": "My school starts at eight o'clock.",
+            "gloss": {
+              "ru": "Уроки в моей школе начинаются в восемь часов.",
+              "uz": "Maktabimda darslar soat sakkizda boshlanadi."
+            }
+          },
+          {
+            "s_id": "s4",
+            "text_en": "First, we have math.",
+            "gloss": {
+              "ru": "Сначала у нас математика.",
+              "uz": "Avval bizda matematika boʻladi."
+            }
+          },
+          {
+            "s_id": "s5",
+            "text_en": "Math is easy for me.",
+            "gloss": {
+              "ru": "Математика для меня — это легко.",
+              "uz": "Matematika men uchun oson."
+            }
+          },
+          {
+            "s_id": "s6",
+            "text_en": "Then we have English and music.",
+            "gloss": {
+              "ru": "Потом у нас английский и музыка.",
+              "uz": "Keyin ingliz tili va musiqa darsi boʻladi."
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "My English teacher is very nice.",
+            "gloss": {
+              "ru": "Моя учительница английского очень хорошая.",
+              "uz": "Ingliz tili oʻqituvchim juda yaxshi."
+            }
+          },
+          {
+            "s_id": "s8",
+            "text_en": "At twelve o'clock, we eat lunch.",
+            "gloss": {
+              "ru": "В двенадцать часов мы обедаем.",
+              "uz": "Soat oʻn ikkida tushlik qilamiz."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s9",
+            "text_en": "My best friend is Sardor.",
+            "gloss": {
+              "ru": "Мой лучший друг — Сардор.",
+              "uz": "Eng yaqin doʻstim — Sardor."
+            }
+          },
+          {
+            "s_id": "s10",
+            "text_en": "We sit together in class.",
+            "gloss": {
+              "ru": "На уроках мы сидим вместе.",
+              "uz": "Darsda birga oʻtiramiz."
+            }
+          },
+          {
+            "s_id": "s11",
+            "text_en": "School ends at one o'clock, and my mom takes me home.",
+            "gloss": {
+              "ru": "Уроки заканчиваются в час, и мама забирает меня домой.",
+              "uz": "Darslar soat birda tugaydi, keyin onam meni uyga olib ketadi."
+            }
+          },
+          {
+            "s_id": "s12",
+            "text_en": "I like my school!",
+            "gloss": {
+              "ru": "Я люблю свою школу!",
+              "uz": "Men maktabimni yaxshi koʻraman!"
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "grade",
+        "gloss": {
+          "ru": "класс (год учёбы); оценка",
+          "uz": "sinf; baho"
+        },
+        "note": {
+          "ru": "Так говорят в американском английском; в британском — year.",
+          "uz": "Amerika inglizchasida shunday deyiladi; Britaniyada — year."
+        }
+      },
+      {
+        "en": "starts",
+        "gloss": {
+          "ru": "начинается",
+          "uz": "boshlanadi"
+        },
+        "note": null
+      },
+      {
+        "en": "math",
+        "gloss": {
+          "ru": "математика",
+          "uz": "matematika"
+        },
+        "note": {
+          "ru": "В британском английском — maths.",
+          "uz": "Britaniya inglizchasida — maths."
+        }
+      },
+      {
+        "en": "easy",
+        "gloss": {
+          "ru": "лёгкий, простой",
+          "uz": "oson"
+        },
+        "note": null
+      },
+      {
+        "en": "lunch",
+        "gloss": {
+          "ru": "обед",
+          "uz": "tushlik"
+        },
+        "note": null
+      },
+      {
+        "en": "best friend",
+        "gloss": {
+          "ru": "лучший друг, лучшая подруга",
+          "uz": "eng yaqin doʻst"
+        },
+        "note": null
+      },
+      {
+        "en": "together",
+        "gloss": {
+          "ru": "вместе",
+          "uz": "birga"
+        },
+        "note": null
+      },
+      {
+        "en": "ends",
+        "gloss": {
+          "ru": "заканчивается",
+          "uz": "tugaydi"
+        },
+        "note": null
+      },
+      {
+        "en": "takes me home",
+        "gloss": {
+          "ru": "забирает меня домой",
+          "uz": "meni uyga olib ketadi"
+        },
+        "note": null
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выбери правильный ответ.",
+          "uz": "Toʻgʻri javobni tanla."
+        },
+        "prompt_en": "When does school start?",
+        "options": [
+          "at one o'clock",
+          "at eight o'clock",
+          "at twelve o'clock"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q2",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Это правда? Посмотри в тексте.",
+          "uz": "Bu toʻgʻrimi? Matnga qara."
+        },
+        "prompt_en": "Bobur is in the second grade.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q3",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впиши пропущенное слово из текста.",
+          "uz": "Matndan tushib qolgan soʻzni yoz."
+        },
+        "prompt_en": "Bobur and Sardor sit ___ in class.",
+        "options": [],
+        "answer": [
+          "together"
+        ]
+      },
+      {
+        "question_id": "q4",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Это правда? Посмотри в тексте.",
+          "uz": "Bu toʻgʻrimi? Matnga qara."
+        },
+        "prompt_en": "Bobur eats lunch at one o'clock.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q5",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выбери правильный ответ.",
+          "uz": "Toʻgʻri javobni tanla."
+        },
+        "prompt_en": "Who takes Bobur home?",
+        "options": [
+          "Sardor",
+          "the teacher",
+          "Bobur's mom"
+        ],
+        "answer": 2
+      }
+    ],
+    "voice": "en-US",
+    "est_minutes": 3
+  },
+  {
+    "reading_id": "r-a1-kids-birthday",
+    "title": {
+      "ru": "День рождения подруги",
+      "uz": "Dugonaning tugʻilgan kuni"
+    },
+    "level": "A1",
+    "audience": [
+      "kids"
+    ],
+    "topics": [
+      "hobbies",
+      "food"
+    ],
+    "skill_ids": [
+      "en.read.signs-menus",
+      "en.gram.there-is",
+      "en.voc.food-drink"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "Kamila has a card from her friend Madina.",
+            "gloss": {
+              "ru": "У Камилы открытка от подруги Мадины.",
+              "uz": "Kamilaga dugonasi Madinadan taklifnoma keldi."
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "The card says: \"Come to my birthday party on Saturday at 4 p.m.!\"",
+            "gloss": {
+              "ru": "На открытке написано: «Приходи на мой день рождения в субботу в 16:00!»",
+              "uz": "Taklifnomada «Shanba kuni soat 16:00 da tugʻilgan kunimga kel!» deb yozilgan."
+            }
+          },
+          {
+            "s_id": "s3",
+            "text_en": "Madina is nine years old this week.",
+            "gloss": {
+              "ru": "На этой неделе Мадине исполняется девять лет.",
+              "uz": "Shu hafta Madina toʻqqiz yoshga toʻladi."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s4",
+            "text_en": "Now it is Saturday, and Kamila is at Madina's house.",
+            "gloss": {
+              "ru": "Сегодня суббота, и Камила в гостях у Мадины.",
+              "uz": "Bugun shanba, Kamila Madinaning uyida."
+            }
+          },
+          {
+            "s_id": "s5",
+            "text_en": "There are ten children in the garden.",
+            "gloss": {
+              "ru": "В саду десять детей.",
+              "uz": "Hovlida oʻnta bola bor."
+            }
+          },
+          {
+            "s_id": "s6",
+            "text_en": "There is a big table with fruit, juice and a chocolate cake.",
+            "gloss": {
+              "ru": "Там стоит большой стол с фруктами, соком и шоколадным тортом.",
+              "uz": "U yerda mevalar, sharbat va shokoladli tort qoʻyilgan katta stol bor."
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "Some children are dancing, and two boys are playing with balloons.",
+            "gloss": {
+              "ru": "Одни дети танцуют, а два мальчика играют с воздушными шариками.",
+              "uz": "Baʼzi bolalar raqs tushyapti, ikki oʻgʻil bola esa havo sharlari bilan oʻynayapti."
+            }
+          },
+          {
+            "s_id": "s8",
+            "text_en": "Madina's grandmother is singing a happy song.",
+            "gloss": {
+              "ru": "Бабушка Мадины поёт весёлую песню.",
+              "uz": "Madinaning buvisi quvnoq qoʻshiq aytyapti."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s9",
+            "text_en": "Kamila has a present for Madina: a book about animals.",
+            "gloss": {
+              "ru": "У Камилы есть подарок для Мадины — книга о животных.",
+              "uz": "Kamilaning Madinaga sovgʻasi bor — hayvonlar haqidagi kitob."
+            }
+          },
+          {
+            "s_id": "s10",
+            "text_en": "Madina loves animals, and she can read very well.",
+            "gloss": {
+              "ru": "Мадина любит животных и очень хорошо умеет читать.",
+              "uz": "Madina hayvonlarni sevadi va juda yaxshi oʻqiy oladi."
+            }
+          },
+          {
+            "s_id": "s11",
+            "text_en": "She is smiling and says, \"Thank you, Kamila!\"",
+            "gloss": {
+              "ru": "Она улыбается и говорит: «Спасибо, Камила!»",
+              "uz": "U jilmayib: «Rahmat, Kamila!» — deydi."
+            }
+          },
+          {
+            "s_id": "s12",
+            "text_en": "Now all the children are eating cake.",
+            "gloss": {
+              "ru": "Теперь все дети едят торт.",
+              "uz": "Endi hamma bolalar tort yeyapti."
+            }
+          },
+          {
+            "s_id": "s13",
+            "text_en": "It is a very happy day!",
+            "gloss": {
+              "ru": "Это очень счастливый день!",
+              "uz": "Bu juda quvonchli kun!"
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "birthday party",
+        "gloss": {
+          "ru": "праздник в честь дня рождения",
+          "uz": "tugʻilgan kun bazmi"
+        },
+        "note": null
+      },
+      {
+        "en": "children",
+        "gloss": {
+          "ru": "дети",
+          "uz": "bolalar"
+        },
+        "note": {
+          "ru": "Множественное число от child — «ребёнок».",
+          "uz": "child — «bola» soʻzining koʻplik shakli."
+        }
+      },
+      {
+        "en": "dancing",
+        "gloss": {
+          "ru": "танцевать; танцы",
+          "uz": "raqs tushmoq; raqs"
+        },
+        "note": {
+          "ru": "be + глагол с -ing — то, что происходит сейчас.",
+          "uz": "be + -ing qoʻshimchali feʼl — hozir boʻlayotgan ish."
+        }
+      },
+      {
+        "en": "balloons",
+        "gloss": {
+          "ru": "воздушные шарики",
+          "uz": "havo sharlari"
+        },
+        "note": null
+      },
+      {
+        "en": "grandmother",
+        "gloss": {
+          "ru": "бабушка",
+          "uz": "buvi"
+        },
+        "note": null
+      },
+      {
+        "en": "present",
+        "gloss": {
+          "ru": "подарок",
+          "uz": "sovgʻa"
+        },
+        "note": null
+      },
+      {
+        "en": "can read",
+        "gloss": {
+          "ru": "умеет читать",
+          "uz": "oʻqiy oladi"
+        },
+        "note": null
+      },
+      {
+        "en": "smiling",
+        "gloss": {
+          "ru": "улыбаться",
+          "uz": "jilmaymoq"
+        },
+        "note": null
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выбери правильный ответ.",
+          "uz": "Toʻgʻri javobni tanla."
+        },
+        "prompt_en": "When is the party?",
+        "options": [
+          "on Friday at 4 p.m.",
+          "on Saturday at 4 p.m.",
+          "on Sunday at 9 a.m."
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q2",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Это правда? Посмотри в тексте.",
+          "uz": "Bu toʻgʻrimi? Matnga qara."
+        },
+        "prompt_en": "There are ten children in the garden.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q3",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выбери правильный ответ.",
+          "uz": "Toʻgʻri javobni tanla."
+        },
+        "prompt_en": "What is Kamila's present for Madina?",
+        "options": [
+          "a ball",
+          "a cake",
+          "a card",
+          "a book about animals"
+        ],
+        "answer": 3
+      },
+      {
+        "question_id": "q4",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впиши пропущенное слово из текста.",
+          "uz": "Matndan tushib qolgan soʻzni yoz."
+        },
+        "prompt_en": "Madina's grandmother is ___ a happy song.",
+        "options": [],
+        "answer": [
+          "singing"
+        ]
+      },
+      {
+        "question_id": "q5",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Это правда? Посмотри в тексте.",
+          "uz": "Bu toʻgʻrimi? Matnga qara."
+        },
+        "prompt_en": "Madina is ten years old this week.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      }
+    ],
+    "voice": "en-GB",
+    "est_minutes": 5
+  },
+  {
+    "reading_id": "r-a1-kids-park",
+    "title": {
+      "ru": "Игры в парке",
+      "uz": "Bogʻdagi oʻyinlar"
+    },
+    "level": "A1",
+    "audience": [
+      "kids"
+    ],
+    "topics": [
+      "hobbies"
+    ],
+    "skill_ids": [
+      "en.read.signs-menus",
+      "en.gram.there-is",
+      "en.voc.city-places"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "There is a big park near my house.",
+            "gloss": {
+              "ru": "Рядом с моим домом есть большой парк.",
+              "uz": "Uyimiz yaqinida katta bogʻ bor."
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "It has a lake, tall trees and a playground.",
+            "gloss": {
+              "ru": "Там есть озеро, высокие деревья и детская площадка.",
+              "uz": "Unda koʻl, baland daraxtlar va bolalar maydonchasi bor."
+            }
+          },
+          {
+            "s_id": "s3",
+            "text_en": "On Sundays, I go there with my dad and my little sister, Nilufar.",
+            "gloss": {
+              "ru": "По воскресеньям я хожу туда с папой и младшей сестрёнкой Нилуфар.",
+              "uz": "Yakshanba kunlari u yerga dadam va singlim Nilufar bilan boraman."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s4",
+            "text_en": "Today the weather is warm and sunny.",
+            "gloss": {
+              "ru": "Сегодня тепло и солнечно.",
+              "uz": "Bugun havo iliq va quyoshli."
+            }
+          },
+          {
+            "s_id": "s5",
+            "text_en": "My sister is on the swings, and Dad is reading a book on a bench.",
+            "gloss": {
+              "ru": "Сестрёнка качается на качелях, а папа читает книгу на скамейке.",
+              "uz": "Singlim argʻimchoqda uchyapti, dadam esa oʻrindiqda kitob oʻqiyapti."
+            }
+          },
+          {
+            "s_id": "s6",
+            "text_en": "I am playing hide-and-seek with my friends.",
+            "gloss": {
+              "ru": "Я играю с друзьями в прятки.",
+              "uz": "Men doʻstlarim bilan bekinmachoq oʻynayapman."
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "Javlon is counting to ten, and we are hiding behind the trees.",
+            "gloss": {
+              "ru": "Жавлон считает до десяти, а мы прячемся за деревьями.",
+              "uz": "Javlon oʻngacha sanayapti, biz esa daraxtlar orqasiga yashirinyapmiz."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s8",
+            "text_en": "Near the lake, there is a sign: \"Please do not feed the ducks.\"",
+            "gloss": {
+              "ru": "У озера висит табличка: «Пожалуйста, не кормите уток».",
+              "uz": "Koʻl yonida «Iltimos, oʻrdaklarni boqmang» degan yozuv bor."
+            }
+          },
+          {
+            "s_id": "s9",
+            "text_en": "We can watch the ducks, but we can't feed them.",
+            "gloss": {
+              "ru": "Мы можем смотреть на уток, но кормить их нельзя.",
+              "uz": "Oʻrdaklarni tomosha qilsak boʻladi, lekin ularni boqish mumkin emas."
+            }
+          },
+          {
+            "s_id": "s10",
+            "text_en": "At five o'clock, we go home.",
+            "gloss": {
+              "ru": "В пять часов мы идём домой.",
+              "uz": "Soat beshda uyga qaytamiz."
+            }
+          },
+          {
+            "s_id": "s11",
+            "text_en": "We are tired, but we are happy!",
+            "gloss": {
+              "ru": "Мы устали, но мы счастливы!",
+              "uz": "Charchadik, lekin xursandmiz!"
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "near",
+        "gloss": {
+          "ru": "рядом с, около",
+          "uz": "yaqinida"
+        },
+        "note": null
+      },
+      {
+        "en": "lake",
+        "gloss": {
+          "ru": "озеро",
+          "uz": "koʻl"
+        },
+        "note": null
+      },
+      {
+        "en": "playground",
+        "gloss": {
+          "ru": "детская площадка",
+          "uz": "bolalar maydonchasi"
+        },
+        "note": null
+      },
+      {
+        "en": "swings",
+        "gloss": {
+          "ru": "качели",
+          "uz": "argʻimchoq"
+        },
+        "note": null
+      },
+      {
+        "en": "bench",
+        "gloss": {
+          "ru": "скамейка",
+          "uz": "oʻrindiq"
+        },
+        "note": null
+      },
+      {
+        "en": "counting",
+        "gloss": {
+          "ru": "считать",
+          "uz": "sanamoq"
+        },
+        "note": null
+      },
+      {
+        "en": "hiding",
+        "gloss": {
+          "ru": "прятаться",
+          "uz": "yashirinmoq"
+        },
+        "note": null
+      },
+      {
+        "en": "behind",
+        "gloss": {
+          "ru": "за, позади",
+          "uz": "orqasida, ortida"
+        },
+        "note": null
+      },
+      {
+        "en": "feed",
+        "gloss": {
+          "ru": "кормить",
+          "uz": "boqmoq, yem bermoq"
+        },
+        "note": null
+      },
+      {
+        "en": "ducks",
+        "gloss": {
+          "ru": "утки",
+          "uz": "oʻrdaklar"
+        },
+        "note": null
+      },
+      {
+        "en": "tired",
+        "gloss": {
+          "ru": "уставший",
+          "uz": "charchagan"
+        },
+        "note": null
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выбери правильный ответ.",
+          "uz": "Toʻgʻri javobni tanla."
+        },
+        "prompt_en": "Who is reading a book?",
+        "options": [
+          "Nilufar",
+          "Dad",
+          "Javlon"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q2",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Это правда? Посмотри в тексте.",
+          "uz": "Bu toʻgʻrimi? Matnga qara."
+        },
+        "prompt_en": "The weather is cold today.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q3",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Впиши число из текста — цифрами или словом.",
+          "uz": "Matndagi sonni yoz — raqam yoki soʻz bilan."
+        },
+        "prompt_en": "Javlon is counting to ___.",
+        "options": [],
+        "answer": [
+          "ten",
+          "10"
+        ]
+      },
+      {
+        "question_id": "q4",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выбери правильный ответ.",
+          "uz": "Toʻgʻri javobni tanla."
+        },
+        "prompt_en": "What does the sign near the lake say?",
+        "options": [
+          "Please do not feed the ducks.",
+          "Please do not play here.",
+          "Please do not walk on the grass."
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q5",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Это правда? Посмотри в тексте.",
+          "uz": "Bu toʻgʻrimi? Matnga qara."
+        },
+        "prompt_en": "They go home at five o'clock.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 0
+      }
+    ],
+    "voice": "en-US",
+    "est_minutes": 5
+  }
+]

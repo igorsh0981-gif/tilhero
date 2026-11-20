@@ -97,7 +97,7 @@ async def test_create_child_profile(env) -> None:
     child = await env.child(guardian, " Мадина ", "6-9")
     cid = child["learner_id"]
     assert child == {"learner_id": cid, "kind": "child", "display_name": "Мадина", "age_band": "6-9",
-                     "is_active": False, "onboarding_completed": False,
+                     "is_active": False, "onboarding_completed": False, "voice_consent": False,
                      "settings": {**CHILD_SETTINGS, "timezone": "Asia/Samarkand"}}
     second = await env.child(guardian, "Тимур", "10-13")
 

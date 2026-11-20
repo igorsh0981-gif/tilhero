@@ -9,7 +9,7 @@
 - кнопка «Открыть» (startapp): напоминание и пропуск → route_home; приглашение принято / новый участник
   семьи / отклонено → route_family; неотвеченное приглашение → invite_<invite_id>; поддержка → ticket_<number>;
   «Что нового» → route_news; решение по заявке на песню/фильм (спринт 3) → route_media_requests; решение по
-  апелляции на оценку урока (спринт 4) → route_lessons;
+  апелляции на оценку урока (спринт 4) → route_lessons; слова к повторению (спринт 5) → route_review;
 - параметры проверяются строгой моделью при приёме (неизвестное поле/формат → failed params_invalid).
 
 Спринт 2 (INTERNAL_API §3 «Шаблоны»): код — источник текстов по умолчанию; сотрудник создаёт версию поверх.
@@ -455,6 +455,58 @@ def _appeal_decided_kid(lang: Lang, p: AppealParams, ctx: Context) -> Rendered:
     return Rendered(title, body, LESSONS_BUTTON[lang], LESSONS_ROUTE)
 
 
+# ---------------------------------------------------------------- reviews_due (memory, спринт 5)
+
+REVIEW_BUTTON = {"ru": "Повторить", "uz": "Takrorlash"}
+REVIEW_ROUTE = "route_review"
+REVIEW_MINUTES_MIN, REVIEW_MINUTES_MAX = 2, 15
+
+
+class ReviewsDueParams(Params):
+    """Вечернее напоминание о повторении (AT-59): сколько карточек к сроку на местную дату. Слов и текстов ученика
+    в параметрах нет — только число."""
+
+    local_date: date
+    due_count: Annotated[int, Field(ge=1, le=2000)]
+
+
+def review_minutes(due_count: int) -> int:
+    """Примерное время «Повторения дня»: ceil(due_count × 0,4), не меньше 2 и не больше 15 минут."""
+    return max(REVIEW_MINUTES_MIN, min(REVIEW_MINUTES_MAX, -(-due_count * 2 // 5)))
+
+
+def _reviews_due_values(lang: Lang, p: ReviewsDueParams, ctx: Context) -> dict[str, str]:
+    return {"due_count": str(p.due_count), "review_minutes": str(review_minutes(p.due_count))}
+
+
+def _reviews_due_kid_values(lang: Lang, p: ReviewsDueParams, ctx: Context) -> dict[str, str]:
+    return {"learner_name": ctx.learner_name or KID_NAME[lang], **_reviews_due_values(lang, p, ctx)}
+
+
+def _reviews_due(lang: Lang, p: ReviewsDueParams, ctx: Context) -> Rendered:
+    minutes = review_minutes(p.due_count)
+    if lang == "ru":
+        body = f"Пора повторить слова: {p.due_count}. Это займёт около {minutes} минут."
+        return Rendered("Повторение дня", body, REVIEW_BUTTON[lang], REVIEW_ROUTE)
+    body = f"Soʻzlarni takrorlash vaqti keldi: {p.due_count}. Bu taxminan {minutes} daqiqa oladi."
+    return Rendered("Kunlik takrorlash", body, REVIEW_BUTTON[lang], REVIEW_ROUTE)
+
+
+def _reviews_due_kid(lang: Lang, p: ReviewsDueParams, ctx: Context) -> Rendered:
+    """Родителю, с именем ребёнка, мягко (CONVENTIONS §8): без серии, давления и сравнения."""
+    name = ctx.learner_name
+    minutes = review_minutes(p.due_count)
+    if lang == "ru":
+        title = f"{name}: пора повторить слова" if name else "Ребёнку пора повторить слова"
+        body = (f"Пора повторить слова: {p.due_count}. Это займёт около {minutes} минут — "
+                "повторите вместе, будет интересно!")
+        return Rendered(title, body, REVIEW_BUTTON[lang], REVIEW_ROUTE)
+    title = f"{name}: soʻzlarni takrorlash vaqti" if name else "Farzandingizga soʻzlarni takrorlash vaqti"
+    body = (f"Soʻzlarni takrorlash vaqti keldi: {p.due_count}. Bu taxminan {minutes} daqiqa oladi — "
+            "birga takrorlang, qiziqarli boʻladi!")
+    return Rendered(title, body, REVIEW_BUTTON[lang], REVIEW_ROUTE)
+
+
 # ---------------------------------------------------------------- pin.reset_code (transactional, не в центре)
 
 
@@ -545,6 +597,12 @@ PLACEHOLDER_DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "appeal_result": (
         "Итог проверки оценки урока на языке ученика: «оценка верна» или «оценка исправлена»",
         "Result of the lesson grade review in the learner's language: “grade is correct” or “grade corrected”",
+    ),
+    "due_count": ("Сколько слов к повторению сегодня, число, например «12»",
+                  "Words due for review today, a number, e.g. “12”"),
+    "review_minutes": (
+        "Примерное время повторения в минутах, число от 2 до 15 (≈ 0,4 мин на слово), например «5»",
+        "Estimated review time in minutes, a number from 2 to 15 (≈ 0.4 min per word), e.g. “5”",
     ),
 }
 KID_NAME = {"ru": "Ваш ребёнок", "uz": "Farzandingiz"}
@@ -877,6 +935,20 @@ TEMPLATES: dict[str, TemplateSpec] = {
                          "Decision on a child's lesson grade appeal — gentle, to the parent"),
             placeholder_names=("learner_name", "appeal_result"), placeholders=_appeal_kid_values,
             sample={"appeal_id": _SAMPLE_ID, "evaluation_id": _SAMPLE_ID, "decision": "upheld"},
+        ),
+        TemplateSpec(
+            "reviews_due", "reminders", ReviewsDueParams, _reviews_due, kid_variant="reviews_due.kid",
+            description=("Вечернее напоминание о повторении слов (19:00 по поясу плана)",
+                         "Evening reminder to review words (19:00 in the plan's time zone)"),
+            placeholder_names=("due_count", "review_minutes"), placeholders=_reviews_due_values,
+            sample={"local_date": "2026-11-20", "due_count": 12},
+        ),
+        TemplateSpec(
+            "reviews_due.kid", "reminders", ReviewsDueParams, _reviews_due_kid,
+            description=("Напоминание о повторении слов ребёнка — родителю, мягко",
+                         "Child's word review reminder — gentle, to the parent"),
+            placeholder_names=("learner_name", "due_count", "review_minutes"), placeholders=_reviews_due_kid_values,
+            sample={"local_date": "2026-11-20", "due_count": 7},
         ),
         TemplateSpec(
             "release_note.published", "product", ReleaseNoteParams, _release_note,

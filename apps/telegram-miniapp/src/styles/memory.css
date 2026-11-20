@@ -1,0 +1,131 @@
+/* ==========================================================================
+   Sprint 5 screens in the notebook language: «Повторение дня» (card, player, tiles, the check block, the summary),
+   «Словарь» (rows with the strength meter, the card), reading (tappable words, glossary terms), «Произнести» (the
+   recording state, the level meter, words of the result), the voice consent. Tokens only, no colour literals; a state
+   is never shown by colour alone (bars + a word, a sign next to each word, a dotted underline for glossary terms).
+   Same layer as content.css / lessons.css (request to move into ui-tokens — README).
+   ========================================================================== */
+@layer layout {
+  /* ---------- the card of Home / the dictionary ---------- */
+  .rv-card .pills .pill { display: inline-flex; align-items: center; gap: 4px; }
+  .rv-hero { height: 120px; width: auto; margin: 0 auto; }
+  .rv-start { padding-top: 12px; }
+  .rv-end { padding-top: 24px; align-items: center; text-align: center; }
+
+  /* ---------- the player ---------- */
+  .lp-strip .prog.grow { flex: 1; height: 6px; }
+  .rv-task { gap: 14px; }
+  .rv-word { font-size: 26px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; margin: 0; }
+  .rv-gloss { font-size: var(--fs-lg); color: var(--ink); margin: 0; }
+  .rv-gapline .gap, .rv-task .lp-q .gap {
+    display: inline-block; min-width: 3.2em; border-bottom: 2.5px solid var(--pen); margin: 0 3px; text-align: center;
+    color: var(--pen); font-weight: 700;
+  }
+  .rv-in { font-size: 18px; }
+  .rv-check { align-items: flex-start; }
+  .rv-check svg { color: var(--warn); }
+  .rv-line { min-height: 60px; }
+  .ow-line.letters, .ow-bank.letters { gap: 6px; }
+  .letters .ow-word { min-width: 46px; padding: 0 10px; font-size: 20px; text-transform: none; }
+  .speak { min-height: var(--tap); }
+  .listen-btn.big { width: 84px; height: 84px; }
+
+  /* children: bigger targets and type */
+  .app[data-learner="child"] .rv-word { font-size: 30px; }
+  .app[data-learner="child"] .rv-task .opt { min-height: 64px; font-size: 17px; }
+  .app[data-learner="child"] .rv-task .ow-word { min-height: 56px; font-size: 20px; }
+  .app[data-learner="child"] .letters .ow-word { min-width: 54px; font-size: 24px; }
+  .app[data-learner="child"] .lp-foot .btn, .app[data-learner="child"] .lp-foot .btn2 { min-height: 56px; font-size: 16.5px; }
+  .app[data-learner="child"] .rv-in { font-size: 20px; min-height: 56px; }
+
+  /* ---------- strength: bars AND a word ---------- */
+  .strength { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 700; color: var(--ink2); white-space: nowrap; }
+  .strength .bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+  .strength .bars i { width: 5px; border-radius: 2px; border: 1.5px solid var(--ink2); background: transparent; }
+  .strength .bars i:nth-child(1) { height: 6px; }
+  .strength .bars i:nth-child(2) { height: 10px; }
+  .strength .bars i:nth-child(3) { height: 14px; }
+  .strength .bars i.on { background: var(--ink2); }
+  .strength.s-strong { color: var(--ok); }
+  .strength.s-strong .bars i { border-color: var(--ok); }
+  .strength.s-strong .bars i.on { background: var(--ok); }
+  .strength.s-weak { color: var(--warn); }
+  .strength.s-weak .bars i { border-color: var(--warn); }
+  .strength.s-weak .bars i.on { background: var(--warn); }
+  .strength.compact { flex-direction: column; gap: 2px; font-size: 10.5px; font-weight: 600; }
+
+  /* ---------- dictionary ---------- */
+  .search { position: relative; }
+  .search > svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ink2); pointer-events: none; }
+  .search .inp { padding-left: 38px; }
+  .dict-row { width: 100%; text-align: left; background: var(--card); border: 0; border-bottom: 1px solid var(--line); font: inherit; color: var(--ink); cursor: pointer; }
+  .list > li:last-child > .dict-row { border-bottom: 0; }
+  .dict-row .t > b { overflow-wrap: anywhere; }
+  .dict-row .pills { align-items: center; }
+  .dict-row .due { font-size: var(--fs-xs); color: var(--ink2); }
+  .gl-src { display: inline-flex; align-items: center; gap: 5px; }
+  .gl-src.ai { color: var(--warn); }
+  .cd-en { font-size: 28px; overflow-wrap: anywhere; }
+  .cd-gloss { font-size: var(--fs-lg); margin: 0; }
+  .cd-foot .duo { width: 100%; }
+  .cd-foot .btn2 { gap: 6px; }
+  .child-item + .child-item { border-top: 1px solid var(--line); }
+  .child-item > .row { border-bottom: 1px dashed var(--line); }
+
+  /* ---------- reading ---------- */
+  .rd-text { font-size: 17px; line-height: 1.75; color: var(--ink); }
+  .rd-text.kid { font-size: 20px; line-height: 1.8; }
+  .rd-p { margin: 0 0 14px; overflow-wrap: anywhere; }
+  .rw {
+    font: inherit; color: inherit; background: transparent; border: 0; padding: 0; margin: 0; cursor: pointer;
+    border-radius: 4px; line-height: inherit; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .rw:hover { background: var(--pen-soft); }
+  .rw:focus-visible { outline: 2px solid var(--pen); outline-offset: 1px; }
+  .rw.term { text-decoration: underline dotted var(--pen) 2px; text-underline-offset: 4px; font-weight: 600; background: linear-gradient(transparent 62%, var(--mark) 62%); }
+  .s-act {
+    display: inline-grid; place-items: center; width: 30px; height: 30px; margin: 0 2px; vertical-align: -6px; border-radius: 15px;
+    border: 1.5px solid var(--line); background: var(--card); color: var(--pen); cursor: pointer; position: relative;
+  }
+  .s-act::after { content: ""; position: absolute; inset: -7px; }
+  .nw { white-space: nowrap; }
+  .rd-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0 18px; }
+  .ic-line { display: flex; gap: 8px; align-items: flex-start; }
+  .ic-line > svg { flex-shrink: 0; margin-top: 2px; }
+  .rd-word { font-size: 24px; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
+  .rd-gloss { font-size: var(--fs-lg); font-weight: 600; margin: 0; }
+  .rd-sentence { font-size: 18px; line-height: 1.5; margin: 0; }
+
+  /* ---------- «Произнести» ---------- */
+  .pn-off .notice svg { color: var(--pen); }
+  .pn-text { font-size: 20px; font-weight: 700; line-height: 1.35; margin: 0; overflow-wrap: anywhere; }
+  .pn-rec { align-items: center; }
+  .rec-btn {
+    width: 84px; height: 84px; border-radius: 42px; border: 0; background: var(--err); color: var(--on-err, var(--pen-ink)); display: grid;
+    place-items: center; cursor: pointer; box-shadow: var(--lift-shadow); margin: 0 auto;
+  }
+  .rec-btn:disabled { opacity: .5; cursor: progress; }
+  .rec-state { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; margin: 0; }
+  .rec-dot { width: 12px; height: 12px; border-radius: 6px; background: var(--err); animation: rec-blink 1s steps(2, start) infinite; }
+  @keyframes rec-blink { to { visibility: hidden; } }
+  @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
+  .meter { display: flex; align-items: flex-end; gap: 3px; height: 28px; justify-content: center; }
+  .meter i { width: 8px; height: 100%; border-radius: 3px; background: var(--line); }
+  .meter i:nth-child(odd) { height: 70%; }
+  .meter i.on { background: var(--pen); }
+  .pn-rec .prog { width: 100%; }
+  .pn-head { display: inline-flex; align-items: center; gap: 8px; }
+  .pn-head.clear svg, .pn-head.mostly_clear svg { color: var(--ok); }
+  .pn-head.needs_practice svg { color: var(--warn); }
+  .pn-words { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .pn-w {
+    display: inline-flex; align-items: baseline; gap: 4px; padding: 6px 10px; border-radius: 10px; border: 1.5px solid var(--line);
+    background: var(--card); font-weight: 600; font-size: 16px;
+  }
+  .pn-w small { font-size: 13px; font-weight: 800; }
+  .pn-w.ok small { color: var(--ok); }
+  .pn-w.practice { border-color: var(--warn); background: var(--warn-soft); }
+  .pn-w.practice > span { text-decoration: underline wavy var(--warn) 1.5px; text-underline-offset: 4px; }
+  .pn-w.missed { border-style: dashed; color: var(--ink2); }
+  .pn-w.extra { border-style: dotted; color: var(--ink2); font-style: italic; }
+}

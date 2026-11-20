@@ -124,8 +124,9 @@ async def resend_evaluations(rt: Runtime, catalog: CatalogGateway, settings: Set
             if s is None:
                 continue
             body = evaluation.build_request(s, await evaluation.steps_of(db, s), await evaluation.turns_of(db, s))
-        before = await clients.skill_states(rt, s.user_id, s.pair_id) if s.kind != "review" else None
-        snapshot = await catalog.snapshot(s.course_id or settings.default_course_id) if s.kind != "review" else None
+        practice = s.kind in ("review", "reading")  # навыки не меняются — «было» и названия не нужны
+        before = await clients.skill_states(rt, s.user_id, s.pair_id) if not practice else None
+        snapshot = await catalog.snapshot(s.course_id or settings.default_course_id) if not practice else None
         titles: dict[str, Any] = {sk["skill_id"]: sk["title"] for sk in (snapshot or {}).get("skills") or []}
         result = await clients.request_evaluation(rt, s.user_id, body)
         async with rt.transaction() as db:

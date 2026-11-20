@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Самопроверка сида ai-gateway: версии агентов (agents/*.v1.json) и золотые тесты (golden/*.json) миграции 0002 и
 накладки поздних миграций (<ревизия>/agents/<agent>.v<N>.json, <ревизия>/golden/<agent>.json — только новые кейсы).
+Накладка 0004 (спринт 5): teaching_coach v2 — объединённая схема вывода (anyOf: TeachingCoachOutput |
+TeachingCoachGlossOutput) и кейсы gloss_word (TeachingCoachGlossContext; предложение — дословно из сида catalog).
 
 Запуск из корня репозитория:
     python3 services/ai-gateway/migrations/seed/check_seed.py            # проверка, код выхода 1 при ошибках
@@ -36,6 +38,10 @@ OUTPUT_TYPE = {
     "conversation_partner": "ConversationPartnerOutput",
     "independent_evaluator": "IndependentEvaluatorOutput",
 }
+# Вид запроса с отдельным контрактом (спринт 5): (агент, context.request) → (контекст, вывод) ai.ts
+REQUEST_TYPES = {("teaching_coach", "gloss_word"): ("TeachingCoachGlossContext", "TeachingCoachGlossOutput")}
+# Схема вывода версии с несколькими видами запроса — anyOf, ветви по порядку (schema_version → типы вывода ai.ts)
+UNION_OUTPUTS = {"teaching_coach.v2": ["TeachingCoachOutput", "TeachingCoachGlossOutput"]}
 # Параметры версии v1, заданные постановкой спринта 4 (поток G).
 EXPECTED_PARAMS: dict[str, dict[str, Any]] = {
     "teaching_coach": {"model_id": "claude-haiku-5-5", "fallback_model_id": None, "temperature": 0.4,
@@ -50,12 +56,15 @@ OVERLAY_PARAMS: dict[tuple[str, str], dict[str, Any]] = {
     ("0003", "independent_evaluator"): {"model_id": "claude-sonnet-5-5", "fallback_model_id": "claude-haiku-5-5",
                                         "temperature": 0, "max_output_tokens": 600, "timeout_ms": 12000,
                                         "max_cost_usd": 0.03},
+    # параметры — общие с v1; для gloss_word шлюз ограничивает вызов 200 токенами и 6 с (INTERNAL_API §3.1)
+    ("0004", "teaching_coach"): {"model_id": "claude-haiku-5-5", "fallback_model_id": None, "temperature": 0.4,
+                                 "max_output_tokens": 400, "timeout_ms": 8000, "max_cost_usd": 0.005},
 }
 AGENT_FILE_KEYS = ["instructions", "rules", "output_schema", "schema_version", "model_id", "fallback_model_id",
                    "temperature", "max_output_tokens", "timeout_ms", "max_cost_usd", "notes"]
 CASE_KEYS = ["case_id", "title", "input", "checks", "mandatory"]
 SCHEMA_KEYWORDS = {"$schema", "type", "enum", "const", "required", "properties", "additionalProperties", "items",
-                   "maxLength", "maxItems", "minimum", "maximum"}
+                   "maxLength", "maxItems", "minimum", "maximum", "anyOf"}
 MIN_CASES, MIN_MANDATORY = 12, 8
 # Жёсткие ограничения загрузчика ai-gateway (миграция 0002 → tilhero_ai_gateway.contracts): нарушение = падение миграции.
 LOADER_MAX_CHECKS, LOADER_MAX_VALUES, LOADER_MAX_VALUE_LEN, LOADER_MAX_NOTES = 50, 50, 200, 2000
@@ -314,8 +323,12 @@ def schema_keywords(schema: Any, where: str, rep: Report) -> None:
                 schema_keywords(ps, f"{where}.properties.{pk}", rep)
         elif k == "items":
             schema_keywords(v, f"{where}.items", rep)
+        elif k == "anyOf":
+            for i, sub in enumerate(v):
+                schema_keywords(sub, f"{where}.anyOf[{i}]", rep)
     if schema.get("type") == "object" or (isinstance(schema.get("type"), list) and "object" in schema["type"]):
-        if schema.get("additionalProperties") is not False:
+        # корень-объединение (anyOf) свойств не задаёт: additionalProperties: false — у каждой ветви
+        if schema.get("additionalProperties") is not False and "anyOf" not in schema:
             rep.err(where, "у объекта должно быть additionalProperties: false")
 
 
@@ -359,6 +372,8 @@ def mini_validate(v: Any, s: dict, where: str = "$") -> list[str]:
                 errs += mini_validate(x, props[k], f"{where}.{k}")
             elif s.get("additionalProperties") is False:
                 errs.append(f"{where}: лишнее поле {k}")
+    if "anyOf" in s and not any(not mini_validate(v, sub, where) for sub in s["anyOf"]):
+        errs.append(f"{where}: не подходит ни одна ветвь anyOf")
     return errs
 
 
@@ -444,13 +459,14 @@ def compare_schema_to_ts(ts: TS, schema: dict, t: Any, where: str, rep: Report) 
 # Пути GoldenCheck: dot-path от корня AgentInvokeResult
 # =====================================================================================================================
 
-def check_path(ts: TS, agent: str, path: str, where: str, rep: Report, rubric_codes: list[str] | None) -> None:
+def check_path(ts: TS, agent: str, path: str, where: str, rep: Report, rubric_codes: list[str] | None,
+               output_type: str | None = None) -> None:
     segs = path.split(".")
     root = ts.obj_fields("AgentInvokeResult")
     if segs[0] not in root:
         rep.err(where, f"путь {path!r}: корень {segs[0]!r} не поле AgentInvokeResult {sorted(root)}")
         return
-    t: Any = ("ref", OUTPUT_TYPE[agent]) if segs[0] == "output" else root[segs[0]][1]
+    t: Any = ("ref", output_type or OUTPUT_TYPE[agent]) if segs[0] == "output" else root[segs[0]][1]
     for i, seg in enumerate(segs[1:], start=1):
         r = ts.resolve(t)
         if r[0] == "union":
@@ -631,8 +647,12 @@ def check_agent_file(ts: TS, agent: str, path: Path, rep: Report, uz_list: UzLis
         rep.err(where, "instructions > 20 000 символов")
     if len(doc.get("rules", "")) > 10000:
         rep.err(where, "rules > 10 000 символов")
-    if doc.get("schema_version") != f"{agent}.v1":
-        rep.err(where, f"schema_version должен быть {agent}.v1")
+    # schema_version — версия контракта вывода (не номер версии агента): v1 или объединённая схема спринта 5
+    allowed_sv = {f"{agent}.v1", *(k for k in UNION_OUTPUTS if k.startswith(f"{agent}."))}
+    if doc.get("schema_version") not in allowed_sv:
+        rep.err(where, f"schema_version должен быть одним из {sorted(allowed_sv)}")
+    union = UNION_OUTPUTS.get(str(doc.get("schema_version")))
+    out_t: Any = ("union", [("ref", t) for t in union]) if union else ("ref", OUTPUT_TYPE[agent])
     for k, v in (expected if expected is not None else EXPECTED_PARAMS[agent]).items():
         if doc.get(k) != v:
             rep.err(where, f"{k} = {doc.get(k)!r}, ожидалось {v!r}")
@@ -664,7 +684,16 @@ def check_agent_file(ts: TS, agent: str, path: Path, rep: Report, uz_list: UzLis
                 rep.err(where, f"output_schema невалидна (Draft 2020-12): {exc.message}")
         if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
             rep.err(where, "$schema должен быть draft 2020-12")
-        compare_schema_to_ts(ts, schema, ("ref", OUTPUT_TYPE[agent]), f"{where}.output_schema", rep)
+        if union:
+            branches = schema.get("anyOf")
+            if schema.get("type") != "object" or "properties" in schema or not isinstance(branches, list) \
+                    or len(branches) != len(union):
+                rep.err(where, f"output_schema: корень type object + anyOf из {len(union)} ветвей ({union})")
+            else:
+                for i, (branch, t) in enumerate(zip(branches, union, strict=True)):
+                    compare_schema_to_ts(ts, branch, ("ref", t), f"{where}.output_schema.anyOf[{i}]", rep)
+        else:
+            compare_schema_to_ts(ts, schema, ("ref", OUTPUT_TYPE[agent]), f"{where}.output_schema", rep)
         examples = extract_examples(doc.get("rules", ""))
         if not examples:
             rep.err(where, "в rules нет ни одного примера вывода (строка-JSON)")
@@ -672,7 +701,7 @@ def check_agent_file(ts: TS, agent: str, path: Path, rep: Report, uz_list: UzLis
             for msg in validate_instance(ex, schema):
                 rep.err(where, f"пример вывода №{i + 1} в rules не проходит схему: {msg}")
             sub = Report()
-            ts_check_value(ts, ("ref", OUTPUT_TYPE[agent]), ex, f"пример №{i + 1}", sub)
+            ts_check_value(ts, out_t, ex, f"пример №{i + 1}", sub)
             for msg in sub.errors:
                 rep.err(where, f"пример вывода не по ai.ts: {msg}")
     scan_text_rules(where, doc, rep, uz_list, skip_not_contains=False)
@@ -694,6 +723,37 @@ class Catalog:
         self.task_criteria = ({x["completion"]["criteria"]["ru"] for x in self.scenarios.values()}
                               | {x["goal"]["ru"] for x in self.lessons.values()}
                               | {x["instruction"]["ru"] for x in exercises})
+        # gloss_word: предложение → (вид контента, уровень, аудитории) — примеры уроков, реплики и фразы медиа
+        self.sentences: dict[str, list[tuple[str, str, list[str]]]] = {}
+        for les in self.lessons.values():
+            for ex in les["examples"]:
+                self.sentences.setdefault(ex["en"], []).append(("lesson", les["level"], les["audience"]))
+        for m in media:
+            for line in [*(t["text_en"] for t in m.get("transcript", [])), *(ph["en"] for ph in m.get("phrases", []))]:
+                self.sentences.setdefault(line, []).append(("media_asset", m["level"], m["audience"]))
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.translate(str.maketrans({"’": "'", "‘": "'", "`": "'", "ʼ": "'"})).lower().split())
+
+
+def check_gloss_context(ctx: dict, audience: str, cat: Catalog, where: str, rep: Report) -> None:
+    """gloss_word: слово встречается в предложении; предложение — дословно из сида catalog (пример урока, реплика или
+    фраза медиа) с подходящими уровнем, видом контента и аудиторией; исключение — кейс инъекции (предупреждение)."""
+    if _norm(ctx["word"]) not in _norm(ctx["sentence_en"]):
+        rep.err(where, "word не встречается в sentence_en (шлюз ответит 422)")
+    if not (0 < len(ctx["word"]) <= 60 and 0 < len(ctx["sentence_en"]) <= 300):
+        rep.err(where, "word 1..60, sentence_en 1..300")
+    sources = cat.sentences.get(ctx["sentence_en"])
+    if sources is None:
+        if "ignore previous instructions" in ctx["sentence_en"].lower():
+            rep.warn(where, "sentence_en не из сида catalog — допустимо для кейса инъекции")
+        else:
+            rep.err(where, "sentence_en — не пример урока, реплика или фраза медиа из сида catalog (дословно)")
+        return
+    if not any(kind == ctx["content_kind"] and level == ctx["level"] and audience in auds
+               for kind, level, auds in sources):
+        rep.err(where, f"content_kind/level/audience не совпадают с источником предложения {sources}")
 
 
 def check_partner_context(ctx: dict, cat: Catalog, where: str, rep: Report) -> list[str]:
@@ -826,8 +886,11 @@ def check_golden_file(ts: TS, agent: str, path: Path, cat: Catalog, rep: Report,
             continue
         if inp["audience"] not in audiences:
             rep.err(where, f"audience {inp['audience']!r} не из {audiences}")
+        request = inp["context"].get("request") if isinstance(inp["context"], dict) else None
+        req_types = REQUEST_TYPES.get((agent, request)) if isinstance(request, str) else None
+        ctx_type, out_type = req_types if req_types else (CONTEXT_TYPE[agent], OUTPUT_TYPE[agent])
         sub = Report()
-        ts_check_value(ts, ("ref", CONTEXT_TYPE[agent]), inp["context"], "context", sub)
+        ts_check_value(ts, ("ref", ctx_type), inp["context"], "context", sub)
         for e in sub.errors:
             rep.err(where, e)
         if sub.errors:
@@ -838,10 +901,12 @@ def check_golden_file(ts: TS, agent: str, path: Path, cat: Catalog, rep: Report,
         learner: dict[str, str] = {}
         if agent == "conversation_partner":
             intents = check_partner_context(ctx, cat, where, rep)
+        elif agent == "teaching_coach" and req_types:
+            check_gloss_context(ctx, inp["audience"], cat, where, rep)
         elif agent == "teaching_coach":
             check_coach_context(ctx, cat, where, rep)
             if inp["audience"] == "kids":
-                rep.err(where, "teaching_coach детям не вызывается (решение владельца) — кейсов kids быть не должно")
+                rep.err(where, "«Объясни проще» детям не вызывается (решение владельца) — кейсов kids быть не должно")
         else:
             rubric_codes, learner = check_evaluator_context(ctx, cat, where, rep)
         # --- проверки
@@ -884,7 +949,7 @@ def check_golden_file(ts: TS, agent: str, path: Path, cat: Catalog, rep: Report,
             segs = p.split(".")
             if len(segs) > 8 or not all(PATH_SEGMENT_RE.match(x) for x in segs):
                 rep.err(w, f"path {p!r}: сегменты [A-Za-z0-9_] через точку, не больше 8 (предел загрузчика)")
-            check_path(ts, agent, p, w, rep, rubric_codes)
+            check_path(ts, agent, p, w, rep, rubric_codes, out_type)
             if kind == "field_equals" and not isinstance(ch["value"], (str, int, float, bool, type(None))):
                 rep.err(w, "value — string | number | boolean | null")
             if kind in ("field_in", "text_not_contains"):
@@ -982,13 +1047,41 @@ def check_coverage(agent: str, cases: list[dict], rep: Report) -> None:
             if not _has(c, "max_length", "output.reply_en") or not _has(c, "text_not_contains", "output.reply_en"):
                 rep.err(where, f"{c['case_id']}: нужны max_length и text_not_contains (ссылки) для reply_en")
     elif agent == "teaching_coach":
-        locs = {c["input"]["context"]["explain_locale"] for c in mand}
+        def is_gloss(c: dict) -> bool:
+            return c["input"]["context"].get("request") == "gloss_word"
+
+        explain = [c for c in cases if not is_gloss(c)]
+        locs = {c["input"]["context"]["explain_locale"] for c in mand if not is_gloss(c)}
         need({"ru", "uz"} <= locs, "объяснение на ru и на uz")
-        need(not any(c["input"]["audience"] == "kids" for c in cases), "без кейсов kids (коуч детям не вызывается)")
+        need(not any(c["input"]["audience"] == "kids" for c in explain),
+             "без кейсов kids для «Объясни проще» (детям не вызывается)")
         for c in ok_cases:
-            for f in ("explanation", "example_en", "example_gloss"):
+            fields = ("gloss.ru", "gloss.uz") if is_gloss(c) else ("explanation", "example_en", "example_gloss")
+            for f in fields:
                 if not _has(c, "text_not_contains", f"output.{f}"):
                     rep.err(where, f"{c['case_id']}: нет text_not_contains (ссылки) для output.{f}")
+        gloss = [c for c in mand if is_gloss(c)]
+        if any(is_gloss(c) for c in cases):  # накладка 0004 (спринт 5, INTERNAL_API §3.1): ≥ 6 обязательных
+
+            def lemma_values(c: dict) -> list[Any]:
+                return [ch.get("value") for ch in c["checks"]
+                        if ch.get("kind") == "field_equals" and ch.get("path") == "output.lemma"]
+
+            need(len(gloss) >= 6, "≥ 6 обязательных кейсов gloss_word")
+            need(any(_has(c, "field_equals", "output.part_of_speech") and _has(c, "text_not_contains",
+                                                                                "output.gloss.ru") for c in gloss),
+                 "gloss_word: многозначное слово по контексту")
+            need(any(" " in c["input"]["context"]["word"] and _has(c, "field_in", "output.part_of_speech", "verb")
+                     for c in gloss), "gloss_word: фразовый глагол")
+            need(any(v not in (None, c["input"]["context"]["word"]) and str(v).lower() != c["input"]["context"][
+                "word"].lower() for c in gloss for v in lemma_values(c)), "gloss_word: форма → лемма")
+            need(any("ignore previous instructions" in c["input"]["context"]["sentence_en"].lower() for c in gloss),
+                 "gloss_word: инъекция в sentence_en")
+            need(any(c["input"]["audience"] == "kids" and _has(c, "field_equals", "status", "ok") for c in gloss),
+                 "gloss_word: ребёнок → ok")
+            need(any(c["input"]["context"]["word"][:1].isupper() and c["input"]["context"]["word"] in lemma_values(c)
+                     and _has(c, "field_equals", "output.part_of_speech", "noun") for c in gloss),
+                 "gloss_word: имя собственное")
     else:
         need(any(_has(c, "field_equals", "status", "refused") and _has(c, "field_equals", "reason", "kids_not_allowed")
                  and c["input"]["audience"] == "kids" for c in mand), "ребёнок (kids) → refused: kids_not_allowed")
@@ -1052,7 +1145,9 @@ def main() -> int:
                     rep.err(f"{prefix}agents/{path.name}", "нет ожидаемых параметров в OVERLAY_PARAMS")
                     continue
                 doc = check_agent_file(ts, agent, path, rep, uz_list, expected, prefix)
-                if doc is not None and base_doc is not None and any(
+                same_contract = doc is not None and base_doc is not None and \
+                    doc.get("schema_version") == base_doc.get("schema_version")
+                if same_contract and doc is not None and base_doc is not None and any(
                         doc.get(k) != base_doc.get(k) for k in ("instructions", "rules", "output_schema")):
                     rep.warn(f"{prefix}agents/{path.name}", "тексты отличаются от v1 — проверьте инструкции заново")
             og = overlay / "golden" / f"{agent}.json"

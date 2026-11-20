@@ -30,9 +30,11 @@ SectionType = Literal["today_plan", "lesson_of_day", "review", "whats_new", "fam
 FlagName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,63}$")]
 TokenName = Annotated[str, StringConstraints(max_length=64)]
 # Разделы меню админки TilHero (прототип Admin.dc.html, NAV) — порядок и видимость; права проверяет admin-bff
+# Спринт 5: + memory («Память»). Действующая версия 1.0.0 его не перечисляет — admin-web добавляет раздел после
+# перечисленных; в новой версии конфигурации его можно поставить на место или выключить.
 ADMIN_MENU: Final[tuple[str, ...]] = (
     "overview", "users", "content", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config",
-    "langs", "roles", "audit",
+    "langs", "roles", "audit", "memory",
 )
 _STRICT = ConfigDict(extra="forbid", strict=True)
 

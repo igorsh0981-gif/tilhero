@@ -22,6 +22,7 @@ SERVICES = [
     "assessment",
     "ai-gateway",
     "tts",  # релиз 4.1: только проверяет токены telegram-bff (закрытый ключ нужен ServiceSettings в stage/prod)
+    "memory",  # спринт 5: словарь, повторения FSRS, проверки удержания (вызывает catalog, assessment, ai-gateway, identity-consent)
     "identity-consent",
     "learning-plan",
     "social",

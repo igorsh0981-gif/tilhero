@@ -27,8 +27,9 @@ Handler = Callable[[AsyncSession, Envelope], Awaitable[None]]
 
 def deletion_handler(runtime: Runtime) -> Handler:
     async def on_user_deleted(session: AsyncSession, env: Envelope) -> None:
-        """user.deletion.requested.v1 → usage.user_id = NULL, кеш результатов ученика стёрт →
-        ACK user.domain.deleted.v1 (ai-gateway, anonymized)."""
+        """user.deletion.requested.v1 → usage.user_id = NULL (вызовы агентов и оценки произношения), кеш результатов
+        ученика стёрт (вызовы агентов и оценки произношения — в них эталон и слова) → ACK user.domain.deleted.v1
+        (ai-gateway, anonymized). Аудио нигде не хранилось — удалять нечего."""
         if env.producer not in DELETION_PRODUCERS:
             log.warning("deletion request from unexpected producer ignored",
                         extra={"event_type": env.event_type, "producer": env.producer[:64]})
@@ -37,11 +38,12 @@ def deletion_handler(runtime: Runtime) -> Handler:
         await anonymize_user(session, user_id, uuid.UUID(str(env.payload["request_id"])), causation_id=env.event_id)
         if runtime.redis is not None:
             settings = cast(Settings, runtime.settings)
-            try:
-                await InvokeCache(runtime.redis, settings.cache_namespace, settings.invoke_cache_ttl_seconds,
-                                  60).purge_user(str(user_id))
-            except RedisError:
-                log.warning("invoke cache purge failed (results expire within 24 h)")
+            for kind in InvokeCache.KINDS:
+                try:
+                    await InvokeCache(runtime.redis, settings.cache_namespace, settings.invoke_cache_ttl_seconds,
+                                      60, kind=kind).purge_user(str(user_id))
+                except RedisError:
+                    log.warning("result cache purge failed (results expire within 24 h)", extra={"kind": kind})
 
     return on_user_deleted
 

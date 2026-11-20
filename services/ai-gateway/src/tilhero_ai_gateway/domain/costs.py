@@ -1,5 +1,10 @@
 """Модели и цены, бюджет и аварийная остановка, затраты (admin.ts «Модели и затраты», ADM-MONEY-01/02, AT-51).
 
+Модели речи (спринт 5): цена — `audio_usd_per_hour` ($ за час аудио), цены токенов — 0 (иначе 422
+PRICE_NOT_APPLICABLE); у `azure_speech` цена часа > 0 (422 PRICE_REQUIRED); снижение — только с costs.manage, как у
+LLM; выключение модели речи допустимо (оценка произношения → not_configured, speech_available=false). Сводка: блок
+`speech` — вызовы `pronunciation_coach`, минуты оценённого аудио (вызовы со status ok), расход (входит в spent_usd).
+
 Сводка `usage/summary?period=day|week|month`: day — с начала «сегодня» по Ташкенту, week — последние 7 дней по
 Ташкенту (включая сегодня), month — календарный месяц UTC (как потолок). spent_usd — все вызовы периода (включая
 золотые прогоны — это реальные деньги); calls/unavailable/p95 — вызовы уроков (без золотых); доля потолка — расход
@@ -27,45 +32,76 @@ from tilhero_ai_gateway.domain.common import (
     month_start,
     usd,
 )
+from tilhero_ai_gateway.domain.registry import SPEECH_PROVIDERS
 from tilhero_ai_gateway.models import AgentRollout, AgentVersion, BudgetRow, ModelRow, UsageRow
 from tilhero_common.errors import conflict, forbidden, not_found, unprocessable
 from tilhero_common.internal_auth import Actor
 
 PERIODS: Final = ("day", "week", "month")
+SPEECH_AGENT: Final = "pronunciation_coach"
 
 
 def model_view(m: ModelRow) -> dict[str, Any]:
     return {"model_id": m.model_id, "provider": m.provider, "input_usd_per_mtok": float(m.input_usd_per_mtok),
-            "output_usd_per_mtok": float(m.output_usd_per_mtok), "active": m.active, "updated_at": iso_z(m.updated_at)}
+            "output_usd_per_mtok": float(m.output_usd_per_mtok),
+            "audio_usd_per_hour": float(m.audio_usd_per_hour) if m.audio_usd_per_hour is not None else None,
+            "active": m.active, "updated_at": iso_z(m.updated_at)}
 
 
 def budget_view(b: BudgetRow) -> dict[str, Any]:
     return {"ai_enabled": b.ai_enabled, "monthly_cap_usd": float(b.monthly_cap_usd),
             "learner_daily_cap_usd": float(b.learner_daily_cap_usd), "lesson_cap_usd": float(b.lesson_cap_usd),
-            "alert_percent": b.alert_percent, "updated_at": iso_z(b.updated_at)}
+            "speech_monthly_cap_usd": float(b.speech_monthly_cap_usd), "alert_percent": b.alert_percent,
+            "updated_at": iso_z(b.updated_at)}
 
 
 async def list_models(session: AsyncSession) -> list[ModelRow]:
     return list((await session.execute(select(ModelRow).order_by(ModelRow.model_id))).scalars().all())
 
 
-async def update_model(session: AsyncSession, model_id: str, *, input_usd: Decimal, output_usd: Decimal, active: bool,
-                       reason: str, actor: Actor, now: datetime) -> ModelRow:
-    row = (await session.execute(select(ModelRow).where(ModelRow.model_id == model_id).with_for_update())
-           ).scalar_one_or_none()
-    if row is None:
-        raise not_found("MODEL_NOT_FOUND", "Модель не найдена")
+def _price_fields(row: ModelRow, input_usd: Decimal, output_usd: Decimal, audio_usd: Decimal | None,
+                  audio_given: bool) -> Decimal | None:
+    """Проверка цен по виду модели → новая цена часа аудио (речь) или None (LLM)."""
+    if row.provider in SPEECH_PROVIDERS:
+        if input_usd != 0 or output_usd != 0:
+            raise unprocessable("PRICE_NOT_APPLICABLE", "У модели оценки речи нет цен токенов — передайте 0",
+                                {"fields": [f for f, v in (("input_usd_per_mtok", input_usd),
+                                                           ("output_usd_per_mtok", output_usd)) if v != 0]})
+        if audio_given and audio_usd is None:
+            raise unprocessable("PRICE_REQUIRED", "Для модели оценки речи нужна цена часа аудио",
+                                {"fields": ["audio_usd_per_hour"]})
+        audio = audio_usd if audio_usd is not None else row.audio_usd_per_hour
+        # как R1-12 для LLM: нулевая цена настоящего провайдера = бесконтрольный расход
+        if row.provider == "azure_speech" and (audio is None or audio <= 0):
+            raise unprocessable("PRICE_REQUIRED", "Для Azure Speech цена часа аудио должна быть больше нуля",
+                                {"fields": ["audio_usd_per_hour"]})
+        return audio
+    if audio_usd is not None:
+        raise unprocessable("PRICE_NOT_APPLICABLE", "Цена часа аудио — только у моделей оценки речи",
+                            {"fields": ["audio_usd_per_hour"]})
     # ревью R1-12: у модели настоящего провайдера нулевая цена = бесконтрольный расход (бюджеты считают по цене)
     if row.provider == "anthropic" and (input_usd <= 0 or output_usd <= 0):
         raise unprocessable("PRICE_REQUIRED", "Для модели Anthropic цены ввода и вывода должны быть больше нуля",
                             {"fields": [f for f, v in (("input_usd_per_mtok", input_usd),
                                                        ("output_usd_per_mtok", output_usd)) if v <= 0]})
+    return None
+
+
+async def update_model(session: AsyncSession, model_id: str, *, input_usd: Decimal, output_usd: Decimal, active: bool,
+                       reason: str, actor: Actor, now: datetime, audio_usd: Decimal | None = None,
+                       audio_given: bool = False) -> ModelRow:
+    row = (await session.execute(select(ModelRow).where(ModelRow.model_id == model_id).with_for_update())
+           ).scalar_one_or_none()
+    if row is None:
+        raise not_found("MODEL_NOT_FOUND", "Модель не найдена")
+    audio = _price_fields(row, input_usd, output_usd, audio_usd, audio_given)
     # снижение цены ослабляет все лимиты бюджета — только с правом на бюджет (costs.manage), не одним ai.publish
-    if (input_usd < row.input_usd_per_mtok or output_usd < row.output_usd_per_mtok) \
-            and COSTS_MANAGE not in actor.permissions:
+    lowered = input_usd < row.input_usd_per_mtok or output_usd < row.output_usd_per_mtok or (
+        audio is not None and row.audio_usd_per_hour is not None and audio < row.audio_usd_per_hour)
+    if lowered and COSTS_MANAGE not in actor.permissions:
         raise forbidden("PERMISSION_DENIED", "Снизить цену модели может только сотрудник с правом на бюджет",
                         {"permission": COSTS_MANAGE})
-    if row.active and not active:
+    if row.active and not active and row.provider not in SPEECH_PROVIDERS:
         # модель, на которой работает опубликованная версия или канарейка, выключать нельзя — сначала другая версия
         used = (await session.execute(
             select(AgentVersion.agent_id, AgentVersion.version)
@@ -76,18 +112,23 @@ async def update_model(session: AsyncSession, model_id: str, *, input_usd: Decim
         if used:
             raise conflict("MODEL_IN_USE", "Модель используется опубликованной версией или канарейкой",
                            {"versions": [f"{a}@{v}" for a, v in used]})
-    before = {"input_usd_per_mtok": str(row.input_usd_per_mtok), "output_usd_per_mtok": str(row.output_usd_per_mtok),
-              "active": row.active}
+    def prices(m: ModelRow) -> dict[str, Any]:
+        out: dict[str, Any] = {"input_usd_per_mtok": str(m.input_usd_per_mtok),
+                               "output_usd_per_mtok": str(m.output_usd_per_mtok), "active": m.active}
+        if m.provider in SPEECH_PROVIDERS:
+            out["audio_usd_per_hour"] = str(m.audio_usd_per_hour)
+        return out
+
+    before = prices(row)
     row.input_usd_per_mtok = input_usd
     row.output_usd_per_mtok = output_usd
+    row.audio_usd_per_hour = audio
     row.active = active
     row.updated_by = actor.id
     row.updated_at = now
     await session.flush()
     await emit_audit(session, audit_payload(actor, "ai.model_updated", "ai_model", model_id, before=before,
-                                            after={"input_usd_per_mtok": str(input_usd),
-                                                   "output_usd_per_mtok": str(output_usd), "active": active},
-                                            reason=reason))
+                                            after=prices(row), reason=reason))
     return row
 
 
@@ -109,6 +150,10 @@ async def update_budget(session: AsyncSession, values: dict[str, Any], expected_
     before = budget_view(row)
     for key, value in values.items():
         setattr(row, key, value)
+    # подлимит речи — внутри потолка месяца (решение владельца 20.11.2026; в БД — CHECK ck_budget_speech)
+    if row.speech_monthly_cap_usd > row.monthly_cap_usd:
+        raise unprocessable("BUDGET_INVALID", "Подлимит оценки произношения больше потолка месяца",
+                            {"fields": ["speech_monthly_cap_usd"]})
     after = budget_view(row)
     if {k: v for k, v in after.items() if k != "updated_at"} == {k: v for k, v in before.items() if k != "updated_at"}:
         return row
@@ -149,7 +194,21 @@ def _p95(values: list[int]) -> int | None:
     return ordered[index]
 
 
-async def summary(session: AsyncSession, period: str, now: datetime, tz: str) -> dict[str, Any]:
+async def speech_summary(session: AsyncSession, since: datetime, speech_available: bool,
+                         cap: Decimal) -> dict[str, Any]:
+    """AiUsageSummary.speech: вызовы pronunciation_coach за период, минуты оценённого аудио (status ok — провайдер
+    обработал запись), расход, подлимит месяца (AiBudget.speech_monthly_cap_usd)."""
+    calls, audio_ms, spent = (await session.execute(
+        select(func.count(),
+               func.coalesce(func.sum(UsageRow.audio_ms).filter(UsageRow.status == "ok"), 0),
+               func.coalesce(func.sum(UsageRow.cost_usd), 0))
+        .where(UsageRow.created_at >= since, UsageRow.status != "pending", UsageRow.agent_id == SPEECH_AGENT))).one()
+    return {"calls": int(calls), "audio_minutes": round(int(audio_ms) / 60_000, 2), "spent_usd": usd(spent),
+            "speech_available": speech_available, "cap_usd": float(cap)}
+
+
+async def summary(session: AsyncSession, period: str, now: datetime, tz: str,
+                  speech_available: bool = False) -> dict[str, Any]:
     """AiUsageSummary (admin.ts)."""
     budget = await get_budget(session)
     since = _period_start(period, now, tz)
@@ -207,13 +266,15 @@ async def summary(session: AsyncSession, period: str, now: datetime, tz: str) ->
         if per_lesson else None,
         "ai_enabled": budget.ai_enabled,
         "alert_percent": budget.alert_percent,
+        "speech": await speech_summary(session, since, speech_available, Decimal(budget.speech_monthly_cap_usd)),
     }
 
 
 def call_view(u: UsageRow) -> dict[str, Any]:
     """AiCall (admin.ts) — без текстов и без user_id."""
     return {"call_id": str(u.call_id), "agent_id": u.agent_id, "version": u.version, "model_id": u.model_id,
-            "status": u.status, "reason": u.reason, "input_tokens": u.input_tokens, "output_tokens": u.output_tokens,
+            "status": u.status, "reason": u.reason, "audio_ms": u.audio_ms, "input_tokens": u.input_tokens,
+            "output_tokens": u.output_tokens,
             "cost_usd": usd(u.cost_usd), "latency_ms": u.latency_ms,
             "session_id": str(u.session_id) if u.session_id else None, "canary": u.canary,
             "created_at": iso_z(u.created_at)}

@@ -56,7 +56,13 @@ from tilhero_identity.domain.notify import (
 )
 from tilhero_identity.domain.pin import PinHasher, new_biometric_token, pin_problem, token_digest, token_matches
 from tilhero_identity.domain.policy import OPTIONAL_PURPOSES, POLICIES, get_policy, normalize_purposes
-from tilhero_identity.domain.purposes import consent_accepted, delivery_categories, effective_purposes
+from tilhero_identity.domain.purposes import (
+    CHILD_GUARDIAN_PURPOSES,
+    VOICE_PURPOSE,
+    consent_accepted,
+    delivery_categories,
+    effective_purposes,
+)
 from tilhero_identity.domain.reset_codes import ResetCodeStore
 from tilhero_identity.models import (
     BiometricCredential,
@@ -178,6 +184,10 @@ def _deletion_word(raw: str | None) -> str:
     return (raw or "").strip().upper().translate(_APOSTROPHES)
 
 
+# версии политики, где voice_recording — «оценка произношения по записи голоса» (спринт 5); новые версии — добавлять
+VOICE_PRONUNCIATION_POLICIES = frozenset({"1.1"})
+
+
 def optional_purposes_of(policy_version: str) -> frozenset[str]:
     policy = POLICIES.get(policy_version)
     return policy.optional_purposes if policy is not None else frozenset(OPTIONAL_PURPOSES)
@@ -185,15 +195,29 @@ def optional_purposes_of(policy_version: str) -> frozenset[str]:
 
 def learner_purposes(learner: User, consent: Consent | None) -> list[str]:
     """Цели действующего согласия ученика; необязательные — только пока разрешены (18+ сам, 14–17 с согласием
-    родителя; детский профиль и возраст не выбран — нет)."""
+    родителя; возраст не выбран — нет). Детский профиль — только `voice_recording` из согласия опекуна (спринт 5),
+    остальные необязательные — никогда."""
     if consent is None:
         return []
-    return effective_purposes(
-        consent.purposes,
-        optional=optional_purposes_of(consent.policy_version),
-        optional_allowed=learner.kind == "account" and optional_purposes_allowed(learner.age_band,
-                                                                                  learner.guardian_consent),
-    )
+    optional = optional_purposes_of(consent.policy_version)
+    if learner.kind == "child":
+        blocked = optional - CHILD_GUARDIAN_PURPOSES if consent.basis == "guardian" else optional
+    elif optional_purposes_allowed(learner.age_band, learner.guardian_consent):
+        blocked = frozenset()
+    else:
+        blocked = optional
+    if consent.policy_version not in VOICE_PRONUNCIATION_POLICIES:
+        # до 1.1 цель voice_recording значила «хранить записи 30 дней» без передачи в сервис оценки — согласием на
+        # оценку произношения (Azure) она не считается: нужно подтвердить согласие по действующей политике
+        blocked = blocked | {VOICE_PURPOSE}
+    return effective_purposes(consent.purposes, optional=blocked, optional_allowed=False)
+
+
+def voice_consent(learner: User, consent: Consent | None) -> bool:
+    """LearnerSummary.voice_consent (спринт 5): запись голоса разрешена — цель `voice_recording` действует в
+    `/public`-смысле: у аккаунта — своё согласие (подросток — после согласия родителя), у детского профиля — согласие
+    опекуна."""
+    return VOICE_PURPOSE in learner_purposes(learner, consent)
 
 
 def learner_categories(learner: User, consent: Consent | None) -> list[str]:
@@ -228,7 +252,9 @@ def user_summary(user: User, *, is_new: bool = False) -> UserSummary:
     )
 
 
-def learner_summary(user: User, *, is_self: bool) -> LearnerSummary:
+def learner_summary(user: User, *, is_self: bool, consent: Consent | None) -> LearnerSummary:
+    """`consent` — согласие, по которому работают функции ученика (`_learner_consent`): аккаунт — своё, детский
+    профиль — опекуна."""
     return LearnerSummary(
         learner_id=user.user_id,
         kind="self" if is_self else "child",
@@ -236,11 +262,13 @@ def learner_summary(user: User, *, is_self: bool) -> LearnerSummary:
         age_band=user.age_band,  # type: ignore[arg-type]
         is_active=is_self,  # активного ученика сессии знает BFF; по умолчанию активен сам аккаунт
         onboarding_completed=False,  # заполняет BFF из learning-plan
+        voice_consent=voice_consent(user, consent),
     )
 
 
-def learner_detail(user: User, *, is_self: bool) -> LearnerDetail:
-    return LearnerDetail(**learner_summary(user, is_self=is_self).model_dump(), settings=notification_settings(user))
+def learner_detail(user: User, *, is_self: bool, consent: Consent | None) -> LearnerDetail:
+    return LearnerDetail(**learner_summary(user, is_self=is_self, consent=consent).model_dump(),
+                         settings=notification_settings(user))
 
 
 def quiet_hours(user: User) -> QuietHours | None:
@@ -511,7 +539,24 @@ class IdentityService:
 
     async def _learners(self, session: AsyncSession, account: User) -> list[LearnerSummary]:
         children = await self._children(session, account.user_id)
-        return [learner_summary(account, is_self=True), *(learner_summary(c, is_self=False) for c in children)]
+        consents = await self._learner_consents(session, [account, *children])
+        return [learner_summary(account, is_self=True, consent=consents.get(account.user_id)),
+                *(learner_summary(c, is_self=False, consent=consents.get(c.user_id)) for c in children)]
+
+    @staticmethod
+    async def _learner_consents(session: AsyncSession, learners: list[User]) -> dict[uuid.UUID, Consent]:
+        """Согласия, по которым работают функции учеников (как `_learner_consent`), одним запросом: аккаунт — своё,
+        детский профиль — опекуна."""
+        wanted = {(u.user_id, "guardian" if u.kind == "child" else "self") for u in learners}
+        if not wanted:
+            return {}
+        rows = (await session.execute(
+            select(Consent).where(Consent.user_id.in_([u for u, _ in wanted]), Consent.revoked_at.is_(None))
+        )).scalars().all()
+        return {c.user_id: c for c in rows if (c.user_id, c.basis) in wanted}
+
+    async def _learner_view(self, session: AsyncSession, learner: User, *, is_self: bool) -> LearnerDetail:
+        return learner_detail(learner, is_self=is_self, consent=await self._learner_consent(session, learner))
 
     async def _me(self, session: AsyncSession, user: User, *, is_new: bool = False) -> MeResponse:
         active = await self._active_consent(session, user.user_id)
@@ -802,7 +847,7 @@ class IdentityService:
         async with self._tx() as session:
             account = await self._load_account(session, user_id)
             learner, is_self = await self._find_learner(session, account, learner_id)
-            return learner_detail(learner, is_self=is_self)
+            return await self._learner_view(session, learner, is_self=is_self)
 
     async def create_child(
         self, user_id: uuid.UUID, body: CreateChildRequest, idempotency_key: str | None
@@ -825,7 +870,7 @@ class IdentityService:
                     replayed = await session.get(User, link.child_user_id)
                     if replayed is None:  # FK не даёт — защитно
                         raise _learner_not_found()
-                    return learner_detail(replayed, is_self=False)
+                    return await self._learner_view(session, replayed, is_self=False)
             if not is_adult(account.age_band):
                 raise _adult_required(account.age_band)
             count = (await session.execute(
@@ -866,7 +911,7 @@ class IdentityService:
             await self._consent_accepted(session, consent)
             await self._touch(session, account.user_id)  # children_count в снимке админки
             log.info("child profile created", extra={"user_pid": pseudonymize(str(child.user_id))})
-            return learner_detail(child, is_self=False)
+            return learner_detail(child, is_self=False, consent=consent)
 
     async def patch_learner(self, user_id: uuid.UUID, learner_id: uuid.UUID, body: LearnerPatch) -> LearnerDetail:
         """Только детский профиль: имя ребёнка и его настройки уведомлений (адресат — опекун)."""
@@ -884,7 +929,45 @@ class IdentityService:
             ):
                 await self._notify_changed(session, child, account)
             await session.flush()
-            return learner_detail(child, is_self=False)
+            return await self._learner_view(session, child, is_self=False)
+
+    async def set_child_voice_consent(self, user_id: uuid.UUID, child_id: uuid.UUID, granted: bool) -> LearnerDetail:
+        """Согласие опекуна на запись голоса ребёнка (спринт 5, INTERNAL_API §6; решение владельца). Только аккаунт
+        18+ со своим действующим согласием (terms, privacy) — опекун этого ребёнка; свой профиль, чужой и неизвестный
+        ребёнок неотличимы → 404. Новое значение — новая запись согласия ребёнка (`basis: guardian`, обязательные
+        цели политики + `voice_recording` при granted, язык и текст политики — опекуна), прежняя — `superseded`,
+        событие `consent.accepted.v1`; повтор того же значения — без новой записи. Категории доставки от цели не
+        зависят — события настроек нет."""
+        async with self._tx() as session:
+            account = await self._load_account(session, user_id, lock=True)
+            _ensure_mutable(account)
+            if not is_adult(account.age_band):
+                raise _adult_required(account.age_band)
+            own = await self._active_consent(session, account.user_id)
+            if own is None or not consent_accepted(own.purposes):
+                raise _consent_required("terms")
+            child, is_self = await self._find_learner(session, account, child_id, lock=True)
+            if is_self:  # своё согласие на запись голоса — POST /me/consent с целью voice_recording
+                raise _learner_not_found()
+            active = await self._active_consent(session, child.user_id, basis="guardian", lock=True)
+            if active is not None and (VOICE_PURPOSE in active.purposes) == granted:
+                return learner_detail(child, is_self=False, consent=active)  # повтор того же значения
+            now = _now()
+            if active is not None:
+                active.revoked_at = truncate_ms(now)
+                active.revoke_reason = "superseded"
+                await session.flush()  # освобождаем уникальный индекс действующего согласия
+            policy = get_policy(self.settings.current_policy_version)
+            purposes = [c for c in policy.purpose_codes
+                        if c in policy.required_purposes or (granted and c == VOICE_PURPOSE)]
+            consent = self._new_consent(child, purposes=purposes, basis="guardian", granted_by=account.user_id,
+                                        locale=account.locale, now=now)
+            session.add(consent)
+            await session.flush()
+            await self._consent_accepted(session, consent)
+            log.info("child voice consent changed", extra={"user_pid": pseudonymize(str(child.user_id)),
+                                                           "granted": granted})
+            return learner_detail(child, is_self=False, consent=consent)
 
     # ---------- согласие родителя для 14–17 ----------
     async def create_guardian_consent_request(

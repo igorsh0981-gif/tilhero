@@ -7,7 +7,11 @@
 ## Кто пишет
 **Через шину** (`admin.audit.recorded.v1`, outbox издателя в транзакции изменения): спринт 1 (INTERNAL_API §7) —
 `identity-consent`, `learning-plan`, `social`, `experience-config`, `support`, `notifications`; спринт 2 —
-`admin-identity` (`auth.*`, `staff.*`, `role.*`, `approval.*`) (`consumers.AUDIT_EVENT_PRODUCERS`). Актора определяет
+`admin-identity` (`auth.*`, `staff.*`, `role.*`, `approval.*`); спринты 3–4 — `catalog` (контент; спринт 5 — ещё словарь
+курса `glossary.entry_created | updated | reviewed | archived`), `diagnostics`, `lessons`, `assessment`, `ai-gateway`;
+спринт 5 — `memory` (`memory.card_adjusted` — ручная правка карточки ученика: перенос, сброс, заморозка)
+(`consumers.AUDIT_EVENT_PRODUCERS`). Действия журнал не перечисляет: код действия — строка `^[a-z][a-z0-9_.]*$` от
+доверенного издателя. Актора определяет
 издатель: сотрудник — из токена admin-bff (claim `actor`), ученик — из `sub`, иначе сам сервис. События безопасности,
 согласий и удаления — только от `identity-consent` (`SECURITY_EVENT_PRODUCERS`). События остальных издателей
 игнорируются с предупреждением в логе.

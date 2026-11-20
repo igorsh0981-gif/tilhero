@@ -2,7 +2,9 @@
 «объясни проще», ролевая ситуация по графу сценария.
 
 План (sessions.plan) фиксируется при старте: {"stages": [{"type", "units": [...]}]}. Единицы:
-  notice | item {src: retrieval|lesson|exercise} | explanation | meaning | roleplay | open_answer | listen | done.
+  notice | item {src: retrieval|lesson|exercise} | explanation | meaning | roleplay | open_answer | listen | done;
+  спринт 5 (чтение): reading (текст) | question {question_id} (вопрос на понимание — без подсказок, оценивает
+  assessment по ключам версии текста).
 Шаг материализуется, когда становится текущим (sessions.step_index), и дальше неизменяем: payload — ровно то, что
 видит ученик (без ключей), ref — служебная ссылка (ключ проверки понимания, соответствие вариантов реплик).
 Положение — sessions.state: {"cursor": {stage, unit}, "turns": n, "rp": {...}, "simpler": n, "ai_off": stage|"all"}.
@@ -43,9 +45,12 @@ from tilhero_lessons.domain.content import (
     distance_to_end,
     exercise_view,
     find_control_item,
+    find_question,
     grade_control_item,
     item_hint,
     item_view,
+    question_view,
+    reading_view,
     validate_answer,
     voices,
 )
@@ -57,6 +62,7 @@ STAGES_BY_KIND: dict[str, list[str]] = {
     "scenario": ["roleplay", "summary"],
     "media": ["listen", "exercises", "summary"],
     "review": ["assessment", "summary"],
+    "reading": ["reading", "questions", "summary"],
 }
 HISTORY_IN_STEP = 10
 HISTORY_FOR_AI = 6
@@ -248,6 +254,18 @@ async def enter_unit(db: AsyncSession, s: Session, b: Bundle, stage_i: int, unit
                          {**base, "item": exercise_view(ex, s.seed), "hint_available": False,
                           "graded_later": True},
                          {"src": "exercise", "key": unit["key"]}, now)
+    if t == "reading":
+        assert b.reading is not None
+        version = int((s.content_versions.get("reading") or {}).get("version", 1))
+        return _add_step(db, s, stype, "reading", {**base, "reading": reading_view(b.reading, version)}, {}, now)
+    if t == "question":
+        # вопрос на понимание текста: без подсказок, правильность — только в итогах (оценивает assessment)
+        assert b.reading is not None
+        question = find_question(b.reading, unit["question_id"])
+        assert question is not None
+        return _add_step(db, s, stype, "item",
+                         {**base, "item": question_view(question), "hint_available": False, "graded_later": True},
+                         {"src": "reading", "question_id": unit["question_id"]}, now)
     if t == "open_answer":
         assert b.lesson is not None
         goal = b.lesson["goal"]
@@ -325,6 +343,8 @@ async def render(db: AsyncSession, s: Session, step: Step) -> dict[str, Any]:
         out.update({k: p[k] for k in ("asset_id", "title", "has_audio", "transcript", "voices", "can_listen")})
     elif step.type == "open_answer":
         out.update({"prompt": p["prompt"], "max_length": p["max_length"]})
+    elif step.type == "reading":
+        out["reading"] = p["reading"]
     return out
 
 

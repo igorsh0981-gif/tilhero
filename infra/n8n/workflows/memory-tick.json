@@ -1,0 +1,84 @@
+{
+  "id": "TilHeroMemoryTck",
+  "name": "memory-tick",
+  "active": true,
+  "nodes": [
+    {
+      "id": "7f1e0000-0000-4000-8000-000000008001",
+      "name": "Расписание",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7f1e0000-0000-4000-8000-000000008002",
+      "name": "POST /internal/v1/memory:tick",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MEMORY_URL }}/internal/v1/memory:tick",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SCHEDULER_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Источник — infra/n8n/workflows/memory-tick.json (импортируется при каждом старте, правки в UI перезаписываются). Спринт 5: истечение сессий «Повторения дня», вечерние напоминания о повторении (19:00 по поясу плана), перенос проверок удержания без активности, сроки хранения (ошибки 90 дней, произношение 180 дней); повтор безопасен. Секрет — SCHEDULER_TOKEN. Без MEMORY_URL workflow не включается (entrypoint.sh).",
+      "notesInFlow": false
+    }
+  ],
+  "connections": {
+    "Расписание": {
+      "main": [
+        [
+          {
+            "node": "POST /internal/v1/memory:tick",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

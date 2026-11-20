@@ -114,7 +114,7 @@ def test_biometric_token_digest_and_compare() -> None:
 
 
 def test_policy_texts_and_purposes() -> None:
-    policy = get_policy("1.0")
+    policy = get_policy("1.1")
     assert policy.purpose_codes == ("terms", "privacy", "learning", "voice_recording", "social", "product_news")
     assert policy.required_purposes == {"terms", "privacy", "learning"}
     assert policy.optional_purposes == {"voice_recording", "social", "product_news"}
@@ -159,7 +159,7 @@ def test_evidence_hash_is_canonical_and_reproducible() -> None:
     assert at.microsecond == 123000
     fields = {
         "user_id": user_id,
-        "policy_version": "1.0",
+        "policy_version": "1.1",
         "purposes": ["terms", "privacy", "learning"],
         "accepted_at": at,
         "channel": "telegram",

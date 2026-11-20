@@ -1,0 +1,382 @@
+[
+  {
+    "reading_id": "r-a1-coffee-shop",
+    "title": {
+      "ru": "Утро в кофейне",
+      "uz": "Qahvaxonadagi tong"
+    },
+    "level": "A1",
+    "audience": [
+      "teens",
+      "adults"
+    ],
+    "topics": [
+      "food"
+    ],
+    "skill_ids": [
+      "en.func.order-drink"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "Every morning, Anna goes to a small coffee shop near her office.",
+            "gloss": {
+              "ru": "Каждое утро Анна ходит в маленькую кофейню рядом с офисом.",
+              "uz": "Har kuni ertalab Anna ofisi yonidagi kichik qahvaxonaga boradi."
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "She usually orders a cup of tea with milk.",
+            "gloss": {
+              "ru": "Обычно она заказывает чашку чая с молоком.",
+              "uz": "U odatda sutli bir piyola choy buyurtma qiladi."
+            }
+          },
+          {
+            "s_id": "s3",
+            "text_en": "The barista, Tom, always says hello and asks about her day.",
+            "gloss": {
+              "ru": "Бариста Том всегда здоровается и спрашивает, как у неё дела.",
+              "uz": "Barista Tom doim salomlashadi va kuni qanday oʻtayotganini soʻraydi."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s4",
+            "text_en": "Today the shop is very busy, so Anna waits in line for ten minutes.",
+            "gloss": {
+              "ru": "Сегодня в кофейне очень много людей, поэтому Анна ждёт в очереди десять минут.",
+              "uz": "Bugun qahvaxonada odam juda koʻp, shuning uchun Anna navbatda oʻn daqiqa kutadi."
+            }
+          },
+          {
+            "s_id": "s5",
+            "text_en": "When it is her turn, she wants to try something new.",
+            "gloss": {
+              "ru": "Когда подходит её очередь, она хочет попробовать что-то новое.",
+              "uz": "Navbati kelganda u yangi narsani tatib koʻrmoqchi."
+            }
+          },
+          {
+            "s_id": "s6",
+            "text_en": "She asks for a hot chocolate and a small piece of cake.",
+            "gloss": {
+              "ru": "Она просит горячий шоколад и маленький кусочек торта.",
+              "uz": "U issiq shokolad va kichik bir boʻlak tort soʻraydi."
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "It costs five pounds, and she pays by card.",
+            "gloss": {
+              "ru": "Это стоит пять фунтов, и она платит картой.",
+              "uz": "Bu besh funt turadi va u karta bilan toʻlaydi."
+            }
+          },
+          {
+            "s_id": "s8",
+            "text_en": "Anna likes her new drink and decides to come back tomorrow.",
+            "gloss": {
+              "ru": "Анне нравится новый напиток, и она решает прийти снова завтра.",
+              "uz": "Annaga yangi ichimlik yoqadi va u ertaga yana kelishga qaror qiladi."
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "coffee shop",
+        "gloss": {
+          "ru": "кофейня",
+          "uz": "qahvaxona"
+        },
+        "note": null
+      },
+      {
+        "en": "orders",
+        "gloss": {
+          "ru": "заказывает",
+          "uz": "buyurtma qiladi"
+        },
+        "note": null
+      },
+      {
+        "en": "waits in line",
+        "gloss": {
+          "ru": "ждёт в очереди",
+          "uz": "navbatda kutadi"
+        },
+        "note": null
+      },
+      {
+        "en": "pays by card",
+        "gloss": {
+          "ru": "платит картой",
+          "uz": "karta bilan toʻlaydi"
+        },
+        "note": null
+      },
+      {
+        "en": "come back",
+        "gloss": {
+          "ru": "вернуться, прийти снова",
+          "uz": "qaytib kelmoq"
+        },
+        "note": {
+          "ru": "фразовый глагол",
+          "uz": "frazali feʼl"
+        }
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выберите ответ",
+          "uz": "Javobni tanlang"
+        },
+        "prompt_en": "What does Anna usually order?",
+        "options": [
+          "Tea with milk",
+          "Hot chocolate",
+          "Orange juice"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q2",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно или неверно?",
+          "uz": "Toʻgʻri yoki notoʻgʻri?"
+        },
+        "prompt_en": "The shop is quiet today.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q3",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Вставьте слово",
+          "uz": "Soʻzni qoʻying"
+        },
+        "prompt_en": "Anna waits in line for ___ minutes.",
+        "options": [],
+        "answer": [
+          "ten",
+          "10"
+        ]
+      }
+    ],
+    "voice": "en-GB",
+    "est_minutes": 5
+  },
+  {
+    "reading_id": "r-a0-my-cat",
+    "title": {
+      "ru": "Мой кот Макс",
+      "uz": "Mening mushugim Maks"
+    },
+    "level": "A0",
+    "audience": [
+      "kids"
+    ],
+    "topics": [
+      "home"
+    ],
+    "skill_ids": [
+      "en.gram.to-be"
+    ],
+    "paragraphs": [
+      {
+        "p_id": "p1",
+        "sentences": [
+          {
+            "s_id": "s1",
+            "text_en": "This is my cat.",
+            "gloss": {
+              "ru": "Это мой кот.",
+              "uz": "Bu mening mushugim."
+            }
+          },
+          {
+            "s_id": "s2",
+            "text_en": "His name is Max.",
+            "gloss": {
+              "ru": "Его зовут Макс.",
+              "uz": "Uning ismi Maks."
+            }
+          },
+          {
+            "s_id": "s3",
+            "text_en": "Max is big and orange.",
+            "gloss": {
+              "ru": "Макс большой и рыжий.",
+              "uz": "Maks katta va sariq."
+            }
+          },
+          {
+            "s_id": "s4",
+            "text_en": "He likes to sleep on my bed.",
+            "gloss": {
+              "ru": "Он любит спать на моей кровати.",
+              "uz": "U mening karavotimda uxlashni yaxshi koʻradi."
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p2",
+        "sentences": [
+          {
+            "s_id": "s5",
+            "text_en": "In the morning, Max is very hungry.",
+            "gloss": {
+              "ru": "Утром Макс очень голодный.",
+              "uz": "Ertalab Maks juda och boʻladi."
+            }
+          },
+          {
+            "s_id": "s6",
+            "text_en": "I give him milk and fish.",
+            "gloss": {
+              "ru": "Я даю ему молоко и рыбу.",
+              "uz": "Men unga sut va baliq beraman."
+            }
+          },
+          {
+            "s_id": "s7",
+            "text_en": "Then we play with a small red ball.",
+            "gloss": {
+              "ru": "Потом мы играем с маленьким красным мячом.",
+              "uz": "Keyin biz kichik qizil toʻp bilan oʻynaymiz."
+            }
+          },
+          {
+            "s_id": "s8",
+            "text_en": "Max can jump very high!",
+            "gloss": {
+              "ru": "Макс умеет прыгать очень высоко!",
+              "uz": "Maks juda baland sakray oladi!"
+            }
+          }
+        ]
+      },
+      {
+        "p_id": "p3",
+        "sentences": [
+          {
+            "s_id": "s9",
+            "text_en": "In the evening, Max sits with my family.",
+            "gloss": {
+              "ru": "Вечером Макс сидит с моей семьёй.",
+              "uz": "Kechqurun Maks oilam bilan oʻtiradi."
+            }
+          },
+          {
+            "s_id": "s10",
+            "text_en": "He is a happy cat, and I love him.",
+            "gloss": {
+              "ru": "Он счастливый кот, и я его люблю.",
+              "uz": "U baxtli mushuk va men uni yaxshi koʻraman."
+            }
+          }
+        ]
+      }
+    ],
+    "glossary": [
+      {
+        "en": "cat",
+        "gloss": {
+          "ru": "кот, кошка",
+          "uz": "mushuk"
+        },
+        "note": null
+      },
+      {
+        "en": "hungry",
+        "gloss": {
+          "ru": "голодный",
+          "uz": "och"
+        },
+        "note": null
+      },
+      {
+        "en": "ball",
+        "gloss": {
+          "ru": "мяч",
+          "uz": "toʻp"
+        },
+        "note": null
+      },
+      {
+        "en": "jump",
+        "gloss": {
+          "ru": "прыгать",
+          "uz": "sakramoq"
+        },
+        "note": null
+      }
+    ],
+    "questions": [
+      {
+        "question_id": "q1",
+        "type": "single_choice",
+        "instruction": {
+          "ru": "Выбери ответ",
+          "uz": "Javobni tanla"
+        },
+        "prompt_en": "What color is Max?",
+        "options": [
+          "Orange",
+          "Black",
+          "White"
+        ],
+        "answer": 0
+      },
+      {
+        "question_id": "q2",
+        "type": "true_false",
+        "instruction": {
+          "ru": "Верно или нет?",
+          "uz": "Toʻgʻrimi yoki yoʻqmi?"
+        },
+        "prompt_en": "Max sleeps on the floor.",
+        "options": [
+          "True",
+          "False"
+        ],
+        "answer": 1
+      },
+      {
+        "question_id": "q3",
+        "type": "gap_fill",
+        "instruction": {
+          "ru": "Вставь слово",
+          "uz": "Soʻzni qoʻy"
+        },
+        "prompt_en": "I give Max milk and ___.",
+        "options": [],
+        "answer": [
+          "fish"
+        ]
+      }
+    ],
+    "voice": "en-US",
+    "est_minutes": 4
+  }
+]

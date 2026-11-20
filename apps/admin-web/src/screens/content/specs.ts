@@ -2,6 +2,7 @@
 import type { ContentKind } from "@tilhero/contracts/content";
 import { LessonEditor, LessonPreview } from "./LessonEditor";
 import { ExerciseEditor, MediaEditor, mediaGate } from "./MediaEditor";
+import { ReadingEditor, ReadingPreview } from "./ReadingEditor";
 import { RubricEditor } from "./RubricEditor";
 import { ScenarioEditor, scenarioGate } from "./ScenarioEditor";
 import { CourseEditor, ModuleEditor, SkillEditor } from "./StructureEditors";
@@ -16,4 +17,6 @@ export const SPECS: Readonly<Record<ContentKind, KindSpec>> = {
   scenario: { kind: "scenario", Editor: ScenarioEditor, gate: scenarioGate },
   media_asset: { kind: "media_asset", Editor: MediaEditor, gate: mediaGate },
   media_exercise: { kind: "media_exercise", Editor: ExerciseEditor },
+  // sprint 5: reading texts — the same life cycle (draft → review by another methodist → publication → archive)
+  reading: { kind: "reading", Editor: ReadingEditor, Preview: ReadingPreview },
 };

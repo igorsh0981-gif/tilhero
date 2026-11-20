@@ -10,7 +10,9 @@
   практике (идемпотентно по session_id) и пройденный урок (траектория — при следующем чтении);
   `assessment.completed.v1` (assessment, kind lesson) — оценка сессии, в т. ч. полученная после завершения
   (R1-05; сопоставление по session_id, порядок событий любой); `assessment.reevaluated.v1` (assessment) — новый исход
-  пройденного урока после переоценки (сессия — по заменённой оценке: session_id в событии нет).
+  пройденного урока после переоценки (сессия — по заменённой оценке: session_id в событии нет);
+- спринт 5 (INTERNAL_API §6, AT-59): `memory.review.completed.v1` (memory) — занятие `review` («Повторение дня»,
+  идемпотентно по session_id, 0 минут не засчитывается); kind `reading` у событий уроков — практика.
 
 Издатель проверяется (защита в глубину, как у саги, ревью P-7): событие чужого издателя — предупреждение в логе
 (тип события и издатель, без user_id) и подтверждение шине без действия. Невалидный payload — исключение → DLQ.
@@ -41,6 +43,7 @@ PROFILE_UPDATED = "user.profile.updated.v1"
 SESSION_COMPLETED = "lesson.session.completed.v1"
 REEVALUATED = "assessment.reevaluated.v1"
 ASSESSMENT_COMPLETED = "assessment.completed.v1"
+REVIEW_COMPLETED = "memory.review.completed.v1"
 PRODUCER = "learning-plan"
 # Сагу удаления ведёт только identity-consent: запрос от другого издателя не исполняется (защита в глубину, P-7)
 DELETION_PRODUCERS = frozenset({"identity-consent"})
@@ -53,6 +56,7 @@ PRODUCERS = {
     SESSION_COMPLETED: frozenset({"lessons"}),
     REEVALUATED: frozenset({"assessment"}),
     ASSESSMENT_COMPLETED: frozenset({"assessment"}),
+    REVIEW_COMPLETED: frozenset({"memory"}),
 }
 MAX_PAIR_LEN = 64
 
@@ -125,7 +129,7 @@ class SessionCompletedIn(_Payload):
 
     session_id: uuid.UUID
     user_id: uuid.UUID
-    kind: Literal["lesson", "scenario", "media", "review"]
+    kind: Literal["lesson", "scenario", "media", "review", "reading"]
     pair_id: Annotated[str, Field(min_length=1, max_length=200)]
     lesson_id: Annotated[str, Field(min_length=1, max_length=200)] | None = None
     status: Literal["completed", "cancelled", "failed"]
@@ -155,9 +159,22 @@ class AssessmentCompletedIn(_Payload):
     evaluation_id: uuid.UUID
     user_id: uuid.UUID
     session_id: uuid.UUID
-    kind: Literal["lesson", "scenario", "media", "review"]
+    kind: Literal["lesson", "scenario", "media", "review", "reading"]
     passed: bool | None = None
     created_at: AwareDatetime
+
+
+class ReviewCompletedIn(_Payload):
+    """memory.review.completed.v1 (спринт 5): «Повторение дня» завершено или истекло с ответами."""
+
+    session_id: uuid.UUID
+    user_id: uuid.UUID
+    pair_id: Annotated[str, Field(min_length=1, max_length=200)]
+    status: Literal["completed", "expired"]
+    minutes: Annotated[int, Field(ge=0, le=60)]
+    reviewed: Annotated[int, Field(ge=0)]
+    correct: Annotated[int, Field(ge=0)]
+    finished_at: AwareDatetime
 
 
 def _foreign(env: Envelope) -> bool:
@@ -288,6 +305,23 @@ def lessons_handler(default_tz: str) -> Handler:
     return on_lessons
 
 
+def memory_handler(default_tz: str) -> Handler:
+    """Обработчик событий memory с зоной плана по умолчанию (настройка сервиса DEFAULT_TIMEZONE)."""
+
+    async def on_memory(session: AsyncSession, env: Envelope) -> None:
+        """memory.review.completed.v1 → занятие kind review (день графика и серия); 0 минут — не занятие.
+        Идемпотентно по session_id; чужой издатель — только лог."""
+        if _foreign(env):
+            return
+        r = ReviewCompletedIn.model_validate(env.payload)
+        recorded = await ls.record_review(session, ls.ReviewCompleted(
+            session_id=r.session_id, user_id=r.user_id, minutes=r.minutes, finished_at=r.finished_at,
+        ), default_tz=default_tz, producer=PRODUCER)
+        log.info("review session recorded", extra={"status": r.status, "activity": recorded})
+
+    return on_memory
+
+
 CONSUMERS: dict[str, tuple[list[str], Handler]] = {
     "learning-plan.user_deletion": ([DELETION_REQUESTED], on_deletion_requested),
     "learning-plan.diagnostics": ([DIAGNOSTICS_COMPLETED, SKILLS_CHANGED], on_diagnostics),
@@ -296,8 +330,11 @@ CONSUMERS: dict[str, tuple[list[str], Handler]] = {
 }
 LESSONS_DURABLE = "learning-plan.lessons"
 LESSONS_EVENTS = [SESSION_COMPLETED, ASSESSMENT_COMPLETED, REEVALUATED]
+MEMORY_DURABLE = "learning-plan.memory"
+MEMORY_EVENTS = [REVIEW_COMPLETED]
 
 
 def consumers(default_tz: str) -> dict[str, tuple[list[str], Handler]]:
-    """Все потребители сервиса (спринт 4: события уроков — с зоной по умолчанию из настроек)."""
-    return {**CONSUMERS, LESSONS_DURABLE: (LESSONS_EVENTS, lessons_handler(default_tz))}
+    """Все потребители сервиса (спринт 4: события уроков, спринт 5: повторения memory — с зоной по умолчанию)."""
+    return {**CONSUMERS, LESSONS_DURABLE: (LESSONS_EVENTS, lessons_handler(default_tz)),
+            MEMORY_DURABLE: (MEMORY_EVENTS, memory_handler(default_tz))}

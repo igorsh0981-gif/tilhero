@@ -18,15 +18,16 @@ test("support sees overview, learners, support and the «soon» sections; not ne
 test("communications: «news» with the three tabs; the 15 menu ids and groups of the prototype for super admin", async ({ page }) => {
   await openAs(page, "comms@tilhero.local", "#/news");
   const ids = await menu(page);
-  expect(ids.filter((x) => !["content", "agents", "qa", "costs", "heroes", "game", "events", "langs"].includes(x!))).toEqual(["overview", "news"]);
+  // sprint 5: «memory» (forgetting analytics) opens with dashboard.read
+  expect(ids.filter((x) => !["content", "agents", "qa", "costs", "heroes", "game", "events", "langs"].includes(x!))).toEqual(["overview", "memory", "news"]);
   await expect(page.getByTestId("news-tab-whatsnew")).toBeVisible();
   await expect(page.getByTestId("news-tab-templates")).toBeVisible();
   await expect(page.getByTestId("news-tab-campaigns")).toBeVisible();
 });
 
-test("super admin: 15 sections in 5 groups; a «soon» section shows its sprint; content and languages are live (sprint 3)", async ({ page }) => {
+test("super admin: 15 sections + «memory» (sprint 5) in 5 groups; a «soon» section shows its sprint; content and languages are live (sprint 3)", async ({ page }) => {
   await openAs(page, "admin@tilhero.local");
-  expect(await menu(page)).toEqual(["overview", "users", "content", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit"]);
+  expect(await menu(page)).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit"]);
   await expect(page.locator(".sn-group")).toHaveCount(5);
   await page.locator('[data-nav="heroes"]').click();
   await expect(page.getByTestId("soon")).toBeVisible();
@@ -73,6 +74,6 @@ test("the admin theme from experience-config is applied without a build; its fai
 
 test("experience-config down → the built-in menu and theme", async ({ page }) => {
   await openAs(page, "admin@tilhero.local", "#/overview", { adminConfigDown: true });
-  expect(await menu(page)).toHaveLength(15);
+  expect(await menu(page)).toHaveLength(16);
   await expect(page.locator("html")).not.toHaveAttribute("style", /--pen/);
 });

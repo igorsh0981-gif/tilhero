@@ -45,6 +45,82 @@ def load_seed() -> dict[str, dict[str, dict[str, Any]]]:
 SEED_DATA = load_seed()
 
 
+def load_seed_readings() -> dict[str, dict[str, Any]]:
+    """Сид текстов catalog спринта 5 (исполнитель B), если уже есть — сквозная проверка совместимости форм."""
+    path = SEED / "readings.json"
+    if not path.exists():
+        return {}
+    return {str(x["reading_id"]): x for x in json.loads(path.read_text(encoding="utf-8"))}
+
+
+SEED_READINGS = load_seed_readings()
+
+
+def _loc(ru: str, uz: str) -> dict[str, str]:
+    return {"ru": ru, "uz": uz}
+
+
+def _sentences(*rows: tuple[str, str, str]) -> list[dict[str, Any]]:
+    return [{"s_id": sid, "text_en": en, "gloss": _loc(ru, ru)} for sid, en, ru in rows]
+
+
+# Тексты для чтения (ReadingPayload, content.ts) — сид catalog спринта 5 делает исполнитель B; здесь — свои по
+# INTERNAL_API §2.1 спринта 5 (взрослый/подростковый и детский).
+READINGS: dict[str, dict[str, Any]] = {
+    "r-a1-coffee-shop": {
+        "reading_id": "r-a1-coffee-shop", "title": _loc("В кофейне", "Qahvaxonada"), "level": "A1",
+        "audience": ["teens", "adults"], "topics": ["food"], "skill_ids": ["read-a1-short-texts"],
+        "paragraphs": [
+            {"p_id": "p1", "sentences": _sentences(
+                ("s1", "Anna works near a small coffee shop.", "Анна работает рядом с маленькой кофейней."),
+                ("s2", "Every morning she orders a latte and a croissant.",
+                 "Каждое утро она заказывает латте и круассан."))},
+            {"p_id": "p2", "sentences": _sentences(
+                ("s3", "The barista knows her name and smiles.", "Бариста знает её имя и улыбается."),
+                ("s4", "On Fridays Anna pays for her friend too.", "По пятницам Анна платит и за подругу."))},
+        ],
+        "glossary": [
+            {"en": "orders", "gloss": _loc("заказывает", "buyurtma qiladi"), "note": None},
+            {"en": "barista", "gloss": _loc("бариста", "barista"), "note": None},
+            {"en": "pays for", "gloss": _loc("платит за", "toʻlaydi"), "note": _loc("глагол с предлогом",
+                                                                                     "predlogli fe'l")},
+        ],
+        "questions": [
+            {"question_id": "rq-coffee-1", "type": "single_choice", "instruction": _loc("Выберите ответ",
+                                                                                          "Javobni tanlang"),
+             "prompt_en": "What does Anna order every morning?",
+             "options": ["Tea and a cake", "A latte and a croissant", "Orange juice"], "answer": 1},
+            {"question_id": "rq-coffee-2", "type": "true_false", "instruction": _loc("Верно или нет?",
+                                                                                       "Toʻgʻrimi yoki yoʻqmi?"),
+             "prompt_en": "The barista does not know Anna.", "options": ["True", "False"], "answer": 1},
+            {"question_id": "rq-coffee-3", "type": "gap_fill", "instruction": _loc("Вставьте слово",
+                                                                                     "Soʻzni qoʻying"),
+             "prompt_en": "On Fridays Anna ___ for her friend too.", "options": [], "answer": ["pays"]},
+        ],
+        "voice": "en-GB", "est_minutes": 5,
+    },
+    "r-a0-my-cat": {
+        "reading_id": "r-a0-my-cat", "title": _loc("Мой кот", "Mening mushugim"), "level": "A0",
+        "audience": ["kids"], "topics": ["home"], "skill_ids": ["read-a0-words"],
+        "paragraphs": [{"p_id": "p1", "sentences": _sentences(
+            ("s1", "I have a cat.", "У меня есть кот."), ("s2", "My cat is black.", "Мой кот чёрный."),
+            ("s3", "He likes milk.", "Он любит молоко."))}],
+        "glossary": [{"en": "cat", "gloss": _loc("кот", "mushuk"), "note": None},
+                     {"en": "black", "gloss": _loc("чёрный", "qora"), "note": None},
+                     {"en": "milk", "gloss": _loc("молоко", "sut"), "note": None}],
+        "questions": [
+            {"question_id": "rq-cat-1", "type": "true_false", "instruction": _loc("Верно?", "Toʻgʻrimi?"),
+             "prompt_en": "The cat is white.", "options": ["True", "False"], "answer": 1},
+            {"question_id": "rq-cat-2", "type": "single_choice", "instruction": _loc("Выбери", "Tanla"),
+             "prompt_en": "What does the cat like?", "options": ["milk", "fish", "bread"], "answer": 0},
+            {"question_id": "rq-cat-3", "type": "gap_fill", "instruction": _loc("Вставь слово", "Soʻzni qoʻy"),
+             "prompt_en": "I have a ___.", "options": [], "answer": ["cat"]},
+        ],
+        "voice": "en-US", "est_minutes": 3,
+    },
+}
+
+
 def error(status: int, code: str) -> httpx.Response:
     return httpx.Response(status, json={"code": code, "message": code, "trace_id": "t", "details": {}})
 
@@ -63,7 +139,12 @@ class FakeCatalog:
         # (kind, key) → {version: payload}; опубликована версия 1
         self.versions: dict[tuple[str, str], dict[int, dict[str, Any]]] = {
             (kind, key): {1: payload} for kind, items in self.data.items() for key, payload in items.items()}
+        for key, payload in {**SEED_READINGS, **READINGS}.items():
+            self.versions[("reading", key)] = {1: copy.deepcopy(payload)}
         self.published: dict[tuple[str, str], int | None] = {k: 1 for k in self.versions}
+        # тексты для чтения: catalog «забыл» проверить аудиторию — проверка в lessons (защита в глубину)
+        self.reading_ignores_audience = False
+        self.reading_without_version = False  # ответ /readings/{id} без номера версии
         self.down = False
         self.snapshot_versions = False
         self.calls: list[str] = []
@@ -148,6 +229,20 @@ class FakeCatalog:
             status = "published" if self.published.get((kind, key)) == v else "archived"
             return httpx.Response(200, json={"kind": kind, "key": key, "version": v, "status": status,
                                              "payload": versions[v]})
+        m = re.fullmatch(r"/internal/v1/readings/([^/]+)", path)
+        if m:  # INTERNAL_API §2.1 спринта 5: опубликованная версия без ключей вопросов
+            key = m.group(1)
+            v = self.published.get(("reading", key))
+            if v is None:
+                return error(404, "READING_NOT_FOUND")
+            p = self.versions[("reading", key)][v]
+            if request.url.params.get("audience") not in p["audience"] and not self.reading_ignores_audience:
+                return error(404, "READING_NOT_FOUND")
+            view = {**{k: val for k, val in p.items() if k != "questions"},
+                    "questions": [{k: val for k, val in q.items() if k != "answer"} for q in p["questions"]]}
+            if not self.reading_without_version:
+                view["version"] = v
+            return httpx.Response(200, json=view)
         m = re.fullmatch(r"/internal/v1/media/([^/]+)/exercises", path)
         if m:
             asset = m.group(1)
@@ -254,6 +349,12 @@ class FakeAssessment:
         self.delay = 0.0  # ответ через N секунд
 
     def _key_item(self, refs: dict[str, Any], item_id: str) -> tuple[str, dict[str, Any]] | None:
+        reading = refs.get("reading")
+        if reading:
+            p = self.catalog.versions[("reading", reading["key"])][reading["version"]]
+            for q in p["questions"]:
+                if q["question_id"] == item_id:
+                    return "reading", {**q, "skill_id": (p["skill_ids"] or [""])[0]}
         lesson = refs.get("lesson")
         if lesson:
             p = self.catalog.versions[("lesson", lesson["key"])][lesson["version"]]
@@ -270,7 +371,7 @@ class FakeAssessment:
         if answer is None:
             return False
         t = item["type"]
-        if t in ("single_choice", "translate_choice", "comprehension", "phrase_meaning"):
+        if t in ("single_choice", "translate_choice", "comprehension", "phrase_meaning", "true_false"):
             return answer == key
         if t == "gap_fill":
             return isinstance(answer, str) and _norm(answer) in {_norm(k) for k in key}
@@ -316,9 +417,16 @@ class FakeAssessment:
             "scores": [{"code": "task", "title": {"ru": "Задача", "uz": "Vazifa"},
                         "score": {"success": 3, "alt_success": 2, "fail": 1}.get(outcome or "", None)}],
             "key_errors": [], "items": items, "practice_only": body["practice_only"],
-            "rubric_version": f"{(refs.get('rubric') or {}).get('key')}@{(refs.get('rubric') or {}).get('version')}",
+            "rubric_version": ("reading-comprehension@1" if refs.get("reading") else
+                               f"{(refs.get('rubric') or {}).get('key')}@{(refs.get('rubric') or {}).get('version')}"),
             "evaluator": None, "superseded_by": None, "appeal": None, "created_at": "2026-11-19T07:30:00Z",
         }
+        if refs.get("reading"):
+            share_score = None if share is None else (3 if share >= 0.8 else 2 if share >= 0.6 else
+                                                      1 if share >= 0.3 else 0)
+            view["scores"] = [{"code": "comprehension", "title": {"ru": "Понимание", "uz": "Tushunish"},
+                               "score": share_score}]
+            view["task_completed"] = None
         outcomes = [] if body["practice_only"] else [
             {"skill_id": sk, "outcome": "demonstrated" if sum(v) >= max(1, (2 * len(v) + 2) // 3) and passed
              else "learning"} for sk, v in by_skill.items()]
@@ -383,6 +491,10 @@ def find_item(item: dict[str, Any], locale: str = "ru") -> tuple[str, dict[str, 
                         kw["gloss"][locale]), "type": "meaning_check"}
     if iid in SEED_DATA["media_exercise"]:
         return "exercise", SEED_DATA["media_exercise"][iid]
+    for reading in READINGS.values():
+        for q in reading["questions"]:
+            if q["question_id"] == iid:
+                return "reading", q
     for lesson in SEED_DATA["lesson"].values():
         for c in lesson["control_items"]:
             if c["item_id"] == iid:
@@ -405,6 +517,8 @@ def wrong_answer(item: dict[str, Any]) -> Any:
     t, key = full["type"], full["answer"]
     if t == "gap_fill":
         return "zzz"
+    if t == "true_false":
+        return 1 - key
     if t in ("order_words", "order_lines"):
         right = correct_answer(item)
         wrong = list(reversed(right))

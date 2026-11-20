@@ -71,6 +71,7 @@ describe("POST /v1/session/telegram", () => {
       age_band: null,
       is_active: true,
       onboarding_completed: false,
+      voice_consent: false,
     });
     expect(body.learners).toEqual([body.learner]);
     expect(JSON.stringify(body)).not.toContain("telegram_user_id");
@@ -288,7 +289,7 @@ describe("POST /v1/session/learner — активный ученик", () => {
     h.fake.onboard(childId);
     const c = await switchTo(h, s, childId);
     expect(Value.Check(SessionResponseSchema, c.body)).toBe(true);
-    expect(c.body.learner).toEqual({ learner_id: childId, kind: "child", display_name: "Мадина", age_band: "6-9", is_active: true, onboarding_completed: true });
+    expect(c.body.learner).toEqual({ learner_id: childId, kind: "child", display_name: "Мадина", age_band: "6-9", is_active: true, onboarding_completed: true, voice_consent: false });
     expect(c.body.account.user_id).toBe(s.userId);
     expect(c.body.onboarding_completed).toBe(true);
     expect(c.body.learners.map((l: { learner_id: string; is_active: boolean }) => [l.learner_id, l.is_active])).toEqual([

@@ -15,6 +15,7 @@ import { Bar } from "../../ui/shell";
 import { PinOffer } from "./ParentCode";
 import { useSocialConsentGate } from "./SocialConsent";
 import { useSwitchToChild } from "./switching";
+import { ChildVoiceToggle } from "./VoiceConsent";
 
 const STATUS_TONE: Record<Invite["status"], "ok" | "mute" | "warn" | undefined> = { active: undefined, accepted: "ok", revoked: "mute", expired: "mute" };
 
@@ -92,15 +93,19 @@ export function Family() {
               {kids.length ? (
                 <ul className="list" data-testid="children">
                   {kids.map((k) => (
-                    <li key={k.learner_id} className="row">
-                      <span className="av s" aria-hidden="true">{initialOf(k.display_name)}</span>
-                      <span className="t">
-                        <b>{k.display_name}</b>
-                        <span>{k.age_band ? t(`age.${k.age_band}` as MessageKey) : ""}</span>
-                      </span>
-                      <Btn variant="link" busy={toChild.busy} onClick={() => void toChild.run(k.learner_id)} aria-label={t("fam.switchTo", { name: k.display_name })}>
-                        {t("fam.switch")}
-                      </Btn>
+                    <li key={k.learner_id} className="child-item" data-testid={`child-${k.learner_id}`}>
+                      <div className="row">
+                        <span className="av s" aria-hidden="true">{initialOf(k.display_name)}</span>
+                        <span className="t">
+                          <b>{k.display_name}</b>
+                          <span>{k.age_band ? t(`age.${k.age_band}` as MessageKey) : ""}</span>
+                        </span>
+                        <Btn variant="link" busy={toChild.busy} onClick={() => void toChild.run(k.learner_id)} aria-label={t("fam.switchTo", { name: k.display_name })}>
+                          {t("fam.switch")}
+                        </Btn>
+                      </div>
+                      {/* sprint 5: the parent's consent to record the child's voice (pronunciation score) */}
+                      <ChildVoiceToggle child={k} />
                     </li>
                   ))}
                 </ul>

@@ -40,7 +40,7 @@ const TOPICS = ["small_talk", "travel", "food", "shopping", "work", "interview",
 }));
 
 function session(kid = false): SessionResponse {
-  const learner = { learner_id: ME, kind: kid ? ("child" as const) : ("self" as const), display_name: "Азиз", age_band: kid ? ("6-9" as const) : ("18+" as const), is_active: true, onboarding_completed: true };
+  const learner = { learner_id: ME, kind: kid ? ("child" as const) : ("self" as const), display_name: "Азиз", age_band: kid ? ("6-9" as const) : ("18+" as const), is_active: true, onboarding_completed: true, voice_consent: false };
   return {
     access_token: "acc",
     expires_in: 900,

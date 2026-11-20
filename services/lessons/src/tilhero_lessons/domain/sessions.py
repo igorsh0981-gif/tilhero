@@ -1,5 +1,6 @@
-"""Сессии ученика (INTERNAL_API §2.2–2.4, bff.ts «Спринт 4»): карточка урока, старт урока/сценария/медиа/повтора,
-текущий шаг, ответы, подсказки, «проще», пауза/продолжение/отмена, повтор ролевой ситуации, итоги, история.
+"""Сессии ученика (INTERNAL_API §2.2–2.4, bff.ts «Спринт 4»): карточка урока, старт урока/сценария/медиа/повтора и
+чтения (спринт 5, INTERNAL_API §4), текущий шаг, ответы, подсказки, «проще», пауза/продолжение/отмена, повтор ролевой
+ситуации, итоги, история, последние результаты чтения.
 
 Транзакции короткие: контент catalog (версии неизменяемы, кеш) и вызовы ИИ/assessment выполняются ВНЕ транзакции
 с блокировкой ученика; команда затем перепроверяет состояние под блокировкой (повтор/гонка — идемпотентно).
@@ -20,6 +21,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, or_, select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tilhero_common.app import Runtime
@@ -40,13 +42,22 @@ from tilhero_lessons.domain.common import (
     lock_user,
     no_exercises,
     pair_not_available,
+    reading_not_available,
     seeded_order,
     session_active,
     session_not_found,
     session_state,
     step_not_current,
 )
-from tilhero_lessons.domain.content import MEDIA_ITEM_TYPES, Bundle, find_control_item, load_bundle, ref
+from tilhero_lessons.domain.content import (
+    MEDIA_ITEM_TYPES,
+    READING_ITEM_TYPES,
+    Bundle,
+    find_control_item,
+    load_bundle,
+    reading_audience_ok,
+    ref,
+)
 from tilhero_lessons.domain.users import Learner, audience_for, ensure_not_deleted, is_child
 from tilhero_lessons.models import ReviewItem, Session, Step, Turn
 from tilhero_lessons.settings import Settings
@@ -56,6 +67,9 @@ log = logging.getLogger("tilhero.lessons.sessions")
 RETRIEVAL_MAX = 3
 KEYS_SEEN_SESSIONS = 50  # прошлых сессий урока, итоги которых просматриваются (R2-01)
 MEDIA_TZ = "Asia/Tashkent"
+PRACTICE_ONLY_KINDS = frozenset({"review", "reading"})  # без влияния на освоение навыков
+NO_AI_KINDS = frozenset({"review", "reading"})  # ИИ не нужен: «варианты» — норма, а не упрощённый режим
+READING_RESULTS_MAX = 50
 
 
 def default_seed() -> str:
@@ -269,12 +283,13 @@ def _new_session(ctx: Ctx, *, kind: str, pair_id: str, course_id: str | None, au
     return Session(
         session_id=uuid.uuid4(), user_id=ctx.learner.user_id, account_id=ctx.learner.account_id, kind=kind,
         pair_id=pair_id, course_id=course_id, title=title, level=level, audience=audience, locale=locale,
-        # взрослый в «вариантах» на старте — ИИ выключен (_ai_mode): плашка упрощённого режима сразу; review — норма
-        ai_mode=ai_mode, ai_degraded=ai_mode == "choices" and audience != "kids" and kind != "review",
+        # взрослый в «вариантах» на старте — ИИ выключен (_ai_mode): плашка упрощённого режима сразу; повтор и чтение
+        # без ИИ — норма
+        ai_mode=ai_mode, ai_degraded=ai_mode == "choices" and audience != "kids" and kind not in NO_AI_KINDS,
         ai_used=False, hints_used=0, seed=seed, content_versions=cv,
         plan={"stages": plan}, state={"cursor": {"stage": 0, "unit": 0}, "turns": 0}, status="ready", stage=None,
         step_index=0, duration_min=duration, created_at=ctx.now, active_seconds=0, minutes=0,
-        practice_only=kind == "review", evaluation_status="none", evaluation_attempts=0,
+        practice_only=kind in PRACTICE_ONLY_KINDS, evaluation_status="none", evaluation_attempts=0,
         summary=None, **targets)
 
 
@@ -584,6 +599,67 @@ async def start_review(ctx: Ctx, source_id: uuid.UUID, locale: str, key: str) ->
     return await _insert(ctx, s, key, rhash)
 
 
+async def start_reading(ctx: Ctx, reading_id: str, pair_id: str, hint: str | None, locale: str,
+                        key: str) -> tuple[Session, bool]:
+    """Практика «Чтение» (спринт 5, INTERNAL_API §4, AT-57): текст → вопросы на понимание (закрытые, без подсказок,
+    правильность — только в итогах) → оценка assessment по ключам версии текста (practice_only, навыки не меняются) →
+    итоги. Текст опубликован и подходит аудитории (ребёнку — только детский), иначе 404 READING_NOT_AVAILABLE; версия
+    фиксируется при старте; ИИ не нужен (ai_mode choices)."""
+    rhash = _request_hash("reading", reading_id, pair_id)
+    existing = await _replay(ctx, key, rhash)
+    if existing is not None:
+        return existing, True
+    await housekeep(ctx)
+    available_pair, course = await _course(ctx, pair_id)
+    if not available_pair:
+        raise pair_not_available(pair_id)
+    audience = await _audience(ctx, hint)
+    found = await ctx.catalog.reading(reading_id, audience)
+    if found is None:
+        raise reading_not_available()
+    version, reading = found
+    questions = [q for q in reading.get("questions") or [] if isinstance(q, dict)]
+    # защита в глубину: аудиторию проверяет и catalog; версия без вопросов или с вопросом, который assessment не
+    # оценит (неизвестный тип), практикой не является — итог без оценки ученику не нужен
+    gradable = bool(questions) and all(q.get("type") in READING_ITEM_TYPES and q.get("question_id")
+                                       for q in questions)
+    if reading.get("reading_id") != reading_id or not reading_audience_ok(reading, audience) or not gradable:
+        raise reading_not_available()
+    plan = [{"type": "reading", "units": [{"t": "reading"}]},
+            {"type": "questions", "units": [{"t": "question", "question_id": str(q["question_id"])}
+                                            for q in questions]},
+            {"type": "summary", "units": [{"t": "done"}]}]
+    s = _new_session(ctx, kind="reading", pair_id=pair_id, course_id=course or None, audience=audience,
+                     locale=locale, title=reading["title"], level=reading.get("level"),
+                     duration=ctx.settings.practice_duration_min, cv={"reading": ref(reading_id, version)},
+                     plan=plan, seed=ctx.seed_factory(), ai_mode="choices", reading_id=reading_id)
+    return await _insert(ctx, s, key, rhash)
+
+
+async def reading_results(ctx: Ctx, reading_ids: list[str]) -> dict[str, Any]:
+    """Последний результат чтения ученика по текстам (ReadingCard.last_result, bff.ts): завершённая сессия с оценкой —
+    доля верных ответов `{correct, total}` из актуальной копии оценки. Тексты без такой сессии в ответе нет."""
+    ids = list(dict.fromkeys(reading_ids))[:READING_RESULTS_MAX]
+    if not ids:
+        return {"items": []}
+    async with ctx.rt.transaction() as db:
+        await ensure_not_deleted(db, ctx.learner.user_id)
+        rows = (await db.execute(
+            select(Session.reading_id, Session.evaluation, Session.finished_at)
+            .where(Session.user_id == ctx.learner.user_id, Session.kind == "reading", Session.status == "completed",
+                   Session.reading_id.in_(ids), Session.evaluation.is_not(None))
+            .ext(distinct_on(Session.reading_id))
+            .order_by(Session.reading_id, Session.finished_at.desc())
+        )).all()
+    found: dict[str, dict[str, Any]] = {}
+    for reading_id, ev, finished_at in rows:
+        items = [i for i in (ev or {}).get("items") or [] if isinstance(i, dict)]
+        correct = sum(1 for i in items if i.get("correct") is True)
+        found[str(reading_id)] = {"reading_id": str(reading_id), "correct": correct, "total": len(items),
+                                  "finished_at": iso(finished_at)}
+    return {"items": [found[i] for i in ids if i in found]}
+
+
 # ---------------------------------------------------------------- просмотр, шаги
 
 
@@ -857,7 +933,7 @@ async def retry(ctx: Ctx, session_id: uuid.UUID) -> dict[str, Any]:
         s = await own(db, ctx.learner, session_id, lock=True)
         _ensure_active(s)
         step = await flow.current_step(db, s)
-        if step is None:
+        if step is None or b.scenario is None:  # медиа и чтение — без ролевой ситуации
             raise conflict("RETRY_NOT_AVAILABLE", "Повторная попытка недоступна")
         await _wake(db, s, ctx)
         nxt = await flow.roleplay_retry(db, s, b, step, ctx.now)
@@ -922,7 +998,7 @@ async def _before_and_titles(ctx: Ctx, s: Session) -> tuple[dict[str, str] | Non
     """«Было» навыков (diagnostics) и названия навыков (снимок курса) — параллельно, до запроса оценки (после него
     карта может уже измениться по событию assessment) и не дольше SUMMARY_AUX_TIMEOUT_SECONDS: не успели — итоги
     без изменений навыков / с кодами навыков вместо названий."""
-    if s.kind == "review":
+    if s.kind in PRACTICE_ONLY_KINDS:
         return None, {}
     before, titles = await asyncio.gather(
         _bounded(clients.skill_states(ctx.rt, s.user_id, s.pair_id), ctx.settings.summary_aux_timeout_seconds,

@@ -33,6 +33,7 @@ export const URLS = {
   aiGateway: "http://ai-gateway.test",
   lessons: "http://lessons.test",
   assessment: "http://assessment.test",
+  memory: "http://memory.test",
 } as const;
 export type Service = keyof typeof URLS;
 export const AUD: Record<Service, string> = {
@@ -48,6 +49,7 @@ export const AUD: Record<Service, string> = {
   aiGateway: "ai-gateway",
   lessons: "lessons",
   assessment: "assessment",
+  memory: "memory",
 };
 
 export function testConfig(env: Record<string, string> = {}): Config {
@@ -72,6 +74,7 @@ export function testConfig(env: Record<string, string> = {}): Config {
     AI_GATEWAY_URL: URLS.aiGateway,
     LESSONS_URL: URLS.lessons,
     ASSESSMENT_URL: URLS.assessment,
+    MEMORY_URL: URLS.memory,
     UPSTREAM_RETRIES: "0",
     UPSTREAM_TIMEOUT_MS: "2000",
     DASHBOARD_TIMEOUT_MS: "500",
@@ -588,7 +591,9 @@ export function contentVersion(p: Record<string, unknown> = {}) {
 
 const KIND_COUNTS = { published: 1, drafts: 2, in_review: 1 };
 export const CONTENT_SUMMARY = {
-  by_kind: Object.fromEntries(["course", "skill", "module", "lesson", "rubric", "scenario", "media_asset", "media_exercise"].map((k) => [k, KIND_COUNTS])),
+  by_kind: Object.fromEntries(
+    ["course", "skill", "module", "lesson", "rubric", "scenario", "media_asset", "media_exercise", "reading"].map((k) => [k, KIND_COUNTS]),
+  ),
   in_review: 8,
   rights_expiring: [{ asset_id: "m-own-coffee-order", title: { ru: "Кофе", uz: "Qahva" }, valid_to: "2026-11-30" }],
   suspended_media: 1,
@@ -810,11 +815,37 @@ export function goldenCase(p: Record<string, unknown> = {}) {
 }
 
 export function aiModel(p: Record<string, unknown> = {}) {
-  return { model_id: "claude-haiku-5-5", provider: "anthropic", input_usd_per_mtok: 0.1, output_usd_per_mtok: 0.5, active: true, updated_at: "2026-11-19T00:00:00Z", ...p };
+  return {
+    model_id: "claude-haiku-5-5",
+    provider: "anthropic",
+    input_usd_per_mtok: 0.1,
+    output_usd_per_mtok: 0.5,
+    audio_usd_per_hour: null,
+    active: true,
+    updated_at: "2026-11-19T00:00:00Z",
+    ...p,
+  };
+}
+
+/** Модель оценки произношения (спринт 5): цены токенов 0, цена часа аудио. */
+export function speechModel(p: Record<string, unknown> = {}) {
+  return aiModel({ model_id: "azure-speech-pa", provider: "azure_speech", input_usd_per_mtok: 0, output_usd_per_mtok: 0, audio_usd_per_hour: 1.32, ...p });
+}
+
+/** AiProviderStatus (+ speech — спринт 5): ключи — только «задан / не задан». */
+export function aiProvider(p: Record<string, unknown> = {}) {
+  return {
+    provider: "fake",
+    key_configured: false,
+    last_error: null,
+    ai_enabled: true,
+    speech: { provider: "fake_speech", key_configured: false, region: null, last_error: null },
+    ...p,
+  };
 }
 
 export function aiBudget(p: Record<string, unknown> = {}) {
-  return { ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, alert_percent: 80, updated_at: "2026-11-19T00:00:00Z", ...p };
+  return { ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80, updated_at: "2026-11-19T00:00:00Z", ...p };
 }
 
 export function aiCall(p: Record<string, unknown> = {}) {
@@ -854,6 +885,7 @@ export const AI_USAGE_SUMMARY = {
   avg_cost_per_lesson_usd: 0.004,
   ai_enabled: true,
   alert_percent: 80,
+  speech: { calls: 40, audio_minutes: 3.5, spent_usd: 0.08, speech_available: true, cap_usd: 5 },
 };
 
 export function sessionRowDomain(p: Record<string, unknown> = {}) {
@@ -864,6 +896,7 @@ export function sessionRowDomain(p: Record<string, unknown> = {}) {
     lesson_id: "l-a1-05-cafe",
     scenario_id: "sc-cafe-order",
     asset_id: null,
+    reading_id: null,
     level: "A1",
     status: "completed",
     outcome: "success",
@@ -988,7 +1021,7 @@ export const LESSON_STATS_DOMAIN = {
   completed: 31,
   completion_pct: 77.5,
   median_minutes: 19,
-  by_kind: { lesson: 30, scenario: 6, media: 3, review: 1 },
+  by_kind: { lesson: 30, scenario: 6, media: 3, review: 1, reading: 2 },
   ai_degraded_pct: 4.2,
 };
 
@@ -1013,6 +1046,195 @@ export const REEVALUATION_BODY = {
   reason: "Ответ ученика верный: артикль необязателен",
   appeal_id: APPEAL_ID,
 };
+
+// ---------------------------------------------------------------- память, словарь курса (спринт 5)
+
+export const GLOSSARY_ENTRY_ID = "f59a4b6d-7e8f-4a0b-9c13-c4d5e6f70819";
+export const GLOSSARY_ENTRY_ID_2 = "0a6b5c7e-8f9a-4b1c-8d24-d5e6f708192a";
+export const CARD_ID = "1b7c6d8f-9a0b-4c2d-9e35-e6f708192a3b";
+export const CARD_ID_2 = "2c8d7e9a-0b1c-4d3e-8f46-f708192a3b4c";
+export const CHECK_ID = "3d9e8f0b-1c2d-4e4f-9a57-08192a3b4c5d";
+export const MEMORY_STAFF_ID = "4e0f9a1c-2d3e-4f5a-8b68-192a3b4c5d6e";
+
+export function glossaryRowDomain(p: Record<string, unknown> = {}) {
+  return {
+    entry_id: GLOSSARY_ENTRY_ID,
+    pair_id: "ru-en",
+    lemma: "coffee",
+    forms: ["coffee", "coffees"],
+    part_of_speech: "noun",
+    gloss: { ru: "кофе", uz: "qahva" },
+    source: "course",
+    review_status: "not_required",
+    confidence: null,
+    refs_count: 2,
+    overridden: false,
+    updated_at: "2026-11-19T10:00:00.000Z",
+    // staff_id (admin.ts) — по нему updated_by_name; имя домена не берётся
+    updated_by: AUTHOR_ID,
+    updated_by_name: "от домена не берётся",
+    // служебное поле catalog — не уходит клиенту
+    seq: 41,
+    ...p,
+  };
+}
+
+export function glossaryDetailDomain(p: Record<string, unknown> = {}) {
+  return {
+    entry_id: GLOSSARY_ENTRY_ID,
+    pair_id: "ru-en",
+    lemma: "coffee",
+    forms: ["coffee", "coffees"],
+    part_of_speech: "noun",
+    gloss: { ru: "кофе", uz: "qahva" },
+    example_en: "A coffee, please.",
+    source: "course",
+    review_status: "not_required",
+    confidence: null,
+    agent_version: null,
+    refs: [{ kind: "lesson", key: "l-a1-05-cafe", version: 2 }, { kind: "reading", key: "r-a1-coffee-shop", version: 1 }],
+    override: null,
+    corrected: false,
+    archived_at: null,
+    updated_by: AUTHOR_ID,
+    updated_at: "2026-11-19T10:00:00.000Z",
+    updated_by_name: null,
+    refs_titles: [
+      { kind: "lesson", key: "l-a1-05-cafe", version: 2, title: { ru: "В кафе", uz: "Kafeda" } },
+      { kind: "reading", key: "r-a1-coffee-shop", version: 1, title: null },
+    ],
+    history: [
+      { at: "2026-11-19T10:00:00.000Z", by: AUTHOR_ID, by_name: null, action: "overridden", before: { gloss: { ru: "кофе", uz: "kofe" } }, after: { gloss: { ru: "кофе", uz: "qahva" } }, reason: "uz — латиница" },
+      { at: "2026-11-18T00:00:00.000Z", by: SEED_ACTOR_ID, by_name: null, action: "created", before: null, after: { lemma: "coffee" }, reason: null },
+      // система (сервис) — by null, имени нет
+      { at: "2026-11-17T00:00:00.000Z", by: null, by_name: null, action: "reviewed", before: null, after: { review_status: "approved" }, reason: null },
+    ],
+    conflicts: [{ ref: { kind: "reading", key: "r-a1-coffee-shop", version: 1 }, gloss: { ru: "кофейня", uz: "qahvaxona" } }],
+    // служебные поля catalog — не уходят клиенту
+    seq: 41,
+    ...p,
+  };
+}
+
+export function fsrsSnapshot(p: Record<string, unknown> = {}) {
+  return { state: "review", stability: 12.5, difficulty: 5.1, due_at: "2026-11-25T09:00:00.000Z", status: "review", ...p };
+}
+
+export function reviewLogRow(p: Record<string, unknown> = {}) {
+  return {
+    log_id: "5f1a0b2d-3e4f-4a6b-9c79-2a3b4c5d6e7f",
+    at: "2026-11-19T09:10:00.000Z",
+    task_type: "typed",
+    answer_mode: "typed",
+    grade: "good",
+    hinted: false,
+    revealed: false,
+    elapsed_days: 3.2,
+    before: fsrsSnapshot({ stability: 4.1, difficulty: 5.3, due_at: "2026-11-19T09:00:00.000Z" }),
+    after: fsrsSnapshot(),
+    algorithm: "fsrs-5",
+    params_version: "fsrs5-default-1",
+    actor: "learner",
+    actor_id: null,
+    actor_name: null,
+    reason: null,
+    // служебные поля memory — не уходят клиенту
+    session_id: randomUUID(),
+    user_id: LEARNER_USER_ID,
+    ...p,
+  };
+}
+
+export function adminCardRow(p: Record<string, unknown> = {}) {
+  return {
+    card_id: CARD_ID,
+    kind: "word",
+    text_en: "coffee",
+    gloss: { ru: "кофе", uz: "qahva" },
+    status: "review",
+    stability: 12.5,
+    difficulty: 5.1,
+    retrievability: 0.93,
+    reps: 4,
+    lapses: 1,
+    due_at: "2026-11-25T09:00:00.000Z",
+    last_review_at: "2026-11-19T09:10:00.000Z",
+    error_code: null,
+    // ключ, допустимые ответы и цитата ошибки — у memory, сотруднику не отдаются
+    key: "coffee",
+    answers_en: ["coffee"],
+    evidence: "learner-quote-evidence",
+    ...p,
+  };
+}
+
+export function adminCardDetailDomain(p: Record<string, unknown> = {}) {
+  return {
+    ...adminCardRow(),
+    user_id: LEARNER_USER_ID,
+    example_en: "A coffee, please.",
+    sources: [
+      { kind: "lesson", key: "l-a1-05-cafe", version: 2, at: "2026-11-15T09:00:00.000Z" },
+      { kind: "manual", key: null, version: null, at: "2026-11-16T09:00:00.000Z" },
+    ],
+    // цитата ученика из оценки — не уходит клиенту
+    error: { correction: "I'd like a latte", evidence: "learner-quote-evidence", error_code: "article", severity: "low" },
+    log: {
+      items: [
+        reviewLogRow(),
+        reviewLogRow({ log_id: "6a2b1c3e-4f5a-4b7c-8d8a-3b4c5d6e7f80", task_type: "manual", answer_mode: "manual", grade: null, actor: "staff", actor_id: MEMORY_STAFF_ID, actor_name: "Имя из токена", reason: "Перенос по просьбе родителя" }),
+      ],
+      next_cursor: "c2",
+    },
+    ...p,
+  };
+}
+
+export function learnerMemorySummary(p: Record<string, unknown> = {}) {
+  return {
+    user_id: LEARNER_USER_ID,
+    pair_id: "ru-en",
+    cards_by_status: { new: 5, learning: 8, review: 30, known: 2, frozen: 1, archived: 3 },
+    due_now: 12,
+    overdue_7d: 2,
+    reviews_30d: 140,
+    last_review_at: "2026-11-19T09:10:00.000Z",
+    checks: [
+      { check_id: CHECK_ID, skill_id: "en.func.order", skill_title: { ru: "Заказ", uz: "Buyurtma" }, stage: "d7", status: "passed", due_at: "2026-11-18T00:00:00.000Z", checked_at: "2026-11-18T10:00:00.000Z", result: { correct: 3, total: 4 }, consecutive_failures: 0, items: [{ lesson_id: "l-a1-05-cafe", version: 2, item_id: "c1" }] },
+      { check_id: randomUUID(), skill_id: "en.gram.articles", skill_title: null, stage: "d30", status: "scheduled", due_at: "2026-12-10T00:00:00.000Z", checked_at: null, result: null, consecutive_failures: 1 },
+    ],
+    ...p,
+  };
+}
+
+const RATE = { scheduled: 20, passed: 14, failed: 3, pass_pct: 82.4, hidden: false };
+const HIDDEN_RATE = { scheduled: 0, passed: 0, failed: 0, pass_pct: null, hidden: true };
+export function forgettingAnalytics(p: Record<string, unknown> = {}) {
+  return {
+    period: "30d",
+    pair_id: "ru-en",
+    generated_at: "2026-11-20T08:00:00.000Z",
+    checks: { d7: RATE, d30: { ...RATE, scheduled: 9, passed: 6, failed: 1, pass_pct: 85.7 } },
+    by_skill: [
+      { skill_id: "en.func.order", title: { ru: "Заказ", uz: "Buyurtma" }, d7: RATE, d30: HIDDEN_RATE },
+      { skill_id: "en.gram.articles", title: null, d7: HIDDEN_RATE, d30: HIDDEN_RATE },
+    ],
+    by_lesson: [
+      { lesson_id: "l-a1-05-cafe", title: { ru: "В кафе", uz: "Kafeda" }, cards: 120, again_pct: 18.5, hidden: false },
+      { lesson_id: "l-a1-06-shop", title: null, cards: 0, again_pct: null, hidden: true },
+    ],
+    repeated_errors: [
+      { error_code: "article", label: { ru: "Артикль", uz: "Artikl" }, learners_with_repeats: 6, cards: 40, hidden: false },
+      { error_code: "word_order", label: { ru: "Порядок слов", uz: "Soʻz tartibi" }, learners_with_repeats: 0, cards: 0, hidden: true },
+    ],
+    forgotten_words: [{ text_en: "receipt", answers: 31, again_pct: 41.9 }],
+    ...p,
+  };
+}
+
+export function memoryStats(p: Record<string, unknown> = {}) {
+  return { period: "today", review_sessions: 58, learners_reviewing: 41, median_minutes: 6.5, d30_pass_pct: 78.3, avg_due_per_learner: 9.2, ai_glosses_pending: 0, ...p };
+}
 
 export class FakeDomains {
   readonly calls: Call[] = [];
@@ -1156,6 +1378,8 @@ export class FakeDomains {
         return this.lessons(c, key);
       case "assessment":
         return this.assessment(c, key);
+      case "memory":
+        return this.memory(c, key);
     }
     return domainError(404, "NOT_FOUND");
   }
@@ -1165,12 +1389,22 @@ export class FakeDomains {
     if (key === `GET ${B}/agents`) {
       return json(200, { items: [agentRowDomain(), agentRowDomain({ agent_id: "learning_orchestrator", implementation: "code", free_text: false, rollout: null, published: null, implemented_in: "lessons", last_test_run: null, calls_7d: 0, unavailable_pct_7d: null })] });
     }
-    if (key === `GET ${B}/models`) return json(200, { items: [aiModel(), aiModel({ model_id: "claude-sonnet-5-5", input_usd_per_mtok: 2, output_usd_per_mtok: 10 }), aiModel({ model_id: "fake", provider: "fake", input_usd_per_mtok: 0, output_usd_per_mtok: 0 })] });
+    if (key === `GET ${B}/models`) {
+      return json(200, {
+        items: [
+          aiModel(),
+          aiModel({ model_id: "claude-sonnet-5-5", input_usd_per_mtok: 2, output_usd_per_mtok: 10 }),
+          aiModel({ model_id: "fake", provider: "fake", input_usd_per_mtok: 0, output_usd_per_mtok: 0 }),
+          speechModel(),
+          speechModel({ model_id: "fake-speech", provider: "fake_speech", audio_usd_per_hour: 0 }),
+        ],
+      });
+    }
     if (c.method === "PUT" && c.path.startsWith(`${B}/models/`)) {
       const { reason: _r, ...m } = c.body;
       return json(200, aiModel({ ...m, model_id: c.path.split("/").pop(), updated_by: c.actor?.id }));
     }
-    if (key === `GET ${B}/provider`) return json(200, { provider: "fake", key_configured: false, last_error: null, ai_enabled: true });
+    if (key === `GET ${B}/provider`) return json(200, aiProvider());
     if (key === `GET ${B}/budget`) return json(200, aiBudget());
     if (key === `PUT ${B}/budget`) {
       const { reason: _r, ...b } = c.body;
@@ -1251,6 +1485,34 @@ export class FakeDomains {
   }
 
   private catalog(c: Call, key: string): Response {
+    const G = "/admin/v1/glossary";
+    if (key === `GET ${G}/stats`) return json(200, { pair_id: null, ai_glosses_pending: 7, ai_approved: 3, ai_rejected: 1, entries: { course: 120, methodist: 4, ai: 11 }, overridden: 2 });
+    if (key === `GET ${G}`) {
+      return json(200, {
+        items: [
+          glossaryRowDomain(),
+          glossaryRowDomain({ entry_id: GLOSSARY_ENTRY_ID_2, lemma: "latte", forms: ["latte"], source: "ai", review_status: "pending", confidence: 0.9, refs_count: 3, updated_by: null }),
+        ],
+        next_cursor: null,
+      });
+    }
+    if (key === `POST ${G}`) {
+      const { reason: _r, ...b } = c.body;
+      return json(201, glossaryDetailDomain({ ...b, entry_id: GLOSSARY_ENTRY_ID_2, source: "methodist", refs: [], refs_titles: [], conflicts: [], updated_by: c.actor?.id }));
+    }
+    const ge = /^\/admin\/v1\/glossary\/([^/]+)(\/review)?$/.exec(c.path);
+    if (ge && !ge[2] && c.method === "GET") return json(200, glossaryDetailDomain({ entry_id: ge[1] }));
+    if (ge && !ge[2] && c.method === "PATCH") {
+      const { reason: _r, override, ...b } = c.body;
+      const at = "2026-11-20T10:00:00.000Z";
+      const ov = override === undefined ? {} : { override: override === null ? null : { ...override, by: c.actor?.id, at } };
+      return json(200, glossaryDetailDomain({ ...b, ...ov, entry_id: ge[1], updated_by: c.actor?.id, updated_at: at }));
+    }
+    if (ge && !ge[2] && c.method === "DELETE") return new Response(null, { status: 204 });
+    if (ge && ge[2] && c.method === "POST") {
+      const status = c.body.decision === "reject" ? "rejected" : "approved";
+      return json(200, glossaryDetailDomain({ entry_id: ge[1], source: "ai", review_status: status, corrected: c.body.decision === "correct", ...(c.body.gloss ? { gloss: c.body.gloss } : {}), updated_by: c.actor?.id }));
+    }
     const B = "/admin/v1/content";
     if (key === `GET ${B}/summary`) return json(200, CONTENT_SUMMARY);
     if (key === `GET ${B}/review-queue`) return json(200, { items: [contentRowDomain({ latest_status: "in_review" })], next_cursor: null });
@@ -1295,6 +1557,26 @@ export class FakeDomains {
       if (verb === "rights-approve") return json(200, ver({ version: Number(v), rights_approved_by: c.actor?.id, rights_approved_at: "2026-11-18T10:00:00Z" }));
       if (sub === "archive") return json(200, { row: contentRowDomain({ kind, key: k, published_version: null, latest_status: "archived", updated_by: c.actor?.id }) });
       if (sub === "rollback") return json(200, ver({ version: c.body.to_version, status: "published", published_by: c.actor?.id }));
+    }
+    return domainError(404, "NOT_FOUND");
+  }
+
+  private memory(c: Call, key: string): Response {
+    const B = "/admin/v1/memory";
+    if (key === `GET ${B}/stats`) return json(200, memoryStats({ period: c.query.period ?? "today" }));
+    if (key === `GET ${B}/analytics`) return json(200, forgettingAnalytics({ pair_id: c.query.pair_id ?? "ru-en", period: c.query.period ?? "30d" }));
+    const l = /^\/admin\/v1\/memory\/learners\/([^/]+)(\/cards)?$/.exec(c.path);
+    if (l && c.method === "GET" && !l[2]) return json(200, learnerMemorySummary({ user_id: l[1] }));
+    // карточка ошибки с текстом — memory прошлой версии (admin.ts: null); BFF обнуляет сам
+    if (l && c.method === "GET" && l[2]) return json(200, { items: [adminCardRow(), adminCardRow({ card_id: CARD_ID_2, kind: "error", text_en: "I'd like a latte, please", status: "learning", error_code: "article" })], next_cursor: null });
+    const cm = /^\/admin\/v1\/memory\/cards\/([^/]+)(\/log|\/actions)?$/.exec(c.path);
+    if (cm && c.method === "GET" && !cm[2]) return json(200, adminCardDetailDomain({ card_id: cm[1] }));
+    if (cm && c.method === "GET" && cm[2] === "/log") return json(200, { items: [reviewLogRow({ log_id: randomUUID() })], next_cursor: null });
+    if (cm && c.method === "POST" && cm[2] === "/actions") {
+      const staff = c.actor?.id ?? null;
+      const manual = reviewLogRow({ log_id: randomUUID(), task_type: "manual", answer_mode: "manual", grade: null, actor: "staff", actor_id: staff, actor_name: c.actor?.name ?? null, reason: c.body.reason });
+      const status = c.body.action === "freeze" ? "frozen" : c.body.action === "reset" ? "new" : "review";
+      return json(200, adminCardDetailDomain({ card_id: cm[1], status, ...(c.body.due_at ? { due_at: c.body.due_at } : {}), log: { items: [manual, reviewLogRow()], next_cursor: null } }));
     }
     return domainError(404, "NOT_FOUND");
   }

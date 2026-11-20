@@ -40,6 +40,7 @@ ISSUERS = (
     "assessment",  # спринт 4: независимая оценка (вызывает catalog, ai-gateway)
     "ai-gateway",  # спринт 4: вызовы агентов (провайдер на стенде — fake)
     "tts",  # релиз 4.1: озвучка (только проверяет токены telegram-bff; на стенде — fake-синтез без моделей)
+    "memory",  # спринт 5: память и повторения (вызывает catalog, assessment, ai-gateway, identity-consent)
 )
 
 

@@ -47,7 +47,7 @@ export interface SessionPolicy {
   principalCacheSeconds: number;
 }
 
-/** Адреса доменов (INTERNAL_API спринтов 2–4): все обязательны в stage/prod. */
+/** Адреса доменов (INTERNAL_API спринтов 2–5): все обязательны в stage/prod. */
 export interface DomainUrls {
   adminIdentity: string;
   userAdmin: string;
@@ -66,6 +66,8 @@ export interface DomainUrls {
   lessons: string;
   /** спринт 4: оценки, переоценка, апелляции */
   assessment: string;
+  /** спринт 5: память ученика (карточки, история планирования, ручная правка), аналитика забывания, блок обзора */
+  memory: string;
 }
 
 export interface Config {
@@ -119,6 +121,7 @@ export const DEV_DEFAULTS = {
   LESSONS_URL: "http://127.0.0.1:8112",
   ASSESSMENT_URL: "http://127.0.0.1:8113",
   AI_GATEWAY_URL: "http://127.0.0.1:8114",
+  MEMORY_URL: "http://127.0.0.1:8116",
 } as const;
 
 /** Переменные адресов доменов (порядок — как в DomainUrls). */
@@ -135,6 +138,7 @@ export const DOMAIN_URL_VARS = {
   aiGateway: "AI_GATEWAY_URL",
   lessons: "LESSONS_URL",
   assessment: "ASSESSMENT_URL",
+  memory: "MEMORY_URL",
 } as const satisfies Record<keyof DomainUrls, keyof typeof DEV_DEFAULTS>;
 
 export class ConfigError extends Error {

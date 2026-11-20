@@ -11,7 +11,9 @@ export interface AppCtx {
   applySession(s: SessionResponse): Promise<void>;
   /** merge a fresh Profile into the session (account, learners, consent, security) */
   syncProfile(p: Profile): void;
-  patchSession(patch: Partial<SessionResponse>): void;
+  /** a partial session, or a function of the current one (answers that arrive one after another must not overwrite
+   *  each other: e.g. two child profiles switched quickly) */
+  patchSession(patch: Partial<SessionResponse> | ((prev: SessionResponse) => Partial<SessionResponse>)): void;
   plan: LearningPlan | null;
   setPlan(p: LearningPlan): void;
   reloadPlan(): Promise<LearningPlan | null>;

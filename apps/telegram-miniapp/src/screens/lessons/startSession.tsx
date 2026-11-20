@@ -11,12 +11,18 @@ import { haptic } from "../../tg";
 import { Btn, ErrorLine } from "../../ui/kit";
 import { Sheet } from "../../ui/overlays";
 
-export type StartWhat = { kind: "lesson"; id: string } | { kind: "scenario"; id: string } | { kind: "media"; id: string } | { kind: "review"; sessionId: string };
+export type StartWhat =
+  | { kind: "lesson"; id: string }
+  | { kind: "scenario"; id: string }
+  | { kind: "media"; id: string }
+  | { kind: "review"; sessionId: string }
+  // sprint 5: questions to a reading text (session kind "reading")
+  | { kind: "reading"; id: string };
 
 const whatKey = (w: StartWhat) => (w.kind === "review" ? `review:${w.sessionId}` : `${w.kind}:${w.id}`);
 
 /**
- * Start a session (lesson, scenario «Разыграть», media «Упражнения», review of mistakes) → the player. One
+ * Start a session (lesson, scenario «Разыграть», media «Упражнения», review of mistakes, questions to a text) → the player. One
  * Idempotency-Key per tap, reused when the answer was lost (the same session, not a second one). 409 SESSION_ACTIVE —
  * a sheet «Продолжить / Отменить и начать новое».
  */
@@ -35,6 +41,8 @@ export function useStartSession() {
         return bff.startMedia(w.id, k);
       case "review":
         return bff.startReview(w.sessionId, k);
+      case "reading":
+        return bff.startReading(w.id, k);
     }
   };
 

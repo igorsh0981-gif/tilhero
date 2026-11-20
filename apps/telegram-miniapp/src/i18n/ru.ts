@@ -1,10 +1,12 @@
 /** Russian — the source dictionary. Keys are the MessageKey type; uz.ts must have exactly the same keys. */
 import { ruContent } from "./ru.content";
 import { ruLessons } from "./ru.lessons";
+import { ruMemory } from "./ru.memory";
 
 export const ru = {
   ...ruContent,
   ...ruLessons,
+  ...ruMemory,
   // ---- common ----
   "c.continue": "Продолжить",
   "c.back": "Назад",
@@ -30,7 +32,7 @@ export const ru = {
   "nav.tabs": "Разделы",
   "tab.home": "Главная",
   "tab.lessons": "Уроки",
-  "tab.review": "Повторение",
+  "tab.review": "Словарь",
   "tab.progress": "Прогресс",
   "tab.profile": "Профиль",
   "bar.inbox": "Уведомления",

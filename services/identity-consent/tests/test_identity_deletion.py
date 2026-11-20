@@ -68,7 +68,7 @@ async def test_deletion_request_with_confirm_word(env) -> None:
         ("POST", "/internal/v1/me/learners", {"display_name": "Мадина", "age_band": "6-9"}),
         ("POST", "/internal/v1/me/guardian-consent-requests", None),
         ("PUT", "/internal/v1/me/pin", {"pin": PIN}),
-        ("POST", "/internal/v1/me/consent", {"policy_version": "1.0", "purposes": REQUIRED}),
+        ("POST", "/internal/v1/me/consent", {"policy_version": "1.1", "purposes": REQUIRED}),
         ("DELETE", "/internal/v1/me/consent", None),
         ("POST", "/internal/v1/me/enable", None),
         ("POST", "/internal/v1/me/disable", None),
@@ -147,8 +147,9 @@ async def test_full_deletion_cycle_and_reregistration(env) -> None:
         ).scalar_one()
     assert seen == 1
 
-    # спринт 3: контент и диагностика; спринт 4: уроки, оценки, ai-gateway (обезличивает учёт вызовов)
-    for d in ("notifications", "social", "catalog", "diagnostics", "lessons", "assessment", "ai-gateway"):
+    # спринт 3: контент и диагностика; спринт 4: уроки, оценки, ai-gateway (обезличивает учёт вызовов); спринт 5:
+    # memory (карточки, история планирования, проверки, попытки произношения)
+    for d in ("notifications", "social", "catalog", "diagnostics", "lessons", "assessment", "ai-gateway", "memory"):
         await env.bus.publish(ack(uid, request_id, d, "anonymized" if d in ("catalog", "ai-gateway") else "deleted"))
     await env.flush()
     # без experience-config (отметки просмотра «Что нового») профиль не обезличивается

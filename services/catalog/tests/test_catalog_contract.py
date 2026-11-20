@@ -73,7 +73,7 @@ def test_every_interface_and_payload_kind_is_covered() -> None:
 @pytest.mark.parametrize("alias", [
     "Band", "AudienceSegment", "GoalCode", "TopicCode", "ContentKind", "VersionStatus", "LocaleCheck", "PairStatus",
     "SkillArea", "LessonStageType", "ControlItemType", "MediaType", "MediaOrigin", "MediaUse", "MediaExerciseType",
-    "MediaRequestStatus",
+    "MediaRequestStatus", "ReadingQuestionType", "GlossarySource", "GlossaryReviewStatus", "PartOfSpeech",
 ])
 def test_enums_match_content_ts(alias: str) -> None:
     assert set(get_args(getattr(content, alias))) == ts.type_aliases("content.ts")[alias]

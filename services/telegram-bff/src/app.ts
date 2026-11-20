@@ -18,6 +18,9 @@ import { EXTRA_REDACT_PATHS, scrub, type LogSink } from "./logging.js";
 import { createLimiter } from "./rateLimit.js";
 import { familyRoutes } from "./routes/family.js";
 import { lessonsRoutes } from "./routes/lessons.js";
+import { memoryRoutes } from "./routes/memory.js";
+import { pronunciationRoutes } from "./routes/pronunciation.js";
+import { readingRoutes } from "./routes/reading.js";
 import { contentRoutes } from "./routes/content.js";
 import { diagnosticsRoutes } from "./routes/diagnostics.js";
 import { notificationsRoutes } from "./routes/notifications.js";
@@ -177,6 +180,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
           { name: "lessons" },
           { name: "assessment" },
           { name: "speech" },
+          { name: "memory" },
+          { name: "reading" },
         ],
       },
       hideUntagged: true,
@@ -197,9 +202,11 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
       diagnostics: config.diagnosticsUrl,
       lessons: config.lessonsUrl,
       assessment: config.assessmentUrl,
+      memory: config.memoryUrl,
     },
     timeoutMs: config.upstreamTimeoutMs,
     lessonsTimeoutMs: config.lessonsTimeoutMs,
+    memoryTimeoutMs: config.memoryTimeoutMs,
     retries: config.upstreamRetries,
     ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
     onFailure: (info) =>
@@ -267,6 +274,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   contentRoutes(app, ctx);
   lessonsRoutes(app, ctx);
   speechRoutes(app, ctx);
+  memoryRoutes(app, ctx);
+  readingRoutes(app, ctx);
+  await pronunciationRoutes(app, ctx);
 
   if (!config.isSecure) {
     app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());

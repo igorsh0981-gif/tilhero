@@ -6,7 +6,9 @@
 - conversation_partner: намерение — по пересечению слов реплики с `examples_en` переходов узла (доля слов примера
   ≥ 0,5, без служебных слов; лучший переход, при равенстве — первый), иначе `unclear`. Инъекция в реплике
   («ignore previous instructions…») ничего не меняет — сравниваются только слова. reply_en — шаблон по намерению.
-- teaching_coach: шаблон из контекста урока — следующий ещё не показанный пример, объяснение на explain_locale.
+- teaching_coach: шаблон из контекста урока — следующий ещё не показанный пример, объяснение на explain_locale;
+  `gloss_word` (спринт 5, INTERNAL_API §3.1) — `gloss = {ru: "[ru] <word>", uz: "[uz] <word>"}`, `lemma = word`,
+  `part_of_speech: other`, `forms: [word]`, `confidence 0.9`.
 - independent_evaluator: правила — задача по исходу (success 3, alt_success 2, fail 1), самостоятельность по
   подсказкам (0 → 3, 1 → 2, 2 → 1, 3+ → 0), грамматика по найденным ошибкам; ошибки — по словарю типичных ошибок
   A1–A2 с цитатой, дословно взятой из реплики ученика; без реплик ученика — insufficient_evidence.
@@ -86,7 +88,15 @@ def conversation_partner(ctx: dict[str, Any]) -> dict[str, Any]:
             "hint_offered": unclear and int(ctx.get("attempts_on_node", 0)) >= 1}
 
 
+def gloss_word(ctx: dict[str, Any]) -> dict[str, Any]:
+    word = str(ctx.get("word", ""))[:60]
+    return {"lemma": word, "part_of_speech": "other", "gloss": {"ru": f"[ru] {word}"[:80], "uz": f"[uz] {word}"[:80]},
+            "forms": [word], "confidence": 0.9}
+
+
 def teaching_coach(ctx: dict[str, Any]) -> dict[str, Any]:
+    if ctx.get("request") == "gloss_word":
+        return gloss_word(ctx)
     lesson = ctx.get("lesson") or {}
     examples = [str(e) for e in lesson.get("examples_en", [])]
     shown = set(ctx.get("already_shown", []))

@@ -2,8 +2,8 @@
 `PRIVILEGED_ROLES`; тот же порядок — порядок выдачи в API). Матрица по умолчанию — сид миграции 0001 (таблица
 docs/sprint2/PLAN.md §«Роли и права») плюс миграция 0003 (права контента и роль content_manager, docs/sprint3/PLAN.md
 §«Права и роли») и миграция 0004 (права ИИ, контроля диалогов и затрат, роль qa_analyst, docs/sprint4/PLAN.md
-§«Права и роли»); источник истины во время работы — таблицы roles/role_permissions (меняются только через
-four-eyes)."""
+§«Права и роли») и миграция 0005 (права памяти и словаря курса, docs/sprint5/PLAN.md §«Права и роли»); источник
+истины во время работы — таблицы roles/role_permissions (меняются только через four-eyes)."""
 
 from __future__ import annotations
 
@@ -43,6 +43,10 @@ Permission = Literal[
     "qa.review",
     "costs.read",
     "costs.manage",
+    # спринт 5 — память и повторения, словарь курса (миграция 0005)
+    "memory.read",
+    "memory.manage",
+    "glossary.manage",
 ]
 RoleCode = Literal[
     "super_admin", "operations", "communications", "support", "methodist", "content_manager", "qa_analyst", "analyst",
@@ -59,7 +63,8 @@ PRIVILEGED_ROLES: frozenset[str] = frozenset({"super_admin", "operations", "comm
 # уведомления, расписание и остановка рассылки; спринт 3 — публикация, снятие и откат контента и тестов диагностики
 # (content.publish), права медиа и решения по заявкам учеников (media.rights), языки и пары (lang.manage);
 # спринт 4 — публикация, канарейка и откат версии агента, модели и цены (ai.publish), переоценка и решение по
-# апелляции (qa.review), бюджет и аварийная остановка ИИ (costs.manage). Без MFA step-up невозможен, поэтому роль,
+# апелляции (qa.review), бюджет и аварийная остановка ИИ (costs.manage); спринт 5 — ручная правка карточки ученика
+# (memory.manage; словарь курса glossary.manage — без step-up). Без MFA step-up невозможен, поэтому роль,
 # получившая такое право через four-eyes, обязана подключить MFA (сессии её сотрудников отзываются). Роль
 # привилегированна, если она в PRIVILEGED_ROLES ИЛИ содержит хотя бы одно из этих прав — расширение матрицы
 # непривилегированной роли не обходит MFA и four-eyes.
@@ -68,6 +73,7 @@ PRIVILEGED_PERMISSIONS: frozenset[str] = frozenset({
     "notif.templates.manage", "notif.campaigns.send",
     "content.publish", "media.rights", "lang.manage",
     "ai.publish", "qa.review", "costs.manage",
+    "memory.manage",
 })
 SUPER_ADMIN = "super_admin"
 DEFAULT_ROLE = "read_only"

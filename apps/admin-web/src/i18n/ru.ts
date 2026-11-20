@@ -5,10 +5,12 @@
  */
 import { ruContent } from "./ru.content";
 import { ruAi } from "./ru.ai";
+import { ruMemory } from "./ru.memory";
 
 export const ru = {
   ...ruContent,
   ...ruAi,
+  ...ruMemory,
   /* account */
   "account.changePwd": "Сменить пароль",
   "account.idle": "Выход после {n} мин бездействия",

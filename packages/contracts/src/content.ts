@@ -27,7 +27,8 @@ export type TopicCode =
   | "movies" | "tech";
 
 export type ContentKind =
-  | "course" | "skill" | "module" | "lesson" | "rubric" | "scenario" | "media_asset" | "media_exercise";
+  | "course" | "skill" | "module" | "lesson" | "rubric" | "scenario" | "media_asset" | "media_exercise"
+  | "reading"; // спринт 5
 
 /** Статус версии. suspended — только media_asset (права истекли/отозваны). */
 export type VersionStatus = "draft" | "in_review" | "approved" | "published" | "suspended" | "archived";
@@ -315,3 +316,96 @@ export interface MediaExercisePayload {
 
 /** Заявка ученика на песню или фильм (APP-MEDIA-04, ADM-MEDIA-04). Ничего не скачивается автоматически. */
 export type MediaRequestStatus = "new" | "in_review" | "authored_alternative" | "licensed" | "rejected" | "duplicate";
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Спринт 5 — тексты для чтения (APP-MEM, «Чтение» в практике) и словарь курса
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** Предложение текста. s_id стабилен между версиями ([a-z0-9]{1,8}, уникален в тексте). */
+export interface ReadingSentence {
+  s_id: string;
+  text_en: string; // ≤ 30 слов, ≤ 240 знаков
+  gloss: Localized; // перевод предложения
+}
+
+export interface ReadingParagraph {
+  p_id: string;
+  sentences: ReadingSentence[]; // 1..8
+}
+
+/** Вопрос на понимание (закрытый). single_choice/true_false — answer: индекс в options (true_false: ["True", "False"]);
+ *  gap_fill — допустимые ответы (сравнение без регистра и концевой пунктуации). */
+export type ReadingQuestionType = "single_choice" | "true_false" | "gap_fill";
+
+export interface ReadingQuestion {
+  question_id: string;
+  type: ReadingQuestionType;
+  instruction: Localized;
+  prompt_en: string; // ≤ 200
+  options: string[]; // single_choice 3..4, true_false 2, gap_fill — пусто
+  answer: number | string[];
+}
+
+/** Статья глоссария текста: слово или выражение, подсвечивается в тексте; перевод по тапу берётся отсюда
+ *  (через словарь курса — статьи source=course строятся при публикации). */
+export interface ReadingGlossaryItem {
+  en: string; // ≤ 60, встречается в тексте (без учёта регистра, по границам слов)
+  gloss: Localized; // ≤ 80
+  note: Localized | null; // ≤ 160 — пояснение («фразовый глагол», «вежливая форма»)
+}
+
+export interface ReadingPayload {
+  reading_id: string; // r-a1-coffee-shop
+  title: Localized;
+  level: Band;
+  audience: AudienceSegment[]; // kids — только [kids]
+  topics: TopicCode[];
+  skill_ids: string[]; // ≤ 3, обычно навык reading уровня
+  paragraphs: ReadingParagraph[]; // 1..8; всего 60..250 слов
+  glossary: ReadingGlossaryItem[]; // 3..20
+  questions: ReadingQuestion[]; // 3..8
+  /** озвучка — серверный синтез (tts) по предложениям */
+  voice: "en-GB" | "en-US";
+  est_minutes: number; // 3..15
+}
+
+/** Словарь курса (catalog glossary_entries). Не версия контента: правка действует сразу, история — glossary_history.
+ *  source: course — из ключевых слов уроков, фраз медиа и глоссариев текстов (правятся через версию контента, в словаре —
+ *  только override); methodist — статья методиста; ai — перевод teaching_coach (gloss_word) для слова из контента,
+ *  которого нет в словаре: выдаётся ученикам с пометкой, пока методист не решит (approve/correct/reject). */
+export type GlossarySource = "course" | "methodist" | "ai";
+export type GlossaryReviewStatus = "not_required" | "pending" | "approved" | "rejected";
+export type PartOfSpeech =
+  | "noun" | "verb" | "adjective" | "adverb" | "pronoun" | "preposition" | "conjunction" | "interjection"
+  | "determiner" | "phrase" | "other";
+
+export interface GlossaryRef {
+  kind: "lesson" | "media_asset" | "reading" | "scenario";
+  key: string;
+  version: number;
+}
+
+export interface GlossaryEntry {
+  entry_id: string;
+  pair_id: string;
+  lemma: string; // ≤ 60
+  /** нормализованные формы (нижний регистр, апостроф ', без концевой пунктуации), уникальны в паре среди действующих */
+  forms: string[]; // 1..8
+  part_of_speech: PartOfSpeech | null;
+  gloss: Localized; // действующий перевод (с учётом override)
+  example_en: string | null;
+  source: GlossarySource;
+  review_status: GlossaryReviewStatus;
+  /** ai: уверенность модели; < 0.5 — ученикам не выдаётся */
+  confidence: number | null;
+  agent_version: string | null; // "teaching_coach@2"
+  refs: GlossaryRef[]; // ≤ 50
+  /** правка методиста поверх статьи course */
+  override: { gloss: Localized; example_en: string | null; by: string; at: string } | null;
+  /** исправлено методистом при модерации ИИ (review_status approved) */
+  corrected: boolean;
+  archived_at: string | null;
+  updated_by: string | null;
+  updated_at: string;
+}
+

@@ -192,6 +192,21 @@ const CONTRACT_ROUTES = [
   "GET /admin/v1/qa/appeals",
   "POST /admin/v1/qa/appeals/:id/take",
   "POST /admin/v1/qa/appeals/:id/decide",
+  // спринт 5 — словарь курса (catalog), память ученика и аналитика забывания (memory)
+  "GET /admin/v1/glossary",
+  "GET /admin/v1/glossary/stats",
+  "GET /admin/v1/glossary/:entryId",
+  "POST /admin/v1/glossary",
+  "PATCH /admin/v1/glossary/:entryId",
+  "POST /admin/v1/glossary/:entryId/review",
+  "DELETE /admin/v1/glossary/:entryId",
+  "GET /admin/v1/memory/learners/:userId",
+  "GET /admin/v1/memory/learners/:userId/cards",
+  "GET /admin/v1/memory/cards/:cardId",
+  "GET /admin/v1/memory/cards/:cardId/log",
+  "POST /admin/v1/memory/cards/:cardId/actions",
+  "GET /admin/v1/memory/analytics",
+  "GET /admin/v1/memory/stats",
 ];
 
 describe("реестр маршрутов", () => {
@@ -264,6 +279,8 @@ describe("реестр маршрутов", () => {
         // переоценка и решение по апелляции (qa.review)
         "POST /admin/v1/qa/evaluations/:id/reevaluate",
         "POST /admin/v1/qa/appeals/:id/decide",
+        // спринт 5: ручная правка карточки памяти ученика (memory.manage); словарь курса — без step-up
+        "POST /admin/v1/memory/cards/:cardId/actions",
         // все команды по сотрудникам, ролям, заявкам
         "POST /admin/v1/staff",
         "PATCH /admin/v1/staff/:id",
@@ -288,6 +305,8 @@ describe("реестр маршрутов", () => {
         "dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read",
         // спринт 4
         "ai.read", "qa.read", "costs.read", "costs.manage",
+        // спринт 5
+        "memory.read", "memory.manage",
       ].sort(),
     );
     // спринт 3 (docs/sprint3/PLAN.md «Права и роли») + спринт 4 (docs/sprint4/PLAN.md «Права и роли»)
@@ -295,13 +314,15 @@ describe("реестр маршрутов", () => {
       [
         "dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish",
         "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review",
+        // спринт 5
+        "memory.read", "glossary.manage",
       ].sort(),
     );
-    expect([...DEFAULT_ROLE_MATRIX.content_manager].sort()).toEqual(["content.read", "content.edit", "media.rights", "dashboard.read"].sort());
-    expect([...DEFAULT_ROLE_MATRIX.qa_analyst].sort()).toEqual(["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts"].sort());
+    expect([...DEFAULT_ROLE_MATRIX.content_manager].sort()).toEqual(["content.read", "content.edit", "media.rights", "dashboard.read", "glossary.manage"].sort());
+    expect([...DEFAULT_ROLE_MATRIX.qa_analyst].sort()).toEqual(["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts", "memory.read"].sort());
     for (const r of ["analyst", "auditor"] as const) {
       expect(DEFAULT_ROLE_MATRIX[r]).toContain("content.read");
-      for (const p of ["ai.read", "qa.read", "costs.read"] as const) expect(DEFAULT_ROLE_MATRIX[r], `${r} ${p}`).toContain(p);
+      for (const p of ["ai.read", "qa.read", "costs.read", "memory.read"] as const) expect(DEFAULT_ROLE_MATRIX[r], `${r} ${p}`).toContain(p);
     }
     // права со step-up спринта 4: публикация агентов и решения QA — методист; лимиты ИИ — операции; реплики — методист и QA
     const holders = (p: Permission) => ROLE_CODES.filter((r) => DEFAULT_ROLE_MATRIX[r].includes(p)).sort();
@@ -310,6 +331,10 @@ describe("реестр маршрутов", () => {
     expect(holders("qa.review")).toEqual(["methodist", "super_admin"]);
     expect(holders("costs.manage")).toEqual(["operations", "super_admin"]);
     expect(holders("qa.transcripts")).toEqual(["methodist", "qa_analyst", "super_admin"]);
+    // спринт 5 (docs/sprint5/PLAN.md «Права и роли»): ручная правка памяти — операции; словарь — методист и контент-менеджер
+    expect(holders("memory.manage")).toEqual(["operations", "super_admin"]);
+    expect(holders("glossary.manage")).toEqual(["content_manager", "methodist", "super_admin"]);
+    expect(holders("memory.read")).toEqual(["analyst", "auditor", "methodist", "operations", "qa_analyst", "super_admin"]);
     expect(DEFAULT_ROLE_MATRIX.super_admin).toEqual(ALL_PERMISSIONS);
     for (const r of ROLE_CODES) expect(DEFAULT_ROLE_MATRIX[r].includes("lang.manage"), r).toBe(r === "super_admin");
     for (const r of ROLE_CODES) expect(DEFAULT_ROLE_MATRIX[r].includes("content.review"), r).toBe(r === "super_admin" || r === "methodist");
@@ -374,8 +399,8 @@ describe("RBAC до вызова домена: матрица 10 ролей × �
     for (const role of ROLE_CODES) {
       const own = new Set<string>(DEFAULT_ROLE_MATRIX[role]);
       const n = routes.filter((r) => r.guard.split("|").some((p) => own.has(p as Permission)) || r.guard === `role:${role}`).length;
-      // support/stats, content/summary, diagnostics/stats (dashboard.read)
-      if (role === "read_only") expect(n, role).toBe(3);
+      // support/stats, content/summary, diagnostics/stats, memory/analytics, memory/stats, glossary/stats (dashboard.read)
+      if (role === "read_only") expect(n, role).toBe(6);
       else expect(n, role).toBeGreaterThan(1);
     }
   });

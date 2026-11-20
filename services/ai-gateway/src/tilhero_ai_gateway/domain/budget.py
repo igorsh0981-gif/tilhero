@@ -5,6 +5,8 @@
 Резерв: вызов записывает в свою строку usage `reserved_usd` (оценка следующей попытки) под транзакционной
 advisory-блокировкой бюджета — параллельные вызовы видят резервы друг друга и не перескакивают потолок.
 Фактическая стоимость — по usage ответа провайдера (общая формула tilhero_common.ai_pricing, Decimal).
+Оценка произношения (спринт 5) — ещё подлимит речи `speech_monthly_cap_usd` (календарный месяц UTC, расход агента
+`pronunciation_coach`); вызовы агентов его не проверяют, но речь входит в общий потолок месяца.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from tilhero_ai_gateway.models import BudgetRow, ModelRow, UsageRow
 from tilhero_common.ai_pricing import UsageIn, cost, env_catalog
 
 BUDGET_LOCK: Final = 811_401
+SPEECH_AGENT: Final = "pronunciation_coach"
 MTOK: Final = Decimal(1_000_000)
 Q6: Final = Decimal("0.000001")
 STALE_PENDING: Final = timedelta(minutes=10)
@@ -53,6 +56,7 @@ class Scope:
     user_id: uuid.UUID | None
     session_id: uuid.UUID | None
     learner_limits: bool
+    speech: bool = False  # оценка произношения: + подлимит речи в месяц
 
 
 async def lock(session: AsyncSession) -> None:
@@ -82,6 +86,9 @@ async def try_reserve(session: AsyncSession, budget: BudgetRow, scope: Scope, *,
     others = UsageRow.call_id != scope.call_id
     if await _spent(session, others, UsageRow.created_at >= month_start(now)) + need > budget.monthly_cap_usd:
         return False
+    if scope.speech and await _spent(session, others, UsageRow.agent_id == SPEECH_AGENT,
+                                     UsageRow.created_at >= month_start(now)) + need > budget.speech_monthly_cap_usd:
+        return False
     if scope.learner_limits:
         if scope.user_id is not None and await _spent(
                 session, others, UsageRow.user_id == scope.user_id,
@@ -98,3 +105,8 @@ async def try_reserve(session: AsyncSession, budget: BudgetRow, scope: Scope, *,
 
 async def month_spent(session: AsyncSession, now: datetime) -> Decimal:
     return await _spent(session, UsageRow.created_at >= month_start(now))
+
+
+async def speech_month_spent(session: AsyncSession, now: datetime) -> Decimal:
+    """Расход оценки произношения за календарный месяц UTC (с резервами идущих вызовов)."""
+    return await _spent(session, UsageRow.agent_id == SPEECH_AGENT, UsageRow.created_at >= month_start(now))

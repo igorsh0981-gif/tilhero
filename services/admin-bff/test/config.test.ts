@@ -22,6 +22,7 @@ const PROD = {
   LESSONS_URL: "http://lessons.railway.internal:8112",
   ASSESSMENT_URL: "http://assessment.railway.internal:8113",
   AI_GATEWAY_URL: "http://ai-gateway.railway.internal:8114",
+  MEMORY_URL: "http://memory.railway.internal:8116",
 };
 
 function problems(env: Record<string, string>): string[] {
@@ -59,6 +60,7 @@ describe("config", () => {
       lessons: "http://127.0.0.1:8112",
       assessment: "http://127.0.0.1:8113",
       aiGateway: "http://127.0.0.1:8114",
+      memory: "http://127.0.0.1:8116",
     });
   });
 
@@ -66,7 +68,7 @@ describe("config", () => {
     expect(Object.values(DOMAIN_URL_VARS).sort()).toEqual(
       [
         "ADMIN_IDENTITY_URL", "AUDIT_URL", "EXPERIENCE_URL", "IDENTITY_URL", "NOTIFICATIONS_URL", "SUPPORT_URL", "USER_ADMIN_URL",
-        "CATALOG_URL", "DIAGNOSTICS_URL", "LESSONS_URL", "ASSESSMENT_URL", "AI_GATEWAY_URL",
+        "CATALOG_URL", "DIAGNOSTICS_URL", "LESSONS_URL", "ASSESSMENT_URL", "AI_GATEWAY_URL", "MEMORY_URL",
       ].sort(),
     );
     for (const v of Object.values(DOMAIN_URL_VARS)) expect(DEV_DEFAULTS[v]).toMatch(/^http:\/\/127\.0\.0\.1:81\d\d$/);
@@ -104,6 +106,16 @@ describe("config", () => {
     expect(problems({ ...PROD, AI_GATEWAY_URL: "ai-gateway:8114" })).toEqual([expect.stringMatching(/^AI_GATEWAY_URL=/)]);
     const dev = loadConfig({});
     expect(dev.urls).toMatchObject({ lessons: "http://127.0.0.1:8112", assessment: "http://127.0.0.1:8113", aiGateway: "http://127.0.0.1:8114" });
+  });
+
+  it("спринт 5: MEMORY_URL обязательна в stage/prod (порт 8116 в dev), только http(s)", () => {
+    for (const env of ["stage", "prod"]) {
+      const { MEMORY_URL: _m, ...rest } = PROD;
+      expect(problems({ ...rest, ENV: env }), env).toEqual([expect.stringMatching(/^MEMORY_URL не задана/)]);
+    }
+    expect(loadConfig(PROD).urls.memory).toBe(PROD.MEMORY_URL);
+    expect(problems({ ...PROD, MEMORY_URL: "memory:8116" })).toEqual([expect.stringMatching(/^MEMORY_URL=/)]);
+    expect(loadConfig({}).urls.memory).toBe("http://127.0.0.1:8116");
   });
 
   it("prod: полный набор — ок, без dev-деривации и без имперсонации; NODE_ENV=production тоже защищённое", () => {

@@ -74,6 +74,8 @@ ALL_PERMS = {
     "content.read", "content.edit", "content.review", "content.publish", "media.rights", "lang.manage",
     # спринт 4 (admin-identity 0004): агенты ИИ, контроль диалогов, затраты
     "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "costs.read", "costs.manage",
+    # спринт 5 (admin-identity 0005): память ученика, ручная правка карточки, словарь курса
+    "memory.read", "memory.manage", "glossary.manage",
 }
 COMMS_PERMS = {"dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage",
                "notif.campaigns.manage", "notif.campaigns.send"}

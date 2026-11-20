@@ -66,7 +66,7 @@ def test_scheduler_and_service_specific_secrets():
     n8n = env_of(files, "n8n")
     assert {k for k in n8n if k.endswith("_URL")} == {"LEARNING_PLAN_URL", "NOTIFICATIONS_URL", "SOCIAL_URL",
                                                        "USER_ADMIN_URL", "CATALOG_URL", "LESSONS_URL",
-                                                       "ASSESSMENT_URL"}
+                                                       "ASSESSMENT_URL", "MEMORY_URL"}
     assert n8n["RAILWAY_RUN_UID"] == "0" and len(n8n["N8N_ENCRYPTION_KEY"]) >= 32
 
 
@@ -123,7 +123,8 @@ def test_admin_services_sprint2():
     assert "INTERNAL_JWT_SECRET" not in bff and bff["INTERNAL_JWT_PRIVATE_KEY"]
     assert {k for k in bff if k.endswith("_URL") and k != "REDIS_URL"} == {
         "ADMIN_IDENTITY_URL", "USER_ADMIN_URL", "IDENTITY_URL", "SUPPORT_URL", "AUDIT_URL", "EXPERIENCE_URL",
-        "NOTIFICATIONS_URL", "CATALOG_URL", "DIAGNOSTICS_URL", "AI_GATEWAY_URL", "LESSONS_URL", "ASSESSMENT_URL"}
+        "NOTIFICATIONS_URL", "CATALOG_URL", "DIAGNOSTICS_URL", "AI_GATEWAY_URL", "LESSONS_URL", "ASSESSMENT_URL",
+        "MEMORY_URL"}
     assert not rs.by_name("admin-bff").public and rs.by_name("admin-web").public
     web = env_of(files, "admin-web")
     assert web["ADMIN_BFF_URL"] == "http://${{admin-bff.RAILWAY_PRIVATE_DOMAIN}}:8002"
@@ -212,3 +213,21 @@ def test_tts_service_release_4_1():
     pub = json.loads(tts["INTERNAL_JWT_PUBLIC_KEYS"])
     assert "telegram-bff" in pub and "tts" not in pub and "tts" not in json.loads(sec.public_keys())
     assert env_of(files, "telegram-bff")["TTS_URL"].endswith(":8115")
+
+
+def test_memory_sprint5():
+    sec, files = build()
+    mem = env_of(files, "memory")
+    assert {k for k in mem if k.endswith("_URL") and k not in ("REDIS_URL", "NATS_URL", "DATABASE_URL",
+                                                                 "MIGRATION_DATABASE_URL")} == {
+        "CATALOG_URL", "ASSESSMENT_URL", "AI_GATEWAY_URL", "IDENTITY_CONSENT_URL"}
+    assert mem["PORT"] == "8116" and mem["SCHEDULER_TOKEN"] == sec.scheduler and mem["NATS_URL"]
+    assert env_of(files, "telegram-bff")["MEMORY_URL"].endswith(":8116")
+    ai = env_of(files, "ai-gateway")
+    # ключ Azure — только ссылка на общую переменную и только у ai-gateway
+    assert ai["AZURE_SPEECH_KEY"] == "${{shared.AZURE_SPEECH_KEY}}" and ai["SPEECH_PROVIDER"] == "azure"
+    assert ai["AZURE_SPEECH_REGION"] == "${{shared.AZURE_SPEECH_REGION}}"
+    for name, text in files.items():
+        if name.endswith(".env") and name != "ai-gateway.env":
+            assert "AZURE_SPEECH" not in text, name
+

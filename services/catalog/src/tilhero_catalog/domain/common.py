@@ -23,6 +23,7 @@ VERSION_PUBLISHED: Final = "catalog.version.published.v1"
 MEDIA_SUSPENDED: Final = "catalog.media.suspended.v1"
 REQUEST_CREATED: Final = "catalog.media_request.created.v1"
 REQUEST_DECIDED: Final = "catalog.media_request.decided.v1"
+GLOSSARY_CHANGED: Final = "catalog.glossary.changed.v1"
 DELETION_REQUESTED: Final = "user.deletion.requested.v1"
 DOMAIN_DELETED: Final = "user.domain.deleted.v1"
 
@@ -38,6 +39,7 @@ CONTENT_PUBLISH: Final = "content.publish"
 MEDIA_RIGHTS: Final = "media.rights"
 LANG_MANAGE: Final = "lang.manage"
 DASHBOARD_READ: Final = "dashboard.read"
+GLOSSARY_MANAGE: Final = "glossary.manage"
 
 
 def canonical_json(data: Any) -> str:

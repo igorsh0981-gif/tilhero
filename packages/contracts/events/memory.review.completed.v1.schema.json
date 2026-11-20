@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "memory.review.completed.v1.schema.json",
+  "title": "memory.review.completed.v1",
+  "type": "object",
+  "required": [
+    "session_id",
+    "user_id",
+    "pair_id",
+    "status",
+    "minutes",
+    "reviewed",
+    "correct",
+    "finished_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "pair_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "expired"
+      ]
+    },
+    "minutes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 60
+    },
+    "reviewed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "correct": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

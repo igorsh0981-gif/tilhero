@@ -25,8 +25,8 @@ from pydantic import (
     field_validator,
 )
 
-Kind = Literal["lesson", "scenario", "media", "review"]
-RefKind = Literal["lesson", "scenario", "rubric", "media_asset", "media_exercise"]
+Kind = Literal["lesson", "scenario", "media", "review", "reading"]
+RefKind = Literal["lesson", "scenario", "rubric", "media_asset", "media_exercise", "reading"]
 Audience = Literal["kids", "teens", "adults"]
 Outcome = Literal["success", "alt_success", "fail"]
 CriterionCode = Literal["task", "vocabulary", "grammar", "independence", "pronunciation", "fluency", "comprehension"]
@@ -358,6 +358,45 @@ class AssessmentStatsOut(BaseModel):
     appeals_new: int  # поданные за период
     appeals_open: int  # сейчас: new + in_review
     human_review_open: int  # сейчас: актуальные оценки, ждущие ручной проверки
+
+
+# ---------------------------------------------------------------- memory (спринт 5, INTERNAL_API §5)
+
+
+class VersionRefOut(BaseModel):
+    key: str
+    version: int
+
+
+class FeedContentRefsOut(BaseModel):
+    """Версии контента оценки по видам (форма для memory): одна ссылка или null; упражнения медиа — списком."""
+
+    lesson: VersionRefOut | None
+    scenario: VersionRefOut | None
+    media_asset: VersionRefOut | None
+    media_exercises: list[VersionRefOut]
+    reading: VersionRefOut | None
+    rubric: VersionRefOut | None
+
+
+class FeedErrorOut(BaseModel):
+    turn_id: str  # T{n} — реплика свободным текстом, OA1 — открытый ответ
+    evidence: str | None  # null — цитата ученика стёрта по сроку хранения
+    correction: str
+    error_code: str
+    severity: Severity
+
+
+class MemoryFeedOut(BaseModel):
+    evaluation_id: uuid.UUID  # актуальная запись цепочки
+    session_id: uuid.UUID
+    user_id: uuid.UUID
+    pair_id: str
+    kind: Kind
+    content_refs: FeedContentRefsOut
+    practice_only: bool
+    superseded_by: uuid.UUID | None  # запрошенная заменена переоценкой — id актуальной (= evaluation_id)
+    errors: list[FeedErrorOut]
 
 
 class TickOut(BaseModel):

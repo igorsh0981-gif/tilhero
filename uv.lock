@@ -21,6 +21,7 @@ members = [
     "tilhero-identity",
     "tilhero-learning-plan",
     "tilhero-lessons",
+    "tilhero-memory",
     "tilhero-notifications",
     "tilhero-social",
     "tilhero-support",
@@ -2028,6 +2029,17 @@ requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
 name = "tilhero-lessons"
 version = "0.1.0"
 source = { editable = "services/lessons" }
+dependencies = [
+    { name = "tilhero-common" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
+
+[[package]]
+name = "tilhero-memory"
+version = "0.1.0"
+source = { editable = "services/memory" }
 dependencies = [
     { name = "tilhero-common" },
 ]

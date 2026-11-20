@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -51,11 +51,19 @@ FILE_KINDS: Final[dict[str, str]] = {
     "media": "media_asset", "media_asset": "media_asset", "media_assets": "media_asset",
     "media_exercise": "media_exercise", "media_exercises": "media_exercise",
 }
+# Тексты для чтения (спринт 5) — отдельной миграцией 0005 (вид reading появляется в 0004): `readings.json` или
+# каталог `readings/` с *.json; 0003 их не читает.
+READING_FILES: Final = ("readings", "reading")
 # порядок публикации: зависимости раньше зависящих
-PUBLISH_ORDER: Final = ("rubric", "skill", "scenario", "media_asset", "media_exercise", "lesson", "module", "course")
+PUBLISH_ORDER: Final = ("rubric", "skill", "scenario", "media_asset", "media_exercise", "lesson", "module", "course",
+                        "reading")
 SEED_NOTE: Final = "Сид контента спринта 3 (проверено: сид — нужна вычитка UZ носителем)"
 RIGHTS_NOTE: Final = "Авторский материал TilHero (сид)"
 SEED_REASON: Final = "Сид контента спринта 3"
+READINGS_NOTE: Final = "Сид текстов для чтения спринта 5 (проверено: сид — нужна вычитка UZ носителем)"
+READINGS_REASON: Final = "Сид текстов для чтения спринта 5"
+# публикация записи сида → (вид, ключ, версия, тело): построение словаря курса (миграция 0005)
+OnPublished = Callable[[str, str, int, dict[str, Any]], None]
 
 
 class SeedInvalid(RuntimeError):
@@ -90,6 +98,24 @@ def load_seed_dir(directory: Path) -> list[Entry]:
             continue
         for path in files:
             entries.extend((kind, obj) for obj in _read(path))
+    return entries
+
+
+def load_readings(directory: Path) -> list[Entry]:
+    """Тексты для чтения сида: `readings.json` (массив ReadingPayload или один объект) или каталог `readings/`.
+    Нет файла — пусто (миграция 0005 ничего не загружает)."""
+    entries: list[Entry] = []
+    if not directory.is_dir():
+        return entries
+    for name in READING_FILES:
+        path, folder = directory / f"{name}.json", directory / name
+        files: list[Path] = []
+        if path.is_file():
+            files = [path]
+        elif folder.is_dir():
+            files = sorted(p for p in folder.glob("*.json") if p.is_file())
+        for file in files:
+            entries.extend(("reading", obj) for obj in _read(file))
     return entries
 
 
@@ -176,7 +202,8 @@ def _outbox(conn: Connection, event_type: str, payload: dict[str, Any]) -> None:
 
 
 def apply_seed(conn: Connection, entries: list[Entry], *, today: date, external_sources: bool,
-               now: datetime) -> dict[str, int]:
+               now: datetime, note: str = SEED_NOTE, reason: str = SEED_REASON,
+               on_published: OnPublished | None = None) -> dict[str, int]:
     """Проверяет и публикует сид. Возвращает число опубликованных и пропущенных (без изменений) записей."""
     in_db = _published_in_db(conn)
     pairs = set(conn.execute(sa.text("SELECT pair_id FROM language_pairs")).scalars().all())
@@ -192,13 +219,15 @@ def apply_seed(conn: Connection, entries: list[Entry], *, today: date, external_
         if current is not None and current[1] == digest:
             skipped += 1
             continue
-        _publish_one(conn, kind, key, payload, digest, current[0] if current else None, now)
+        version = _publish_one(conn, kind, key, payload, digest, current[0] if current else None, now, note, reason)
+        if on_published is not None:
+            on_published(kind, key, version, payload)
         published += 1
     return {"published": published, "skipped": skipped}
 
 
 def _publish_one(conn: Connection, kind: str, key: str, payload: dict[str, Any], digest: str,
-                 previous: int | None, now: datetime) -> None:
+                 previous: int | None, now: datetime, note: str = SEED_NOTE, reason: str = SEED_REASON) -> int:
     max_version = conn.execute(sa.text("SELECT max(version) FROM content_versions WHERE kind = :k AND key = :key"),
                                {"k": kind, "key": key}).scalar()
     version = int(max_version or 0) + 1
@@ -211,7 +240,7 @@ def _publish_one(conn: Connection, kind: str, key: str, payload: dict[str, Any],
         id=uuid.uuid4(), kind=kind, key=key, version=version, status="published", payload=payload,
         payload_hash=digest, author_id=SEED_ACTOR_ID, editors=[SEED_ACTOR_ID], created_at=now,
         updated_by=SEED_ACTOR_ID, updated_at=now, submitted_at=now, reviewer_id=SEED_ACTOR_ID, reviewed_at=now,
-        review_note=SEED_NOTE, locale_checks={"ru": "checked", "uz": "checked"},
+        review_note=note, locale_checks={"ru": "checked", "uz": "checked"},
         rights_approved_by=SEED_ACTOR_ID if media else None, rights_approved_at=now if media else None,
         rights_note=RIGHTS_NOTE if media else None, published_by=SEED_ACTOR_ID, published_at=now, archived_at=None,
     ))
@@ -237,9 +266,10 @@ def _publish_one(conn: Connection, kind: str, key: str, payload: dict[str, Any],
     audit = audit_payload(None, "content.published", "content_version", version_object_id(kind, key, version),
                           before={"published_version": previous},
                           after={"status": "published", "payload_hash": digest, "published_version": version},
-                          reason=SEED_REASON, actor_type="system")
+                          reason=reason, actor_type="system")
     audit["actor_id"] = SEED_ACTOR_ID
     _outbox(conn, AUDIT_EVENT, audit)
+    return version
 
 
 def remove_seed(conn: Connection) -> None:
@@ -257,3 +287,40 @@ def remove_seed(conn: Connection) -> None:
         "AND v.version = p.published_version AND v.status = 'published')"))
     conn.execute(sa.text("ALTER TABLE scenario_test_runs ENABLE TRIGGER scenario_test_runs_append_only"))
     conn.execute(sa.text("ALTER TABLE content_versions ENABLE TRIGGER content_versions_guard"))
+
+
+def remove_readings_seed(conn: Connection) -> None:
+    """Откат миграции 0005 (владелец схемы): тексты сида и их следы в словаре курса — ссылки на них снимаются,
+    статьи course, построенные только из них, удаляются вместе с формами и историей (триггеры — на время удаления)."""
+    keys = set(conn.execute(sa.text("SELECT DISTINCT key FROM content_versions WHERE kind = 'reading' "
+                                    "AND author_id = :a"), {"a": SEED_ACTOR_ID}).scalars().all())
+    if not keys:
+        return
+    rows = conn.execute(sa.text("SELECT entry_id, source, refs FROM glossary_entries WHERE refs @> "
+                                "'[{\"kind\": \"reading\"}]'::jsonb")).all()
+    doomed: list[Any] = []
+    for row in rows:
+        refs = [r for r in row.refs if not (r.get("kind") == "reading" and r.get("key") in keys)]
+        if len(refs) == len(row.refs):
+            continue
+        if row.source == "course" and not refs:
+            doomed.append(row.entry_id)
+        else:
+            conn.execute(sa.text("UPDATE glossary_entries SET refs = CAST(:refs AS jsonb) WHERE entry_id = :e"),
+                         {"refs": json.dumps(refs), "e": row.entry_id})
+    if doomed:
+        conn.execute(sa.text("ALTER TABLE glossary_history DISABLE TRIGGER glossary_history_append_only"))
+        conn.execute(sa.text("DELETE FROM glossary_history WHERE entry_id = ANY(:ids)"), {"ids": doomed})
+        conn.execute(sa.text("ALTER TABLE glossary_history ENABLE TRIGGER glossary_history_append_only"))
+        conn.execute(sa.text("DELETE FROM glossary_entries WHERE entry_id = ANY(:ids)"), {"ids": doomed})
+    conn.execute(sa.text("ALTER TABLE content_versions DISABLE TRIGGER content_versions_guard"))
+    conn.execute(sa.text("DELETE FROM content_versions WHERE kind = 'reading' AND author_id = :a"),
+                 {"a": SEED_ACTOR_ID})
+    conn.execute(sa.text("ALTER TABLE content_versions ENABLE TRIGGER content_versions_guard"))
+    conn.execute(sa.text(
+        "DELETE FROM content_pointers p WHERE p.kind = 'reading' AND NOT EXISTS "
+        "(SELECT 1 FROM content_versions v WHERE v.kind = p.kind AND v.key = p.key)"))
+    conn.execute(sa.text(
+        "UPDATE content_pointers p SET published_version = NULL WHERE p.kind = 'reading' "
+        "AND published_version IS NOT NULL AND NOT EXISTS (SELECT 1 FROM content_versions v WHERE v.kind = p.kind "
+        "AND v.key = p.key AND v.version = p.published_version AND v.status = 'published')"))

@@ -19,6 +19,12 @@
    клиента или неразбираемый ответ после HTTP 200 — провайдер мог выставить счёт: в стоимость идёт оценка попытки
    (консервативно, ревью R1-08); ошибка HTTP/сети — 0.
 Вызывающий обязан продолжить без ИИ при unavailable/refused.
+
+Вид запроса (спринт 5): `teaching_coach` с `context.request = gloss_word` — свой контракт вывода и лимиты вызова
+(`REQUEST_LIMITS`: ≤ 200 выходных токенов и ≤ 6 с — меньшее из лимитов версии и запроса; оценка стоимости — по этому
+лимиту). Версия, чья схема вывода не принимает вид запроса (v1 teaching_coach и черновики из неё), его не обслуживает:
+`refused: agent_not_active` без вызова провайдера (`supports_request`) — до публикации v2 memory получает «перевода
+нет».
 """
 
 from __future__ import annotations
@@ -29,14 +35,14 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Final
 
 from sqlalchemy import select, update
 
-from tilhero_ai_gateway.contracts import output_contract_errors
+from tilhero_ai_gateway.contracts import output_contract_errors, request_kind
 from tilhero_ai_gateway.domain import budget as budgets
 from tilhero_ai_gateway.domain import jsonschema_lite
 from tilhero_ai_gateway.domain.common import usd
@@ -53,6 +59,15 @@ MAX_ATTEMPTS = 3
 MIN_ATTEMPT_S: Final = 1.5  # до дедлайна вызывающего осталось меньше — попытка не начинается (timeout)
 DEADLINE_MARGIN_S: Final = 0.5  # таймаут попытки = min(timeout_ms версии, остаток − 0,5 с): ответ успевает дойти
 BILLED_ERRORS: Final = frozenset({"bad_response"})  # HTTP 200, но тело не разобрать — запрос, скорее всего, оплачен
+
+NO_LESSON_CAP_KINDS: Final = frozenset({"memory"})
+# Лимиты вида запроса поверх лимитов версии (INTERNAL_API §3.1): (agent_id, request) → (max_output_tokens, timeout_ms)
+REQUEST_LIMITS: Final[dict[tuple[str, str], tuple[int, int]]] = {("teaching_coach", "gloss_word"): (200, 6000)}
+# Образцовый вывод вида запроса: версия обслуживает вид, только если её схема вывода принимает образец
+REQUEST_SAMPLES: Final[dict[tuple[str, str], dict[str, Any]]] = {
+    ("teaching_coach", "gloss_word"): {"lemma": "go", "part_of_speech": "verb", "gloss": {"ru": "идти", "uz": "bormoq"},
+                                       "forms": ["go", "went"], "confidence": 0.9},
+}
 
 
 @dataclass
@@ -100,6 +115,22 @@ class VersionSnapshot:
         return cls(row.agent_id, row.version, row.instructions, row.rules, dict(row.output_schema),
                    row.schema_version, row.model_id, row.fallback_model_id, float(row.temperature),
                    row.max_output_tokens, row.timeout_ms, Decimal(row.max_cost_usd))
+
+    def for_request(self, context: dict[str, Any]) -> VersionSnapshot:
+        """Лимиты вызова с учётом вида запроса: меньшее из лимитов версии и REQUEST_LIMITS."""
+        kind = request_kind(self.agent_id, context)
+        limits = REQUEST_LIMITS.get((self.agent_id, kind)) if kind is not None else None
+        if limits is None:
+            return self
+        return replace(self, max_output_tokens=min(self.max_output_tokens, limits[0]),
+                       timeout_ms=min(self.timeout_ms, limits[1]))
+
+
+def supports_request(agent_id: str, output_schema: dict[str, Any], context: dict[str, Any]) -> bool:
+    """Обслуживает ли версия вид запроса: схема вывода версии принимает образцовый вывод вида (gloss_word)."""
+    kind = request_kind(agent_id, context)
+    sample = REQUEST_SAMPLES.get((agent_id, kind)) if kind is not None else None
+    return sample is None or not jsonschema_lite.validate(sample, output_schema)
 
 
 @dataclass
@@ -152,16 +183,18 @@ def result(agent_id: str, status: str, reason: str | None, *, version: VersionSn
 
 
 def evaluate_text(agent_id: str, text: str, version: VersionSnapshot, context: dict[str, Any],
-                  secrets: tuple[str, ...]) -> tuple[dict[str, Any] | None, list[str], list[str]]:
-    """Ответ модели → (проверенный вывод | None, нарушения, исправления без повтора)."""
+                  secrets: tuple[str, ...], provider: str | None = None
+                  ) -> tuple[dict[str, Any] | None, list[str], list[str]]:
+    """Ответ модели → (проверенный вывод | None, нарушения, исправления без повтора). Контракт ai.ts — по виду
+    запроса (объединённая схема v2 teaching_coach пропускает обе формы)."""
     data = first_json_object(text)
     if data is None:
         return None, ["not_json"], []
     if jsonschema_lite.validate(data, version.output_schema):
         return None, ["schema_invalid"], []
-    if output_contract_errors(agent_id, data):
+    if output_contract_errors(agent_id, data, context):
         return None, ["contract_mismatch"], []
-    gate = check_output(agent_id, data, context, secrets=secrets)
+    gate = check_output(agent_id, data, context, secrets=secrets, provider=provider)
     if gate.violations:
         return None, gate.violations, []
     return gate.output, [], gate.redactions
@@ -218,11 +251,18 @@ async def invoke(deps: Deps, req: InvokeRequest, *, caller: str, version_overrid
         await _record_early(deps, base, "refused", "agent_not_active", started)
         return result(req.agent_id, "refused", "agent_not_active", latency_ms=_ms(started))
 
-    version = VersionSnapshot.of(row)
+    if not supports_request(req.agent_id, dict(row.output_schema), req.context):
+        # версия не обслуживает вид запроса (gloss_word до публикации teaching_coach v2) — без вызова провайдера
+        await _record_early(deps, base, "refused", "agent_not_active", started, version=row.version)
+        return result(req.agent_id, "refused", "agent_not_active", latency_ms=_ms(started))
+    version = VersionSnapshot.of(row).for_request(req.context)
     context = sanitize_context(req.agent_id, req.context)
     async with deps.rt.transaction() as s:
         s.add(UsageRow(**base, version=version.version, status="pending", canary=canary))
-    scope = budgets.Scope(call_id=call_id, user_id=user_id, session_id=req.session_id,
+    # лимит урока — сумма по session_id занятия; у memory (перевод по тапу) занятия нет: месяц и ученик в день
+    # (решение владельца 20.11.2026), дневной session_id memory под лимит урока не попадает
+    lesson_session = req.session_id if req.session_kind not in NO_LESSON_CAP_KINDS else None
+    scope = budgets.Scope(call_id=call_id, user_id=user_id, session_id=lesson_session,
                           learner_limits=learner_limits)
     outcome = Outcome()
     status, reason = await _attempts(deps, req, version, context, models, budget, scope, outcome)
@@ -332,7 +372,8 @@ async def _call(deps: Deps, req: InvokeRequest, version: VersionSnapshot, contex
     outcome.input_tokens += response.input_tokens
     outcome.output_tokens += response.output_tokens
     outcome.cost += budgets.actual_cost(model, response.input_tokens, response.output_tokens)
-    output, violations, redactions = evaluate_text(req.agent_id, response.text, version, context, secrets)
+    output, violations, redactions = evaluate_text(req.agent_id, response.text, version, context, secrets,
+                                                   deps.provider.name)
     if output is not None:
         outcome.output = output
         outcome.redactions = redactions

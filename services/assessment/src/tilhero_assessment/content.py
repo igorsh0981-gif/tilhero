@@ -22,7 +22,7 @@ log = logging.getLogger("tilhero.assessment.catalog")
 
 CATALOG: Final = "catalog"
 ID_FIELD: Final = {"lesson": "lesson_id", "scenario": "scenario_id", "rubric": "rubric_id",
-                   "media_asset": "asset_id", "media_exercise": "exercise_id"}
+                   "media_asset": "asset_id", "media_exercise": "exercise_id", "reading": "reading_id"}
 # черновик и непроверенная версия ключей не дают (catalog и так отвечает 404 — защита в глубину)
 _NOT_PUBLISHED: Final = frozenset({"draft", "in_review", "approved"})
 

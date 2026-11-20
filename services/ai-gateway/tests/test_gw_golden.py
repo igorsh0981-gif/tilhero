@@ -203,9 +203,12 @@ async def test_test_run_errors(env) -> None:
     assert r.status_code == 404 and r.json()["code"] == "VERSION_NOT_FOUND"
     r = await env.c.post(env.url("learning_orchestrator", "versions", 1, "test-runs"), headers=env.h(MANAGER))
     assert r.status_code == 409 and r.json()["code"] == "AGENT_NOT_LLM"
-    draft = await env.draft("spaced_repetition_coach")  # planned LLM-агент: черновик из шаблона, кейсов нет
+    # spaced_repetition_coach с 0004 — code (memory): версий инструкций нет
+    r = await env.c.post(env.url("spaced_repetition_coach", "versions"), headers=env.h(MANAGER))
+    assert r.status_code == 409 and r.json()["code"] == "AGENT_NOT_LLM"
+    draft = await env.draft("duel_host")  # planned LLM-агент: черновик из шаблона, кейсов нет
     assert draft["version"] == 1 and draft["output_schema"] == {"type": "object"}
-    r = await env.c.post(env.url("spaced_repetition_coach", "versions", 1, "test-runs"), headers=env.h(MANAGER))
+    r = await env.c.post(env.url("duel_host", "versions", 1, "test-runs"), headers=env.h(MANAGER))
     assert r.status_code == 422 and r.json()["code"] == "NO_GOLDEN_CASES"
     r = await env.c.get(env.url("conversation_partner", "versions", 1, "test-runs", uuid.uuid4()),
                         headers=env.h(ANALYST))

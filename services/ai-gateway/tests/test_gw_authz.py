@@ -11,6 +11,7 @@ A = "/admin/v1/ai/agents/conversation_partner"
 CASE = {"title": "Кейс", "mandatory": False, "checks": [{"kind": "schema_valid"}],
         "input": {"audience": "adults", "context": {}}}
 BUDGET = {"monthly_cap_usd": 20, "learner_daily_cap_usd": 0.05, "lesson_cap_usd": 0.03, "alert_percent": 80,
+          "speech_monthly_cap_usd": 5,
           "reason": "Лимиты"}
 
 # (метод, путь, тело, право)
@@ -77,15 +78,17 @@ async def test_actor_only_from_admin_bff(env) -> None:
 
 
 async def test_internal_status_for_domains_only(env) -> None:
-    """GET /internal/v1/status — lessons и assessment; аварийная остановка → ai_available false."""
+    """GET /internal/v1/status — lessons, assessment и memory (спринт 5: + speech_available); аварийная остановка →
+    ai_available и speech_available false."""
     assert (await env.c.get("/internal/v1/status")).status_code == 401
     for caller in ("telegram-bff", "admin-bff"):
         r = await env.c.get("/internal/v1/status", headers=env.svc(caller))
         assert r.status_code == 403 and r.json()["code"] == "CALLER_NOT_ALLOWED", caller
-    for caller in ("lessons", "assessment"):
+    for caller in ("lessons", "assessment", "memory"):
         r = await env.c.get("/internal/v1/status", headers=env.svc(caller))
-        assert r.status_code == 200 and r.json() == {"ai_available": True}, caller
+        assert r.status_code == 200 and r.json() == {"ai_available": True, "speech_available": True}, caller
     stop = await env.c.post("/admin/v1/ai/emergency-stop", json={"enabled": True, "reason": "Авария"},
                             headers=env.h(OPERATIONS, **{"Idempotency-Key": "stop-status-1"}))
     assert stop.status_code == 200, stop.text
-    assert (await env.c.get("/internal/v1/status", headers=env.svc("lessons"))).json() == {"ai_available": False}
+    assert (await env.c.get("/internal/v1/status", headers=env.svc("lessons"))).json() == {
+        "ai_available": False, "speech_available": False}
