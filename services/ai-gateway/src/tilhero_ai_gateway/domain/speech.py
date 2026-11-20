@@ -1,5 +1,8 @@
 """Оценка произношения — `pronunciation_coach` (implementation `code`, INTERNAL_API §3.2; скилл LinguaFlow
-`08_pronunciation.md`): акустическая оценка провайдера (Azure AI Speech, Pronunciation Assessment) + советы правилами.
+`08_pronunciation.md`): оценка провайдера + советы правилами. Провайдер (релиз 5.1): `whisper` — свой сервер
+(распознавание в tts, сравнение слов с эталоном — `domain/word_score.py`; денег не стоит, бюджеты не тратит), `azure`
+— Azure AI Speech Pronunciation Assessment (запасной), `fake` — стенд и тесты. Шаги ниже — общие; для whisper шаг
+бюджета пропускается.
 
 Порядок:
 1. Доступность: аварийная остановка → `unavailable: ai_disabled`; нет ключа или региона Azure (или модель речи
@@ -234,14 +237,17 @@ async def speech_model(session: AsyncSession, provider: SpeechProvider) -> Model
 
 
 async def speech_available(session: AsyncSession, provider: SpeechProvider, now: datetime) -> bool:
-    """AiStatus.speech_available: нет аварийной остановки, ключ и регион заданы (fake — всегда), модель речи включена,
-    месячный потолок не превышен и расход речи за месяц меньше подлимита речи."""
+    """AiStatus.speech_available: нет аварийной остановки, провайдер настроен (whisper — задан TTS_URL, без проверки
+    сети; azure — ключ и регион; fake — всегда), модель речи включена; для платных провайдеров ещё месячный потолок не
+    превышен и расход речи за месяц меньше подлимита речи (whisper бюджеты не тратит)."""
     budget = await session.get(BudgetRow, 1)
     if budget is None or not budget.ai_enabled or not provider.ready():
         return False
     model = await speech_model(session, provider)
     if model is None or not model.active:
         return False
+    if not provider.budgeted:
+        return True
     if await budgets.speech_month_spent(session, now) >= Decimal(budget.speech_monthly_cap_usd):
         return False
     return await budgets.month_spent(session, now) < Decimal(budget.monthly_cap_usd)
@@ -288,10 +294,12 @@ async def assess(deps: SpeechDeps, meta: SpeechAssessMeta, audio: bytes, info: W
     estimate = audio_cost(info.duration_ms, price, ceiling=True)
     async with deps.rt.transaction() as s:
         s.add(UsageRow(**base, status="pending"))
-    scope = budgets.Scope(call_id=call_id, user_id=user_id, session_id=None, learner_limits=True, speech=True)
-    async with deps.rt.transaction() as s:
-        reserved = await budgets.try_reserve(s, budget, scope, actual=Decimal(0), estimate=estimate,
-                                             now=deps.clock(), tz=deps.settings.timezone)
+    reserved = True
+    if provider.budgeted:  # whisper (свой сервер) денег не стоит — бюджеты и подлимит речи не проверяются
+        scope = budgets.Scope(call_id=call_id, user_id=user_id, session_id=None, learner_limits=True, speech=True)
+        async with deps.rt.transaction() as s:
+            reserved = await budgets.try_reserve(s, budget, scope, actual=Decimal(0), estimate=estimate,
+                                                 now=deps.clock(), tz=deps.settings.timezone)
     if not reserved:
         return await _finish(deps, meta, call_id, "unavailable", "budget_exceeded", started=started, attempts=0,
                              cost=Decimal(0), info=info, provider=None, caller=caller, audience=audience)

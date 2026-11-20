@@ -20,7 +20,7 @@ import { ConfirmCommand } from "../../ui/overlays";
 import { useToast } from "../../ui/toasts";
 import { errText } from "../../ui/errors";
 import { AgentCard } from "./AgentCard";
-import { AGENT_IDS } from "./model";
+import { AGENT_IDS, isOwnServer, isSpeech } from "./model";
 import { AiOffBanner, Kv, useUsd } from "./parts";
 
 export const IMPL_TONE: Record<AgentImplementation, Tone> = { llm: "info", rules: "accent", code: "neutral" };
@@ -342,7 +342,8 @@ function ModelsTab() {
                       {isSpeech(m) ? "—" : money(m.output_usd_per_mtok)}
                     </td>
                     <td className="r num" data-testid={`mdl-audio-${m.model_id}`}>
-                      {isSpeech(m) ? money(m.audio_usd_per_hour) : "—"}
+                      {isSpeech(m) ? money(isOwnServer(m) ? 0 : m.audio_usd_per_hour) : "—"}
+                      {isOwnServer(m) && <span className="xs muted block">{t("mdl.ownServer")}</span>}
                     </td>
                     <td>{m.active ? <Pill tone="good">{t("mdl.active")}</Pill> : <Pill>{t("mdl.inactive")}</Pill>}</td>
                     <td className="small muted">{fmt.dateTime(m.updated_at)}</td>
@@ -372,14 +373,43 @@ function ModelsTab() {
   );
 }
 
-/** sprint 5: a speech model (Azure Pronunciation Assessment) is priced per hour of audio, not per token. */
-export const isSpeech = (m: Pick<AiModel, "provider">): boolean => m.provider === "azure_speech" || m.provider === "fake_speech";
-
-/** Status of the pronunciation provider: «key set / not set», region, last error — the key itself is never shown or entered. */
+/**
+ * Status of the pronunciation provider. Azure: «key set / not set», region, last error — the key itself is never shown
+ * or entered. release 5.1 — the own server (whisper): «Свой сервер (Whisper) · подключён / не подключён», no region and
+ * no key (key_configured means the recognition service is connected).
+ */
 function SpeechProvider({ s }: { s: AiProviderStatus["speech"] }) {
   const { t, fmt } = useI18n();
+  if (isOwnServer(s))
+    return (
+      <div className="stack sm prov-speech" data-testid="prov-speech" data-provider={s.provider}>
+        <h3 className="h3">{t("prov.speech")}</h3>
+        <Kv
+          k={t("prov.provider")}
+          testId="prov-speech-own"
+          v={
+            <span className="row wrap">
+              <span>{t("prov.ownServer")}</span>
+              {s.key_configured ? (
+                <Pill tone="good" testId="prov-speech-on">
+                  <Icon name="checkCircle" /> {t("prov.connected")}
+                </Pill>
+              ) : (
+                <Pill tone="warn" testId="prov-speech-off">
+                  <Icon name="alert" /> {t("prov.disconnected")}
+                </Pill>
+              )}
+            </span>
+          }
+        />
+        <Kv k={t("prov.lastError")} v={s.last_error ? `${s.last_error.code} · ${fmt.dateTime(s.last_error.at)}` : t("prov.noErrors")} testId="prov-speech-error" />
+        <Callout kind={s.key_configured ? "info" : "warn"} icon={s.key_configured ? "info" : "alert"} testId="prov-speech-note">
+          {s.key_configured ? t("prov.ownNoteOn") : t("prov.ownNoteOff")}
+        </Callout>
+      </div>
+    );
   return (
-    <div className="stack sm prov-speech" data-testid="prov-speech">
+    <div className="stack sm prov-speech" data-testid="prov-speech" data-provider={s.provider}>
       <h3 className="h3">{t("prov.speech")}</h3>
       <Kv k={t("prov.provider")} v={<span className="mono">{s.provider}</span>} />
       <Kv
@@ -409,6 +439,8 @@ function SpeechProvider({ s }: { s: AiProviderStatus["speech"] }) {
 function ModelDialog({ model, onClose, onSaved, errText: et }: { model: AiModel; onClose: () => void; onSaved: (m: AiModel) => void; errText: (e: unknown) => string }) {
   const { t } = useI18n();
   const speech = isSpeech(model);
+  // release 5.1: the own server (whisper) — the price of an hour is fixed at 0, only the activity is edited
+  const own = isOwnServer(model);
   const [inp, setInp] = useState(String(model.input_usd_per_mtok));
   const [out, setOut] = useState(String(model.output_usd_per_mtok));
   const [audio, setAudio] = useState(String(model.audio_usd_per_hour ?? ""));
@@ -419,13 +451,13 @@ function ModelDialog({ model, onClose, onSaved, errText: et }: { model: AiModel;
   };
   const pi = speech ? model.input_usd_per_mtok : price(inp);
   const po = speech ? model.output_usd_per_mtok : price(out);
-  const pa = speech ? price(audio) : null;
-  const bad = pi == null || po == null || (speech && pa == null);
-  const same = pi === model.input_usd_per_mtok && po === model.output_usd_per_mtok && active === model.active && (!speech || pa === model.audio_usd_per_hour);
+  const pa = speech && !own ? price(audio) : null;
+  const bad = pi == null || po == null || (speech && !own && pa == null);
+  const same = pi === model.input_usd_per_mtok && po === model.output_usd_per_mtok && active === model.active && (!speech || own || pa === model.audio_usd_per_hour);
   return (
     <ConfirmCommand
       title={t("mdl.editT", { m: model.model_id })}
-      text={speech ? t("mdl.editSpeechM") : t("mdl.editM")}
+      text={own ? t("mdl.editOwnM") : speech ? t("mdl.editSpeechM") : t("mdl.editM")}
       icon="coins"
       ok={t("common.save")}
       okDisabled={bad || same}
@@ -434,7 +466,11 @@ function ModelDialog({ model, onClose, onSaved, errText: et }: { model: AiModel;
       onClose={onClose}
       extra={
         <div className="stack sm">
-          {speech ? (
+          {own ? (
+            <p className="small" data-testid="mdl-own">
+              <Icon name="info" /> {t("mdl.ownPrice")}
+            </p>
+          ) : speech ? (
             <div className="field">
               <label htmlFor="mdl-audio" className="req">
                 {t("mdl.col.audio")}
@@ -474,7 +510,8 @@ function ModelDialog({ model, onClose, onSaved, errText: et }: { model: AiModel;
       }
       onConfirm={async (reason) => {
         try {
-          const m = await Ai.putModel({ model_id: model.model_id, input_usd_per_mtok: pi!, output_usd_per_mtok: po!, active, ...(speech ? { audio_usd_per_hour: pa } : {}) }, reason);
+          // the own server never sends a price of an hour (ai-gateway: 422 PRICE_NOT_APPLICABLE)
+          const m = await Ai.putModel({ model_id: model.model_id, input_usd_per_mtok: pi!, output_usd_per_mtok: po!, active, ...(speech && !own ? { audio_usd_per_hour: pa } : {}) }, reason);
           onSaved(m);
           return null;
         } catch (e) {

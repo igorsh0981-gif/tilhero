@@ -22,7 +22,7 @@ import { ConfirmCommand } from "../../ui/overlays";
 import { useToast } from "../../ui/toasts";
 import { errText } from "../../ui/errors";
 import { setAiEnabled } from "./aiState";
-import { budgetForm, capPct, checkBudget, decimal, mergeBudgetForm, speechHourPrice, speechHours, type BudgetForm } from "./model";
+import { budgetForm, capPct, checkBudget, decimal, isOwnServer, mergeBudgetForm, speechHourPrice, speechHours, type BudgetForm } from "./model";
 import { AiOffBanner, BarChart, BudgetBar, Kv, useKeyed, useUsd } from "./parts";
 
 type UsagePeriod = AiUsageSummary["period"];
@@ -36,6 +36,8 @@ export function CostsPage() {
   const [other, setOther] = useState<AiUsageSummary | null>(null);
   const [budget, setBudget] = useState<AiBudget | null>(null);
   const [budgetErr, setBudgetErr] = useState<unknown>(null);
+  /** release 5.1: is pronunciation on the own server (whisper, nothing charged)? null — unknown (no ai.read / no answer) */
+  const ownServer = useOwnSpeechServer();
   const loadMonth = useCallback(() => {
     Ai.usageSummary("month")
       .then((s) => {
@@ -114,9 +116,9 @@ export function CostsPage() {
           </h2>
           <Seg<UsagePeriod> label={t("cs.period")} value={period} onChange={setPeriod} testId="cs-period" items={(["day", "week", "month"] as const).map((v) => ({ v, label: t(`usp.${v}`) }))} />
         </div>
-        {!sum ? <Spinner label={t("common.loading")} /> : <UsageBody s={sum} />}
+        {!sum ? <Spinner label={t("common.loading")} /> : <UsageBody s={sum} own={ownServer} />}
       </section>
-      <SettingsCard budget={budget} error={budgetErr} onRetry={loadBudget} onSaved={onBudget} onConflict={rereadBudget} />
+      <SettingsCard budget={budget} error={budgetErr} onRetry={loadBudget} onSaved={onBudget} onConflict={rereadBudget} own={ownServer} />
     </div>
   );
 }
@@ -154,7 +156,25 @@ function MonthBody({ s, alert }: { s: AiUsageSummary; alert: number }) {
   );
 }
 
-function UsageBody({ s }: { s: AiUsageSummary }) {
+/** The provider of pronunciation (ai.read): true — the own server (whisper), false — a paid one, null — unknown. */
+function useOwnSpeechServer(): boolean | null {
+  const { can } = useSession();
+  const read = can("ai.read");
+  const [own, setOwn] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!read) return;
+    let alive = true;
+    Ai.provider(true)
+      .then((p) => alive && setOwn(p.speech ? isOwnServer(p.speech) : null))
+      .catch(() => alive && setOwn(null));
+    return () => {
+      alive = false;
+    };
+  }, [read]);
+  return own;
+}
+
+function UsageBody({ s, own }: { s: AiUsageSummary; own: boolean | null }) {
   const { t, fmt, lang } = useI18n();
   const money = useUsd();
   const k = useKeyed();
@@ -167,7 +187,7 @@ function UsageBody({ s }: { s: AiUsageSummary }) {
         {s.unavailable_pct != null && ` · ${t("cs.unavailShort", { p: fmt.pct(s.unavailable_pct) })}`}
       </div>
       <BarChart data={days} title={t("cs.byDay")} valueLabel={t("cs.spent")} format={(n) => money(n)} testId="cs-chart" />
-      <SpeechBlock s={s} />
+      <SpeechBlock s={s} own={own} />
       <div className="grid2">
         <div className="stack sm">
           <h3 className="h3">{t("cs.byAgent")}</h3>
@@ -262,8 +282,12 @@ function UsageBody({ s }: { s: AiUsageSummary }) {
 
 /* ---------------------------------------------------------------- pronunciation (sprint 5) */
 
-/** «Оценка произношения» (agent pronunciation_coach, Azure): calls, minutes of audio, spend — part of the period total. */
-function SpeechBlock({ s }: { s: AiUsageSummary }) {
+/**
+ * «Оценка произношения» (agent pronunciation_coach): calls, minutes of audio, spend — part of the period total; the
+ * month's spend against the sub-cap. release 5.1: on the own server (whisper) the spend is $0 — the sub-cap is still
+ * shown (it applies to paid providers) with «на своём сервере расход не начисляется».
+ */
+function SpeechBlock({ s, own }: { s: AiUsageSummary; own: boolean | null }) {
   const { t, fmt } = useI18n();
   const money = useUsd();
   const sp = s.speech;
@@ -303,7 +327,7 @@ function SpeechBlock({ s }: { s: AiUsageSummary }) {
           <div className="kpi-v" data-testid="cs-speech-spent">
             {money(sp.spent_usd)}
           </div>
-          <div className="kpi-n">{t("cs.speechShare", { s: money(s.spent_usd) })}</div>
+          <div className="kpi-n">{own ? t("cs.speechOwnFree") : t("cs.speechShare", { s: money(s.spent_usd) })}</div>
         </div>
       </div>
       {sp.cap_usd == null ? null : sp.cap_usd === 0 ? (
@@ -321,7 +345,12 @@ function SpeechBlock({ s }: { s: AiUsageSummary }) {
           {t("cs.speechCap", { c: money(sp.cap_usd) })}
         </p>
       )}
-      <p className="xs muted">{sp.speech_available ? t("cs.speechNote") : t("cs.speechOffM")}</p>
+      {own && (
+        <p className="small muted row" data-testid="cs-speech-own">
+          <Icon name="info" /> {t("cs.speechOwnCap")}
+        </p>
+      )}
+      <p className="xs muted">{!sp.speech_available ? t("cs.speechOffM") : own ? t("cs.speechOwnNote") : t("cs.speechNote")}</p>
     </section>
   );
 }
@@ -427,7 +456,7 @@ const FIELDS: ReadonlyArray<{ k: keyof BudgetForm; unit: "usd" | "pct" }> = [
   { k: "speech_monthly_cap_usd", unit: "usd" },
 ];
 
-function SettingsCard({ budget, error, onRetry, onSaved, onConflict }: { budget: AiBudget | null; error: unknown; onRetry: () => void; onSaved: (b: AiBudget) => void; onConflict: () => Promise<AiBudget> }) {
+function SettingsCard({ budget, error, onRetry, onSaved, onConflict, own }: { budget: AiBudget | null; error: unknown; onRetry: () => void; onSaved: (b: AiBudget) => void; onConflict: () => Promise<AiBudget>; own: boolean | null }) {
   const i = useI18n();
   const { t } = i;
   const { can } = useSession();
@@ -528,6 +557,11 @@ function SettingsCard({ budget, error, onRetry, onSaved, onConflict }: { budget:
             <span className="hint" id={`csf-${k}-h`}>
               {t(`csf.h.${k}`)}
               {k === "speech_monthly_cap_usd" && <SpeechHours cap={decimal(form[k])} hourUsd={hourUsd} />}
+              {k === "speech_monthly_cap_usd" && own && (
+                <span className="block" data-testid="csf-speech-own">
+                  {t("csf.speechOwn")}
+                </span>
+              )}
               {conflict && form[k] !== base[k] && (
                 <b className="block" data-testid={`csf-${k}-saved`}>
                   {t("csf.savedNow", { v: saved(k, unit) })}

@@ -1,8 +1,10 @@
-"""Настройки tts. Голоса Piper лежат в образе (`TTS_VOICES_DIR`, скачиваются при сборке Dockerfile)."""
+"""Настройки tts. Голоса Piper и модель распознавания faster-whisper лежат в образе (`TTS_VOICES_DIR`, `ASR_MODEL_DIR`;
+скачиваются при сборке Dockerfile)."""
 
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -34,11 +36,31 @@ class Settings(ServiceSettings):
     tts_cache_ttl_days: int = Field(default=30, ge=1, le=365)
     tts_cache_namespace: str = "tts:v1"
 
+    # Распознавание речи (релиз 5.1, решение владельца 20.11.2026): оценка произношения на своём сервере.
+    # whisper — faster-whisper (CTranslate2, CPU, int8), модель в образе; fake — детерминированная заглушка (dev/test)
+    asr_engine: Literal["whisper", "fake"] = "whisper"
+    # модель: каталог <ASR_MODEL_DIR>/<ASR_MODEL> (config.json, model.bin, tokenizer.json, vocabulary.txt)
+    asr_model: str = Field(default="base.en", pattern=r"^[a-z0-9][a-z0-9._-]{0,40}$")
+    asr_model_dir: str = "/app/asr"
+    # 1 — жадное декодирование (быстрее на CPU), до 5 — поиск лучом (точнее, дольше)
+    asr_beam_size: int = Field(default=1, ge=1, le=5)
+    # одновременных распознаваний (CPU); остальные ждут в пределах таймаута
+    asr_concurrency: int = Field(default=1, ge=1, le=8)
+    asr_cpu_threads: int = Field(default=2, ge=1, le=16)
+    # ожидание очереди + распознавание (ai-gateway ждёт попытку ≤ 12 с)
+    asr_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+
     @model_validator(mode="after")
     def _engine_guard(self) -> Settings:
         if self.is_secure_env and self.tts_engine == "fake":
             raise ValueError("TTS_ENGINE=fake is not allowed in stage/prod")
+        if self.is_secure_env and self.asr_engine == "fake":
+            raise ValueError("ASR_ENGINE=fake is not allowed in stage/prod")
         return self
+
+    @property
+    def asr_model_path(self) -> Path:
+        return Path(self.asr_model_dir) / self.asr_model
 
     def voice_for(self, variant: Variant) -> str:
         return self.tts_voice_en_us if variant == "en-US" else self.tts_voice_en_gb

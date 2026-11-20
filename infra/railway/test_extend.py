@@ -77,5 +77,6 @@ def test_extend_verify_only_service_touches_only_callers(tmp_path: Path) -> None
     assert tts["INTERNAL_JWT_PRIVATE_KEY"] and "NATS_URL" not in tts and "DATABASE_URL" not in tts
     assert json.loads((out / "public-keys.json").read_text()) == json.loads(keys.read_text())
     upd = json.loads((out / "updates.json").read_text())
-    assert upd == {"telegram-bff": {"TTS_URL": "http://${{tts.RAILWAY_PRIVATE_DOMAIN}}:8115"}}
+    url = {"TTS_URL": "http://${{tts.RAILWAY_PRIVATE_DOMAIN}}:8115"}
+    assert upd == {"telegram-bff": url, "ai-gateway": url}  # релиз 5.1: ai-gateway — распознавание речи
     assert (out / "db-passwords.sql").read_text() == ""

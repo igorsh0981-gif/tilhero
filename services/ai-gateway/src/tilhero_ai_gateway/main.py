@@ -15,9 +15,10 @@ from tilhero_ai_gateway.consumers import CONSUMER_USER_DELETED, DELETION_REQUEST
 from tilhero_ai_gateway.domain import stand
 from tilhero_ai_gateway.domain.invoke import Deps
 from tilhero_ai_gateway.domain.provider_status import ProviderStatus
+from tilhero_ai_gateway.domain.speech import ATTEMPT_TIMEOUT_S
 from tilhero_ai_gateway.domain.versions import fail_stale_runs
 from tilhero_ai_gateway.providers import Provider, make_provider
-from tilhero_ai_gateway.providers.speech import SpeechProvider, make_speech_provider
+from tilhero_ai_gateway.providers.speech import TTS, SpeechProvider, make_speech_provider
 from tilhero_ai_gateway.settings import Settings, get_settings
 from tilhero_common.app import Runtime, create_app
 
@@ -28,11 +29,15 @@ def build_app(settings: Settings | None = None, runtime: Runtime | None = None, 
               transport: httpx.AsyncBaseTransport | None = None, speech: SpeechProvider | None = None,
               speech_transport: httpx.AsyncBaseTransport | None = None) -> FastAPI:
     """provider / transport — для тестов (подмена провайдера или транспорта httpx Anthropic); speech /
-    speech_transport — то же для оценки произношения (Azure Speech)."""
+    speech_transport — то же для оценки произношения (транспорт Azure Speech или клиента tts для whisper)."""
     settings = settings or get_settings()
     runtime = runtime or Runtime(settings)
     ai = provider or make_provider(settings, transport)
-    speech_provider = speech or make_speech_provider(settings, speech_transport)
+    if settings.speech_provider == "whisper" and settings.tts_url:
+        # релиз 5.1: распознавание — сервис tts; повторы и таймаут попытки — в domain/speech.py (не в клиенте)
+        runtime.register_client(TTS, settings.tts_url, timeout=ATTEMPT_TIMEOUT_S + 1, retries=0,
+                                transport=speech_transport)
+    speech_provider = speech or make_speech_provider(settings, speech_transport, runtime)
 
     def configure(rt: Runtime) -> None:
         rt.add_consumer(CONSUMER_USER_DELETED, [DELETION_REQUESTED], deletion_handler(rt))
@@ -44,8 +49,8 @@ def build_app(settings: Settings | None = None, runtime: Runtime | None = None, 
                 stale = await fail_stale_runs(session, now_of(rt), settings.golden_run_stale_minutes)
             if stale:
                 log.warning("stale golden runs marked failed", extra={"runs": stale})
-            if settings.speech_provider == "azure" and not speech_provider.ready():
-                log.info("pronunciation assessment not configured (AZURE_SPEECH_KEY / AZURE_SPEECH_REGION)")
+            if settings.speech_provider != "fake" and not speech_provider.ready():
+                log.info("pronunciation assessment not configured", extra={"provider": settings.speech_provider})
             # dev/e2e-стенд (AI_ALLOW_FAKE_TEST_PUBLISH, fake): черновики сида — прогон на fake и публикация
             deps = Deps(rt=rt, settings=settings, provider=ai, clock=lambda: now_of(rt),
                         status=ProviderStatus(rt.redis, settings.cache_namespace))

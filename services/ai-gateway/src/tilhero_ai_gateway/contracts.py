@@ -426,7 +426,7 @@ class PronunciationResult(BaseModel):
     tips: list[PronunciationTip] = Field(max_length=2)
     confidence: float | None = Field(ge=0, le=1)
     audio_ms: int = Field(ge=0)
-    provider: Literal["azure_speech", "fake_speech"] | None
+    provider: Literal["whisper", "azure_speech", "fake_speech"] | None
     cost_usd: float = Field(ge=0)
     latency_ms: int = Field(ge=0)
 

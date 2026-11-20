@@ -203,8 +203,9 @@ export type AgentOutput =
   | ConversationPartnerOutput | TeachingCoachOutput | TeachingCoachGlossOutput | IndependentEvaluatorOutput;
 
 // ---------------------------------------------------------------------------------------------------------------------
-// pronunciation_coach (спринт 5) — оценка произношения по акустике (Azure Speech Pronunciation Assessment) + советы
-// правилами. POST /internal/v1/speech/pronunciation (вызывающий memory): тело audio/wav (PCM 16 бит, моно, 16 кГц,
+// pronunciation_coach (спринт 5) — оценка произношения по акустике + советы правилами. Релиз 5.1 (решение владельца
+// 20.11.2026): по умолчанию свой сервер — сервис tts распознаёт запись (faster-whisper, модель в образе) и ai-gateway
+// сравнивает распознанные слова с эталоном (разборчивость слов, без оценки отдельных звуков); Azure — запасной провайдер. POST /internal/v1/speech/pronunciation (вызывающий memory): тело audio/wav (PCM 16 бит, моно, 16 кГц,
 // 0,5..15 с), заголовок X-Speech-Meta = base64url(JSON SpeechAssessMeta). Аудио не хранится нигде.
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -234,7 +235,8 @@ export interface PronunciationResult {
   tips: Array<{ word: string; text: string }>;
   confidence: number | null; // NBest[0].Confidence
   audio_ms: number;
-  provider: "azure_speech" | "fake_speech" | null;
+  /** whisper — свой сервер (релиз 5.1, сервис tts: распознавание faster-whisper и сравнение с эталоном по словам) */
+  provider: "whisper" | "azure_speech" | "fake_speech" | null;
   cost_usd: number;
   latency_ms: number;
 }
@@ -332,7 +334,7 @@ export interface AgentRollout {
 
 export interface AiModel {
   model_id: string; // claude-haiku-5-5; azure-speech-pa (спринт 5)
-  provider: "anthropic" | "fake" | "azure_speech" | "fake_speech";
+  provider: "anthropic" | "fake" | "whisper" | "azure_speech" | "fake_speech";
   input_usd_per_mtok: number; // речь — 0
   output_usd_per_mtok: number; // речь — 0
   /** речь: цена часа аудио (azure-speech-pa по умолчанию 1.32); LLM — null */
@@ -361,7 +363,9 @@ export interface AiProviderStatus {
   ai_enabled: boolean; // false — аварийная остановка; для ролей без costs.read (баннер «ИИ выключен»)
   /** оценка произношения (спринт 5): ключ и регион Azure — общие переменные проекта, вводит владелец */
   speech: {
-    provider: "azure_speech" | "fake_speech";
+    /** whisper (релиз 5.1, по умолчанию) — свой сервер, ключ не нужен: key_configured = адрес сервиса распознавания
+     *  задан, region = null */
+    provider: "whisper" | "azure_speech" | "fake_speech";
     key_configured: boolean;
     region: string | null; // westeurope
     last_error: { code: string; at: string } | null;

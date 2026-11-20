@@ -113,7 +113,8 @@ async def test_reference_data_seeded(roles_env) -> None:
         "claude-sonnet-5-5": ("2.0000", "10.0000", "anthropic", "None"),
         "fake": ("0.0000", "0.0000", "fake", "None"),
         "azure-speech-pa": ("0.0000", "0.0000", "azure_speech", "1.3200"),
-        "fake-speech": ("0.0000", "0.0000", "fake_speech", "0.0000")}
+        "fake-speech": ("0.0000", "0.0000", "fake_speech", "0.0000"),
+        "whisper-base-en": ("0.0000", "0.0000", "whisper", "0.0000")}
     budget = (await _fetch(roles.runtime_url, roles.schema, "SELECT * FROM budget"))[0]
     assert (budget["ai_enabled"], str(budget["monthly_cap_usd"]), str(budget["learner_daily_cap_usd"]),
             str(budget["lesson_cap_usd"]), budget["alert_percent"], str(budget["speech_monthly_cap_usd"])) == (

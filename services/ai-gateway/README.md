@@ -5,7 +5,9 @@
 цены, бюджеты и аварийная остановка ИИ, вызов агента со строгой проверкой JSON и правилами безопасности
 (`safety_quality_gate`), учёт затрат **без текстов** (спринт 4, AT-49…51; INTERNAL_API §1, §9). Спринт 5
 (`docs/sprint5/INTERNAL_API.md` §3): `teaching_coach` v2 с переводом слова `gloss_word` для memory и оценка
-произношения `pronunciation_coach` — Azure AI Speech (Pronunciation Assessment) + советы правилами (AT-57, AT-58).
+произношения `pronunciation_coach` + советы правилами (AT-57, AT-58). Релиз 5.1 (решение владельца 20.11.2026: регистрация
+Azure не прошла): по умолчанию свой сервер — запись распознаёт сервис tts (faster-whisper), ai-gateway сравнивает слова с
+эталоном (провайдер `whisper`); Azure AI Speech (Pronunciation Assessment) — запасной провайдер.
 
 Порт 8114, схема PostgreSQL `ai_gateway` (роли `ai_gateway_owner` — миграции, `ai_gateway` — рантайм без DDL),
 внутренний JWT с `aud = ai-gateway`. Redis — идемпотентность вызовов (результат по `request_id`, 24 ч) и команд
@@ -148,6 +150,8 @@ archived`, `ai.model_updated`, `ai.budget_updated`, `ai.emergency_stop` (без 
   набор — прежние прогоны teaching_coach устаревают; черновик из v1 (схема без gloss) их не пройдёт. Там же: модели и
   учёт речи, реестр агентов (`spaced_repetition_coach` → `code`/memory, `pronunciation_coach` → `code`/ai-gateway,
   их пустая маршрутизация версий удаляется). Откат возвращает всё как в спринте 4 (вызовы речи из `usage` удаляются).
+- **0005** — подлимит речи `budget.speech_monthly_cap_usd` (5 $). **0006** (релиз 5.1) — провайдер `whisper` в `models` и
+  `usage`, сид модели `whisper-base-en` (0 $); откат удаляет вызовы и модель whisper.
 - Золотые прогоны: не больше `GOLDEN_RUNS_DAILY_LIMIT` (20) в сутки по Ташкенту на все агенты (429 `TEST_RUNS_LIMIT`);
   аварийная остановка прогон **не** блокирует (проверка сотрудником перед включением ИИ), месячный потолок —
   учитывается (ревью R1-11).
@@ -167,10 +171,41 @@ archived`, `ai.model_updated`, `ai.budget_updated`, `ai.emergency_stop` (без 
 | 422 `AUDIO_INVALID {reason: format \| too_short \| too_long \| too_large}` | не RIFF/WAVE, не PCM 16 бит моно 16 кГц, не `audio/wav`; < 0,5 с; > 15 с; > 600 000 байт |
 | 422 `IDEMPOTENCY_KEY_REUSED`, 409 `IDEMPOTENCY_IN_PROGRESS` | тот же `request_id` с другой метой/аудио; дубль не дождался первого |
 
-Порядок: аварийная остановка → `unavailable: ai_disabled`; нет `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION` (или регион не
-похож на регион Azure, или модель речи выключена в админке) → `unavailable: not_configured`; бюджет (месяц UTC, ученик
-за день по Ташкенту) по оценке стоимости длительности → `unavailable: budget_exceeded` — всё **до** вызова провайдера.
-Azure REST для короткого аудио: `POST https://{region}.stt.speech.microsoft.com/speech/recognition/conversation/
+**Провайдер** — `SPEECH_PROVIDER`: `whisper` (по умолчанию, релиз 5.1), `azure` (запасной), `fake` (стенд и тесты).
+Все отдают ответ в формате Azure, дальше общий разбор, советы, учёт и идемпотентность (ниже).
+
+**whisper (свой сервер, релиз 5.1).** Запись уходит в сервис tts `POST {TTS_URL}/internal/v1/recognize` (общий
+`ServiceClient`, сырое тело `audio/wav`; в токене нет ученика — tts незачем знать, чья запись; эталон в tts не
+передаётся — иначе распознаватель «исправит» произношение). Ответ tts `{text, words: [{word, start_ms, end_ms,
+probability}], duration_ms, model}` сравнивается с эталоном в `domain/word_score.py` — это оценка **разборчивости
+слов** (узнал ли распознаватель слово и насколько уверенно), без оценки отдельных звуков:
+- нормализация как в memory (§1.6): регистр, апострофы, краевая пунктуация, сокращения в обе стороны (I'm = I am,
+  can't = cannot = can not, …), слова через дефис — части одного слова, числа цифрами — словами (25 = twenty-five,
+  10:40 = ten forty, 20th = twentieth);
+- выравнивание Левенштейном по словам (части слов; совпадение 0, замена / пропуск / лишнее — 1): совпало —
+  `accuracy = round(probability × 100)`, при probability < 0,5 — `mispronunciation`; замена — `mispronunciation`,
+  accuracy = 10 + 40 × похожесть написания (≤ 50); пропуск — `omission` (0); лишнее слово — `insertion` (accuracy
+  null, на своём месте); не больше 40 слов (лишние отбрасываются первыми);
+- scores: accuracy — среднее по словам эталона; completeness — доля слов эталона, распознанных целиком, × 100;
+  fluency — 100 − паузы (пауза ≥ 0,7 с — 10, ≥ 1,5 с — 20, вместе ≤ 60) − медленный темп ((1,5 − слов/с) × 40, ≤ 40;
+  слов/с — по отрезку от начала первого до конца последнего слова; одно слово — 100); pron = 0,6 × accuracy +
+  0,2 × fluency + 0,2 × completeness; confidence — средняя probability распознанных слов;
+- insufficient_evidence: нет слов → `not_recognized`, confidence < 0,4 → `low_confidence`, completeness < 30 →
+  `incomplete`.
+Денег не стоит: модель `whisper-base-en` 0 $ (`cost_usd` 0, учёт в `usage` с `provider whisper` и `audio_ms`), **бюджеты
+ИИ и подлимит речи не проверяются и не тратятся**; аварийная остановка действует. `speech_available`: нет остановки,
+`TTS_URL` задан, модель включена (сеть на каждом статусе не проверяется). Ошибки tts: сеть (tts не отвечает), 502/504 —
+один повтор по общим правилам; 503 `RECOGNITION_UNAVAILABLE` (tts не успел или модель упала), 4xx и неверный ответ —
+без повтора (CPU tts не перегружается) → `unavailable: provider_error` (код — `speech.last_error`: `network`,
+`http_503`, `bad_response`, `circuit_open`); таймаут попытки → `unavailable: timeout`.
+
+**Общий порядок:** аварийная остановка → `unavailable: ai_disabled`; провайдер не настроен (whisper — нет `TTS_URL`;
+azure — нет `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION` или регион не похож на регион Azure) или модель речи выключена в
+админке → `unavailable: not_configured`; для платных провайдеров (azure, fake) — бюджет (месяц UTC, подлимит речи,
+ученик за день по Ташкенту) по оценке стоимости длительности → `unavailable: budget_exceeded` — всё **до** вызова
+провайдера.
+
+**azure (запасной).** Azure REST для короткого аудио: `POST https://{region}.stt.speech.microsoft.com/speech/recognition/conversation/
 cognitiveservices/v1?language=en-US&format=detailed`, заголовки `Ocp-Apim-Subscription-Key`, `Content-Type: audio/wav;
 codecs=audio/pcm; samplerate=16000`, `Accept: application/json`, `Pronunciation-Assessment` = base64(JSON
 `{ReferenceText, GradingSystem: HundredMark, Granularity: Word, Dimension: Comprehensive, EnableMiscue: true}`); тело —
@@ -229,8 +264,10 @@ advisory-блокировкой параллельные вызовы видят
 - `AI_PROVIDER=fake` (тесты, стенд e2e; в stage/prod запрещён): детерминированный (`providers/fake.py`), стоимость 0
   (модель `fake` 0/0), реплика ученика — только слова.
 
-- `SPEECH_PROVIDER=azure` (prod): Azure AI Speech REST для короткого аудио через httpx (`providers/speech.py`), ключ —
-  `AZURE_SPEECH_KEY`, регион — `AZURE_SPEECH_REGION`. `SPEECH_PROVIDER=fake` — тесты и стенд e2e (в stage/prod запрещён).
+- `SPEECH_PROVIDER=whisper` (по умолчанию, релиз 5.1): распознавание — сервис tts (`TTS_URL`, faster-whisper), сравнение
+  слов с эталоном — здесь; ключ не нужен. `SPEECH_PROVIDER=azure` (запасной): Azure AI Speech REST для короткого аудио
+  через httpx (`providers/speech.py`), ключ — `AZURE_SPEECH_KEY`, регион — `AZURE_SPEECH_REGION`.
+  `SPEECH_PROVIDER=fake` — тесты и стенд e2e (в stage/prod запрещён).
 
 **Как добавить ключ:** Railway → сервис ai-gateway → Variables → `ANTHROPIC_API_KEY` (вводит владелец), `AI_PROVIDER=
 anthropic`; redeploy. Ключ живёт только в переменной окружения ai-gateway: не в БД, не в логах, не в ответах; в админке —
@@ -240,7 +277,8 @@ anthropic`; redeploy. Ключ живёт только в переменной �
 **Ключ Azure Speech (решение владельца 20.11.2026):** Railway → общие переменные проекта (Shared Variables) →
 `AZURE_SPEECH_KEY` (ключ ресурса Speech) и `AZURE_SPEECH_REGION` (регион ресурса, например `westeurope`); у ai-gateway
 уже заданы ссылки `AZURE_SPEECH_KEY=${{shared.AZURE_SPEECH_KEY}}`, `AZURE_SPEECH_REGION=${{shared.AZURE_SPEECH_REGION}}`,
-`SPEECH_PROVIDER=azure`; redeploy ai-gateway. Пустые переменные — «не настроено»: `speech_available=false`, кнопки
+`SPEECH_PROVIDER=azure` (с релиза 5.1 по умолчанию — `whisper`; Azure включается заменой на `azure`); redeploy
+ai-gateway. Пустые переменные — «не настроено»: `speech_available=false`, кнопки
 «Произнести» нет, уроки и повторения идут без неё. Проверка — `GET /admin/v1/ai/provider` → `speech.key_configured`,
 `speech.region`; цена часа аудио — `PUT /admin/v1/ai/models/azure-speech-pa` (по умолчанию 1.32; бесплатный уровень
 Azure F0 — 5 ч в месяц, шлюз его не учитывает и считает по цене).
@@ -253,13 +291,14 @@ Azure F0 — 5 ч в месяц, шлюз его не учитывает и сч
 
 ## Данные
 `agents` (сид 17), `models` (сид: claude-haiku-5-5 0.10/0.50, claude-sonnet-5-5 2.00/10.00, fake 0/0; речь —
-`audio_usd_per_hour`: azure-speech-pa 1.32, fake-speech 0, миграция 0004), `agent_versions` (триггер неизменяемости),
+`audio_usd_per_hour`: azure-speech-pa 1.32, fake-speech 0 — миграция 0004; whisper-base-en 0 — миграция 0006),
+`agent_versions` (триггер неизменяемости),
 `agent_rollout` (только LLM-агенты), `golden_cases`, `test_runs` (завершённый неизменяем), `budget`, `usage` (только
 метаданные вызова; речь — + `audio_ms`), `deleted_users`, `outbox`, `inbox`.
 
 ## Настройки
 `AI_PROVIDER`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` (тесты), `AI_ALLOW_FAKE_TEST_PUBLISH` (dev/test; на стенде ещё
-и публикация черновиков сида по прогону на fake при старте), `SPEECH_PROVIDER` (azure | fake), `AZURE_SPEECH_KEY`,
+и публикация черновиков сида по прогону на fake при старте), `SPEECH_PROVIDER` (whisper | azure | fake), `TTS_URL` (whisper), `AZURE_SPEECH_KEY`,
 `AZURE_SPEECH_REGION`, `SEED_DIR`,
 `TIMEZONE` (Asia/Tashkent), `GOLDEN_RUN_MAX_AGE_DAYS` (14), `GOLDEN_RUN_STALE_MINUTES` (60), `GOLDEN_RUNS_DAILY_LIMIT`
 (20), `INVOKE_CACHE_TTL_SECONDS`
@@ -269,9 +308,12 @@ Azure F0 — 5 ч в месяц, шлюз его не учитывает и сч
 - **Авария провайдера / расходы:** `POST /admin/v1/ai/emergency-stop {enabled: true}` — все вызовы `ai_disabled`.
 - **Регрессия версии:** `POST /agents/{id}/rollback` (снимает и канарейку).
 - **Прогон «завис» в running** (рестарт процесса): при старте прогоны старше 60 минут помечаются `failed`.
-- **Произношение не работает:** `GET /admin/v1/ai/provider` → `speech` (ключ/регион, `last_error`: `http_401` — неверный
-  ключ, `http_429` — лимит ресурса Azure, `timeout`, `network`); выключить без аварийной остановки ИИ — `PUT
-  /admin/v1/ai/models/azure-speech-pa {active: false}` (→ `not_configured`, кнопка скрыта).
+- **Произношение не работает:** `GET /admin/v1/ai/provider` → `speech`. whisper: `key_configured` — задан ли
+  `TTS_URL`; `last_error`: `network` / `circuit_open` — tts не отвечает (логи и здоровье сервиса tts), `http_503` — tts не
+  успел распознать (нагрузка: `ASR_CONCURRENCY`, `ASR_BEAM_SIZE`, `ASR_TIMEOUT_SECONDS` у tts), `timeout`. azure:
+  ключ/регион, `http_401` — неверный ключ, `http_429` — лимит ресурса Azure. Выключить без аварийной остановки ИИ —
+  `PUT /admin/v1/ai/models/<whisper-base-en | azure-speech-pa> {active: false}` (→ `not_configured`, кнопка скрыта).
+- **Переключиться на Azure** (запасной): `SPEECH_PROVIDER=azure` + ключ и регион (выше); обратно — `whisper`.
 - **teaching_coach v2 в prod:** `POST /admin/v1/ai/agents/teaching_coach/versions/2/test-runs` (anthropic) → при
   `passed_mandatory` — `POST …/versions/2/publish`. До этого `gloss_word` → `refused: agent_not_active` (перевод только
   из словаря курса).

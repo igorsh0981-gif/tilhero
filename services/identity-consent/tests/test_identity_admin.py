@@ -87,7 +87,7 @@ async def test_snapshot_account_child_teen(env) -> None:
     assert p["username"] == "ivan_test" and p["display_name"] == "Иван Т" and p["locale"] == "ru"
     assert p["age_band"] == "18+" and p["guardian_consent"] == "not_required" and p["status"] == "ACTIVE"
     assert p["consent"]["basis"] == "self" and p["consent"]["purposes"] == NEWS
-    assert p["consent"]["policy_version"] == "1.1" and p["consent"]["accepted_at"]
+    assert p["consent"]["policy_version"] == "1.2" and p["consent"]["accepted_at"]
     assert p["consent"]["revoked_at"] is None
     assert p["security"] == {"pin_enabled": True, "pin_reset_pending": False}
     assert p["notifications"] == {"enabled": True, "categories": {

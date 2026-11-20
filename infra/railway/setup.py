@@ -73,7 +73,8 @@ SERVICES: tuple[Service, ...] = (
     Service("lessons", 8112, "services/lessons/Dockerfile", "lessons",
             calls=("catalog", "ai-gateway", "assessment", "learning-plan", "diagnostics")),
     Service("assessment", 8113, "services/assessment/Dockerfile", "assessment", calls=("catalog", "ai-gateway")),
-    Service("ai-gateway", 8114, "services/ai-gateway/Dockerfile", "ai_gateway"),
+    # релиз 5.1: оценка произношения — распознавание в tts (faster-whisper), ai-gateway сравнивает с эталоном
+    Service("ai-gateway", 8114, "services/ai-gateway/Dockerfile", "ai_gateway", calls=("tts",)),
     # релиз 4.1 — серверная озвучка (Piper → MP3): синтез устройства в Telegram на Android отсутствует, на iOS тихий
     Service("tts", 8115, "services/tts/Dockerfile"),
     # спринт 5 — память и повторения (FSRS), перевод по тапу, проверки удержания, произношение (через ai-gateway)
@@ -222,10 +223,9 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
     if svc.name == "ai-gateway":  # ключ провайдера — общая переменная проекта (вводит владелец, как BOT_TOKEN);
         # не задана — ссылка пустая, ИИ выключен (урок без ИИ). Ссылка только у ai-gateway.
         lines += ["AI_PROVIDER=anthropic", "ANTHROPIC_API_KEY=${{shared.ANTHROPIC_API_KEY}}",
-                  # спринт 5: оценка произношения — ключ и регион Azure Speech (общие переменные, вводит владелец);
-                  # не заданы — функция скрыта (speech_available=false)
-                  "SPEECH_PROVIDER=azure", "AZURE_SPEECH_KEY=${{shared.AZURE_SPEECH_KEY}}",
-                  "AZURE_SPEECH_REGION=${{shared.AZURE_SPEECH_REGION}}"]
+                  # релиз 5.1: оценка произношения на своём сервере (tts распознаёт, ai-gateway сравнивает с эталоном);
+                  # Azure — запасной провайдер (SPEECH_PROVIDER=azure + общие переменные AZURE_SPEECH_KEY/REGION)
+                  "SPEECH_PROVIDER=whisper"]
     if svc.name == "notifications":
         lines.append("ADMIN_TEST_CHAT_IDS=")  # Telegram chat id тестовых чатов через запятую (тестовая отправка)
     if svc.name == "telegram-bot-gateway":

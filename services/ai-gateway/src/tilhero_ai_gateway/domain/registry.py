@@ -142,8 +142,14 @@ SPEECH_MODELS: Final[tuple[dict[str, Any], ...]] = (
     {"model_id": "fake-speech", "provider": "fake_speech", "input_usd_per_mtok": "0", "output_usd_per_mtok": "0",
      "audio_usd_per_hour": "0", "active": True},
 )
-SPEECH_MODEL_BY_PROVIDER: Final[dict[str, str]] = {"azure_speech": "azure-speech-pa", "fake_speech": "fake-speech"}
-SPEECH_PROVIDERS: Final = ("azure_speech", "fake_speech")
+# Релиз 5.1 (решение владельца 20.11.2026): свой сервер — распознавание faster-whisper в сервисе tts, сравнение с
+# эталоном здесь; денег не стоит (0), бюджеты ИИ не тратит. Сид — миграция 0006.
+WHISPER_MODEL: Final[dict[str, Any]] = {
+    "model_id": "whisper-base-en", "provider": "whisper", "input_usd_per_mtok": "0", "output_usd_per_mtok": "0",
+    "audio_usd_per_hour": "0", "active": True}
+SPEECH_MODEL_BY_PROVIDER: Final[dict[str, str]] = {"azure_speech": "azure-speech-pa", "fake_speech": "fake-speech",
+                                                   "whisper": "whisper-base-en"}
+SPEECH_PROVIDERS: Final = ("whisper", "azure_speech", "fake_speech")
 LLM_PROVIDERS: Final = ("anthropic", "fake")
 
 # Бюджет по умолчанию (решение владельца 19.11.2026): $20 в месяц, $0,05 на ученика в день, $0,03 на урок

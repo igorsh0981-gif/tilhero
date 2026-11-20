@@ -35,7 +35,7 @@ ME_ENDPOINTS = [
     ("PUT", "/internal/v1/me/biometric", None),
     ("DELETE", "/internal/v1/me/biometric", None),
     ("POST", "/internal/v1/me/biometric/verify", {"biometric_token": "x" * 43}),
-    ("POST", "/internal/v1/me/consent", {"policy_version": "1.1", "purposes": REQUIRED}),
+    ("POST", "/internal/v1/me/consent", {"policy_version": "1.2", "purposes": REQUIRED}),
     ("DELETE", "/internal/v1/me/consent", None),
     ("POST", "/internal/v1/me/disable", None),
     ("POST", "/internal/v1/me/enable", None),
@@ -117,7 +117,7 @@ async def test_telegram_login_creates_profile_once(env) -> None:
     assert first["consent"] == {
         "accepted": False,
         "policy_version": None,
-        "current_policy_version": "1.1",
+        "current_policy_version": "1.2",
         "accepted_at": None,
         "evidence_hash": None,
         "purposes": [],
@@ -308,7 +308,7 @@ async def test_legal_policy_document(env) -> None:
     ru = await env.call("GET", "/internal/v1/legal/policy?lang=ru", None)
     assert ru.status_code == 200
     body = ru.json()
-    assert body["version"] == "1.1" and body["text"].startswith("# Политика обработки данных TilHero")
+    assert body["version"] == "1.2" and body["text"].startswith("# Политика обработки данных TilHero")
     assert "черновик" in body["text"]
     assert [(p["code"], p["required"]) for p in body["purposes"]] == [
         ("terms", True), ("privacy", True), ("learning", True),
@@ -318,7 +318,7 @@ async def test_legal_policy_document(env) -> None:
     assert all(p["title"] and p["description"] for p in body["purposes"])
     uz = (await env.call("GET", "/internal/v1/legal/policy?lang=uz", None)).json()
     assert uz["text"].startswith("# TilHero maʼlumotlarini") and "qoralama" in uz["text"]
-    assert uz["purposes"][0]["title"] == "Foydalanish shartlari" and uz["version"] == "1.1"
+    assert uz["purposes"][0]["title"] == "Foydalanish shartlari" and uz["version"] == "1.2"
     assert (await env.call("GET", "/internal/v1/legal/policy?lang=uz-Latn", None)).json()["text"] == uz["text"]
     assert (await env.call("GET", "/internal/v1/legal/policy?lang=en", None)).json()["text"] == body["text"]
     assert (await env.call("GET", "/internal/v1/legal/policy", None)).json()["text"] == body["text"]

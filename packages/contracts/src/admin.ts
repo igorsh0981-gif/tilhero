@@ -1273,7 +1273,8 @@ export type GoldenCaseInput = Pick<GoldenCase, "title" | "input" | "checks" | "m
 // ---------- Модели и затраты (ADM-AGENT-05, ADM-MONEY-01/02) ----------
 /** GET /admin/v1/ai/models (ai.read) → {items: AiModel[]}; PUT /admin/v1/ai/models/{model_id} {input_usd_per_mtok,
  *  output_usd_per_mtok, audio_usd_per_hour? (только модели речи, спринт 5), active, reason} (ai.publish, step-up) → AiModel.
- *  Цена не того вида (audio для LLM, токены для речи) → 422 PRICE_NOT_APPLICABLE.
+ *  Цена не того вида (audio для LLM, токены для речи) → 422 PRICE_NOT_APPLICABLE. Модель whisper (свой сервер, релиз
+ *  5.1) бесплатна: правится только active, ненулевая цена часа → 422 PRICE_NOT_APPLICABLE.
  *  GET /admin/v1/ai/provider (ai.read) → AiProviderStatus.
  *  GET /admin/v1/ai/budget (costs.read) → AiBudget; PUT /admin/v1/ai/budget AiBudget-поля & {reason, updated_at
  *  (прочитанного бюджета; иначе 409 BUDGET_CONFLICT {updated_at} — лимиты изменил другой сотрудник)} (costs.manage,

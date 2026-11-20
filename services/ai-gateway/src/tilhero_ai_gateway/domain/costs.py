@@ -70,6 +70,12 @@ def _price_fields(row: ModelRow, input_usd: Decimal, output_usd: Decimal, audio_
         if audio_given and audio_usd is None:
             raise unprocessable("PRICE_REQUIRED", "Для модели оценки речи нужна цена часа аудио",
                                 {"fields": ["audio_usd_per_hour"]})
+        if row.provider == "whisper":
+            # релиз 5.1: распознавание на своём сервере (tts) — расхода нет, цена часа всегда 0
+            if audio_usd is not None and audio_usd != 0:
+                raise unprocessable("PRICE_NOT_APPLICABLE", "Модель на своём сервере бесплатна: цена часа не задаётся",
+                                    {"fields": ["audio_usd_per_hour"]})
+            return Decimal("0")
         audio = audio_usd if audio_usd is not None else row.audio_usd_per_hour
         # как R1-12 для LLM: нулевая цена настоящего провайдера = бесконтрольный расход
         if row.provider == "azure_speech" and (audio is None or audio <= 0):

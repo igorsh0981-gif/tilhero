@@ -212,7 +212,9 @@ export const MODELS = (): AiModel[] => [
   { model_id: "claude-haiku-5-5", provider: "anthropic", input_usd_per_mtok: 0.1, output_usd_per_mtok: 0.5, audio_usd_per_hour: null, active: true, updated_at: iso(-1 * DAY) },
   { model_id: "claude-sonnet-5-5", provider: "anthropic", input_usd_per_mtok: 2, output_usd_per_mtok: 10, audio_usd_per_hour: null, active: true, updated_at: iso(-1 * DAY) },
   { model_id: "fake", provider: "fake", input_usd_per_mtok: 0, output_usd_per_mtok: 0, audio_usd_per_hour: null, active: true, updated_at: iso(-14 * DAY) },
-  // sprint 5: Azure Pronunciation Assessment — priced per hour of audio ($1.32 by default)
+  // release 5.1: own server (tts: faster-whisper) — the default provider of pronunciation, nothing is charged ($0/h)
+  { model_id: "whisper-base-en", provider: "whisper", input_usd_per_mtok: 0, output_usd_per_mtok: 0, audio_usd_per_hour: 0, active: true, updated_at: iso(-1 * HOUR) },
+  // sprint 5: Azure Pronunciation Assessment — priced per hour of audio ($1.32 by default); since 5.1 the fallback
   { model_id: "azure-speech-pa", provider: "azure_speech", input_usd_per_mtok: 0, output_usd_per_mtok: 0, audio_usd_per_hour: 1.32, active: true, updated_at: iso(-2 * DAY) },
   { model_id: "fake-speech", provider: "fake_speech", input_usd_per_mtok: 0, output_usd_per_mtok: 0, audio_usd_per_hour: 0, active: true, updated_at: iso(-2 * DAY) },
 ];

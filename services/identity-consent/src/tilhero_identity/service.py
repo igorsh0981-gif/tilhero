@@ -185,7 +185,7 @@ def _deletion_word(raw: str | None) -> str:
 
 
 # версии политики, где voice_recording — «оценка произношения по записи голоса» (спринт 5); новые версии — добавлять
-VOICE_PRONUNCIATION_POLICIES = frozenset({"1.1"})
+VOICE_PRONUNCIATION_POLICIES = frozenset({"1.1", "1.2"})
 
 
 def optional_purposes_of(policy_version: str) -> frozenset[str]:

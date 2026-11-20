@@ -225,8 +225,59 @@ test("overview: the AI queue unknown (catalog down) is «нет данных»",
   await expect(page.getByTestId("dai-speech")).toContainText("мин аудио");
 });
 
-test("speech: audio hour price of the speech model (step-up), provider status without the key, pronunciation in costs", async ({ page }) => {
+/** a key, a region or Railway variables — never about the own server («подключён» is not «ключ») */
+const NO_KEY_WORDS = /(?<![а-яё])ключ|регион|region|Railway/i;
+
+test("release 5.1 whisper (default): own server «подключён» without region or key, $0 model without a price to edit, costs $0 with the sub-cap note", async ({ page }) => {
   const bff = await openAs(page, "admin@tilhero.local", "#/agents/models");
+  const sp = page.getByTestId("prov-speech");
+  await expect(sp).toHaveAttribute("data-provider", "whisper");
+  await expect(page.getByTestId("prov-speech-own")).toContainText("Свой сервер (Whisper)");
+  await expect(page.getByTestId("prov-speech-on")).toHaveText("подключён");
+  await expect(page.getByTestId("prov-speech-region")).toHaveCount(0);
+  await expect(page.getByTestId("prov-speech-key")).toHaveCount(0);
+  await expect(sp).not.toContainText(NO_KEY_WORDS);
+  await expect(page.getByTestId("prov-speech-note")).toContainText("расход не начисляется");
+  // the model of the own server: $0 an hour, the price is not edited — only the availability
+  await expect(page.getByTestId("mdl-audio-whisper-base-en")).toContainText("$0,00");
+  await expect(page.getByTestId("mdl-audio-whisper-base-en")).toContainText("свой сервер");
+  await expect(page.getByTestId("mdl-in-whisper-base-en")).toHaveText("—");
+  await page.getByTestId("mdl-edit-whisper-base-en").click();
+  const dlg = page.getByTestId("mdl-dialog");
+  await expect(dlg.getByTestId("mdl-own")).toContainText("цена часа аудио — $0, не редактируется");
+  await expect(dlg.getByTestId("mdl-audio")).toHaveCount(0);
+  await expect(dlg.getByTestId("mdl-in")).toHaveCount(0);
+  await dlg.locator("#cmd-reason").fill("Проверка отключения");
+  await expect(dlg.getByTestId("confirm-ok")).toBeDisabled(); // nothing changed
+  await dlg.locator('label[for="mdl-active"]').click();
+  await dlg.getByTestId("confirm-ok").click();
+  await typeOtp(page, "stepup", TOTP);
+  await expect(page.getByTestId("mdl-row-whisper-base-en")).toContainText("отключена");
+  const put = bff.calls("PUT", "/ai/models/whisper-base-en").at(-1)!.body;
+  expect(put).toEqual({ input_usd_per_mtok: 0, output_usd_per_mtok: 0, active: false, reason: "Проверка отключения" });
+  // costs: minutes of audio, $0 spent, the sub-cap is shown with «на своём сервере расход не начисляется»
+  await page.locator('[data-nav="costs"]').click();
+  await expect(page.getByTestId("cs-speech")).toHaveAttribute("data-available", "true");
+  await expect(page.getByTestId("cs-speech-minutes")).toHaveText("136,5");
+  await expect(page.getByTestId("cs-speech-spent")).toHaveText("$0,00");
+  await expect(page.getByTestId("cs-speech")).toContainText("на своём сервере расход не начисляется");
+  await expect(page.getByTestId("cs-speech-cap")).toContainText("из $5,00");
+  await expect(page.getByTestId("cs-speech-own")).toContainText("подлимит действует для платных провайдеров");
+  await expect(page.getByTestId("csf-speech-own")).toHaveText("Сейчас работает свой сервер (Whisper): расход не начисляется");
+});
+
+test("release 5.1 whisper not connected: «не подключён», never a key; pronunciation unavailable", async ({ page }) => {
+  await openAs(page, "admin@tilhero.local", "#/agents/models", { ai: { noSpeechKey: true } });
+  await expect(page.getByTestId("prov-speech-off")).toHaveText("не подключён");
+  await expect(page.getByTestId("prov-speech")).not.toContainText(NO_KEY_WORDS);
+  await expect(page.getByTestId("prov-speech-note")).toContainText("Сервис распознавания не подключён");
+  await page.locator('[data-nav="costs"]').click();
+  await expect(page.getByTestId("cs-speech-off")).toContainText("недоступна");
+  await expect(page.getByTestId("cs-speech")).toContainText("провайдер распознавания не подключён");
+});
+
+test("speech (Azure): audio hour price of the speech model (step-up), provider status without the key, pronunciation in costs", async ({ page }) => {
+  const bff = await openAs(page, "admin@tilhero.local", "#/agents/models", { ai: { speechProvider: "azure_speech" } });
   await expect(page.getByTestId("mdl-audio-azure-speech-pa")).toHaveText("$1,32");
   await expect(page.getByTestId("mdl-in-azure-speech-pa")).toHaveText("—");
   await expect(page.getByTestId("mdl-audio-claude-haiku-5-5")).toHaveText("—");
@@ -263,7 +314,7 @@ test("speech: audio hour price of the speech model (step-up), provider status wi
 });
 
 test("pronunciation sub-cap: «≈ N ч аудио» at the current price, 0…month, step-up; the costs show the spend against it", async ({ page }) => {
-  const bff = await openAs(page, "ops@tilhero.local", "#/costs");
+  const bff = await openAs(page, "ops@tilhero.local", "#/costs", { ai: { speechProvider: "azure_speech" } });
   // the month's speech spend against the sub-cap: 136,5 min × $1,32/h = $3,00 of $5,00
   const bar = page.getByTestId("cs-speech-cap");
   await expect(bar).toContainText("$3,00");
@@ -302,7 +353,7 @@ test("pronunciation sub-cap: «≈ N ч аудио» at the current price, 0…m
 });
 
 test("speech without the Azure key: «не задан», the feature is shown as unavailable", async ({ page }) => {
-  await openAs(page, "admin@tilhero.local", "#/agents/models", { ai: { noSpeechKey: true } });
+  await openAs(page, "admin@tilhero.local", "#/agents/models", { ai: { noSpeechKey: true, speechProvider: "azure_speech" } });
   await expect(page.getByTestId("prov-speech-unset")).toContainText("ключ не задан");
   await expect(page.getByTestId("prov-speech-note")).toContainText("вводит владелец в Railway");
   await page.locator('[data-nav="costs"]').click();

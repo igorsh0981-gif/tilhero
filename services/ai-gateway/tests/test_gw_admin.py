@@ -177,7 +177,7 @@ async def test_models_and_prices(env) -> None:
              m["audio_usd_per_hour"]) for m in items] == [
         ("azure-speech-pa", "azure_speech", 0.0, 0.0, 1.32), ("claude-haiku-5-5", "anthropic", 0.1, 0.5, None),
         ("claude-sonnet-5-5", "anthropic", 2.0, 10.0, None), ("fake", "fake", 0.0, 0.0, None),
-        ("fake-speech", "fake_speech", 0.0, 0.0, 0.0)]
+        ("fake-speech", "fake_speech", 0.0, 0.0, 0.0), ("whisper-base-en", "whisper", 0.0, 0.0, 0.0)]
     body = {"input_usd_per_mtok": 0.12, "output_usd_per_mtok": 0.6, "active": True, "reason": "Новый прайс"}
     r = await env.c.put("/admin/v1/ai/models/claude-haiku-5-5", json=body, headers=env.h(PUBLISHER))
     assert r.status_code == 200 and r.json()["input_usd_per_mtok"] == 0.12

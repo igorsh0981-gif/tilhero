@@ -61,7 +61,7 @@ ignore_missing_imports = true
 
 # tts: piper и lameenc без аннотаций типов
 [[tool.mypy.overrides]]
-module = ["piper", "piper.*", "lameenc"]
+module = ["piper", "piper.*", "lameenc", "faster_whisper", "faster_whisper.*", "ctranslate2"]
 ignore_missing_imports = true
 
 # psycopg — не зависимость workspace: только infra/railway, ставится в CI через `uv run --with psycopg[binary]`.

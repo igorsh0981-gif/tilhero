@@ -1,4 +1,14 @@
-"""Провайдеры оценки произношения (INTERNAL_API §3.2): azure (prod) и fake (тесты, стенд). Выбор — SPEECH_PROVIDER.
+"""Провайдеры оценки произношения (INTERNAL_API §3.2): whisper (по умолчанию, релиз 5.1), azure (запасной) и fake
+(тесты, стенд). Выбор — SPEECH_PROVIDER. Все отдают ответ в формате Azure (`RecognitionStatus`, `NBest[0]`) — дальше
+общий разбор, советы и учёт (`domain/speech.py`).
+
+**whisper** (решение владельца 20.11.2026: регистрация Azure не прошла — свой сервер): запись уходит в сервис tts
+`POST {TTS_URL}/internal/v1/recognize` (общий ServiceClient, сырое тело `audio/wav`, без ученика в токене — tts
+незачем знать, чья запись; эталон туда не передаётся — модель не «исправит» произношение); распознанные слова с
+вероятностью и временем сравниваются с эталоном здесь (`domain/word_score.py`). Денег не стоит: модель
+`whisper-base-en` 0 $, бюджеты ИИ и подлимит речи не тратятся (`budgeted = False`), аварийная остановка действует.
+Ошибки: сеть/tts недоступен (`network`), 502/504 — повтор по общим правилам; 503 `RECOGNITION_UNAVAILABLE` (tts не
+успел или модель упала) и прочие ответы — без повтора (CPU tts не перегружается повторами).
 
 **Azure AI Speech, REST для короткого аудио** (SDK провайдеров не ставим — httpx):
 `POST https://{region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1
@@ -29,11 +39,17 @@ from typing import Any, Final, Literal, Protocol
 import httpx
 
 from tilhero_ai_gateway.domain.wav import mean_amplitude, parse_wav
+from tilhero_ai_gateway.domain.word_score import score
 from tilhero_ai_gateway.settings import Settings
+from tilhero_common.app import Runtime
+from tilhero_common.http_client import CircuitOpen, UpstreamError
 
 log = logging.getLogger("tilhero.ai_gateway.speech")
 
-SpeechProviderName = Literal["azure_speech", "fake_speech"]
+SpeechProviderName = Literal["whisper", "azure_speech", "fake_speech"]
+TTS: Final = "tts"
+RECOGNIZE_PATH: Final = "/internal/v1/recognize"
+RETRYABLE_STATUS: Final = frozenset({502, 504})
 AZURE_PATH: Final = "/speech/recognition/conversation/cognitiveservices/v1"
 CONTENT_TYPE: Final = "audio/wav; codecs=audio/pcm; samplerate=16000"
 SILENCE_AMPLITUDE: Final = 200
@@ -69,6 +85,8 @@ class SpeechRequest:
 
 class SpeechProvider(Protocol):
     name: SpeechProviderName
+    # оценка стоит денег: бюджеты ИИ и подлимит речи (whisper — свой сервер, False)
+    budgeted: bool
 
     def ready(self) -> bool:
         """Можно ли вызывать: у azure — заданы ключ и регион. False → unavailable: not_configured."""
@@ -89,6 +107,7 @@ def assessment_header(reference_text: str) -> str:
 
 class AzureSpeechProvider:
     name: SpeechProviderName = "azure_speech"
+    budgeted = True
 
     def __init__(self, key: str | None, region: str | None, *,
                  transport: httpx.AsyncBaseTransport | None = None) -> None:
@@ -151,6 +170,7 @@ def reference_words(reference_text: str) -> list[str]:
 
 class FakeSpeechProvider:
     name: SpeechProviderName = "fake_speech"
+    budgeted = True  # цена fake-speech правится в админке — тесты бюджета речи идут на fake
 
     def ready(self) -> bool:
         return True
@@ -175,7 +195,51 @@ class FakeSpeechProvider:
         return None
 
 
-def make_speech_provider(settings: Settings, transport: httpx.AsyncBaseTransport | None = None) -> SpeechProvider:
+class WhisperSpeechProvider:
+    """Свой сервер: распознавание в tts + сравнение с эталоном по словам. Клиент tts регистрируется в Runtime
+    (`main.py`) только при заданном TTS_URL."""
+
+    name: SpeechProviderName = "whisper"
+    budgeted = False
+
+    def __init__(self, runtime: Runtime, tts_url: str | None) -> None:
+        self._rt = runtime
+        self._url = tts_url
+
+    def ready(self) -> bool:
+        return bool(self._url)
+
+    async def assess(self, request: SpeechRequest) -> dict[str, Any]:
+        client = self._rt.clients.get(TTS) if self._url else None
+        if client is None:
+            raise SpeechError("not_configured")
+        try:
+            data = await client.post(RECOGNIZE_PATH, content=request.audio, headers={"Content-Type": "audio/wav"})
+        except CircuitOpen:
+            raise SpeechError("circuit_open") from None
+        except UpstreamError as exc:
+            if exc.code == "UPSTREAM_UNAVAILABLE":  # сеть: tts не отвечает (перезапуск, деплой)
+                raise SpeechError("network", retryable=True) from None
+            log.warning("tts recognize error status", extra={"status": exc.status, "code": exc.code[:64]})
+            raise SpeechError(f"http_{exc.status}", retryable=exc.status in RETRYABLE_STATUS) from None
+        words = data.get("words") if isinstance(data, dict) else None
+        if not isinstance(words, list) or not all(isinstance(w, dict) for w in words):
+            raise SpeechError("bad_response")
+        return score(request.reference_text, words)
+
+    async def aclose(self) -> None:
+        return None  # клиент tts закрывает Runtime
+
+    def __repr__(self) -> str:
+        return f"WhisperSpeechProvider(tts_configured={bool(self._url)})"
+
+
+def make_speech_provider(settings: Settings, transport: httpx.AsyncBaseTransport | None = None,
+                         runtime: Runtime | None = None) -> SpeechProvider:
     if settings.speech_provider == "fake":
         return FakeSpeechProvider()
+    if settings.speech_provider == "whisper":
+        if runtime is None:  # pragma: no cover — build_app всегда передаёт Runtime
+            raise RuntimeError("whisper speech provider needs Runtime (tts client)")
+        return WhisperSpeechProvider(runtime, settings.tts_url)
     return AzureSpeechProvider(settings.speech_key, settings.speech_region, transport=transport)
