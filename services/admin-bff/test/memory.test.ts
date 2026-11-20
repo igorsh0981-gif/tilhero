@@ -718,6 +718,35 @@ describe("тексты для чтения, журнал сессий reading, �
     expect((await get(s, "/admin/v1/ai/models")).statusCode).toBe(503);
   });
 
+  it("релиз 5.1 — whisper (свой сервер): провайдер речи, модель whisper-base-en с ценой часа 0, вызовы — проходят строго", async () => {
+    const { s } = await loginAs(h, "super_admin");
+    h.fake.on("aiGateway", "GET", "/admin/v1/ai/provider", () =>
+      json(200, aiProvider({ speech: { provider: "whisper", key_configured: true, region: null, last_error: { code: "asr_timeout", at: "2026-11-21T10:00:00Z" } } })),
+    );
+    expect((await get(s, "/admin/v1/ai/provider")).json().speech).toEqual({
+      provider: "whisper",
+      key_configured: true,
+      region: null,
+      last_error: { code: "asr_timeout", at: "2026-11-21T10:00:00Z" },
+    });
+    const whisper = speechModel({ model_id: "whisper-base-en", provider: "whisper", audio_usd_per_hour: 0 });
+    h.fake.on("aiGateway", "GET", "/admin/v1/ai/models", () => json(200, { items: [whisper, speechModel()] }));
+    const models = await get(s, "/admin/v1/ai/models");
+    expect(models.statusCode).toBe(200);
+    expect(models.json().items[0]).toEqual(whisper);
+    await stepUp(h, s);
+    const body = { input_usd_per_mtok: 0, output_usd_per_mtok: 0, audio_usd_per_hour: 0, active: true, reason: "свой сервер распознавания" };
+    h.fake.on("aiGateway", "PUT", "/admin/v1/ai/models/whisper-base-en", () => json(200, { ...whisper, active: true }));
+    expect((await send(s, "PUT", "/admin/v1/ai/models/whisper-base-en", body)).json()).toMatchObject({ provider: "whisper", audio_usd_per_hour: 0 });
+    expect(h.fake.callsTo("aiGateway", "PUT", "/admin/v1/ai/models/whisper-base-en")[0]!.body).toEqual(body);
+    const call = aiCall({ agent_id: "pronunciation_coach", model_id: "whisper-base-en", status: "ok", reason: null, audio_ms: 3100, input_tokens: 0, output_tokens: 0, cost_usd: 0, session_id: null });
+    h.fake.on("aiGateway", "GET", "/admin/v1/ai/usage", () => json(200, { items: [call], next_cursor: null }));
+    expect((await get(s, "/admin/v1/ai/usage?agent_id=pronunciation_coach")).json().items[0]).toMatchObject({ model_id: "whisper-base-en", cost_usd: 0, audio_ms: 3100 });
+    // по-прежнему строго: неизвестный провайдер речи → 503
+    h.fake.on("aiGateway", "GET", "/admin/v1/ai/provider", () => json(200, aiProvider({ speech: { provider: "vosk", key_configured: true, region: null, last_error: null } })));
+    expect((await get(s, "/admin/v1/ai/provider")).json()).toMatchObject({ code: "UPSTREAM_UNAVAILABLE", details: { service: "ai-gateway" } });
+  });
+
   it("провайдер речи: ключ — только «задан / не задан»; регион не похожий на регион (ключ в переменной) → null; поле speech_key → 503", async () => {
     const { s } = await loginAs(h, "methodist");
     const AZ = "0123456789abcdef0123456789abcdef";

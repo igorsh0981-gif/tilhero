@@ -19,7 +19,7 @@ class Settings(ServiceSettings):
     port: int = 8101
 
     # Действующая версия политики обработки данных (тексты — tilhero_identity.domain.policy).
-    current_policy_version: str = "1.1"  # спринт 5: цель voice_recording — оценка произношения, звук не хранится
+    current_policy_version: str = "1.2"  # релиз 5.1: оценка произношения на серверах TilHero (1.1 — Azure)
     default_timezone: str = "Asia/Tashkent"
 
     # Дети и подростки (CONVENTIONS §8): не больше N детских профилей на аккаунт; ссылка согласия родителя

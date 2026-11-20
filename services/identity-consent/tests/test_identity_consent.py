@@ -32,8 +32,8 @@ async def test_accept_consent_with_evidence(env) -> None:
     r = await env.consent(uid, ["product_news", *REQUIRED, "voice_recording"])
     assert r.status_code == 200, r.text
     state = r.json()
-    assert state["accepted"] is True and state["policy_version"] == "1.1"
-    assert state["current_policy_version"] == "1.1"
+    assert state["accepted"] is True and state["policy_version"] == "1.2"
+    assert state["current_policy_version"] == "1.2"
     assert state["purposes"] == [*REQUIRED, "voice_recording", "product_news"]  # порядок политики
     assert len(state["evidence_hash"]) == 64 and state["accepted_at"].endswith("Z")
 
@@ -41,7 +41,7 @@ async def test_accept_consent_with_evidence(env) -> None:
     assert row.purposes == state["purposes"] and row.channel == "telegram"
     assert row.locale == "ru" and row.revoked_at is None
     assert (row.age_band, row.basis, row.granted_by_user_id) == ("18+", "self", None)
-    assert row.policy_text_sha256 == get_policy("1.1").text_sha256("ru")
+    assert row.policy_text_sha256 == get_policy("1.2").text_sha256("ru")
     # доказательство пересчитывается из сохранённых фактов
     assert (
         row.evidence_hash
@@ -69,7 +69,7 @@ async def test_accept_consent_with_evidence(env) -> None:
     assert event.payload == {
         "user_id": uid,
         "consent_id": str(row.consent_id),
-        "policy_version": "1.1",
+        "policy_version": "1.2",
         "purposes": state["purposes"],
         "age_band": "18+",
         "basis": "self",
@@ -156,22 +156,22 @@ async def test_repeat_is_idempotent_and_change_supersedes(env) -> None:
     ("body", "status", "code", "details"),
     [
         ({"policy_version": "0.9", "purposes": REQUIRED}, 409, "POLICY_VERSION_OUTDATED",
-         {"current_policy_version": "1.1"}),
-        ({"policy_version": "1.1", "purposes": ["terms", "privacy"]}, 422, "CONSENT_REQUIRED_PURPOSES",
+         {"current_policy_version": "1.2"}),
+        ({"policy_version": "1.2", "purposes": ["terms", "privacy"]}, 422, "CONSENT_REQUIRED_PURPOSES",
          {"missing": ["learning"]}),
-        ({"policy_version": "1.1", "purposes": ["voice_recording"]}, 422, "CONSENT_REQUIRED_PURPOSES",
+        ({"policy_version": "1.2", "purposes": ["voice_recording"]}, 422, "CONSENT_REQUIRED_PURPOSES",
          {"missing": REQUIRED}),
-        ({"policy_version": "1.1", "purposes": []}, 422, "CONSENT_REQUIRED_PURPOSES", {"missing": REQUIRED}),
-        ({"policy_version": "1.1", "purposes": [*REQUIRED, "ads"]}, 422, "CONSENT_PURPOSES_INVALID",
+        ({"policy_version": "1.2", "purposes": []}, 422, "CONSENT_REQUIRED_PURPOSES", {"missing": REQUIRED}),
+        ({"policy_version": "1.2", "purposes": [*REQUIRED, "ads"]}, 422, "CONSENT_PURPOSES_INVALID",
          {"unknown": ["ads"]}),
-        ({"policy_version": "1.1", "purposes": ["personalization", "notifications"]}, 422,
+        ({"policy_version": "1.2", "purposes": ["personalization", "notifications"]}, 422,
          "CONSENT_PURPOSES_INVALID", {"unknown": ["notifications", "personalization"]}),  # цели aievent
-        ({"policy_version": "1.1", "purposes": REQUIRED, "age_confirmed_18_plus": True}, 422, "VALIDATION_ERROR",
+        ({"policy_version": "1.2", "purposes": REQUIRED, "age_confirmed_18_plus": True}, 422, "VALIDATION_ERROR",
          None),  # поле aievent удалено: возраст — PUT /me/age
-        ({"policy_version": "1.1", "purposes": REQUIRED, "accepted_at": "2020-01-01T00:00:00Z"}, 422,
+        ({"policy_version": "1.2", "purposes": REQUIRED, "accepted_at": "2020-01-01T00:00:00Z"}, 422,
          "VALIDATION_ERROR", None),
-        ({"policy_version": "1.1", "purposes": ["p" * 33]}, 422, "VALIDATION_ERROR", None),
-        ({"policy_version": "1.1", "purposes": ["terms"] * 11}, 422, "VALIDATION_ERROR", None),
+        ({"policy_version": "1.2", "purposes": ["p" * 33]}, 422, "VALIDATION_ERROR", None),
+        ({"policy_version": "1.2", "purposes": ["terms"] * 11}, 422, "VALIDATION_ERROR", None),
         ({"purposes": REQUIRED}, 422, "VALIDATION_ERROR", None),
     ],
 )
@@ -194,7 +194,7 @@ async def test_revoke_consent(env) -> None:
     assert r.json() == {
         "accepted": False,
         "policy_version": None,
-        "current_policy_version": "1.1",
+        "current_policy_version": "1.2",
         "accepted_at": None,
         "evidence_hash": None,
         "purposes": [],
@@ -205,7 +205,7 @@ async def test_revoke_consent(env) -> None:
     again = await env.call("DELETE", "/internal/v1/me/consent", uid)
     assert again.status_code == 200 and again.json()["accepted"] is False
     [event] = await env.events("consent.revoked.v1", uid)
-    assert event.payload == {"user_id": uid, "consent_id": str(row.consent_id), "policy_version": "1.1",
+    assert event.payload == {"user_id": uid, "consent_id": str(row.consent_id), "policy_version": "1.2",
                              "basis": "self"}
 
     # повторное согласие после отзыва — новая запись, уведомления снова включены
@@ -228,7 +228,7 @@ async def test_consent_locale_follows_user_language(env) -> None:
     uid = await env.adult(language_code="uz")
     await env.consent(uid)
     [row] = await _consents(env, uid)
-    assert row.locale == "uz" and row.policy_text_sha256 == get_policy("1.1").text_sha256("uz")
+    assert row.locale == "uz" and row.policy_text_sha256 == get_policy("1.2").text_sha256("uz")
 
 
 async def test_consent_rows_are_immutable_evidence(env) -> None:
@@ -267,9 +267,19 @@ def test_policy_1_1_voice_purpose_is_pronunciation_without_storage() -> None:
     assert new.required_purposes == old.required_purposes
 
 
+def test_policy_1_2_pronunciation_on_tilhero_servers() -> None:
+    """Релиз 5.1: распознавание на серверах TilHero — в 1.2 нет передачи в Azure; цели те же, что в 1.1;
+    тексты 1.1 не изменены (доказательства принятых согласий)."""
+    v11, v12 = get_policy("1.1"), get_policy("1.2")
+    assert [p.code for p in v12.purposes] == [p.code for p in v11.purposes]
+    for lang, marker in (("ru", "серверах TilHero"), ("uz", "TilHero serverlarida")):
+        assert "Microsoft Azure" in v11.text[lang] and "Microsoft Azure" not in v12.text[lang]
+        assert marker in v12.text[lang] and v12.text_sha256(lang) != v11.text_sha256(lang)
+
+
 async def test_old_policy_consent_is_outdated_after_1_1(env) -> None:  # type: ignore[no-untyped-def]
     """Согласие на 1.0 остаётся действующим, но устаревшим: клиент видит policy_version 1.0 ≠ current 1.1 и просит
     подтвердить заново; принять 1.0 больше нельзя."""
     uid = await env.adult(language_code="ru")
     r = await env.call("POST", "/internal/v1/me/consent", uid, {"policy_version": "1.0", "purposes": list(REQUIRED)})
-    assert r.status_code == 409 and r.json()["details"] == {"current_policy_version": "1.1"}
+    assert r.status_code == 409 and r.json()["details"] == {"current_policy_version": "1.2"}

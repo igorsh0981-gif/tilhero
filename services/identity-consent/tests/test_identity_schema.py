@@ -41,7 +41,7 @@ async def test_models_match_migrations_and_runtime_role() -> None:
                 assert (await c.put("/internal/v1/me/age", json={"age_band": "18+"}, headers=h)).status_code == 200
                 consent = await c.post(
                     "/internal/v1/me/consent",
-                    json={"policy_version": "1.1", "purposes": ["terms", "privacy", "learning"]},
+                    json={"policy_version": "1.2", "purposes": ["terms", "privacy", "learning"]},
                     headers=h,
                 )
                 assert consent.status_code == 200, consent.text

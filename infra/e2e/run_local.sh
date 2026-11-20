@@ -156,7 +156,7 @@ svc_env() {
       # спринт 5: речь — fake (без ключа Azure функция была бы скрыта)
       env="$env AI_PROVIDER=${E2E_AI_PROVIDER:-fake} AI_ALLOW_FAKE_TEST_PUBLISH=true SPEECH_PROVIDER=${E2E_SPEECH_PROVIDER:-fake}" ;;
     tts)  # стенд — fake-синтез (детерминированный MP3 без моделей Piper); prod — Piper с голосами в образе
-      env="$env TTS_ENGINE=fake" ;;
+      env="$env TTS_ENGINE=fake ASR_ENGINE=fake" ;;  # релиз 5.1: распознавание — fake без модели
     assessment)  # SCHEDULER_TOKEN — вход n8n assessment-tick (стирание текста апелляций по сроку, R3-04)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 AI_GATEWAY_URL=http://127.0.0.1:8114" ;;
     lessons)

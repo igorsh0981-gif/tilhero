@@ -511,9 +511,19 @@ export function checkBudget(f: BudgetForm): { issues: BudgetIssue[]; value: Pick
   return { issues, value: issues.length ? null : { monthly_cap_usd: m!, learner_daily_cap_usd: d!, lesson_cap_usd: l!, speech_monthly_cap_usd: sp!, alert_percent: a! } };
 }
 
-/** The price of an hour of audio now: the active Azure speech model first, then any active speech model with a price. */
+/** sprint 5: a speech model (pronunciation) is priced per hour of audio, not per token. */
+export const isSpeech = (m: Pick<AiModel, "provider">): boolean => m.provider === "whisper" || m.provider === "azure_speech" || m.provider === "fake_speech";
+
+/**
+ * release 5.1: whisper — the own server (tts: faster-whisper). Nothing is charged: the price of an hour is fixed at 0 and
+ * is not edited; its status is «подключён / не подключён» (the recognition service), never a key or a region.
+ */
+export const isOwnServer = (m: { provider: string } | null | undefined): boolean => m?.provider === "whisper";
+
+/** The price of an hour of audio of a paid provider now (the sub-cap applies to those): the active Azure model first,
+ *  then any other active paid speech model. The own server (whisper, $0) never counts. */
 export function speechHourPrice(models: ReadonlyArray<Pick<AiModel, "provider" | "active" | "audio_usd_per_hour">> | null | undefined): number | null {
-  const priced = (models ?? []).filter((x) => x.active && (x.provider === "azure_speech" || x.provider === "fake_speech") && x.audio_usd_per_hour != null && x.audio_usd_per_hour > 0);
+  const priced = (models ?? []).filter((x) => x.active && isSpeech(x) && !isOwnServer(x) && x.audio_usd_per_hour != null && x.audio_usd_per_hour > 0);
   const m = priced.find((x) => x.provider === "azure_speech") ?? priced[0];
   return m ? m.audio_usd_per_hour : null;
 }

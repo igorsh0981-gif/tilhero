@@ -245,11 +245,11 @@ async def test_accept_records_guardian_consent_with_evidence(env) -> None:
 
     grant = await _active(env, teen, "guardian")
     assert grant is not None
-    policy = get_policy("1.1")
+    policy = get_policy("1.2")
     assert grant.purposes == list(policy.purpose_codes)  # разрешение родителя — на все цели политики
     assert (grant.basis, str(grant.granted_by_user_id), grant.age_band) == ("guardian", parent, "14-17")
     # доказательство: версия и текст политики на языке родителя (он читал), время, канал
-    assert (grant.policy_version, grant.locale, grant.channel) == ("1.1", "uz", "telegram")
+    assert (grant.policy_version, grant.locale, grant.channel) == ("1.2", "uz", "telegram")
     assert grant.policy_text_sha256 == policy.text_sha256("uz")
     assert grant.evidence_hash == evidence_hash(
         user_id=grant.user_id, policy_version=grant.policy_version, purposes=grant.purposes,
@@ -267,7 +267,7 @@ async def test_accept_records_guardian_consent_with_evidence(env) -> None:
     events = await env.events("consent.accepted.v1", teen)
     assert [e.payload["basis"] for e in events] == ["self", "guardian"]
     assert events[1].payload == {
-        "user_id": teen, "consent_id": str(grant.consent_id), "policy_version": "1.1",
+        "user_id": teen, "consent_id": str(grant.consent_id), "policy_version": "1.2",
         "purposes": grant.purposes, "age_band": "14-17", "basis": "guardian", "granted_by_user_id": parent,
     }
     assert "Подросток" not in await env.outbox_dump()
@@ -415,7 +415,7 @@ async def test_revoke_guardian_consent(env) -> None:
 
     # события
     [revoked] = await env.events("consent.revoked.v1", teen)
-    assert revoked.payload == {"user_id": teen, "consent_id": str(grant.consent_id), "policy_version": "1.1",
+    assert revoked.payload == {"user_id": teen, "consent_id": str(grant.consent_id), "policy_version": "1.2",
                                "basis": "guardian", "revoked_by_user_id": parent}
     [*_, updated] = await env.events("user.profile.updated.v1", teen)
     assert (updated.payload["changed_fields"], updated.payload["guardian_consent"]) == (

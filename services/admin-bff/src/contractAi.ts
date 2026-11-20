@@ -375,8 +375,17 @@ export const GOLDEN_CASES = itemsOf(GOLDEN_CASE, 500);
 
 // ---------------------------------------------------------------- модели, провайдер, бюджет, затраты
 
-/** Провайдер модели: LLM (anthropic | fake) и, со спринта 5, речь (azure_speech | fake_speech). */
-const MODEL_PROVIDER = C.oneOf(["anthropic", "fake", "azure_speech", "fake_speech"] as const);
+/** Провайдер речи (ai.ts): whisper — свой сервер (релиз 5.1, по умолчанию; модель whisper-base-en, цена часа 0),
+ *  azure_speech — Azure Pronunciation Assessment, fake_speech — стенд и тесты. */
+const SPEECH_PROVIDERS = ["whisper", "azure_speech", "fake_speech"] as const satisfies readonly AiProviderStatus["speech"]["provider"][];
+/** Провайдер модели: LLM (anthropic | fake) и, со спринта 5, речь. */
+const MODEL_PROVIDERS = ["anthropic", "fake", ...SPEECH_PROVIDERS] as const satisfies readonly AiModel["provider"][];
+const _exactProviders: [
+  Exact<AiProviderStatus["speech"]["provider"], typeof SPEECH_PROVIDERS>,
+  Exact<AiModel["provider"], typeof MODEL_PROVIDERS>,
+] = [true, true];
+void _exactProviders;
+const MODEL_PROVIDER = C.oneOf(MODEL_PROVIDERS);
 export const AI_MODEL: Codec<AiModel> = C.obj<AiModel>({
   model_id: MODEL,
   provider: MODEL_PROVIDER,
@@ -405,7 +414,7 @@ const lenient = <T>(c: Codec<T>): Codec<T | null> =>
 const LAST_ERROR = lenient(PROVIDER_ERROR);
 /**
  * Регион Azure (westeurope, eastus2, southcentralus): только строчные буквы и цифра в конце. Иначе — null: если в
- * переменную региона по ошибке попал ключ (32 hex), он не уйдёт в админку.
+ * переменную региона по ошибке попал ключ (32 hex), он не уйдёт в админку. У whisper региона нет (null).
  */
 const AZURE_REGION = lenient(C.id(/^[a-z]{2,30}[0-9]?$/, 31));
 /** «Задан / не задан» и код последней ошибки — без ключа и без текста ошибки провайдера (LLM и, спринт 5, речь). */
@@ -415,7 +424,8 @@ export const AI_PROVIDER: Codec<AiProviderStatus> = C.obj<AiProviderStatus>({
   last_error: LAST_ERROR,
   ai_enabled: C.bool,
   speech: C.obj<AiProviderStatus["speech"]>({
-    provider: C.oneOf(["azure_speech", "fake_speech"] as const),
+    provider: C.oneOf(SPEECH_PROVIDERS),
+    // whisper: адрес сервиса распознавания задан (ключа нет); azure_speech: ключ задан
     key_configured: C.bool,
     region: AZURE_REGION,
     last_error: LAST_ERROR,

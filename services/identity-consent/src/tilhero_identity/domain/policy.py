@@ -216,9 +216,32 @@ _TEXT_V11_UZ = _v11(_TEXT_V1_UZ, (
     ("Ovoz yozuvlarini 30 kun saqlash", "Ovoz yozuvi orqali talaffuzni baholash"),
 ))
 
+# ---------------------------------------------- 1.2 (релиз 5.1): оценка произношения — на серверах TilHero
+# Решение владельца 20.11.2026: регистрация Azure не прошла, распознавание — на нашем сервере (faster-whisper). Запись
+# никуда не передаётся. Согласие на голос по 1.1 (более широкое: допускало передачу в Azure) остаётся в силе.
+
+_TEXT_V12_RU = _v11(_TEXT_V11_RU, (
+    ("Версия 1.1 · черновик", "Версия 1.2 · черновик"),
+    ("запись передаётся сервису распознавания речи "
+     "(Microsoft Azure) лишь для оценки и не сохраняется ни у нас, ни у сервиса; хранятся только баллы по словам.",
+     "запись распознаётся на серверах TilHero "
+     "лишь для оценки, никуда не передаётся и сразу удаляется; хранятся только баллы по словам."),
+))
+
+_TEXT_V12_UZ = _v11(_TEXT_V11_UZ, (
+    ("Versiya 1.1 · qoralama", "Versiya 1.2 · qoralama"),
+    ("yozuv faqat baholash uchun nutqni tanish "
+     "xizmatiga (Microsoft Azure) yuboriladi va na bizda, na xizmatda saqlanadi; faqat soʻzlar boʻyicha ballar "
+     "saqlanadi.",
+     "yozuv faqat baholash uchun TilHero "
+     "serverlarida tanib olinadi, hech qayerga yuborilmaydi va darhol oʻchiriladi; faqat soʻzlar boʻyicha ballar "
+     "saqlanadi."),
+))
+
 POLICIES: dict[str, Policy] = {
     "1.0": Policy(version="1.0", purposes=_PURPOSES_V1, text={"ru": _TEXT_V1_RU, "uz": _TEXT_V1_UZ}),
     "1.1": Policy(version="1.1", purposes=_PURPOSES_V11, text={"ru": _TEXT_V11_RU, "uz": _TEXT_V11_UZ}),
+    "1.2": Policy(version="1.2", purposes=_PURPOSES_V11, text={"ru": _TEXT_V12_RU, "uz": _TEXT_V12_UZ}),
 }
 
 

@@ -27,10 +27,13 @@ class Settings(ServiceSettings):
     # База Messages API (тесты подменяют транспорт httpx; в stage/prod — только https)
     anthropic_base_url: str = "https://api.anthropic.com"
 
-    # Оценка произношения (спринт 5, INTERNAL_API §3.2): azure (prod) | fake (тесты, стенд e2e; в stage/prod запрещён).
-    # Ключ и регион Azure Speech — ТОЛЬКО переменные окружения ai-gateway (в Railway — ссылки на общие переменные
-    # проекта, вводит владелец). Пусто — «не настроено»: speech_available=false, вызовы — unavailable: not_configured.
-    speech_provider: Literal["azure", "fake"] = "azure"
+    # Оценка произношения (спринт 5, INTERNAL_API §3.2; релиз 5.1 — решение владельца 20.11.2026):
+    # whisper (по умолчанию) — свой сервер: распознавание в сервисе tts (TTS_URL, faster-whisper) и сравнение слов с
+    # эталоном здесь; azure — запасной (Azure AI Speech, ключ и регион — ТОЛЬКО переменные окружения ai-gateway);
+    # fake — тесты и стенд e2e (в stage/prod запрещён). Нет TTS_URL (whisper) или ключа/региона (azure) — «не
+    # настроено»: speech_available=false, вызовы — unavailable: not_configured.
+    speech_provider: Literal["whisper", "azure", "fake"] = "whisper"
+    tts_url: str | None = None
     azure_speech_key: SecretStr | None = None
     azure_speech_region: str | None = None
 
@@ -60,6 +63,14 @@ class Settings(ServiceSettings):
             return v or None
         return v
 
+    @field_validator("tts_url", mode="before")
+    @classmethod
+    def _tts_url(cls, v: object) -> object:
+        if isinstance(v, str):
+            v = v.strip().rstrip("/")
+            return v or None
+        return v
+
     @field_validator("azure_speech_region", mode="before")
     @classmethod
     def _region(cls, v: object) -> object:
@@ -83,6 +94,8 @@ class Settings(ServiceSettings):
             raise ValueError("AI_PROVIDER=fake is not allowed in stage/prod")
         if self.is_secure_env and self.speech_provider == "fake":
             raise ValueError("SPEECH_PROVIDER=fake is not allowed in stage/prod")
+        if self.tts_url is not None and not self.tts_url.startswith(("https://", "http://")):
+            raise ValueError("TTS_URL must be an http(s) URL")
         if self.ai_allow_fake_test_publish and self.env not in ("dev", "test"):
             raise ValueError("AI_ALLOW_FAKE_TEST_PUBLISH=true is allowed only with ENV dev|test")
         if not self.anthropic_base_url.startswith(("https://", "http://")):

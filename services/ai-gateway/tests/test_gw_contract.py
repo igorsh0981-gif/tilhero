@@ -76,7 +76,9 @@ def test_speech_enums_match_ai_ts() -> None:
     assert set(get_args(contracts.AiSessionKind)) == aliases["SessionKind"] | {"memory"}
     assert 'export type AiSessionKind = SessionKind | "memory"' in ts.source("ai.ts")
     model = ts.fields("ai.ts", "AiModel")
-    assert ts.literals(model["provider"]) == {"anthropic", "fake", "azure_speech", "fake_speech"}
+    assert ts.literals(model["provider"]) == {"anthropic", "fake", "whisper", "azure_speech", "fake_speech"}
+    speech = ts.inline_object(ts.fields("ai.ts", "AiProviderStatus")["speech"])
+    assert speech is not None and ts.literals(speech["provider"]) == {"whisper", "azure_speech", "fake_speech"}
 
 
 def test_invoke_request_matches_ai_ts() -> None:

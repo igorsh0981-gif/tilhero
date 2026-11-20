@@ -37,6 +37,7 @@ from tilhero_ai_gateway.domain.common import (
 )
 from tilhero_ai_gateway.domain.speech import speech_available
 from tilhero_ai_gateway.schemas import BudgetIn, EmergencyStopIn, ModelUpdateIn
+from tilhero_ai_gateway.settings import Settings
 from tilhero_common.app import Runtime, get_runtime
 from tilhero_common.errors import unprocessable
 from tilhero_common.internal_auth import Principal
@@ -94,8 +95,16 @@ async def provider_status(request: Request, principal: Principal = Depends(staff
         budget = await costs.get_budget(session)
     return {"provider": deps.provider.name, "key_configured": bool(deps.settings.api_key),
             "last_error": await deps.status.last_error(), "ai_enabled": budget.ai_enabled,
-            "speech": {"provider": speech.provider.name, "key_configured": bool(deps.settings.speech_key),
-                       "region": deps.settings.azure_speech_region, "last_error": await speech.status.last_error()}}
+            "speech": {"provider": speech.provider.name, **_speech_config(speech.provider.name, deps.settings),
+                       "last_error": await speech.status.last_error()}}
+
+
+def _speech_config(provider: str, settings: Settings) -> dict[str, Any]:
+    """whisper — свой сервер: «ключ задан» = задан адрес сервиса распознавания (TTS_URL), региона нет; azure / fake —
+    ключ Azure задан / не задан (сам ключ — никогда) и регион как введён."""
+    if provider == "whisper":
+        return {"key_configured": bool(settings.tts_url), "region": None}
+    return {"key_configured": bool(settings.speech_key), "region": settings.azure_speech_region}
 
 
 @router.get("/budget")

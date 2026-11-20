@@ -248,7 +248,7 @@ def _user(kind: str, age_band: str | None, guardian_consent: str) -> User:
     return User(user_id=uuid.uuid4(), kind=kind, age_band=age_band, guardian_consent=guardian_consent)
 
 
-def _consent(purposes: list[str], basis: str, policy_version: str = "1.1") -> Consent:
+def _consent(purposes: list[str], basis: str, policy_version: str = "1.2") -> Consent:
     return Consent(consent_id=uuid.uuid4(), user_id=uuid.uuid4(), policy_version=policy_version, purposes=purposes,
                    accepted_at=datetime.now(UTC), basis=basis)
 
@@ -285,4 +285,11 @@ def test_voice_from_policy_1_0_is_not_pronunciation_consent(kind: str, age: str 
     assert voice_consent(user, consent) is False
     if kind == "account":
         assert [p for p in ALL_PURPOSES if p != VOICE] == learner_purposes(user, consent)
+
+
+@pytest.mark.parametrize("version", ["1.1", "1.2"])
+def test_voice_from_policy_1_1_and_1_2_counts(version: str) -> None:
+    """Согласие на голос по 1.1 (допускало Azure) шире, чем по 1.2 (только наш сервер) — оба действуют."""
+    user = _user("account", "18+", "not_required")
+    assert voice_consent(user, _consent(list(ALL_PURPOSES), "self", policy_version=version)) is True
 

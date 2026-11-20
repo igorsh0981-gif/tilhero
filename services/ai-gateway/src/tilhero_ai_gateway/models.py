@@ -5,8 +5,9 @@
 тело и идентичность, допускает только переходы статуса draft → published, published → archived, archived → published
 (откат); удалить можно только черновик не под канарейкой. Роль сервиса не может снять триггер (DDL — у владельца).
 `usage` — только метаданные вызова (без текстов запроса и ответа); вызов оценки произношения (спринт 5) — та же
-таблица: агент `pronunciation_coach`, провайдер `azure_speech | fake_speech`, длительность аудио `audio_ms` (самого
-аудио нет нигде). `models` — LLM (цена за 1 млн токенов) и речь (цена часа аудио `audio_usd_per_hour`).
+таблица: агент `pronunciation_coach`, провайдер `whisper | azure_speech | fake_speech`, длительность аудио
+`audio_ms` (самого аудио нет нигде). `models` — LLM (цена за 1 млн токенов) и речь (цена часа аудио
+`audio_usd_per_hour`).
 """
 
 from __future__ import annotations
@@ -48,8 +49,8 @@ REASONS_SQL = ("'ai_disabled', 'not_configured', 'budget_exceeded', 'cost_limit'
                "'invalid_output', 'kids_not_allowed', 'agent_not_active'")
 # оценка произношения: вызов состоялся (status ok), но оценки нет (PronunciationResult insufficient_evidence)
 INSUFFICIENT_SQL = "'not_recognized', 'low_confidence', 'incomplete'"
-PROVIDERS_SQL = "'anthropic', 'fake', 'azure_speech', 'fake_speech'"
-SPEECH_PROVIDERS_SQL = "'azure_speech', 'fake_speech'"
+PROVIDERS_SQL = "'anthropic', 'fake', 'whisper', 'azure_speech', 'fake_speech'"
+SPEECH_PROVIDERS_SQL = "'whisper', 'azure_speech', 'fake_speech'"
 SESSION_KINDS_SQL = "'lesson', 'scenario', 'media', 'review', 'reading', 'memory', 'golden'"
 USAGE_STATUS_REASON_SQL = (
     f"(status = 'pending' AND reason IS NULL) "

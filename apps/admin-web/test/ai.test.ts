@@ -5,7 +5,7 @@ import { translate } from "../src/i18n";
 import {
   CALL_REASONS,
   buildCheck, budgetLevel, capPct, checkBudget, checkContextJson, checkForm, checkLine, checkOutputSchema, collapseDiff, diffStats, draftOf,
-  emptyCheck, formOf, isOutputPath, lineDiff, mergeBudgetForm, niceMax, parseValueList, patchOf, PATH_RE, publishGate, scrubPii, speechHourPrice, speechHours, taskFileName,
+  emptyCheck, formOf, isOutputPath, lineDiff, mergeBudgetForm, niceMax, parseValueList, patchOf, PATH_RE, publishGate, scrubPii, speechHourPrice, speechHours, taskFileName, isSpeech, isOwnServer,
   taskMarkdown, usd,
 } from "../src/screens/ai/model";
 
@@ -196,9 +196,20 @@ describe("budget share and levels", () => {
     expect(codes({ speech_monthly_cap_usd: "-1" })).toEqual(["speech_monthly_cap_usd:range0"]);
     expect(codes({ speech_monthly_cap_usd: "" })).toEqual(["speech_monthly_cap_usd:range0"]);
   });
+  it("release 5.1: whisper is a speech model of the own server; LLMs are not speech", () => {
+    expect(isSpeech({ provider: "whisper" })).toBe(true);
+    expect(isSpeech({ provider: "azure_speech" })).toBe(true);
+    expect(isSpeech({ provider: "anthropic" })).toBe(false);
+    expect(isOwnServer({ provider: "whisper" })).toBe(true);
+    expect(isOwnServer({ provider: "azure_speech" })).toBe(false);
+    expect(isOwnServer(null)).toBe(false);
+  });
   it("pronunciation sub-cap: hours of audio at the price of the active speech model", () => {
-    const m = (provider: "anthropic" | "azure_speech" | "fake_speech", active: boolean, audio_usd_per_hour: number | null) => ({ provider, active, audio_usd_per_hour });
+    const m = (provider: "anthropic" | "whisper" | "azure_speech" | "fake_speech", active: boolean, audio_usd_per_hour: number | null) => ({ provider, active, audio_usd_per_hour });
     expect(speechHourPrice([m("anthropic", true, null), m("fake_speech", true, 0), m("azure_speech", true, 1.32)])).toBe(1.32);
+    // release 5.1: the own server (whisper, $0) is never the price of the sub-cap
+    expect(speechHourPrice([m("whisper", true, 0), m("azure_speech", true, 1.32)])).toBe(1.32);
+    expect(speechHourPrice([m("whisper", true, 0.5)])).toBeNull();
     expect(speechHourPrice([m("azure_speech", false, 1.32), m("fake_speech", true, 0.5)])).toBe(0.5);
     expect(speechHourPrice([m("azure_speech", false, 1.32)])).toBeNull();
     expect(speechHourPrice(null)).toBeNull();

@@ -224,10 +224,12 @@ def test_memory_sprint5():
     assert mem["PORT"] == "8116" and mem["SCHEDULER_TOKEN"] == sec.scheduler and mem["NATS_URL"]
     assert env_of(files, "telegram-bff")["MEMORY_URL"].endswith(":8116")
     ai = env_of(files, "ai-gateway")
-    # ключ Azure — только ссылка на общую переменную и только у ai-gateway
-    assert ai["AZURE_SPEECH_KEY"] == "${{shared.AZURE_SPEECH_KEY}}" and ai["SPEECH_PROVIDER"] == "azure"
-    assert ai["AZURE_SPEECH_REGION"] == "${{shared.AZURE_SPEECH_REGION}}"
+    # релиз 5.1: произношение на своём сервере — ai-gateway вызывает tts, ключей Azure нет нигде
+    assert ai["SPEECH_PROVIDER"] == "whisper" and ai["TTS_URL"].endswith(":8115")
     for name, text in files.items():
-        if name.endswith(".env") and name != "ai-gateway.env":
+        if name.endswith(".env"):
             assert "AZURE_SPEECH" not in text, name
+    # tts принимает токены ai-gateway (распознавание) и telegram-bff (озвучка)
+    pub = json.loads(env_of(files, "tts")["INTERNAL_JWT_PUBLIC_KEYS"])
+    assert {"ai-gateway", "telegram-bff"} <= set(pub)
 

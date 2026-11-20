@@ -59,8 +59,9 @@ async def test_invalid_variant_and_extra_fields_422(env: Env) -> None:
 
 async def test_only_telegram_bff_may_call(env: Env) -> None:
     assert (await env.c.post("/internal/v1/speech", json={"text": "Hi", "variant": "en-GB"})).status_code == 401
-    r = await env.speak("Hi", issuer="admin-bff")
-    assert r.status_code == 403
+    for issuer in ("admin-bff", "ai-gateway"):  # ai-gateway — только распознавание
+        r = await env.speak("Hi", issuer=issuer)
+        assert r.status_code == 403, issuer
     assert env.synth.calls == []
 
 

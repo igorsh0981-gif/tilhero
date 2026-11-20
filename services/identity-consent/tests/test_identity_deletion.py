@@ -68,7 +68,7 @@ async def test_deletion_request_with_confirm_word(env) -> None:
         ("POST", "/internal/v1/me/learners", {"display_name": "Мадина", "age_band": "6-9"}),
         ("POST", "/internal/v1/me/guardian-consent-requests", None),
         ("PUT", "/internal/v1/me/pin", {"pin": PIN}),
-        ("POST", "/internal/v1/me/consent", {"policy_version": "1.1", "purposes": REQUIRED}),
+        ("POST", "/internal/v1/me/consent", {"policy_version": "1.2", "purposes": REQUIRED}),
         ("DELETE", "/internal/v1/me/consent", None),
         ("POST", "/internal/v1/me/enable", None),
         ("POST", "/internal/v1/me/disable", None),
