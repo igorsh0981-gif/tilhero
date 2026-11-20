@@ -168,7 +168,16 @@ async def test_levels_up_and_never_down(env: Env, user: uuid.UUID) -> None:
         ("learning.", "skills.", "lesson.", "memory.", "assessment."))]
 
 
-async def test_plan_timezone_sets_learner_day(env: Env, user: uuid.UUID) -> None:
+async def _pg_without_legacy_zones(env, monkeypatch) -> None:
+    """Сборки PostgreSQL отличаются tzdata (в CI postgres:16-alpine знает America/Godthab, на стенде — нет):
+    «неизвестные PostgreSQL» пояса задаём явно — кеш поясов процесса без них."""
+    from tilhero_gamification.domain import engine as engine_mod
+    names = {n for (n,) in await env.sql("SELECT name FROM pg_timezone_names")}
+    monkeypatch.setattr(engine_mod, "_PG_ZONES", frozenset(names - {"America/Godthab", "Asia/Rangoon"}))
+
+
+async def test_plan_timezone_sets_learner_day(env: Env, user: uuid.UUID, monkeypatch) -> None:
+    await _pg_without_legacy_zones(env, monkeypatch)
     await env.plan(user, tz="Pacific/Honolulu")  # T0 05:00 UTC → 19:00 предыдущего дня
     q = await env.get(user, "quests")
     assert q["local_date"] == (env.today - timedelta(days=1)).isoformat()

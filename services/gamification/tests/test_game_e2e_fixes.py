@@ -53,8 +53,17 @@ async def test_skill_rewards_follow_evidence_in_any_order(env: Env, user: uuid.U
     assert "skill_demonstrated" in {o["reason"] for o in (await rewards(env, user, s4))["operations"]}
 
 
-async def test_tick_survives_timezone_unknown_to_postgres(env: Env, user: uuid.UUID) -> None:
+async def _pg_without_legacy_zones(env, monkeypatch) -> None:
+    """Сборки PostgreSQL отличаются tzdata (в CI postgres:16-alpine знает America/Godthab, на стенде — нет):
+    «неизвестные PostgreSQL» пояса задаём явно — кеш поясов процесса без них."""
+    from tilhero_gamification.domain import engine as engine_mod
+    names = {n for (n,) in await env.sql("SELECT name FROM pg_timezone_names")}
+    monkeypatch.setattr(engine_mod, "_PG_ZONES", frozenset(names - {"America/Godthab", "Asia/Rangoon"}))
+
+
+async def test_tick_survives_timezone_unknown_to_postgres(env: Env, user: uuid.UUID, monkeypatch) -> None:
     """2: пояс, который знает zoneinfo, но не PostgreSQL, не роняет tick; проекция такой пояс не сохраняет."""
+    await _pg_without_legacy_zones(env, monkeypatch)
     await env.get(user, "quests")
     other = uuid.uuid4()
     await env.get(other, "quests")
