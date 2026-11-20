@@ -166,6 +166,10 @@ export interface NoteSeed {
   slug: string;
   audience: "new" | "existing" | "all";
   published_at: string;
+  /** segment by age (none — everyone): kids — a child profile, teens — 14–17, adults — the rest */
+  age?: Array<"kids" | "teens" | "adults">;
+  /** release 6.1: the illustration key (public/whatsnew/<key>.webp) */
+  illustration?: string | null;
   title: Record<UiLang, string>;
   items: Array<{ title: Record<UiLang, string>; text: Record<UiLang, string>; link: WhatsNewNote["items"][number]["link"]; icon: WhatsNewNote["items"][number]["icon"] }>;
 }
@@ -206,12 +210,110 @@ export const UPDATE_2: NoteSeed = {
   items: [{ title: { ru: "Все сообщения — в приложении", uz: "Barcha xabarlar — ilovada" }, text: { ru: "Даже если бот заблокирован, напоминания видны в колокольчике.", uz: "Bot bloklangan boʻlsa ham, eslatmalar qoʻngʻiroqchada koʻrinadi." }, link: null, icon: "bell" }],
 };
 
+/** Release 6.1 (experience-config migration 0007): the notes published at the deploy — the texts of the migration. */
+export const S6_HEROES: NoteSeed = {
+  id: "11111111-aaaa-4bbb-8ccc-000000000061",
+  slug: "s6-heroes",
+  audience: "existing",
+  published_at: "2026-11-20T21:00:00Z",
+  age: ["teens", "adults"],
+  illustration: "s6-heroes",
+  title: { ru: "Новое в TilHero: герои, тилы и повторения", uz: "TilHero’da yangi: qahramonlar, tillar va takrorlash" },
+  items: [
+    {
+      title: { ru: "Выберите героя", uz: "Qahramon tanlang" },
+      text: { ru: "9 героев растут вместе с вами: новая ступень — за навыки, подтверждённые в уроках. Сменить героя можно в любой момент.", uz: "9 ta qahramon siz bilan birga oʻsadi: yangi bosqich — darslarda tasdiqlangan koʻnikmalar uchun. Qahramonni istalgan vaqtda almashtirish mumkin." },
+      link: "heroes",
+      icon: "hero",
+    },
+    {
+      title: { ru: "Тилы и задания дня", uz: "Tillar va kunlik vazifalar" },
+      text: { ru: "За уроки и повторения начисляются опыт и тилы. Каждый день — три задания, за все три — бонус.", uz: "Darslar va takrorlash uchun tajriba va tillar beriladi. Har kuni uchta vazifa, uchalasi uchun — bonus." },
+      link: "home",
+      icon: "gift",
+    },
+    {
+      title: { ru: "Серия под защитой", uz: "Seriya himoyada" },
+      text: { ru: "Пропустили день? Заморозка сохранит серию. Две заморозки уже ждут вас, ещё две — за друга, который начнёт заниматься.", uz: "Bir kunni oʻtkazib yubordingizmi? Muzlatish seriyani saqlab qoladi. Ikkita muzlatish sizni kutmoqda, yana ikkitasi — oʻqishni boshlagan doʻst uchun." },
+      link: "shop",
+      icon: "flame",
+    },
+    {
+      title: { ru: "Повторение дня", uz: "Kun takrori" },
+      text: { ru: "Слова и ошибки из уроков попадают в личный словарь и возвращаются в нужный момент, чтобы не забыться.", uz: "Darslardagi soʻzlar va xatolar shaxsiy lugʻatga tushadi va unutilmasligi uchun kerakli paytda qaytadi." },
+      link: "review",
+      icon: "book",
+    },
+    {
+      title: { ru: "Произношение", uz: "Talaffuz" },
+      text: { ru: "Нажмите «Произнести» в словаре или в тексте — мы оценим каждое слово. Запись сразу удаляется.", uz: "Lugʻat yoki matnda «Talaffuz qilish» tugmasini bosing — har bir soʻzni baholaymiz. Yozuv darhol oʻchiriladi." },
+      link: "dictionary",
+      icon: "mic",
+    },
+    {
+      title: { ru: "Чтение с переводом", uz: "Tarjimali oʻqish" },
+      text: { ru: "Короткие тексты по уровню: нажмите на слово, чтобы увидеть перевод и добавить его в словарь.", uz: "Darajangizga mos qisqa matnlar: tarjimani koʻrish va lugʻatga qoʻshish uchun soʻzni bosing." },
+      link: "reading",
+      icon: "book",
+    },
+  ],
+};
+
+export const S6_HEROES_KIDS: NoteSeed = {
+  id: "11111111-aaaa-4bbb-8ccc-000000000062",
+  slug: "s6-heroes-kids",
+  audience: "existing",
+  published_at: "2026-11-20T21:00:00Z",
+  age: ["kids"],
+  illustration: "s6-heroes",
+  title: { ru: "Новое в TilHero: герои, тилы и повторения", uz: "TilHero’da yangi: qahramonlar, tillar va takrorlash" },
+  items: [
+    {
+      title: { ru: "Выбери героя", uz: "Qahramon tanla" },
+      text: { ru: "9 героев растут вместе с тобой: новая ступень — за навыки, которые получаются у тебя в уроках. Поменять героя можно когда захочешь.", uz: "9 ta qahramon sen bilan birga oʻsadi: yangi bosqich — darslarda oʻrgangan koʻnikmalaring uchun. Qahramonni xohlagan paytda almashtirsa boʻladi." },
+      link: "heroes",
+      icon: "hero",
+    },
+    {
+      title: { ru: "Тилы и задания дня", uz: "Tillar va kunlik vazifalar" },
+      text: { ru: "За уроки и повторения ты получаешь опыт и тилы. Каждый день — три задания, за все три — бонус. Не успеешь — ничего страшного, завтра будут новые.", uz: "Darslar va takrorlash uchun tajriba va tillar olasan. Har kuni uchta vazifa, uchalasi uchun — bonus. Ulgurmasang ham hechqisi yoʻq — ertaga yangilari boʻladi." },
+      link: "home",
+      icon: "gift",
+    },
+    {
+      title: { ru: "Заморозка — твой помощник", uz: "Muzlatish — sening yordamching" },
+      text: { ru: "Заморозка сохранит серию, если пропустишь день. Две заморозки уже ждут тебя.", uz: "Kunni oʻtkazib yuborsang, muzlatish seriyangni saqlab qoladi. Ikkita muzlatish seni kutmoqda." },
+      link: "shop",
+      icon: "flame",
+    },
+    {
+      title: { ru: "Повторение дня", uz: "Kun takrori" },
+      text: { ru: "Слова и ошибки из уроков попадают в твой словарь и возвращаются в нужный момент — так они лучше запоминаются.", uz: "Darslardagi soʻzlar va xatolar lugʻatingga tushadi va kerakli paytda qaytadi — shunda ular yaxshi esda qoladi." },
+      link: "review",
+      icon: "book",
+    },
+    {
+      title: { ru: "Произношение", uz: "Talaffuz" },
+      text: { ru: "С разрешения родителя нажми «Произнести» в словаре или в тексте — мы оценим каждое слово. Запись сразу удаляется.", uz: "Ota-onang ruxsat bersa, lugʻat yoki matnda «Talaffuz qilish» tugmasini bos — har bir soʻzni baholaymiz. Yozuv darhol oʻchiriladi." },
+      link: "dictionary",
+      icon: "mic",
+    },
+    {
+      title: { ru: "Чтение с переводом", uz: "Tarjimali oʻqish" },
+      text: { ru: "Короткие тексты по твоему уровню: нажми на слово, чтобы увидеть перевод и добавить его в словарь.", uz: "Darajangga mos qisqa matnlar: tarjimani koʻrish va lugʻatga qoʻshish uchun soʻzni bos." },
+      link: "reading",
+      icon: "book",
+    },
+  ],
+};
+
 export function toNote(n: NoteSeed, lang: UiLang): WhatsNewNote {
   return {
     release_note_id: n.id,
     slug: n.slug,
     title: n.title[lang],
     audience: n.audience,
+    illustration: n.illustration ?? null,
     published_at: n.published_at,
     items: n.items.map((i) => ({ title: i.title[lang], text: i.text[lang], link: i.link, icon: i.icon })),
   };

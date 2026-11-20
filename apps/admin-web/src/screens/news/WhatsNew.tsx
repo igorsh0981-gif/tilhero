@@ -3,13 +3,15 @@
  * Mini App (experience-config). List with status, audience and views; editor with RU/UZ tabs, length counters and
  * highlighted empty translations; 1..6 items with a Mini App route and an icon; audience new/existing/all and age /
  * language segments; preview in a phone frame (RU/UZ, light/dark) exactly as the Mini App sheet; statistics of views.
+ * Release 6.1: an illustration from the catalogue (picker with previews) — on top of the note's first card, as in the
+ * Mini App. Notes of releases are published by the deploy (system:release); staff may withdraw them (archive).
  * Learner texts are rendered only as text (React escapes; no markup).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgeSegment, ReleaseNoteAudience, ReleaseNoteIcon, ReleaseNoteRoute, ReleaseNoteStats, StaffReleaseNote, UiLang } from "@tilhero/contracts/admin";
 import { ReleaseNotes } from "../../api/endpoints";
 import { ApiError } from "../../api/errors";
-import { useI18n } from "../../i18n";
+import { useI18n, type MessageKey } from "../../i18n";
 import { lt } from "../../i18n/learner";
 import { uuid } from "../../lib/ids";
 import { useSession } from "../../state/session";
@@ -24,11 +26,15 @@ import {
   AUDIENCES,
   emptyItem,
   emptyNote,
+  ILLUSTRATION_SIZE,
+  ILLUSTRATION_URLS,
+  illustrationUrl,
   LANGS,
   missingIn,
   nextSlug,
   normalizeNote,
   NOTE_ICONS,
+  NOTE_ILLUSTRATIONS,
   NOTE_LIMITS,
   NOTE_ROUTES,
   noteContent,
@@ -45,6 +51,9 @@ type Sel = { kind: "new" } | { kind: "note"; id: string } | null;
 type Cmd = { kind: "publish" | "archive"; note: StaffReleaseNote; key: string } | null;
 
 export const NOTE_TONE: Record<StaffReleaseNote["status"], Tone> = { draft: "warn", published: "good", archived: "neutral" };
+/** Authors that are not staff: the deploy of a release (release 6.1, CONVENTIONS §10) and the initial seed. */
+export const SYSTEM_AUTHORS: Readonly<Record<string, MessageKey>> = { "system:release": "wn.byRelease", "system:seed": "wn.bySeed" };
+const authorKey = (n: StaffReleaseNote): MessageKey | undefined => SYSTEM_AUTHORS[n.published_by ?? n.created_by];
 
 export function WhatsNewTab({ openId }: { openId: string | null }) {
   const i = useI18n();
@@ -217,7 +226,7 @@ export function WhatsNewTab({ openId }: { openId: string | null }) {
                       </td>
                       <td className="nowrap small">
                         {fmt.dateTime(n.published_at ?? n.updated_at)}
-                        <div className="cell-sub">{n.published_by_name ?? n.created_by_name ?? ""}</div>
+                        <div className="cell-sub">{n.published_by_name ?? n.created_by_name ?? (authorKey(n) ? t(authorKey(n)!) : "")}</div>
                       </td>
                     </tr>
                   );
@@ -269,6 +278,7 @@ export function WhatsNewTab({ openId }: { openId: string | null }) {
             {!isDraft && current && (
               <Callout icon="lock" testId="wn-readonly">
                 {t(current.status === "published" ? "wn.roPublished" : "wn.roArchived")}
+                {current.status === "published" && current.published_by === "system:release" ? <span data-testid="wn-release-note"> {t("wn.releaseNote")}</span> : null}
               </Callout>
             )}
             <Tabs<UiLang>
@@ -335,6 +345,15 @@ export function WhatsNewTab({ openId }: { openId: string | null }) {
                   ))}
                 </div>
                 <span className="hint">{t("wn.segmentsHint")}</span>
+              </fieldset>
+              <fieldset className="field span-2 fs">
+                <legend className="field-label" id="wn-ill-l">
+                  {t("wn.illustration")}
+                </legend>
+                <IllustrationPicker labelledBy="wn-ill-l" value={draft.illustration} disabled={!editable} onChange={(illustration) => update((d) => ({ ...d, illustration }))} />
+                <span className={cx("hint", shown.illustration && "err")} data-testid="wn-ill-hint">
+                  {shown.illustration ? t("wn.illustrationErr") : t("wn.illustrationHint")}
+                </span>
               </fieldset>
             </div>
             <FieldErr msg={formErr} />
@@ -554,6 +573,33 @@ function IconPicker({ value, onChange, disabled, labelledBy, idPrefix }: { value
   );
 }
 
+/** Radio group of the catalogue illustrations with previews (release 6.1): «без иллюстрации» or a key. */
+function IllustrationPicker({ value, onChange, disabled, labelledBy }: { value: string | null; onChange: (v: string | null) => void; disabled?: boolean; labelledBy: string }) {
+  const { t } = useI18n();
+  return (
+    <div className="ill-pick" role="radiogroup" aria-labelledby={labelledBy} data-testid="wn-ill">
+      <label className={cx("ill", !value && "on")}>
+        <input type="radio" name="wn-ill" className="sr-only" checked={!value} disabled={disabled} onChange={() => onChange(null)} data-testid="wn-ill-none" />
+        <span className="ill-img ill-none" aria-hidden="true">
+          <Icon name="x" />
+        </span>
+        <span className="ill-cap">{t("wn.noIllustration")}</span>
+      </label>
+      {NOTE_ILLUSTRATIONS.map((key) => (
+        <label key={key} className={cx("ill", value === key && "on")}>
+          <input type="radio" name="wn-ill" className="sr-only" checked={value === key} disabled={disabled} onChange={() => onChange(key)} data-testid={`wn-ill-${key}`} />
+          {ILLUSTRATION_URLS[key] ? (
+            <img className="ill-img" src={ILLUSTRATION_URLS[key]} width={ILLUSTRATION_SIZE.width} height={ILLUSTRATION_SIZE.height} alt="" loading="lazy" decoding="async" />
+          ) : (
+            <span className="ill-img ill-none" aria-hidden="true" />
+          )}
+          <span className="ill-cap mono">{key}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------- preview: the Mini App sheet in a phone frame */
 
 export function WhatsNewPreview({ d, initialLang = "ru" }: { d: NoteDraft; initialLang?: UiLang }) {
@@ -567,6 +613,8 @@ export function WhatsNewPreview({ d, initialLang = "ru" }: { d: NoteDraft; initi
   const it = d.items[k];
   const welcome = d.audience === "new";
   const last = k >= n - 1;
+  // as the Mini App: the illustration on top of the note's first card only
+  const art = k === 0 ? illustrationUrl(d.illustration) : null;
   return (
     <div className="stack sm wn-preview" data-testid="wn-preview">
       <div className="row between">
@@ -578,6 +626,11 @@ export function WhatsNewPreview({ d, initialLang = "ru" }: { d: NoteDraft; initi
           <span className="mx-grab" aria-hidden="true" />
           <div className="mx-cap">{lt(lang, welcome ? "wn.welcome.cap" : "wn.updates.cap")}</div>
           <div className="mx-h">{lt(lang, welcome ? "wn.welcome.title" : "wn.updates.title")}</div>
+          {art ? (
+            <div className="mx-art" data-testid="wn-pv-art">
+              <img src={art} width={ILLUSTRATION_SIZE.width} height={ILLUSTRATION_SIZE.height} alt={d.title[lang]} />
+            </div>
+          ) : null}
           {it ? (
             <div className="mx-card" data-testid="wn-pv-card">
               <div className="mx-row">

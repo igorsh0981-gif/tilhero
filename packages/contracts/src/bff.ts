@@ -423,7 +423,9 @@ export interface Family {
 export type ReleaseNoteRoute =
   | "home" | "lessons" | "review" | "progress" | "profile" | "schedule" | "notifications" | "family" | "support" | "news"
   // спринт 3 (release-notes.json)
-  | "diagnostics" | "plan" | "skills" | "scenarios" | "media" | "media_requests" | "languages";
+  | "diagnostics" | "plan" | "skills" | "scenarios" | "media" | "media_requests" | "languages"
+  // релиз 6.1: игра (спринт 6) — герои, магазин, значки, история, настройки; словарь и чтение (спринт 5)
+  | "heroes" | "shop" | "badges" | "game_history" | "game_settings" | "dictionary" | "reading";
 export type ReleaseNoteIcon =
   | "spark" | "hero" | "calendar" | "clock" | "bell" | "book" | "chat" | "mic" | "star" | "flame" | "users" | "gift"
   | "shield" | "globe" | "trophy" | "news";
@@ -441,6 +443,9 @@ export interface WhatsNewNote {
   title: string;
   items: ReleaseNoteItem[];
   audience: "new" | "existing" | "all";
+  /** релиз 6.1: ключ иллюстрации из каталога release-notes.json (`illustrations`, формат ^[a-z0-9][a-z0-9-]{0,31}$) —
+   *  картинка 16:9 сверху первой карточки заметки, файл Mini App `/whatsnew/<key>.webp`; null — без картинки */
+  illustration: string | null;
   published_at: string;
 }
 

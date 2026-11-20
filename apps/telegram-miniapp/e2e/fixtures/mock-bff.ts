@@ -294,12 +294,25 @@ export class MockBff {
       week,
     };
   }
+  /** the age segment of the active learner (as telegram-bff): a child profile — kids, 14–17 — teens, the rest — adults */
+  private ageSegment(): "kids" | "teens" | "adults" {
+    const l = this.learner();
+    return l.kind === "child" ? "kids" : l.age_band === "14-17" ? "teens" : "adults";
+  }
+  /** the language of the notes — the locale of the account, as telegram-bff (review T-6), not ui_lang of the plan */
+  private noteLang(): UiLang {
+    return this.account.locale === "uz" ? "uz" : "ru";
+  }
+  private visibleNotes(): F.NoteSeed[] {
+    const seg = this.ageSegment();
+    return this.notes.filter((n) => !n.age || n.age.includes(seg));
+  }
   private whatsNew(): WhatsNew {
     const p = this.plan();
     if (!p.onboarding_completed_at) return { mode: "none", notes: [] };
-    const lang = p.ui_lang;
+    const lang = this.noteLang();
     const seen = (this.seen[this.active] ??= new Set());
-    const published = [...this.notes].sort((a, b) => (a.published_at < b.published_at ? 1 : -1));
+    const published = [...this.visibleNotes()].sort((a, b) => (a.published_at < b.published_at ? 1 : -1));
     const news = published.filter((n) => n.audience === "new");
     const sawNew = news.some((n) => seen.has(n.id));
     if (!sawNew && news.length) {
@@ -608,8 +621,8 @@ export class MockBff {
       return route.fulfill({ status: 204, body: "" });
     }
     if (key === "GET /v1/news") {
-      const lang = this.plan().ui_lang;
-      return this.ok(route, { items: [...this.notes].sort((a, z) => (a.published_at < z.published_at ? 1 : -1)).map((n) => F.toNote(n, lang)), next_cursor: null });
+      const lang = this.noteLang();
+      return this.ok(route, { items: [...this.visibleNotes()].sort((a, z) => (a.published_at < z.published_at ? 1 : -1)).map((n) => F.toNote(n, lang)), next_cursor: null });
     }
 
     // ---- support ----

@@ -83,8 +83,24 @@
   .soon .hero { height: 160px; width: auto; margin: 0 auto; }
 
   /* whats-new card */
-  .wn-card { min-height: 150px; gap: 8px; }
+  /* the card never shrinks under its text (its min-height would let it): a long note scrolls the sheet instead of
+     overlapping the dots and the buttons; a long note title wraps inside the pill, the counter stays on its line */
+  .wn-card { min-height: 150px; gap: 8px; flex-shrink: 0; }
   .wn-card .h3 { font-size: 17px; }
+  .wn-card .hrow.between > .pill { min-width: 0; white-space: normal; }
+  .wn-card .hrow.between > .sub { flex-shrink: 0; white-space: nowrap; }
   .inv-hero { height: 88px; width: auto; flex-shrink: 0; }
   .wn-ic { width: 36px; height: 36px; border-radius: 18px; display: grid; place-items: center; background: var(--pen-soft); color: var(--pen); }
+  /* release 6.1: the illustration of a note on top of its first card — full width of the sheet, 16:9, the corners of the
+     cards; the box is reserved before the picture loads (no layout shift); short screens crop it instead of scrolling */
+  .wn-art {
+    margin: 0; flex-shrink: 0; width: 100%; aspect-ratio: 16 / 9; max-height: 34vh; overflow: hidden;
+    border-radius: var(--r-card); border: 1px solid var(--line); background: var(--pen-soft);
+    animation: fadeIn var(--dur) var(--ease);
+  }
+  .wn-art img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  :root[data-scheme="dark"] .wn-art img,
+  :root[data-theme="notebook_dark"] .wn-art img { filter: brightness(.86); }
+  @media (max-height: 640px) { .wn-art { max-height: 26vh; } }
+  @media (prefers-reduced-motion: reduce) { .wn-art { animation: none; } }
 }

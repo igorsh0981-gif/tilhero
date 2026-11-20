@@ -84,9 +84,20 @@ const ROUTE_SCREEN: Partial<Record<AppRoute, Pushed>> = {
   media: { name: "practice", tab: "media" },
   media_requests: { name: "mediaRequests" },
   languages: { name: "languages" },
+  // release 6.1: the screens of the game (sprint 6) and reading texts (sprint 5, «Практика» → «Чтение»)
+  heroes: { name: "heroes" },
+  shop: { name: "shop" },
+  badges: { name: "badges" },
+  game_history: { name: "gameHistory" },
+  game_settings: { name: "gameSettings" },
+  reading: { name: "practice", tab: "reading" },
 };
-/** Routes that open a tab root: the skill map lives on the «Прогресс» tab. */
-const ROUTE_TAB: Partial<Record<AppRoute, Tab>> = { skills: "progress" };
+/** Routes that open a tab root: the skill map lives on the «Прогресс» tab, the dictionary (release 6.1) is the root
+ *  of the «Словарь» tab. */
+const ROUTE_TAB: Partial<Record<AppRoute, Tab>> = { skills: "progress", dictionary: "review" };
+/** Routes into the game: when the operator switched the game off (flag `game`), they lead Home. */
+export const GAME_ROUTES: readonly AppRoute[] = ["heroes", "shop", "badges", "game_history", "game_settings"];
+export const routeAllowed = (r: AppRoute, gameOn: boolean): AppRoute => (!gameOn && GAME_ROUTES.includes(r) ? "home" : r);
 /** Sprint 5: route_review (the evening notification reviews_due, «Что нового») opens «Повторение дня» above the
  *  «Словарь» tab — «Назад» lands in the dictionary. */
 const REVIEW_SCREEN: Pushed = { name: "review" };

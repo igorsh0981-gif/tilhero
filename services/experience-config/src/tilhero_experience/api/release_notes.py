@@ -152,7 +152,8 @@ async def create_note(body: rn.NoteContent, principal: Principal = Depends(staff
 async def update_note(note_id: uuid.UUID, body: UpdateIn, principal: Principal = Depends(staff),
                       rt: Runtime = Depends(get_runtime)) -> dict:
     actor = principal.require_permission(MANAGE)
-    content = rn.NoteContent.model_validate(body.model_dump(exclude={"expected_version"}))
+    # exclude_unset: поле, которого нет в теле (illustration у клиента до 6.1), не затирает значение черновика
+    content = rn.NoteContent.model_validate(body.model_dump(exclude={"expected_version"}, exclude_unset=True))
     async with rt.transaction() as session:
         note = await rn.update(session, note_id, body.expected_version, content, actor)
         return rn.staff_view(note)  # правится только черновик: показов нет

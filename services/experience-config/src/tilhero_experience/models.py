@@ -82,7 +82,8 @@ class ReleaseNote(Base):
     для тех, кто уже занимается, all — всем) и сегментами (возраст, язык интерфейса; пусто — все).
 
     Правится только черновик (version — оптимистическая блокировка). У опубликованной меняется лишь статус на
-    archived — триггер release_notes_guard (миграция 0003) запрещает остальное, DELETE — только черновиков.
+    archived — триггер release_notes_guard (миграции 0003, 0006) запрещает остальное, DELETE — только черновиков.
+    illustration — ключ иллюстрации из каталога release-notes.json (миграция 0006); NULL — без картинки.
     """
 
     __tablename__ = "release_notes"
@@ -97,6 +98,8 @@ class ReleaseNote(Base):
         CheckConstraint("status <> 'published' OR published_at IS NOT NULL", name="ck_release_notes_published"),
         CheckConstraint("status <> 'draft' OR published_at IS NULL", name="ck_release_notes_draft"),
         CheckConstraint("version >= 1", name="ck_release_notes_version"),
+        CheckConstraint("illustration IS NULL OR illustration ~ '^[a-z0-9][a-z0-9-]{0,31}$'",
+                        name="ck_release_notes_illustration"),
         # одна действующая (не архивная) заметка на метку
         Index("uq_release_notes_slug_active", "slug", unique=True, postgresql_where=text("status <> 'archived'")),
         Index("ix_release_notes_status_published", "status", "published_at"),
@@ -109,6 +112,7 @@ class ReleaseNote(Base):
     items: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     audience: Mapped[str] = mapped_column(String(16), nullable=False)
     segments: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    illustration: Mapped[str | None] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     created_by: Mapped[str] = mapped_column(String(64), nullable=False)

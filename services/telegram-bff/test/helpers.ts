@@ -222,6 +222,7 @@ export function noteFixture(o: Partial<WhatsNewNote> = {}): WhatsNewNote {
     title: "Что нового",
     items: [{ title: "График занятий", text: "Выберите дни и время", link: "schedule", icon: "calendar" }],
     audience: "existing",
+    illustration: null,
     published_at: "2026-11-18T08:00:00Z",
     ...o,
   };

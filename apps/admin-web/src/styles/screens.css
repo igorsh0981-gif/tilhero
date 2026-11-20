@@ -81,6 +81,10 @@
 .mx-btn{border-radius:10px;text-align:center;font-size:12px;font-weight:600;padding:9px 0;background:var(--mx-pen);color:var(--mx-pen-ink)}
 .mx-btn.sec{background:transparent;border:1.5px solid var(--mx-ink);color:var(--mx-ink)}
 .mx-once{font-size:10.5px;color:var(--mx-ink2);text-align:center}
+/* release 6.1: the illustration on top of the note's first card (Mini App .wn-art) */
+.mx-art{aspect-ratio:16/9;border-radius:14px;overflow:hidden;border:1px solid var(--mx-line);background:var(--mx-pen-soft);flex-shrink:0}
+.mx-art img{display:block;width:100%;height:100%;object-fit:cover}
+.phone.is-dark .mx-art img{filter:brightness(.86)}
 
 /* Telegram message preview (templates, campaigns) */
 .tgp{display:flex;flex-direction:column;min-height:470px;background:var(--tg-wall)}
@@ -105,6 +109,18 @@
 .ip:hover{border-color:var(--line-strong);color:var(--ink)}
 .ip.on{border-color:var(--pen);background:var(--pen-soft);color:var(--pen)}
 .ip svg{width:18px;height:18px}
+/* illustration picker (release 6.1): «без иллюстрации» and the catalogue pictures, 16:9 previews */
+.ill-pick{display:flex;flex-wrap:wrap;gap:8px}
+.ill{display:flex;flex-direction:column;gap:4px;width:150px;padding:4px;border-radius:10px;border:1.5px solid var(--line);background:var(--card);cursor:pointer}
+.ill:hover{border-color:var(--line-strong)}
+.ill.on{border-color:var(--pen);background:var(--pen-soft)}
+.ill:has(input:focus-visible){outline:2px solid var(--pen);outline-offset:2px}
+.ill:has(input:disabled){cursor:default;opacity:.75}
+.ill-img{display:block;width:100%;height:auto;aspect-ratio:16/9;border-radius:7px;object-fit:cover}
+.ill-none{display:grid;place-items:center;background:var(--surface-sunk);color:var(--ink2)}
+.ill-cap{font-size:12px;color:var(--ink2);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ill.on .ill-cap{color:var(--pen);font-weight:600}
+.field .hint.err{color:var(--err)}
 .seg-sep{width:1px;height:22px;background:var(--line);margin:0 4px}
 
 /* ---------- templates ---------- */

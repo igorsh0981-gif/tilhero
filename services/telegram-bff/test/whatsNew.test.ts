@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
 import { ageSegment } from "../src/account.js";
-import { NOTE_ICONS, NOTE_ROUTES, NewsPageSchema, WhatsNewSchema } from "../src/schemas.js";
+import { ILLUSTRATION_PATTERN, NOTE_ICONS, NOTE_ROUTES, NewsPageSchema, WhatsNewSchema } from "../src/schemas.js";
 import { bearer, closeRedis, domainError, login, makeHarness, noteFixture, switchTo, type Harness, type LoggedIn } from "./helpers.js";
 
 let h: Harness;
@@ -33,10 +33,17 @@ describe("каталог release-notes.json", () => {
       routes: string[];
       icons: string[];
       segments: { age: string[]; ui_lang: string[] };
+      illustrations: Array<{ key: string; width: number; height: number }>;
+      limits: { illustration_pattern: string };
     };
     expect([...NOTE_ROUTES].sort()).toEqual([...cat.routes].sort());
     expect([...NOTE_ICONS].sort()).toEqual([...cat.icons].sort());
     expect(cat.segments.age.sort()).toEqual(["adults", "kids", "teens"]);
+    // релиз 6.1: иллюстрации — формат ключа тот же, что пропускает BFF; каждый ключ каталога ему соответствует
+    expect(ILLUSTRATION_PATTERN).toBe(cat.limits.illustration_pattern);
+    expect(cat.illustrations.map((i) => i.key)).toEqual(["welcome", "s6-heroes"]);
+    for (const i of cat.illustrations) expect(new RegExp(ILLUSTRATION_PATTERN).test(i.key), i.key).toBe(true);
+    expect(NOTE_ROUTES).toEqual(expect.arrayContaining(["heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading"]));
   });
 
   it("возраст → сегмент: 6-9, 10-13 → kids; 14-17 → teens; 18+ и не выбран → adults", () => {
@@ -99,6 +106,31 @@ describe("GET /v1/whats-new", () => {
     expect((await get("/v1/whats-new")).json()).toEqual({ mode: "none", notes: [] });
     h.fake.forMe = { mode: "updates", notes: [] };
     expect((await get("/v1/whats-new")).json()).toEqual({ mode: "none", notes: [] });
+  });
+
+  it("релиз 6.1: иллюстрация (ключ каталога) и маршруты игры, словаря и чтения проходят; ключ не того формата → null", async () => {
+    h.fake.onboard(s.userId);
+    const routes = ["heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading"] as const;
+    const items = routes.map((link) => ({ title: link, text: "x", link, icon: "hero" as const }));
+    const good = noteFixture({ slug: "s6-heroes", illustration: "s6-heroes", items });
+    const bad = ["../x", "S6", "a".repeat(33), "welcome.webp", "", 7, undefined].map((illustration, i) =>
+      noteFixture({ slug: `bad-${i}`, illustration: illustration as never }),
+    );
+    h.fake.forMe = { mode: "updates", notes: [good, ...bad.slice(0, 4)] };
+    const res = await get("/v1/whats-new");
+    expect(res.statusCode).toBe(200);
+    expect(Value.Check(WhatsNewSchema, res.json())).toBe(true);
+    const notes = res.json().notes as Array<{ illustration: string | null; items: Array<{ link: string | null }> }>;
+    expect(notes[0]!.illustration).toBe("s6-heroes");
+    expect(notes[0]!.items.map((i) => i.link)).toEqual([...routes]);
+    expect(notes.slice(1).map((n) => n.illustration)).toEqual([null, null, null, null]);
+    // лента — те же правила; домен до 6.1 (поля нет) → null
+    const old = noteFixture({ slug: "old" }) as Partial<ReturnType<typeof noteFixture>>;
+    delete old.illustration;
+    h.fake.feed = [noteFixture({ slug: "welcome-1", audience: "new", illustration: "welcome" }), ...bad.slice(4), old as never];
+    const page = (await get("/v1/news")).json();
+    expect(Value.Check(NewsPageSchema, page)).toBe(true);
+    expect(page.items.map((n: { illustration: string | null }) => n.illustration)).toEqual(["welcome", null, null, null, null]);
   });
 
   it("сбой experience-config или learning-plan → 503 (шторка не показывается); 401 без токена", async () => {

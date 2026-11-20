@@ -21,6 +21,12 @@ import {
   validateNote,
   emptyCampaign,
   checkSendAt,
+  ILLUSTRATION_RE,
+  ILLUSTRATION_SIZE,
+  ILLUSTRATION_URLS,
+  illustrationUrl,
+  noteContent,
+  NOTE_ILLUSTRATIONS,
 } from "../src/screens/news/catalog";
 import { canStop } from "../src/screens/news/Campaigns";
 
@@ -30,7 +36,8 @@ const CATALOG = JSON.parse(readFileSync(resolve(__dirname, "../../../packages/co
   segments: { age: string[]; ui_lang: string[] };
   routes: string[];
   icons: string[];
-  limits: { slug_pattern: string; title_max: number; item_title_max: number; item_text_max: number; items_min: number; items_max: number; client_max_notes: number };
+  illustrations: Array<{ key: string; width: number; height: number }>;
+  limits: { slug_pattern: string; title_max: number; item_title_max: number; item_text_max: number; items_min: number; items_max: number; client_max_notes: number; illustration_pattern: string };
 };
 
 describe("«Что нового» catalogue = packages/contracts/release-notes.json", () => {
@@ -42,6 +49,18 @@ describe("«Что нового» catalogue = packages/contracts/release-notes.j
     expect([...LANGS]).toEqual(CATALOG.locales);
     expect(SLUG.source).toBe(CATALOG.limits.slug_pattern);
     expect(NOTE_LIMITS).toMatchObject({ title: CATALOG.limits.title_max, itemTitle: CATALOG.limits.item_title_max, itemText: CATALOG.limits.item_text_max, itemsMin: CATALOG.limits.items_min, itemsMax: CATALOG.limits.items_max, clientMaxNotes: CATALOG.limits.client_max_notes });
+  });
+  it("release 6.1: illustrations = the catalogue, each bundled from the Mini App build (16:9, 1200×675)", () => {
+    expect([...NOTE_ILLUSTRATIONS]).toEqual(CATALOG.illustrations.map((i) => i.key));
+    expect(ILLUSTRATION_RE.source).toBe(CATALOG.limits.illustration_pattern);
+    for (const i of CATALOG.illustrations) {
+      expect({ width: i.width, height: i.height }).toEqual(ILLUSTRATION_SIZE);
+      expect(ILLUSTRATION_URLS[i.key], i.key).toMatch(new RegExp(`${i.key}.*\\.webp`));
+      expect(illustrationUrl(i.key)).toBe(ILLUSTRATION_URLS[i.key]);
+    }
+    expect(illustrationUrl(null)).toBeNull();
+    expect(illustrationUrl("nope")).toBeNull();
+    expect(NOTE_ROUTES).toEqual(expect.arrayContaining(["heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading"]));
   });
 });
 
@@ -65,6 +84,16 @@ describe("note validation (server paths)", () => {
     expect(i["items[0].title.uz"]?.reason).toBe("control_chars");
     d.items = [];
     expect(validateNote(d).items?.reason).toBe("required");
+  });
+  it("release 6.1: illustration — null in a new note, kept by noteContent, unknown key flagged", () => {
+    const d = emptyNote("2026.12");
+    expect(d.illustration).toBeNull();
+    expect(noteContent({ ...d, illustration: "s6-heroes" }).illustration).toBe("s6-heroes");
+    expect(noteContent({ ...d, illustration: undefined as never }).illustration).toBeNull();
+    d.title = { ru: "Т", uz: "T" };
+    d.items[0] = { title: { ru: "a", uz: "a" }, text: { ru: "t", uz: "t" }, link: "heroes", icon: "hero" };
+    expect(validateNote({ ...d, illustration: "welcome" })).toEqual({});
+    expect(validateNote({ ...d, illustration: "nope" }).illustration?.reason).toBe("invalid_format");
   });
   it("next free «YYYY.MM» label", () => {
     const now = new Date("2026-11-18T10:00:00Z");

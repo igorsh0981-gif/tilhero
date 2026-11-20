@@ -22,6 +22,8 @@ export type DeepLink =
 export const ROUTES: readonly AppRoute[] = [
   "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
   "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
+  // release 6.1: the game (heroes, shop, badges, history, settings), the dictionary and reading
+  "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
 ];
 const ROUTE_SET: ReadonlySet<string> = new Set(ROUTES);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
