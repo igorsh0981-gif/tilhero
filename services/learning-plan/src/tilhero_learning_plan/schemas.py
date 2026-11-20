@@ -73,6 +73,7 @@ class WeekDayOut(BaseModel):
     scheduled: bool
     done: bool
     missed: bool
+    frozen: bool  # спринт 6: пропуск, закрытый заморозкой серии (missed остаётся true)
 
 
 class TodayPlanOut(BaseModel):

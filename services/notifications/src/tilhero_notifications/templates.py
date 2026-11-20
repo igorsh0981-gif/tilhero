@@ -10,6 +10,7 @@
   семьи / отклонено → route_family; неотвеченное приглашение → invite_<invite_id>; поддержка → ticket_<number>;
   «Что нового» → route_news; решение по заявке на песню/фильм (спринт 3) → route_media_requests; решение по
   апелляции на оценку урока (спринт 4) → route_lessons; слова к повторению (спринт 5) → route_review;
+  игра (спринт 6): заморозка серии и ступень героя → route_home, новый значок → route_progress;
 - параметры проверяются строгой моделью при приёме (неизвестное поле/формат → failed params_invalid).
 
 Спринт 2 (INTERNAL_API §3 «Шаблоны»): код — источник текстов по умолчанию; сотрудник создаёт версию поверх.
@@ -507,6 +508,180 @@ def _reviews_due_kid(lang: Lang, p: ReviewsDueParams, ctx: Context) -> Rendered:
     return Rendered(title, body, REVIEW_BUTTON[lang], REVIEW_ROUTE)
 
 
+# ---------------------------------------------------------------- игра (gamification, спринт 6)
+#
+# Категория `game`; переменные — коды и числа из событий (без текстов ученика). Имена значков, героев и ступеней —
+# словарь сида (INTERNAL_API спринта 6 §1.4, §1.6): каталог героев правится в админке gamification, имена здесь —
+# черновые до появления имён в событии; неизвестный код — общее название. Детям 6–13 — только центр детского
+# профиля (опекуну «в сводке»), тексты `*.kid` — родителю, с именем ребёнка, мягко, без «серии».
+
+PROGRESS_BUTTON = {"ru": "Открыть достижения", "uz": "Yutuqlarni ochish"}
+PROGRESS_ROUTE = "route_progress"
+HOME_ROUTE = "route_home"
+
+
+def _plural_ru(n: int, one: str, few: str, many: str) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
+class StreakFrozenParams(Params):
+    """Заморозка закрыла пропуск дня `local_date`; `freeze_left` — сколько заморозок осталось."""
+
+    local_date: date
+    freeze_left: Annotated[int, Field(ge=0)]
+
+
+def _streak_frozen_values(lang: Lang, p: StreakFrozenParams, ctx: Context) -> dict[str, str]:
+    return {"date": _ddmm(p.local_date), "left": str(p.freeze_left)}
+
+
+def _streak_frozen_kid_values(lang: Lang, p: StreakFrozenParams, ctx: Context) -> dict[str, str]:
+    return {"learner_name": ctx.learner_name or KID_NAME[lang], **_streak_frozen_values(lang, p, ctx)}
+
+
+def _streak_frozen(lang: Lang, p: StreakFrozenParams, ctx: Context) -> Rendered:
+    d, left = _ddmm(p.local_date), p.freeze_left
+    if lang == "ru":
+        return Rendered("Серия спасена", f"Заморозка закрыла пропуск {d}. Осталось заморозок: {left}.",
+                        OPEN[lang], HOME_ROUTE)
+    return Rendered("Seriya saqlab qolindi",
+                    f"Muzlatish {d} kuni oʻtkazib yuborilgan mashgʻulotni yopdi. Qolgan muzlatishlar: {left}.",
+                    OPEN[lang], HOME_ROUTE)
+
+
+def _streak_frozen_kid(lang: Lang, p: StreakFrozenParams, ctx: Context) -> Rendered:
+    """Родителю, мягко: без «серии» и «потери» (CONVENTIONS §8)."""
+    name, d, left = ctx.learner_name, _ddmm(p.local_date), p.freeze_left
+    if lang == "ru":
+        title = f"{name}: заморозка помогла" if name else "Заморозка помогла"
+        body = f"Пропуск {d} закрыт заморозкой — можно спокойно продолжать. Заморозок осталось: {left}."
+        return Rendered(title, body, OPEN[lang], HOME_ROUTE)
+    title = f"{name}: muzlatish yordam berdi" if name else "Muzlatish yordam berdi"
+    body = (f"{d} kuni oʻtkazib yuborilgan mashgʻulot muzlatish bilan yopildi — bemalol davom etish mumkin. "
+            f"Qolgan muzlatishlar: {left}.")
+    return Rendered(title, body, OPEN[lang], HOME_ROUTE)
+
+
+class BadgeParams(Params):
+    badge_code: Annotated[str, Field(pattern=r"^[a-z0-9_]{3,40}$")]
+
+
+_BADGE_FIXED: dict[str, dict[str, str]] = {
+    "first_lesson": {"ru": "Первый урок", "uz": "Birinchi dars"},
+    "first_freeze": {"ru": "Первая заморозка", "uz": "Birinchi muzlatish"},
+    "skill_retained": {"ru": "Первый закреплённый навык", "uz": "Birinchi mustahkamlangan koʻnikma"},
+}
+_BADGE_UNKNOWN = {"ru": "Новое достижение", "uz": "Yangi yutuq"}
+_BADGE_COUNTED = ("streak_", "skills_", "reviews_", "readings_")
+
+
+def badge_title(lang: Lang, code: str) -> str:
+    """Название значка по коду (§1.6): first_lesson, streak_<n>, skills_<n>, skill_retained, reviews_<n>,
+    readings_<n>, first_freeze. Значок серии — «N дней подряд» (без слова «серия»: текст бывает и родителю)."""
+    if code in _BADGE_FIXED:
+        return _BADGE_FIXED[code][lang]
+    prefix = next((p for p in _BADGE_COUNTED if code.startswith(p)), None)
+    raw = code[len(prefix):] if prefix else ""
+    if prefix is None or not raw.isdigit() or not 0 < int(raw) <= 100_000:
+        return _BADGE_UNKNOWN[lang]
+    n = int(raw)
+    if prefix == "streak_":
+        return f"{_days_ru(n)} подряд" if lang == "ru" else f"Ketma-ket {n} kun"
+    if prefix == "skills_":
+        return (f"{n} {_plural_ru(n, 'подтверждённый навык', 'подтверждённых навыка', 'подтверждённых навыков')}"
+                if lang == "ru" else f"{n} ta tasdiqlangan koʻnikma")
+    if prefix == "reviews_":
+        return (f"{n} {_plural_ru(n, 'повторённая карточка', 'повторённые карточки', 'повторённых карточек')}"
+                if lang == "ru" else f"{n} ta takrorlangan soʻz")
+    return (f"{n} {_plural_ru(n, 'прочитанный текст', 'прочитанных текста', 'прочитанных текстов')}"
+            if lang == "ru" else f"{n} ta oʻqilgan matn")
+
+
+def _badge_values(lang: Lang, p: BadgeParams, ctx: Context) -> dict[str, str]:
+    return {"badge": badge_title(lang, p.badge_code)}
+
+
+def _badge_kid_values(lang: Lang, p: BadgeParams, ctx: Context) -> dict[str, str]:
+    return {"learner_name": ctx.learner_name or KID_NAME[lang], **_badge_values(lang, p, ctx)}
+
+
+def _badge_earned(lang: Lang, p: BadgeParams, ctx: Context) -> Rendered:
+    badge = badge_title(lang, p.badge_code)
+    if lang == "ru":
+        return Rendered("Поздравляем!", f"Новый значок: {badge}.", PROGRESS_BUTTON[lang], PROGRESS_ROUTE)
+    return Rendered("Tabriklaymiz!", f"Yangi nishon: {badge}.", PROGRESS_BUTTON[lang], PROGRESS_ROUTE)
+
+
+def _badge_earned_kid(lang: Lang, p: BadgeParams, ctx: Context) -> Rendered:
+    name, badge = ctx.learner_name, badge_title(lang, p.badge_code)
+    if lang == "ru":
+        title = f"{name}: новый значок" if name else "Новый значок ребёнка"
+        return Rendered(title, f"Новый значок: {badge} — отличный повод порадоваться вместе!",
+                        PROGRESS_BUTTON[lang], PROGRESS_ROUTE)
+    title = f"{name}: yangi nishon" if name else "Farzandingizning yangi nishoni"
+    return Rendered(title, f"Yangi nishon: {badge} — birga quvonish uchun ajoyib sabab!",
+                    PROGRESS_BUTTON[lang], PROGRESS_ROUTE)
+
+
+class HeroStageParams(Params):
+    hero_code: Annotated[str, Field(pattern=r"^(robot|pet|human)_[0-9]$")]
+    stage: Literal[2, 3]
+
+
+# код → (имя RU, имя UZ, женский род) — сид каталога (§1.4); UZ — на вычитку владельцу, как в сиде gamification
+HERO_NAMES: dict[str, tuple[str, str, bool]] = {
+    "robot_0": ("Робот Вольт", "Robot Volt", False),
+    "robot_1": ("Робот Искра", "Robot Iskra", False),
+    "robot_2": ("Робот Бриз", "Robot Briz", False),
+    "pet_0": ("Дракончик Мятик", "Ajdarcha Myatik", False),
+    "pet_1": ("Дракончик Персик", "Ajdarcha Persik", False),
+    "pet_2": ("Дракончик Сирень", "Ajdarcha Siren", False),
+    "human_0": ("Ученица Нилу", "Oʻquvchi Nilu", True),
+    "human_1": ("Ученик Тимур", "Oʻquvchi Timur", False),
+    "human_2": ("Ученица Ая", "Oʻquvchi Aya", True),
+}
+HERO_UNKNOWN = {"ru": "Герой", "uz": "Qahramon"}
+# линия → ступень → (RU, UZ); ступень 1 в уведомлениях не бывает (событие — только рост до 2 и 3)
+STAGE_NAMES: dict[str, dict[int, tuple[str, str]]] = {
+    "robot": {2: ("Запуск", "Ishga tushish"), 3: ("Полёт", "Parvoz")},
+    "pet": {2: ("Малыш", "Bolakay"), 3: ("Крылья", "Qanotlar")},
+    "human": {2: ("Путешественник", "Sayohatchi"), 3: ("Знаток", "Bilimdon")},
+}
+
+
+def _hero_values(lang: Lang, p: HeroStageParams, ctx: Context) -> dict[str, str]:
+    known = HERO_NAMES.get(p.hero_code)
+    name = (known[0] if lang == "ru" else known[1]) if known else HERO_UNKNOWN[lang]
+    feminine = bool(known and known[2])
+    grew = ("выросла" if feminine else "вырос") if lang == "ru" else "oʻsdi"
+    ru, uz = STAGE_NAMES[p.hero_code.split("_", 1)[0]][p.stage]
+    return {"hero": name, "grew": grew, "stage": ru if lang == "ru" else uz}
+
+
+def _hero_kid_values(lang: Lang, p: HeroStageParams, ctx: Context) -> dict[str, str]:
+    return {"learner_name": ctx.learner_name or KID_NAME[lang], **_hero_values(lang, p, ctx)}
+
+
+def _hero_stage_reached(lang: Lang, p: HeroStageParams, ctx: Context) -> Rendered:
+    v = _hero_values(lang, p, ctx)
+    body = f"{v['hero']} {v['grew']}: {v['stage']}!"
+    return Rendered("Новая ступень героя" if lang == "ru" else "Qahramonning yangi bosqichi", body, OPEN[lang],
+                    HOME_ROUTE)
+
+
+def _hero_stage_reached_kid(lang: Lang, p: HeroStageParams, ctx: Context) -> Rendered:
+    v, name = _hero_values(lang, p, ctx), ctx.learner_name
+    if lang == "ru":
+        title = f"{name}: новая ступень героя" if name else "Новая ступень героя ребёнка"
+        return Rendered(title, f"{v['hero']} {v['grew']}: {v['stage']}! Посмотрите вместе.", OPEN[lang], HOME_ROUTE)
+    title = f"{name}: qahramonning yangi bosqichi" if name else "Farzandingiz qahramonining yangi bosqichi"
+    return Rendered(title, f"{v['hero']} {v['grew']}: {v['stage']}! Birga koʻring.", OPEN[lang], HOME_ROUTE)
+
+
 # ---------------------------------------------------------------- pin.reset_code (transactional, не в центре)
 
 
@@ -604,6 +779,19 @@ PLACEHOLDER_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "Примерное время повторения в минутах, число от 2 до 15 (≈ 0,4 мин на слово), например «5»",
         "Estimated review time in minutes, a number from 2 to 15 (≈ 0.4 min per word), e.g. “5”",
     ),
+    # спринт 6 — игра
+    "date": ("Дата дня, закрытого заморозкой, ДД.ММ", "Date of the day covered by a streak freeze, DD.MM"),
+    "left": ("Сколько заморозок осталось, число, например «1»", "Streak freezes left, a number, e.g. “1”"),
+    "badge": (
+        "Название значка на языке ученика, например «7 дней подряд»",
+        "Badge name in the learner's language, e.g. “7 days in a row”",
+    ),
+    "hero": ("Имя героя, например «Дракончик Мятик»", "Hero's name, e.g. “Dragon Myatik”"),
+    "grew": (
+        "«вырос» или «выросла» по роду героя (UZ — «oʻsdi»)",
+        "“grew” in Russian with the hero's grammatical gender (UZ — “oʻsdi”)",
+    ),
+    "stage": ("Название новой ступени героя, например «Малыш»", "Name of the hero's new stage, e.g. “Baby”"),
 }
 KID_NAME = {"ru": "Ваш ребёнок", "uz": "Farzandingiz"}
 INVITER_NAME = {"ru": "Ваш знакомый", "uz": "Tanishingiz"}
@@ -681,7 +869,14 @@ class TextOverride:
 
 # ---------------------------------------------------------------- реестр
 
-Category = Literal["reminders", "missed", "social", "support", "product", "service"]
+Category = Literal["reminders", "missed", "social", "support", "product", "service", "game"]
+# Категории, известные публичным контрактам (bff.ts InboxItem.category, admin.ts TemplateInfo.category): game
+# (спринт 6) пока показывается как reminders — её выключатель тоже reminders (Settings.game_category_gate)
+PUBLIC_CATEGORY: dict[str, str] = {"game": "reminders"}
+
+
+def public_category(category: str) -> str:
+    return PUBLIC_CATEGORY.get(category, category)
 Placeholders = Callable[[Lang, Any, Context], dict[str, str]]
 
 
@@ -701,6 +896,8 @@ class TemplateSpec:
     transactional: bool = False
     # Секрет в параметрах: только синхронный POST /internal/v1/notifications/transactional, никогда через шину
     direct_only: bool = False
+    # Спринт 6: детям 6–13 — только центр детского профиля (опекуну «в сводке», без сообщения в Telegram)
+    kid_in_app_only: bool = False
     # Спринт 2 — версии сотрудников: описание (RU, EN), плейсхолдеры и их значения на языке ученика, образец
     # параметров для текстов по умолчанию и предпросмотра
     description: tuple[str, str] = ("", "")
@@ -949,6 +1146,50 @@ TEMPLATES: dict[str, TemplateSpec] = {
                          "Child's word review reminder — gentle, to the parent"),
             placeholder_names=("learner_name", "due_count", "review_minutes"), placeholders=_reviews_due_kid_values,
             sample={"local_date": "2026-11-20", "due_count": 7},
+        ),
+        TemplateSpec(
+            "streak_frozen", "game", StreakFrozenParams, _streak_frozen, kid_variant="streak_frozen.kid",
+            kid_in_app_only=True,
+            description=("Заморозка закрыла пропуск — серия сохранена (утром следующего дня)",
+                         "A streak freeze covered a missed day — the streak is kept (next morning)"),
+            placeholder_names=("date", "left"), placeholders=_streak_frozen_values,
+            sample={"local_date": "2026-11-19", "freeze_left": 1},
+        ),
+        TemplateSpec(
+            "streak_frozen.kid", "game", StreakFrozenParams, _streak_frozen_kid, kid_in_app_only=True,
+            description=("Заморозка закрыла пропуск ребёнка — родителю в центре детского профиля, мягко",
+                         "A freeze covered the child's missed day — to the parent, in-app only, gentle"),
+            placeholder_names=("learner_name", "date", "left"), placeholders=_streak_frozen_kid_values,
+            sample={"local_date": "2026-11-19", "freeze_left": 1},
+        ),
+        TemplateSpec(
+            "badge_earned", "game", BadgeParams, _badge_earned, kid_variant="badge_earned.kid",
+            kid_in_app_only=True,
+            description=("Новый значок за учебный результат", "New badge for a learning result"),
+            placeholder_names=("badge",), placeholders=_badge_values,
+            sample={"badge_code": "streak_7"},
+        ),
+        TemplateSpec(
+            "badge_earned.kid", "game", BadgeParams, _badge_earned_kid, kid_in_app_only=True,
+            description=("Новый значок ребёнка — родителю в центре детского профиля",
+                         "Child's new badge — to the parent, in-app only"),
+            placeholder_names=("learner_name", "badge"), placeholders=_badge_kid_values,
+            sample={"badge_code": "first_lesson"},
+        ),
+        TemplateSpec(
+            "hero_stage_reached", "game", HeroStageParams, _hero_stage_reached, kid_variant="hero_stage_reached.kid",
+            kid_in_app_only=True,
+            description=("Герой вырос: новая ступень за подтверждённые навыки",
+                         "The hero grew: a new stage for confirmed skills"),
+            placeholder_names=("hero", "grew", "stage"), placeholders=_hero_values,
+            sample={"hero_code": "human_0", "stage": 2},
+        ),
+        TemplateSpec(
+            "hero_stage_reached.kid", "game", HeroStageParams, _hero_stage_reached_kid, kid_in_app_only=True,
+            description=("Герой ребёнка вырос — родителю в центре детского профиля",
+                         "The child's hero grew — to the parent, in-app only"),
+            placeholder_names=("learner_name", "hero", "grew", "stage"), placeholders=_hero_kid_values,
+            sample={"hero_code": "pet_0", "stage": 2},
         ),
         TemplateSpec(
             "release_note.published", "product", ReleaseNoteParams, _release_note,

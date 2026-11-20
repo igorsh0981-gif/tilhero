@@ -46,6 +46,12 @@ export const DOMAIN = {
 } as const satisfies Record<keyof DomainUrls, string>;
 export type DomainKey = keyof typeof DOMAIN;
 
+/**
+ * Спринт 6: gamification — необязательный домен (GAMIFICATION_URL): клиент создаётся, только если адрес задан
+ * (BffContext.gamification), иначе маршруты игры отвечают 503 UPSTREAM_UNAVAILABLE {service: gamification}.
+ */
+export const GAME_SERVICE = "gamification";
+
 const INTERNAL_AUTH_CODES = new Set([
   "INTERNAL_TOKEN_INVALID",
   "INTERNAL_TOKEN_EXPIRED",
@@ -67,7 +73,9 @@ export interface CallOptions {
   /** Массив — повторяющийся параметр (`?session_id=a&session_id=b`, пакетная сводка assessment). */
   query?: Record<string, string | number | boolean | readonly string[] | undefined | null>;
   idempotencyKey?: string | undefined;
-  /** Дополнительные заголовки (If-Match оптимистической блокировки черновика версии агента). */
+  /** Сырое тело (загрузка картинки игры: байты и их тип) вместо JSON `body`. */
+  raw?: { bytes: Buffer; contentType: string } | undefined;
+  /** Дополнительные заголовки (If-Match оптимистической блокировки черновика версии агента, X-Step-Up). */
   headers?: Record<string, string> | undefined;
   /** Таймаут именно этого вызова (по умолчанию — UPSTREAM_TIMEOUT_MS). */
   timeoutMs?: number;
@@ -85,7 +93,7 @@ export interface BinaryBody {
   etag: string | null;
 }
 
-export interface BinaryOptions extends Omit<CallOptions, "body" | "idempotencyKey" | "mapServerError"> {
+export interface BinaryOptions extends Omit<CallOptions, "body" | "raw" | "idempotencyKey" | "mapServerError"> {
   /** Больше — ответ испорчен (503), тело дальше не читается. */
   maxBytes: number;
 }
@@ -155,7 +163,8 @@ export class DomainClient {
           ...(ro.actor ? { actor: ro.actor } : {}),
         }),
       };
-      if (ro.body !== undefined) headers["content-type"] = "application/json";
+      if (ro.raw) headers["content-type"] = ro.raw.contentType;
+      else if (ro.body !== undefined) headers["content-type"] = "application/json";
       if (ro.idempotencyKey) headers["idempotency-key"] = ro.idempotencyKey;
       // служебные заголовки (токен, тип, Idempotency-Key) дополнительными не перекрываются
       for (const [k, v] of Object.entries(ro.headers ?? {})) if (!(k.toLowerCase() in headers)) headers[k.toLowerCase()] = v;
@@ -165,7 +174,7 @@ export class DomainClient {
         resp = await this.fetchImpl(url, {
           method,
           headers,
-          body: ro.body !== undefined ? JSON.stringify(ro.body) : null,
+          body: ro.raw ? ro.raw.bytes : ro.body !== undefined ? JSON.stringify(ro.body) : null,
           signal: AbortSignal.timeout(ro.timeoutMs ?? this.o.timeoutMs),
         });
       } catch {

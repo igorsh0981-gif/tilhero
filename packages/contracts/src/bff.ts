@@ -324,8 +324,9 @@ export interface TodayPlan {
   next_slot: { local_date: string; time: string } | null;
   /** дни подряд с занятием в дни графика (дни вне графика серию не рвут) */
   streak_days: number;
-  /** текущая неделя пн…вс */
-  week: Array<{ local_date: string; scheduled: boolean; done: boolean; missed: boolean }>;
+  /** текущая неделя пн…вс. frozen (спринт 6) — день графика без занятия, закрытый заморозкой серии: missed остаётся
+   *  true, серия не рвётся */
+  week: Array<{ local_date: string; scheduled: boolean; done: boolean; missed: boolean; frozen: boolean }>;
 }
 /** GET /v1/plan/today → TodayPlan */
 /** POST /v1/plan/activity → TodayPlan. Заголовок Idempotency-Key (UUID) обязателен. Спринт 1 — «практика» из
@@ -1290,3 +1291,225 @@ export interface ReadingView {
   question_types: ReadingQuestionType[];
   est_minutes: number;
 }
+
+// =====================================================================================================================
+// Спринт 6 — игра и герои (APP-GAME-01…07, APP-PROG-01, APP-PROG-03)
+// Всё игровое — gamification через telegram-bff (/v1/game/*), у активного ученика (lrn). Игра не меняет уровень языка,
+// навыки, план и сроки повторения. XP и тилы начисляются сервером по событиям занятий — клиент их не задаёт.
+// Тилы за деньги — спринт 8: при нехватке тилов purchase_available=false, экран показывает «покупка тилов скоро».
+// Общие коды: 503 GAME_UNAVAILABLE (игровой блок скрыть, учёба работает); 404 HERO_NOT_FOUND | ITEM_NOT_FOUND;
+// 409 HERO_NOT_AVAILABLE; 409 INSUFFICIENT_TILS {price, balance, missing, purchase_available: false};
+// 409 ALREADY_OWNED; 409 FREEZE_STOCK_FULL {max}; 410 ITEM_NOT_AVAILABLE; 409 NOT_OWNED;
+// 422 IDEMPOTENCY_KEY_REUSED.
+// =====================================================================================================================
+
+export type GameCurrency = "xp" | "til" | "freeze";
+export type GameReason =
+  | "lesson" | "scenario" | "media" | "reading" | "review" | "skill_demonstrated" | "skill_retained"
+  | "quest" | "quest_bonus" | "registration_bonus" | "referral_bonus" | "streak_freeze" | "shop" | "manual"
+  | "reversal" | "purchase";
+export type HeroLine = "robot" | "pet" | "human";
+export type HeroStage = 1 | 2 | 3;
+export type QuestKind =
+  | "lesson_complete" | "review_cards" | "reading_complete" | "scenario_complete" | "media_complete" | "xp_earned"
+  | "skill_confirmed";
+export type GameAction = "lesson" | "scenario" | "media" | "reading" | "review" | "skill" | "quest";
+export type ShopItemKind = "background" | "hero_frame" | "streak_freeze";
+
+/** Картинка: url — GET /v1/game/assets/{asset_id}/{sha256} (без авторизации, неизменяемая; 304 по If-None-Match;
+ *  404 ASSET_NOT_FOUND — нет картинки или sha не совпал) */
+export interface GameImage {
+  asset_id: string;
+  url: string;
+  width: number;
+  height: number;
+}
+
+export interface GameSettings {
+  /** тратить заморозку автоматически за пропущенный день графика */
+  auto_freeze: boolean;
+  /** не выпускать задания дня */
+  quests_hidden: boolean;
+  /** quiet — без анимаций и конфетти (детям по умолчанию) */
+  celebrations: "full" | "quiet";
+  /** уведомления о значках и росте героя (о спасённой серии приходят всегда) */
+  game_notifications: boolean;
+}
+
+export interface HeroStageView {
+  stage: HeroStage;
+  name: Localized;
+  image: GameImage;
+  /** сколько подтверждённых навыков нужно для ступени */
+  skills_required: number;
+}
+
+export interface HeroView {
+  code: string; // "robot_0" … "human_2"
+  line: HeroLine;
+  name: Localized;
+  tagline: Localized;
+  stages: HeroStageView[];
+}
+
+/** Герой ученика: ступень общая для всех героев, растёт только за подтверждённые навыки */
+export interface MyHero {
+  code: string;
+  name: Localized;
+  stage: HeroStage;
+  stage_name: Localized;
+  image: GameImage;
+  confirmed_skills: number;
+  /** навыков до следующей ступени; null — последняя ступень */
+  next_stage_at: number | null;
+}
+
+export interface Quest {
+  slot: 1 | 2 | 3;
+  code: string;
+  kind: QuestKind;
+  target: number;
+  progress: number;
+  status: "active" | "completed" | "expired";
+  reward: { xp: number; til: number };
+}
+
+export interface DailyQuests {
+  local_date: string;
+  /** скрыты в настройках — items пусто */
+  hidden: boolean;
+  items: Quest[];
+  all_done_bonus: { xp: number; til: number };
+  bonus_received: boolean;
+}
+
+export interface ActiveGameEvent {
+  event_id: string;
+  title: Localized;
+  description: Localized;
+  ends_at: string;
+  multipliers: Array<{ action: GameAction; currency: "xp" | "til"; factor: number }>;
+}
+
+/** GET /v1/game/summary → GameSummary (главная, профиль). Задания дня выпускаются при первом запросе дня. */
+export interface GameSummary {
+  level: number;
+  xp_total: number;
+  /** XP на начало текущего уровня и порог следующего (null — последний уровень) */
+  xp_level_start: number;
+  xp_next_level: number | null;
+  til_balance: number;
+  freeze_stock: number;
+  freeze_max: number;
+  freeze_price_til: number;
+  /** null — герой ещё не выбран (показать выбор) */
+  hero: MyHero | null;
+  quests: DailyQuests;
+  events: ActiveGameEvent[];
+  equipment: { background: ShopItemRef | null; frame: ShopItemRef | null };
+  settings: GameSettings;
+  /** покупка тилов за деньги — спринт 8 */
+  purchase_available: false;
+}
+
+export interface ShopItemRef {
+  code: string;
+  kind: ShopItemKind;
+  title: Localized;
+  image: GameImage | null;
+  /** ключи токенов темы для фона/рамки (не CSS) */
+  theme: { bg: string; accent: string } | null;
+}
+
+/** GET /v1/game/heroes → HeroesResponse (детям первыми — дракончики) */
+export interface HeroesResponse {
+  items: HeroView[];
+  selected: string | null;
+  stage: HeroStage;
+}
+/** PUT /v1/game/hero {hero_code} → GameSummary. Смена бесплатна, XP и ступень сохраняются. */
+export interface SelectHeroRequest {
+  hero_code: string;
+}
+
+/** GET /v1/game/quests → DailyQuests */
+
+export interface BadgeView {
+  code: string; // first_lesson, streak_7, skills_10, reviews_100, readings_10, skill_retained, first_freeze…
+  title: Localized;
+  description: Localized;
+  image: GameImage | null;
+  earned_at: string | null;
+  /** основание (выдан) или прогресс (не выдан) */
+  basis: { metric: "lessons" | "streak" | "skills" | "skill_retained" | "reviews_cards" | "readings" | "freeze";
+    value: number; threshold: number };
+}
+/** GET /v1/game/badges → BadgesResponse (выданные первыми) */
+export interface BadgesResponse {
+  items: BadgeView[];
+}
+
+export interface ShopItemView extends ShopItemRef {
+  description: Localized;
+  price_til: number;
+  owned: boolean;
+  equipped: boolean;
+  can_buy: boolean;
+  /** почему нельзя купить: owned | freeze_full | not_enough_tils */
+  reason_unavailable: "owned" | "freeze_full" | "not_enough_tils" | null;
+  available_until: string | null;
+}
+/** GET /v1/game/shop → ShopResponse */
+export interface ShopResponse {
+  items: ShopItemView[];
+  til_balance: number;
+  freeze_stock: number;
+  freeze_max: number;
+}
+
+/** POST /v1/game/shop/purchases (Idempotency-Key обязателен) → PurchaseResult. Повтор ключа — тот же ответ. */
+export interface PurchaseRequest {
+  item_code: string;
+}
+export interface PurchaseResult {
+  purchase_id: string;
+  item_code: string;
+  price_til: number;
+  til_balance: number;
+  freeze_stock: number;
+  purchased_at: string;
+}
+
+/** PUT /v1/game/equipment → GameSummary. null — снять. 409 NOT_OWNED */
+export interface EquipmentRequest {
+  background_code: string | null;
+  frame_code: string | null;
+}
+
+export interface GameOperation {
+  op_id: string;
+  currency: GameCurrency;
+  amount: number;
+  reason: GameReason;
+  /** урезано дневным лимитом */
+  capped: boolean;
+  /** множитель события недели (1 — без события) */
+  multiplier: number;
+  status: "confirmed" | "reversed";
+  created_at: string;
+}
+/** GET /v1/game/history?currency=&cursor= → Page<GameOperation> (новые сверху, по 30). Ручные операции поддержки —
+ *  reason "manual", без комментария сотрудника. */
+
+/** GET /v1/game/rewards?source_session_id=<uuid> → SessionRewards. Награды начисляются по событиям асинхронно:
+ *  pending — опрашивать каждые 1.5 с, до 8 раз; none — наград не было. */
+export interface SessionRewards {
+  status: "pending" | "ready" | "none";
+  operations: GameOperation[];
+  level_up: { from: number; to: number } | null;
+  hero_stage_up: { from: HeroStage; to: HeroStage } | null;
+  badges: BadgeView[];
+  quests_completed: Quest[];
+}
+
+/** GET /v1/game/settings → GameSettings; PATCH /v1/game/settings (Partial<GameSettings>) → GameSettings */

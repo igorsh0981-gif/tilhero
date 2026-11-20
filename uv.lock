@@ -18,6 +18,7 @@ members = [
     "tilhero-common",
     "tilhero-diagnostics",
     "tilhero-experience",
+    "tilhero-gamification",
     "tilhero-identity",
     "tilhero-learning-plan",
     "tilhero-lessons",
@@ -2176,6 +2177,17 @@ requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
 name = "tilhero-experience"
 version = "0.1.0"
 source = { editable = "services/experience-config" }
+dependencies = [
+    { name = "tilhero-common" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
+
+[[package]]
+name = "tilhero-gamification"
+version = "0.1.0"
+source = { editable = "services/gamification" }
 dependencies = [
     { name = "tilhero-common" },
 ]

@@ -136,7 +136,7 @@ Redis: `pin:fail:<user_id>`, `pin:lock:<user_id>`, `pin_reset:code:<user_id>`, `
 | `PIN_RESET_CODE_TTL_SECONDS`, `PIN_RESET_CODE_MAX_ATTEMPTS` | 600, 5 | |
 | `PIN_RESET_MIN_INTERVAL_SECONDS`, `PIN_RESET_DAILY_LIMIT` | 60, 5 | |
 | `PIN_RESET_DELAY_HOURS` | 24 | через сколько часов новый код из сброса начинает действовать (0 < N ≤ 168) |
-| `DELETION_DOMAINS` | `["learning-plan","social","notifications","support","experience-config","catalog","diagnostics","lessons","assessment","ai-gateway","memory"]` | JSON-список доменов, чей ACK нужен до обезличивания (спринт 5: + `memory` — карточки, история планирования, проверки удержания, попытки произношения) |
+| `DELETION_DOMAINS` | `["learning-plan","social","notifications","support","experience-config","catalog","diagnostics","lessons","assessment","ai-gateway","memory","gamification"]` | JSON-список доменов, чей ACK нужен до обезличивания (спринт 5: + `memory` — карточки, история планирования, проверки удержания, попытки произношения; спринт 6: + `gamification` — реестр XP, тилов и заморозок, кошелёк, инвентарь, задания, значки, рефералы; обезличенная дневная статистика остаётся) |
 | `DELETION_RETRY_SCHEDULE_MINUTES` | `15,60,240,720,1440` | точки повтора от запроса, дальше раз в сутки |
 | `DELETION_STUCK_HOURS` | 24 | через сколько часов без полного ACK запрос — `STUCK` |
 | `DELETION_SWEEP_SECONDS` | 60 | период таймера саги (0 — выключен) |

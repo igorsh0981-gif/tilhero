@@ -1,4 +1,20 @@
 import type {
+  AdminGameEvent,
+  AdminGameImage,
+  AdminHero,
+  AdminHeroFields,
+  AdminLedgerOperation,
+  AdminShopItem,
+  AdminWallet,
+  GameEventFields,
+  GameEventStatus,
+  GameOverview,
+  RulesDraftRequest,
+  RulesValidation,
+  RulesVersion,
+  RulesVersionSummary,
+  ShopItemCreate,
+  WalletAdjustment,
   AdminCardDetail,
   AdminCardRow,
   CardAction,
@@ -110,6 +126,7 @@ import type {
 import type { Ticket as ClientTicket } from "@tilhero/contracts/bff";
 import type { Band, ContentKind, GlossaryReviewStatus, GlossarySource, MediaRequestStatus, ScenarioTestRun, VersionStatus } from "@tilhero/contracts/content";
 import type { SessionKind } from "@tilhero/contracts/ai";
+import type { GameCurrency } from "@tilhero/contracts/bff";
 import { api } from "./client";
 
 export type { SlaPolicies, SlaPolicy, SupportStats };
@@ -476,4 +493,54 @@ export const Memory = {
   act: (cardId: string, action: CardAction, idempotencyKey: string) => api.post<AdminCardDetail>(`/memory/cards/${enc(cardId)}/actions`, action, { idempotencyKey }),
   analytics: (period: ForgettingAnalytics["period"], pairId?: string) => api.get<ForgettingAnalytics>("/memory/analytics", { query: { period, pair_id: pairId } }),
   stats: (period: Period) => api.get<MemoryStats>("/memory/stats", { query: { period } }),
+};
+
+/* ---------------------------------------------------------------- game and heroes (gamification via admin-bff, sprint 6) */
+
+export type AssetPurpose = "hero_stage" | "shop_item" | "badge";
+
+/**
+ * «Герои», «Геймификация», «События и сезоны» (admin.ts «Игра и герои»). Reads — game.read; drafts, pictures, shop
+ * items and events — game.manage; activation / rollback of the rules, publication of heroes, items and events —
+ * game.publish + step-up; manual wallet operations, reversals and refunds — wallet.adjust + step-up. The client never
+ * sends an amount or a reason of an automatic award: only staff commands with their own reason.
+ */
+export const Game = {
+  overview: (period: GameOverview["period"]) => api.get<GameOverview>("/game/overview", { query: { period } }),
+  /* rules: draft → validate → activate (step-up, comment ≥ 10); rollback = a new version from an archived one */
+  rules: () => api.get<{ items: RulesVersionSummary[] }>("/game/rules"),
+  rulesVersion: (v: number) => api.get<RulesVersion>(`/game/rules/${v}`),
+  /** If-Match: `updated_at` of the draft that was read (409 DRAFT_CONFLICT when someone saved in between); none for a new draft */
+  saveDraft: (body: RulesDraftRequest, ifMatch: string | null) => api.put<RulesVersion>("/game/rules/draft", body, ifMatch ? { headers: { "If-Match": ifMatch } } : {}),
+  deleteDraft: () => api.del<void>("/game/rules/draft"),
+  validate: () => api.post<RulesValidation>("/game/rules/draft/validate"),
+  activate: (comment: string, idempotencyKey: string) => api.post<RulesVersion>("/game/rules/draft/activate", { comment }, { idempotencyKey }),
+  rollback: (version: number, comment: string, idempotencyKey: string) => api.post<RulesVersion>(`/game/rules/${version}/rollback`, { comment }, { idempotencyKey }),
+  /* heroes and pictures */
+  heroes: () => api.get<{ items: AdminHero[] }>("/game/heroes"),
+  saveHero: (code: string, body: AdminHeroFields) => api.put<AdminHero>(`/game/heroes/${enc(code)}/draft`, body),
+  publishHero: (code: string, comment: string, idempotencyKey: string) => api.post<AdminHero>(`/game/heroes/${enc(code)}/publish`, { comment }, { idempotencyKey }),
+  /** raw bytes ≤ 300 KB, ≤ 1024×1024 (413 ASSET_TOO_LARGE, 422 ASSET_INVALID); the same picture → the same asset_id */
+  upload: (data: Uint8Array, type: "image/webp" | "image/png", purpose: AssetPurpose) => api.upload<AdminGameImage>(`/game/assets?purpose=${enc(purpose)}`, data, type),
+  /* shop */
+  items: () => api.get<{ items: AdminShopItem[] }>("/game/shop/items"),
+  createItem: (body: ShopItemCreate, idempotencyKey: string) => api.post<AdminShopItem>("/game/shop/items", body, { idempotencyKey }),
+  patchItem: (code: string, body: Partial<ShopItemCreate>) => api.patch<AdminShopItem>(`/game/shop/items/${enc(code)}`, body),
+  publishItem: (code: string, comment: string, idempotencyKey: string) => api.post<AdminShopItem>(`/game/shop/items/${enc(code)}/publish`, { comment }, { idempotencyKey }),
+  retireItem: (code: string, comment: string, idempotencyKey: string) => api.post<AdminShopItem>(`/game/shop/items/${enc(code)}/retire`, { comment }, { idempotencyKey }),
+  /* events of the week */
+  events: (status?: GameEventStatus | "") => api.get<{ items: AdminGameEvent[] }>("/game/events", { query: { status } }),
+  createEvent: (body: GameEventFields, idempotencyKey: string) => api.post<AdminGameEvent>("/game/events", body, { idempotencyKey }),
+  patchEvent: (id: string, body: Partial<GameEventFields>) => api.patch<AdminGameEvent>(`/game/events/${enc(id)}`, body),
+  publishEvent: (id: string, comment: string, idempotencyKey: string) => api.post<AdminGameEvent>(`/game/events/${enc(id)}/publish`, { comment }, { idempotencyKey }),
+  cancelEvent: (id: string, comment: string, idempotencyKey: string) => api.post<AdminGameEvent>(`/game/events/${enc(id)}/cancel`, { comment }, { idempotencyKey }),
+  /* wallets of learners */
+  wallet: (userId: string) => api.get<AdminWallet>(`/game/wallets/${enc(userId)}`),
+  ledger: (userId: string, currency: GameCurrency | "", cursor?: string | null) =>
+    api.get<Page<AdminLedgerOperation>>(`/game/wallets/${enc(userId)}/ledger`, { query: { currency, cursor, limit: 50 } }),
+  adjust: (userId: string, body: WalletAdjustment, idempotencyKey: string) => api.post<AdminLedgerOperation>(`/game/wallets/${enc(userId)}/adjustments`, body, { idempotencyKey }),
+  reverse: (userId: string, opId: string, reason: string, idempotencyKey: string) =>
+    api.post<AdminLedgerOperation>(`/game/wallets/${enc(userId)}/ledger/${enc(opId)}/reverse`, { reason }, { idempotencyKey }),
+  refund: (userId: string, purchaseId: string, reason: string, idempotencyKey: string) =>
+    api.post<{ operations: AdminLedgerOperation[] }>(`/game/wallets/${enc(userId)}/purchases/${enc(purchaseId)}/refund`, { reason }, { idempotencyKey }),
 };

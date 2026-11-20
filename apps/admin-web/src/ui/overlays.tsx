@@ -148,6 +148,8 @@ export interface ConfirmProps {
   reasonLabel?: string;
   reasonPlaceholder?: string;
   minReason?: number;
+  /** upper bound of the reason (the textarea shows a counter and refuses longer text with an error) */
+  maxReason?: number;
   extra?: ReactNode;
   /** the confirm button is inactive while `extra` holds an invalid choice (its own error is shown at the field) */
   okDisabled?: boolean;
@@ -166,10 +168,16 @@ export function ConfirmCommand(p: ConfirmProps) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const min = p.minReason ?? 5;
+  const max = p.maxReason;
+  const over = max != null && reason.trim().length > max;
   const submit = async () => {
     if (busy || p.okDisabled) return;
     if (reason.trim().length < min) {
       setErr(t("cmd.errReason", { n: min }));
+      return;
+    }
+    if (max != null && reason.trim().length > max) {
+      setErr(t("cmd.errReasonMax", { n: max }));
       return;
     }
     setBusy(true);
@@ -204,17 +212,24 @@ export function ConfirmCommand(p: ConfirmProps) {
     >
       {p.extra}
       <div className="field">
-        <label htmlFor="cmd-reason" className="req">
-          {p.reasonLabel ?? t("cmd.reason")}
-        </label>
+        <div className="field-top">
+          <label htmlFor="cmd-reason" className="req">
+            {p.reasonLabel ?? t("cmd.reason")}
+          </label>
+          {max != null && (
+            <span className={cx("counter", over && "is-over")} data-testid="cmd-reason-count">
+              {reason.trim().length}/{max}
+            </span>
+          )}
+        </div>
         <textarea
           id="cmd-reason"
-          className={cx("textarea", err && reason.trim().length < min && "is-invalid")}
+          className={cx("textarea", ((err && reason.trim().length < min) || over) && "is-invalid")}
           rows={3}
           data-autofocus=""
           placeholder={p.reasonPlaceholder ?? t("cmd.reasonPh")}
           value={reason}
-          maxLength={500}
+          maxLength={max != null ? max * 2 : 500}
           onChange={(e) => setReason(e.target.value)}
         />
       </div>

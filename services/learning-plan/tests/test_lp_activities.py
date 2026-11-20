@@ -15,10 +15,12 @@ async def test_practice_recorded_with_event(env, user) -> None:
     assert today["local_date"] == "2026-11-16" and today["minutes_today"] == 12 and today["done_today"] is True
     assert today["is_scheduled_today"] is True and today["slot_time"] == "19:00" and today["duration_min"] == 20
     assert today["streak_days"] == 1 and today["next_slot"] == {"local_date": "2026-11-17", "time": "19:00"}
-    assert today["week"][0] == {"local_date": "2026-11-16", "scheduled": True, "done": True, "missed": False}
+    assert today["week"][0] == {"local_date": "2026-11-16", "scheduled": True, "done": True, "missed": False,
+                                "frozen": False}
     [ev] = await env.events("learning.activity.recorded.v1", user)
     assert ev.payload == {"user_id": str(user), "activity_id": ev.payload["activity_id"], "local_date": "2026-11-16",
-                          "kind": "practice", "minutes": 12, "recorded_at": "2026-11-16T08:00:00Z"}
+                          "kind": "practice", "minutes": 12, "recorded_at": "2026-11-16T08:00:00Z",
+                          "streak_days": 1}
     # план по умолчанию создан при первом занятии
     assert (await env.c.get("/internal/v1/me/plan", headers=env.h(user))).status_code == 200
 
@@ -105,8 +107,10 @@ async def test_streak_and_week_use_missed_marks(env, user) -> None:
     today = (await env.c.get("/internal/v1/me/plan/today", headers=env.h(user))).json()
     assert today["streak_days"] == 1  # только сб после пропуска пт
     week = {d["local_date"]: d for d in today["week"]}
-    assert week["2026-11-20"] == {"local_date": "2026-11-20", "scheduled": True, "done": False, "missed": True}
-    assert week["2026-11-21"] == {"local_date": "2026-11-21", "scheduled": False, "done": True, "missed": False}
+    assert week["2026-11-20"] == {"local_date": "2026-11-20", "scheduled": True, "done": False, "missed": True,
+                                  "frozen": False}
+    assert week["2026-11-21"] == {"local_date": "2026-11-21", "scheduled": False, "done": True, "missed": False,
+                                  "frozen": False}
     assert week["2026-11-17"]["missed"] is False
     # занятие задним числом за пт снимает пропуск в неделе и серию больше не рвёт
     env.now = datetime(2026, 11, 22, 8, 0, tzinfo=UTC)

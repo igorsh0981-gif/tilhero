@@ -207,6 +207,35 @@ const CONTRACT_ROUTES = [
   "POST /admin/v1/memory/cards/:cardId/actions",
   "GET /admin/v1/memory/analytics",
   "GET /admin/v1/memory/stats",
+  // спринт 6 — игра и герои (gamification)
+  "GET /admin/v1/game/overview",
+  "GET /admin/v1/game/rules",
+  "GET /admin/v1/game/rules/:version",
+  "PUT /admin/v1/game/rules/draft",
+  "DELETE /admin/v1/game/rules/draft",
+  "POST /admin/v1/game/rules/draft/validate",
+  "POST /admin/v1/game/rules/draft/activate",
+  "POST /admin/v1/game/rules/:version/rollback",
+  "GET /admin/v1/game/heroes",
+  "PUT /admin/v1/game/heroes/:code/draft",
+  "POST /admin/v1/game/heroes/:code/publish",
+  "POST /admin/v1/game/assets",
+  "GET /admin/v1/game/assets/:assetId/content",
+  "GET /admin/v1/game/shop/items",
+  "POST /admin/v1/game/shop/items",
+  "PATCH /admin/v1/game/shop/items/:code",
+  "POST /admin/v1/game/shop/items/:code/publish",
+  "POST /admin/v1/game/shop/items/:code/retire",
+  "GET /admin/v1/game/events",
+  "POST /admin/v1/game/events",
+  "PATCH /admin/v1/game/events/:id",
+  "POST /admin/v1/game/events/:id/publish",
+  "POST /admin/v1/game/events/:id/cancel",
+  "GET /admin/v1/game/wallets/:userId",
+  "GET /admin/v1/game/wallets/:userId/ledger",
+  "POST /admin/v1/game/wallets/:userId/adjustments",
+  "POST /admin/v1/game/wallets/:userId/ledger/:opId/reverse",
+  "POST /admin/v1/game/wallets/:userId/purchases/:purchaseId/refund",
 ];
 
 describe("реестр маршрутов", () => {
@@ -281,6 +310,18 @@ describe("реестр маршрутов", () => {
         "POST /admin/v1/qa/appeals/:id/decide",
         // спринт 5: ручная правка карточки памяти ученика (memory.manage); словарь курса — без step-up
         "POST /admin/v1/memory/cards/:cardId/actions",
+        // спринт 6: активация и откат правил, публикация героев, предметов и событий (game.publish)
+        "POST /admin/v1/game/rules/draft/activate",
+        "POST /admin/v1/game/rules/:version/rollback",
+        "POST /admin/v1/game/heroes/:code/publish",
+        "POST /admin/v1/game/shop/items/:code/publish",
+        "POST /admin/v1/game/shop/items/:code/retire",
+        "POST /admin/v1/game/events/:id/publish",
+        "POST /admin/v1/game/events/:id/cancel",
+        // ручная операция, обратная запись, возврат покупки (wallet.adjust)
+        "POST /admin/v1/game/wallets/:userId/adjustments",
+        "POST /admin/v1/game/wallets/:userId/ledger/:opId/reverse",
+        "POST /admin/v1/game/wallets/:userId/purchases/:purchaseId/refund",
         // все команды по сотрудникам, ролям, заявкам
         "POST /admin/v1/staff",
         "PATCH /admin/v1/staff/:id",
@@ -307,6 +348,8 @@ describe("реестр маршрутов", () => {
         "ai.read", "qa.read", "costs.read", "costs.manage",
         // спринт 5
         "memory.read", "memory.manage",
+        // спринт 6
+        "game.read", "game.manage", "game.publish", "wallet.adjust",
       ].sort(),
     );
     // спринт 3 (docs/sprint3/PLAN.md «Права и роли») + спринт 4 (docs/sprint4/PLAN.md «Права и роли»)
@@ -316,9 +359,13 @@ describe("реестр маршрутов", () => {
         "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review",
         // спринт 5
         "memory.read", "glossary.manage",
+        // спринт 6
+        "game.read",
       ].sort(),
     );
-    expect([...DEFAULT_ROLE_MATRIX.content_manager].sort()).toEqual(["content.read", "content.edit", "media.rights", "dashboard.read", "glossary.manage"].sort());
+    expect([...DEFAULT_ROLE_MATRIX.content_manager].sort()).toEqual(
+      ["content.read", "content.edit", "media.rights", "dashboard.read", "glossary.manage", "game.read", "game.manage"].sort(),
+    );
     expect([...DEFAULT_ROLE_MATRIX.qa_analyst].sort()).toEqual(["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts", "memory.read"].sort());
     for (const r of ["analyst", "auditor"] as const) {
       expect(DEFAULT_ROLE_MATRIX[r]).toContain("content.read");
@@ -335,6 +382,11 @@ describe("реестр маршрутов", () => {
     expect(holders("memory.manage")).toEqual(["operations", "super_admin"]);
     expect(holders("glossary.manage")).toEqual(["content_manager", "methodist", "super_admin"]);
     expect(holders("memory.read")).toEqual(["analyst", "auditor", "methodist", "operations", "qa_analyst", "super_admin"]);
+    // спринт 6 (docs/sprint6/PLAN.md «Права и роли»): wallet.adjust — только super_admin и operations
+    expect(holders("game.read")).toEqual(["analyst", "auditor", "content_manager", "methodist", "operations", "super_admin", "support"]);
+    expect(holders("game.manage")).toEqual(["content_manager", "operations", "super_admin"]);
+    expect(holders("game.publish")).toEqual(["operations", "super_admin"]);
+    expect(holders("wallet.adjust")).toEqual(["operations", "super_admin"]);
     expect(DEFAULT_ROLE_MATRIX.super_admin).toEqual(ALL_PERMISSIONS);
     for (const r of ROLE_CODES) expect(DEFAULT_ROLE_MATRIX[r].includes("lang.manage"), r).toBe(r === "super_admin");
     for (const r of ROLE_CODES) expect(DEFAULT_ROLE_MATRIX[r].includes("content.review"), r).toBe(r === "super_admin" || r === "methodist");
@@ -453,7 +505,7 @@ describe("actor-токен в домены", () => {
       id: staff.staff_id,
       role: "support",
       name: "Мария Оператор",
-      permissions: ["dashboard.read", "support.read", "support.reply", "users.read"],
+      permissions: ["dashboard.read", "game.read", "support.read", "support.reply", "users.read"],
     });
     // токен для другого домена не принимается этим доменом
     await expect(verifyInternalToken(token, INTERNAL_SECRET, "support")).rejects.toMatchObject({ code: "INTERNAL_TOKEN_INVALID" });
@@ -623,7 +675,7 @@ describe("имперсонация", () => {
     const me = res.json() as Me;
     expect(me.impersonating).toBe("support");
     expect(me.staff.role).toBe("super_admin");
-    expect(me.permissions).toEqual(["dashboard.read", "support.read", "support.reply", "users.read"]);
+    expect(me.permissions).toEqual(["dashboard.read", "game.read", "support.read", "support.reply", "users.read"]);
     const audit = h.fake.callsTo("audit", "POST", "/internal/v1/records")[0]!;
     expect(audit.body).toMatchObject({ action: "dev.impersonate", after: { impersonating: "support" } });
 
@@ -631,7 +683,7 @@ describe("имперсонация", () => {
     expect((await h.app.inject({ url: "/admin/v1/staff", headers: browser(s) })).statusCode).toBe(403);
     await h.app.inject({ url: "/admin/v1/learners", headers: browser(s) });
     const actor = h.fake.callsTo("userAdmin", "GET", "/admin/v1/learners").at(-1)!.actor!;
-    expect(actor).toEqual({ id: staff.staff_id, role: "super_admin", name: staff.display_name, permissions: ["dashboard.read", "support.read", "support.reply", "users.read"] });
+    expect(actor).toEqual({ id: staff.staff_id, role: "super_admin", name: staff.display_name, permissions: ["dashboard.read", "game.read", "support.read", "support.reply", "users.read"] });
 
     // проверка по роли при имперсонации тоже сужается: super_admin, примеривший support, не утверждает заявки
     await stepUp(h, s);

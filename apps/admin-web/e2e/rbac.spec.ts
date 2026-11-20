@@ -5,10 +5,10 @@ import { MATRIX } from "./fixtures/data";
 
 const menu = async (page: import("@playwright/test").Page) => page.locator("[data-nav]").evaluateAll((els) => els.map((e) => e.getAttribute("data-nav")));
 
-test("support sees overview, learners, support and the «soon» sections; not news, config, roles, audit", async ({ page }) => {
+test("support sees overview, learners, support and the game (game.read, sprint 6); not news, config, roles, audit", async ({ page }) => {
   await openAs(page, "support@tilhero.local");
   const ids = await menu(page);
-  expect(ids).toEqual(expect.arrayContaining(["overview", "users", "support"]));
+  expect(ids).toEqual(expect.arrayContaining(["overview", "users", "support", "heroes", "game", "events"]));
   for (const x of ["news", "config", "roles", "audit"]) expect(ids).not.toContain(x);
   // a forbidden section by link → toast + the start screen
   await page.evaluate(() => (window.location.hash = "#/roles"));
@@ -25,13 +25,14 @@ test("communications: «news» with the three tabs; the 15 menu ids and groups o
   await expect(page.getByTestId("news-tab-campaigns")).toBeVisible();
 });
 
-test("super admin: 15 sections + «memory» (sprint 5) in 5 groups; a «soon» section shows its sprint; content and languages are live (sprint 3)", async ({ page }) => {
+test("super admin: 15 sections + «memory» (sprint 5) in 5 groups; the game sections are live (sprint 6), so are content and languages (sprint 3)", async ({ page }) => {
   await openAs(page, "admin@tilhero.local");
   expect(await menu(page)).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit"]);
   await expect(page.locator(".sn-group")).toHaveCount(5);
+  await expect(page.locator(".sn-tag")).toHaveCount(0);
   await page.locator('[data-nav="heroes"]').click();
-  await expect(page.getByTestId("soon")).toBeVisible();
-  await expect(page.getByTestId("soon-sprint")).toContainText("6");
+  await expect(page.getByTestId("heroes")).toBeVisible();
+  await expect(page.getByTestId("soon")).toHaveCount(0);
   await page.locator('[data-nav="content"]').click();
   await expect(page.getByTestId("content")).toBeVisible();
   await expect(page.getByTestId("soon")).toHaveCount(0);

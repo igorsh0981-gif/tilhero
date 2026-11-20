@@ -116,6 +116,10 @@ export interface Config {
   ttsUrl: string | undefined;
   /** Таймаут вызова tts, мс (15 000), без повторов: синтез длинной фразы — секунды, кеш у tts. */
   ttsTimeoutMs: number;
+  /** gamification (8117, спринт 6): игра ученика и картинки героев/предметов. Необязателен даже в stage/prod: без адреса
+   *  маршруты /v1/game/* отвечают 503 GAME_UNAVAILABLE (Mini App скрывает игровой блок, учёба работает). Таймаут и
+   *  повторы GET — общие UPSTREAM_TIMEOUT_MS / UPSTREAM_RETRIES. */
+  gamificationUrl: string | undefined;
 
   rateLimits: RateLimits;
   rateLimiting: RateLimiting;
@@ -304,18 +308,22 @@ export function loadConfig(env: Env = process.env): Config {
     problems.push("REFRESH_TTL_SECONDS должен быть больше ACCESS_TTL_SECONDS");
   }
 
-  // ---- tts: необязательный адрес (нет — озвучка недоступна, остальное работает)
-  let ttsUrl = raw("TTS_URL");
-  if (ttsUrl !== undefined) {
+  /** Необязательный адрес домена: нет — функция недоступна (503 своим кодом), остальное работает. */
+  const optionalUrl = (name: string): string | undefined => {
+    const v = raw(name);
+    if (v === undefined) return undefined;
     try {
-      const u = new URL(ttsUrl);
+      const u = new URL(v);
       if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("protocol");
-      ttsUrl = ttsUrl.replace(/\/+$/, "");
+      return v.replace(/\/+$/, "");
     } catch {
-      problems.push(`TTS_URL=${JSON.stringify(ttsUrl)}: ожидается http(s) URL`);
-      ttsUrl = undefined;
+      problems.push(`${name}=${JSON.stringify(v)}: ожидается http(s) URL`);
+      return undefined;
     }
-  }
+  };
+  // ---- tts (озвучка) и gamification (игра, спринт 6) — необязательны
+  const ttsUrl = optionalUrl("TTS_URL");
+  const gamificationUrl = optionalUrl("GAMIFICATION_URL");
 
   const rlEnabledRaw = raw("RATE_LIMITS_ENABLED")?.toLowerCase();
   if (rlEnabledRaw !== undefined && !["true", "false", "1", "0"].includes(rlEnabledRaw)) {
@@ -373,6 +381,7 @@ export function loadConfig(env: Env = process.env): Config {
     audienceCacheSeconds: int("AUDIENCE_CACHE_SECONDS", 30, 0, 600),
     ttsUrl,
     ttsTimeoutMs: int("TTS_TIMEOUT_MS", 15_000, 1000, 60_000),
+    gamificationUrl,
     rateLimits: {
       userPerMinute: int("RATE_LIMIT_USER_PER_MIN", 120, 1, 100_000),
       sessionPerIpPerMinute: int("RATE_LIMIT_SESSION_IP_PER_MIN", 10, 1, 100_000),

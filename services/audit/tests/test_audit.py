@@ -41,7 +41,7 @@ AUDITOR = Actor(id="staff-7", role="auditor", permissions=frozenset({"audit.read
 SUPPORT = Actor(id="staff-8", role="support", permissions=frozenset({"support.reply"}))
 SPRINT1_WRITERS = ("identity-consent", "learning-plan", "social", "experience-config", "support", "notifications")
 BUS_WRITERS = (*SPRINT1_WRITERS, "admin-identity", "catalog", "diagnostics", "lessons", "assessment", "ai-gateway",
-               "memory")
+               "memory", "gamification")
 HTTP_WRITERS = ("identity-consent",)
 
 
@@ -147,6 +147,11 @@ WRITER_RECORDS: dict[str, dict[str, Any]] = {
                      before={"status": "review", "due_at": "2026-11-21T08:00:00Z"},
                      after={"status": "review", "due_at": "2026-11-28T08:00:00Z", "action": "reschedule"},
                      reason="Ученик в отпуске неделю, перенос по обращению"),
+    # спринт 6: ручная операция с кошельком (wallet.adjust, step-up) — отдельной записью, без текстов ученика
+    "gamification": record(actor_id=str(uuid.uuid4()), actor_role="operations", action="game.wallet_adjusted",
+                           object_type="game_wallet", object_id=str(uuid.uuid4()), before={"til_balance": 10},
+                           after={"til_balance": 60, "currency": "til", "amount": 50},
+                           reason="Компенсация за сбой начисления по обращению"),
 }
 
 

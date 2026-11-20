@@ -1,5 +1,6 @@
 /** Russian — the source dictionary. Keys are the MessageKey type; uz.ts must have exactly the same keys. */
 import { ruContent } from "./ru.content";
+import { ruGame } from "./ru.game";
 import { ruLessons } from "./ru.lessons";
 import { ruMemory } from "./ru.memory";
 
@@ -7,6 +8,7 @@ export const ru = {
   ...ruContent,
   ...ruLessons,
   ...ruMemory,
+  ...ruGame,
   // ---- common ----
   "c.continue": "Продолжить",
   "c.back": "Назад",
@@ -233,9 +235,6 @@ export const ru = {
   "wd.missed": "пропуск",
   "wd.planned": "по графику",
   "wd.rest": "без занятия",
-  "home.hero": "Вольт · «Сборка»",
-  "home.heroKid": "Мятик · «Яйцо»",
-  "home.heroText": "Герой растёт только за подтверждённые навыки. Первые уроки — скоро.",
   "home.lessonNote": "скоро",
   "home.lessonCap": "Урок дня · 20 мин",
   "home.lessonTitle": "Уроки с ИИ-коучем",

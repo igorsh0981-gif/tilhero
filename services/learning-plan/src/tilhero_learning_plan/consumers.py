@@ -12,7 +12,10 @@
   (R1-05; сопоставление по session_id, порядок событий любой); `assessment.reevaluated.v1` (assessment) — новый исход
   пройденного урока после переоценки (сессия — по заменённой оценке: session_id в событии нет);
 - спринт 5 (INTERNAL_API §6, AT-59): `memory.review.completed.v1` (memory) — занятие `review` («Повторение дня»,
-  идемпотентно по session_id, 0 минут не засчитывается); kind `reading` у событий уроков — практика.
+  идемпотентно по session_id, 0 минут не засчитывается); kind `reading` у событий уроков — практика;
+- спринт 6 (INTERNAL_API спринта 6 §2, AT-66): `game.streak.frozen.v1` (только gamification) — день закрыт
+  заморозкой серии (`frozen_days`, повтор ничего не меняет): пропуск этого дня не рвёт серию и цепочку пропусков,
+  неделя TodayPlan показывает `frozen`. Единственное обратное влияние игры на учёбу.
 
 Издатель проверяется (защита в глубину, как у саги, ревью P-7): событие чужого издателя — предупреждение в логе
 (тип события и издатель, без user_id) и подтверждение шине без действия. Невалидный payload — исключение → DLQ.
@@ -32,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tilhero_common.messaging import Envelope
 from tilhero_learning_plan.domain import lessons as ls
 from tilhero_learning_plan.domain import trajectory as tr
-from tilhero_learning_plan.domain.plans import delete_user_data
+from tilhero_learning_plan.domain.plans import delete_user_data, record_frozen_day
 
 DELETION_REQUESTED = "user.deletion.requested.v1"
 DIAGNOSTICS_COMPLETED = "diagnostics.completed.v1"
@@ -44,6 +47,7 @@ SESSION_COMPLETED = "lesson.session.completed.v1"
 REEVALUATED = "assessment.reevaluated.v1"
 ASSESSMENT_COMPLETED = "assessment.completed.v1"
 REVIEW_COMPLETED = "memory.review.completed.v1"
+STREAK_FROZEN = "game.streak.frozen.v1"
 PRODUCER = "learning-plan"
 # Сагу удаления ведёт только identity-consent: запрос от другого издателя не исполняется (защита в глубину, P-7)
 DELETION_PRODUCERS = frozenset({"identity-consent"})
@@ -57,6 +61,7 @@ PRODUCERS = {
     REEVALUATED: frozenset({"assessment"}),
     ASSESSMENT_COMPLETED: frozenset({"assessment"}),
     REVIEW_COMPLETED: frozenset({"memory"}),
+    STREAK_FROZEN: frozenset({"gamification"}),
 }
 MAX_PAIR_LEN = 64
 
@@ -175,6 +180,15 @@ class ReviewCompletedIn(_Payload):
     reviewed: Annotated[int, Field(ge=0)]
     correct: Annotated[int, Field(ge=0)]
     finished_at: AwareDatetime
+
+
+class StreakFrozenIn(_Payload):
+    """game.streak.frozen.v1 (спринт 6): нужны ученик, день и операция списания; freeze_left — для уведомлений."""
+
+    user_id: uuid.UUID
+    local_date: date
+    op_id: uuid.UUID
+    frozen_at: AwareDatetime
 
 
 def _foreign(env: Envelope) -> bool:
@@ -322,11 +336,22 @@ def memory_handler(default_tz: str) -> Handler:
     return on_memory
 
 
+async def on_streak_frozen(session: AsyncSession, env: Envelope) -> None:
+    """game.streak.frozen.v1 → день закрыт заморозкой (`frozen_days`). Повтор доставки — inbox; повторная публикация
+    (новый event_id) — ON CONFLICT по (ученик, день). После удаления ученика — без действия. Чужой издатель — лог."""
+    if _foreign(env):
+        return
+    f = StreakFrozenIn.model_validate(env.payload)
+    inserted = await record_frozen_day(session, f.user_id, f.local_date, f.op_id)
+    log.info("streak freeze recorded", extra={"inserted": inserted})
+
+
 CONSUMERS: dict[str, tuple[list[str], Handler]] = {
     "learning-plan.user_deletion": ([DELETION_REQUESTED], on_deletion_requested),
     "learning-plan.diagnostics": ([DIAGNOSTICS_COMPLETED, SKILLS_CHANGED], on_diagnostics),
     "learning-plan.catalog": ([VERSION_PUBLISHED], on_catalog),
     "learning-plan.profiles": ([PROFILE_CREATED, PROFILE_UPDATED], on_profile),
+    "learning-plan.game": ([STREAK_FROZEN], on_streak_frozen),
 }
 LESSONS_DURABLE = "learning-plan.lessons"
 LESSONS_EVENTS = [SESSION_COMPLETED, ASSESSMENT_COMPLETED, REEVALUATED]

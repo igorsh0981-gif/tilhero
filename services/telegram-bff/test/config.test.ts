@@ -89,6 +89,15 @@ describe("loadConfig", () => {
     expect(problems({ MEMORY_PRONUNCIATION_TIMEOUT_MS: "500" })).toEqual(["MEMORY_PRONUNCIATION_TIMEOUT_MS=500: допустимо от 1000 до 60000"]);
   });
 
+  it("спринт 6: GAMIFICATION_URL необязателен и в stage/prod (без него игра — 503 GAME_UNAVAILABLE); если задан — только http(s)", () => {
+    expect(loadConfig({}).gamificationUrl).toBeUndefined();
+    expect(loadConfig(PROD_OK).gamificationUrl).toBeUndefined();
+    expect(loadConfig({ ...PROD_OK, GAMIFICATION_URL: "http://gamification.railway.internal:8117/" }).gamificationUrl).toBe("http://gamification.railway.internal:8117");
+    expect(loadConfig({ GAMIFICATION_URL: "  " }).gamificationUrl).toBeUndefined();
+    expect(problems({ ...PROD_OK, GAMIFICATION_URL: "gamification:8117" })).toEqual(['GAMIFICATION_URL="gamification:8117": ожидается http(s) URL']);
+    expect(problems({ GAMIFICATION_URL: "ftp://gamification" })).toEqual(['GAMIFICATION_URL="ftp://gamification": ожидается http(s) URL']);
+  });
+
   it("R2-02: таймаут lessons больше таймаута ИИ в lessons (20 с); завершение — больше ожидания оценки (до 32 с)", () => {
     const LESSONS_AI_TIMEOUT_MS = 20_000; // services/lessons AI_TIMEOUT_SECONDS по умолчанию
     const LESSONS_FINISH_WAIT_MS = 32_000; // lessons → assessment при finish

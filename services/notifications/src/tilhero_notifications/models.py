@@ -1,4 +1,4 @@
-"""Модели notifications — зеркало миграций 0001–0003 (сверка — tests/test_notifications_schema.py).
+"""Модели notifications — зеркало миграций 0001–0004 (сверка — tests/test_notifications_schema.py).
 
 `notifications` — журнал доставки и одновременно центр уведомлений в приложении (INTERNAL_API §4): каждая запись
 хранит категорию, отрисованные title/body на языке ученика, startapp, telegram_status и read_at; срок — 90 дней.
@@ -27,7 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-CATEGORIES = ("reminders", "missed", "social", "support", "product", "service")
+CATEGORIES = ("reminders", "missed", "social", "support", "product", "service", "game")  # game — спринт 6, 0004
 # cancelled (спринт 2) — запись рассылки, остановленной до отправки: не отправляется и не видна в центре
 TELEGRAM_STATUSES = ("scheduled", "sent", "in_app_only", "failed", "skipped", "cancelled")
 KINDS = ("standard", "transactional", "campaign")

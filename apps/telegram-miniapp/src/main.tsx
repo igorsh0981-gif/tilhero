@@ -2,6 +2,7 @@ import "@tilhero/ui-tokens/index.css";
 import "./styles/content.css";
 import "./styles/lessons.css";
 import "./styles/memory.css";
+import "./styles/game.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";

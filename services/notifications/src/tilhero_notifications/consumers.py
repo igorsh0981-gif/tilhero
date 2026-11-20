@@ -26,6 +26,14 @@
 - memory.reviews.due.v1 (спринт 5, только от memory) → reviews_due(.kid) → ученику, ребёнку — опекуну, категория
   reminders (reviews_due:<user>:<date>; одно в местный день); позже 19:00 + 3 ч — только центр; кнопка →
   «Повторение» (route_review);
+- game.streak.frozen.v1 / game.badge.earned.v1 / game.hero.stage_reached.v1 (спринт 6, только от gamification) →
+  streak_frozen / badge_earned / hero_stage_reached (*.kid), категория game (выключатель — GAME_CATEGORY_GATE,
+  пока reminders; лимит дня — общий); ученику, детям 6–13 — только центр детского профиля (опекуну «в сводке»,
+  без Telegram). badge_earned и hero_stage_reached с notify=false (game_notifications выключены) — без записи;
+  streak_frozen — всегда (информация о серии). Ключи: streak_frozen:<user>:<date> (одно на день),
+  badge_earned:<user>:<badge> (значок выдаётся один раз), hero_stage_reached:<user>:<stage> (ступень не
+  понижается). Заморозка — после 22:00 следующего дня только центр; значок и ступень — позже события +
+  GAME_STALE_HOURS только центр;
 - user.deletion.requested.v1 (только от identity-consent) → удаление → user.domain.deleted.v1 {domain: notifications};
 - user.status.changed / consent.revoked / user.notification_settings.changed / user.profile.updated — сброс кэша
   адресации.
@@ -41,7 +49,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -79,6 +87,11 @@ MEMORY_PRODUCERS = frozenset({"memory"})
 REVIEWS_DUE_TIME = "19:00"  # местное время напоминания memory (окно 19:00–19:14) — «слот» для устаревания
 # Сагу удаления ведёт только identity-consent: запрос от другого издателя не исполняется (защита в глубину, P-7)
 DELETION_PRODUCERS = frozenset({"identity-consent"})
+STREAK_FROZEN = "game.streak.frozen.v1"
+BADGE_EARNED = "game.badge.earned.v1"
+HERO_STAGE_REACHED = "game.hero.stage_reached.v1"
+# События игры публикует только gamification (спринт 6)
+GAME_PRODUCERS = frozenset({"gamification"})
 CACHE_EVENTS = [
     "user.status.changed.v1",
     "consent.revoked.v1",
@@ -179,6 +192,30 @@ class AppealDecided(_Payload):
     user_id: uuid.UUID
     decision: Literal["upheld", "corrected"]
     decided_at: datetime
+
+
+class StreakFrozen(_Payload):
+    user_id: uuid.UUID
+    local_date: date
+    op_id: uuid.UUID
+    freeze_left: Annotated[int, Field(ge=0)]
+    frozen_at: AwareDatetime
+
+
+class BadgeEarned(_Payload):
+    user_id: uuid.UUID
+    badge_code: Annotated[str, Field(pattern=r"^[a-z0-9_]{3,40}$")]
+    notify: bool
+    earned_at: AwareDatetime
+
+
+class HeroStageReached(_Payload):
+    user_id: uuid.UUID
+    hero_code: Annotated[str, Field(pattern=r"^(robot|pet|human)_[0-9]$")]
+    stage: Literal[2, 3]
+    confirmed_skills: Annotated[int, Field(ge=0)]
+    notify: bool
+    reached_at: AwareDatetime
 
 
 Accept = Callable[..., Awaitable[str]]
@@ -490,6 +527,61 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
             stale_after=slot + timedelta(hours=settings.reminder_stale_hours),
         )
 
+    # ---------------------------------------------------------------- gamification (спринт 6)
+
+    async def on_game(session: AsyncSession, env: Envelope) -> None:
+        """Заморозка серии, новый значок, ступень героя (AT-66, AT-70, AT-65) → запись ученику через общую политику
+        доставки (категория game, тихие часы, выключатель, лимит дня); детям 6–13 — только центр детского профиля.
+        notify=false у значка и ступени — без записи (game_notifications выключены у ученика)."""
+        if env.producer not in GAME_PRODUCERS:
+            log.warning("game event from unexpected producer ignored",
+                        extra={"event_type": env.event_type, "producer": env.producer[:64]})
+            return
+        stale = timedelta(hours=settings.game_stale_hours)
+        if env.event_type == STREAK_FROZEN:
+            f = StreakFrozen.model_validate(env.payload)
+            # пропуск выпускается после местной полуночи; утром следующего дня — сообщение, после 22:00 — только
+            # центр (как lesson.missed). Пояса в событии нет — пояс по умолчанию; ночь закрывают тихие часы ученика
+            tz = zone(None, settings.default_timezone)
+            await accept(
+                session,
+                env,
+                user_id=f.user_id,
+                template="streak_frozen",
+                params={"local_date": f.local_date.isoformat(), "freeze_left": f.freeze_left},
+                dedup_key=f"streak_frozen:{f.user_id}:{f.local_date.isoformat()}",
+                stale_after=at_local(f.local_date + timedelta(days=1), settings.missed_stale_time, tz),
+            )
+            return
+        if env.event_type == BADGE_EARNED:
+            b = BadgeEarned.model_validate(env.payload)
+            if not b.notify:
+                log.info("game notification turned off by learner", extra={"event_type": env.event_type})
+                return
+            await accept(
+                session,
+                env,
+                user_id=b.user_id,
+                template="badge_earned",
+                params={"badge_code": b.badge_code},
+                dedup_key=f"badge_earned:{b.user_id}:{b.badge_code}",
+                stale_after=b.earned_at + stale,
+            )
+            return
+        h = HeroStageReached.model_validate(env.payload)
+        if not h.notify:
+            log.info("game notification turned off by learner", extra={"event_type": env.event_type})
+            return
+        await accept(
+            session,
+            env,
+            user_id=h.user_id,
+            template="hero_stage_reached",
+            params={"hero_code": h.hero_code, "stage": h.stage},
+            dedup_key=f"hero_stage_reached:{h.user_id}:{h.stage}",
+            stale_after=h.reached_at + stale,
+        )
+
     # ---------------------------------------------------------------- identity-consent
 
     async def on_user_deleted(session: AsyncSession, env: Envelope) -> None:
@@ -525,6 +617,7 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
         "notifications.catalog": ([MEDIA_REQUEST_DECIDED], on_catalog),
         "notifications.assessment": ([APPEAL_DECIDED], on_assessment),
         "notifications.memory": ([REVIEWS_DUE], on_memory),
+        "notifications.game": ([STREAK_FROZEN, BADGE_EARNED, HERO_STAGE_REACHED], on_game),
         "notifications.user_deleted": ([DELETION_REQUESTED], on_user_deleted),
         "notifications.delivery_cache": (CACHE_EVENTS, on_user_changed),
     }

@@ -92,6 +92,11 @@ export const ALL_PERMISSIONS = [
   "memory.read",
   "memory.manage",
   "glossary.manage",
+  // спринт 6 — игра и герои; game.publish и wallet.adjust — со step-up
+  "game.read",
+  "game.manage",
+  "game.publish",
+  "wallet.adjust",
 ] as const satisfies readonly Permission[];
 
 /** Компиляция падает, если в admin.ts появилось право, которого нет в ALL_PERMISSIONS (права вне списка отбрасываются). */
@@ -117,11 +122,13 @@ const _allRolesListed: [MissingRoles] extends [never] ? true : MissingRoles = tr
 void _allRolesListed;
 
 /**
- * Матрица по умолчанию (docs/sprint2/PLAN.md §«Роли и права» + §«Права и роли» PLAN спринтов 3–5) — только для
+ * Матрица по умолчанию (docs/sprint2/PLAN.md §«Роли и права» + §«Права и роли» PLAN спринтов 3–6) — только для
  * имперсонации в dev: эффективные права = свои ∩ права выбранной роли (сужение, не расширение). Источник истины
- * матрицы — admin-identity (сид 0001 + 0003 + 0004 + 0005). Спринт 5: memory.manage (step-up) — operations;
+ * матрицы — admin-identity (сид 0001 + 0003 + 0004 + 0005 + спринт 6). Спринт 5: memory.manage (step-up) — operations;
  * memory.read — methodist, qa_analyst, analyst, operations, auditor; glossary.manage (без step-up) — methodist,
- * content_manager. methodist (content.publish, ai.publish, qa.review) и
+ * content_manager. Спринт 6: game.read — content_manager, methodist, operations, support, analyst, auditor;
+ * game.manage — content_manager, operations; game.publish и wallet.adjust (step-up) — только operations (и
+ * super_admin). methodist (content.publish, ai.publish, qa.review) и
  * content_manager (media.rights) — привилегированные по составу прав (MFA, four-eyes), хотя PRIVILEGED_ROLES admin.ts
  * их не перечисляет; operations (costs.manage) привилегирован и по коду роли; qa_analyst (чтение и реплики с
  * причиной, без прав со step-up) — нет. Признак `Role.privileged` вычисляет admin-identity.
@@ -143,6 +150,10 @@ export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[
     "costs.manage",
     "memory.read",
     "memory.manage",
+    "game.read",
+    "game.manage",
+    "game.publish",
+    "wallet.adjust",
   ],
   communications: [
     "dashboard.read",
@@ -152,7 +163,7 @@ export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[
     "notif.campaigns.manage",
     "notif.campaigns.send",
   ],
-  support: ["dashboard.read", "users.read", "support.read", "support.reply"],
+  support: ["dashboard.read", "users.read", "support.read", "support.reply", "game.read"],
   methodist: [
     "dashboard.read",
     "users.read",
@@ -168,11 +179,12 @@ export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[
     "qa.review",
     "memory.read",
     "glossary.manage",
+    "game.read",
   ],
-  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage"],
+  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage", "game.read", "game.manage"],
   qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts", "memory.read"],
-  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read"],
-  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read"],
+  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
   read_only: ["dashboard.read"],
 };
 

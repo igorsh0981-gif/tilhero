@@ -273,11 +273,13 @@ def test_payload_miniapp_rules() -> None:
 def test_payload_admin_rules() -> None:
     p = admin_payload()
     p["layout"]["menu"].append({"id": "audit", "enabled": False})
-    assert ("payload.layout.menu[15].id", "duplicate") in _errors("admin", p)  # 15 из 16 разрешённых — дубль, не лимит
+    assert ("payload.layout.menu[15].id", "duplicate") in _errors("admin", p)  # 16 из 17 разрешённых — дубль, не лимит
     p = admin_payload()
     p["layout"]["menu"].append({"id": "memory", "enabled": True})  # спринт 5: раздел «Память» разрешён
     assert validate_payload("admin", p)["layout"]["menu"][-1]["id"] == "memory"
     p["layout"]["menu"].append({"id": "audit", "enabled": False})
+    assert _errors("admin", p) == [("payload.layout.menu[16].id", "duplicate")]  # 17 — ровно лимит
+    p["layout"]["menu"].append({"id": "users", "enabled": False})
     assert ("payload.layout.menu", "too_many") in _errors("admin", p)
     p = admin_payload()
     p["layout"]["menu"][1] = {"id": "overview", "enabled": True}
@@ -291,6 +293,36 @@ def test_payload_admin_rules() -> None:
     p = admin_payload()
     p["home"] = {}
     assert _errors("admin", p) == [("payload.home", "unknown_field")]
+
+
+def test_payload_admin_game_menu() -> None:
+    """Спринт 6: раздел «Игра» — heroes, game, game_events. game_events — новый id «Событий и сезонов» (прежний id
+    прототипа events в сиде 1.0.0 остаётся допустимым); оба в одной версии — один раздел дважды."""
+    from tilhero_experience.domain.payload import ADMIN_MENU, MENU_ALIASES
+
+    assert {"heroes", "game", "game_events"} <= set(ADMIN_MENU) and MENU_ALIASES == {"events": "game_events"}
+    p = admin_payload()
+    ids = [m["id"] for m in p["layout"]["menu"]]
+    assert {"heroes", "game", "events"} <= set(ids)  # сид 1.0.0 — id прототипа, по-прежнему годен
+    p["layout"]["menu"][ids.index("events")] = {"id": "game_events", "enabled": True}
+    p["layout"]["menu"].append({"id": "memory", "enabled": False})
+    out = validate_payload("admin", p)
+    assert [m["id"] for m in out["layout"]["menu"]][6:9] == ["heroes", "game", "game_events"]
+    assert len(out["layout"]["menu"]) == 16
+    # раздел выключается, как любой другой
+    p["layout"]["menu"][ids.index("heroes")]["enabled"] = False
+    assert validate_payload("admin", p)["layout"]["menu"][6] == {"id": "heroes", "enabled": False}
+    # events и game_events вместе — тот же раздел дважды
+    p["layout"]["menu"].append({"id": "events", "enabled": True})
+    assert _errors("admin", p) == [("payload.layout.menu[16].id", "duplicate")]
+    p = admin_payload()
+    p["layout"]["menu"].insert(0, {"id": "game_events", "enabled": True})
+    assert _errors("admin", p) == [(f"payload.layout.menu[{ids.index('events') + 1}].id", "duplicate")]
+    # неизвестные разделы игры не принимаются
+    for bad in ("game_shop", "wallets", "Game_events"):
+        p = admin_payload()
+        p["layout"]["menu"][ids.index("game")] = {"id": bad, "enabled": True}
+        assert _errors("admin", p) == [(f"payload.layout.menu[{ids.index('game')}].id", "not_allowed")], bad
 
 
 def test_payload_size_and_type() -> None:

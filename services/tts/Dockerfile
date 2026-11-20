@@ -36,10 +36,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 ARG ASR_MODEL=base.en
 ARG ASR_REPO=Systran/faster-whisper-base.en
 ARG ASR_COMMIT=3d3d5dee26484f91867d81cb899cfcf72b96be6c
-ARG ASR_SHA256_CONFIG=""
-ARG ASR_SHA256_MODEL=""
-ARG ASR_SHA256_TOKENIZER=""
-ARG ASR_SHA256_VOCABULARY=""
+# суммы base.en@3d3d5dee закреплены по первой сборке в prod (20.11.2026); другая модель — свои ASR_SHA256_*
+ARG ASR_SHA256_CONFIG=f3bc3821e9fc76a27bae538e11ae5b677dcdd352b4600429ce7951d398569aeb
+ARG ASR_SHA256_MODEL=2a166925539a16005f14ff328359f9b9adb9dc4fb631bb3b227526862e93e2ef
+ARG ASR_SHA256_TOKENIZER=929c5252409436dce1b38a75d1abbcb5e132d170d8e324e4e04ed915fa2d22df
+ARG ASR_SHA256_VOCABULARY=ff77588746d3a2595d32ab5b69ffd7b95ce2441ac57533cb66fc3eb575a115cf
 WORKDIR /asr/${ASR_MODEL}
 RUN set -eu; \
     fetch() { curl -fsSL --retry 3 -o "$1" "https://huggingface.co/$ASR_REPO/resolve/$ASR_COMMIT/$1"; \

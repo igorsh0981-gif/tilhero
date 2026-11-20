@@ -28,8 +28,9 @@ declare module "fastify" {
     access?: "public" | "user";
     /** Разрешён сессии с pin=false (код родителя задан, но ещё не подтверждён). */
     pinExempt?: boolean;
-    /** Лимит по IP для публичного маршрута: session — 10/мин на /v1/session/telegram, public — общий. */
-    ipLimit?: "session" | "public";
+    /** Лимит по IP для публичного маршрута: session — 10/мин на /v1/session/telegram, public — общий,
+     *  game_assets — картинки игры (tg.game.assets, 600/мин). */
+    ipLimit?: "session" | "public" | "game_assets";
     /** Операция с PIN/биометрией — отдельный лимит 5/мин на пользователя (бакет "pin").
      *  "reset" — ввод кода сброса: свой бакет "pin_reset" того же размера. Иначе 5 неверных PIN, которые и привели
      *  к блокировке, съедали лимит, и восстановление по коду из бота получало 429 в ту же минуту (e2e, дефект BFF-2).

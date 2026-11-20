@@ -1,3 +1,4 @@
+import type { GameSummary } from "@tilhero/contracts/bff";
 import { useEffect } from "react";
 import { children, initialOf, teenWithoutConsent } from "../../domain/people";
 import { flag } from "../../config/experience";
@@ -19,7 +20,7 @@ import { useSwitchToParent } from "./switching";
 export function Profile() {
   const { bff, session, syncProfile, nav, config } = useApp();
   const plan = usePlan();
-  const { t, lang } = useI18n();
+  const { t, tp, l, lang } = useI18n();
   const profile = useLoad(() => bff.profile(), [session.learner.learner_id]);
   const dx = useLoad(() => bff.diagnosticsState(true), [session.learner.learner_id]);
   useEffect(() => {
@@ -38,6 +39,10 @@ export function Profile() {
   const direction = [plan.goal ? t(`goal.${plan.goal}` as MessageKey) : null, plan.level_self ? t(`level.${plan.level_self}` as MessageKey) : null]
     .filter(Boolean)
     .join(" · ");
+  // sprint 6: the game section is shown once the game answers (GAME_UNAVAILABLE — no section, learning settings stay)
+  const gameOn = flag(config, "game");
+  const game = useLoad<GameSummary | null>(() => (gameOn ? bff.gameSummary(true).catch(() => null) : Promise.resolve(null)), [session.learner.learner_id, gameOn]);
+  const g = game.data;
   const notif = profile.data?.notifications;
   const notifValue = notif ? (notif.enabled ? t("c.on") : t("c.off")) : "";
 
@@ -84,6 +89,19 @@ export function Profile() {
             <NavRow title={t("profile.languages")} icon="globe" onClick={() => nav.push({ name: "languages" })} testId="row-languages" />
           </div>
         </div>
+
+        {g ? (
+          <div className="pad" data-testid="profile-game">
+            <p className="sec mb8">{t("profile.game")}</p>
+            <div className="list">
+              <NavRow title={t("game.myHero")} value={g.hero ? l(g.hero.name) : t("game.noHero")} icon="hero" onClick={() => nav.push({ name: "heroes" })} testId="row-hero" />
+              <NavRow title={t("game.shop")} value={t("game.tilsN", { n: g.til_balance, w: tp("game.tilsWord", g.til_balance) })} icon="bag" onClick={() => nav.push({ name: "shop" })} testId="row-shop" />
+              <NavRow title={t("game.badges")} icon="medal" onClick={() => nav.push({ name: "badges" })} testId="row-badges" />
+              <NavRow title={t("game.historyLong")} icon="list" onClick={() => nav.push({ name: "gameHistory" })} testId="row-game-history" />
+              <NavRow title={t("game.settings")} icon="sliders" onClick={() => nav.push({ name: "gameSettings" })} testId="row-game-settings" />
+            </div>
+          </div>
+        ) : null}
 
         <div className="pad">
           <div className="list">

@@ -78,6 +78,9 @@ export const KNOWN_CODES = [
   // sprint 5: memory, reading, pronunciation
   "CARD_NOT_FOUND", "REVIEW_SESSION_NOT_FOUND", "TASK_NOT_FOUND", "READING_NOT_AVAILABLE", "CONTENT_NOT_FOUND", "TASK_NOT_CURRENT",
   "REVIEW_SESSION_STATE", "CARD_STATE", "CARDS_LIMIT", "WORD_NOT_IN_CONTENT", "GLOSS_UNAVAILABLE", "VOICE_CONSENT_REQUIRED", "AUDIO_INVALID",
+  // sprint 6: the game (gamification via telegram-bff)
+  "GAME_UNAVAILABLE", "HERO_NOT_FOUND", "ITEM_NOT_FOUND", "HERO_NOT_AVAILABLE", "INSUFFICIENT_TILS", "ALREADY_OWNED",
+  "FREEZE_STOCK_FULL", "ITEM_NOT_AVAILABLE", "NOT_OWNED",
 ] as const;
 export type KnownCode = (typeof KNOWN_CODES)[number];
 const KNOWN: ReadonlySet<string> = new Set(KNOWN_CODES);

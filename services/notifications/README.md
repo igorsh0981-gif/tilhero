@@ -70,6 +70,7 @@ admin.ts, `*_name` сотрудников — `null` (заполняет admin-b
 | `notifications.catalog` | `catalog.media_request.decided.v1` (спринт 3, только от `catalog`: от другого издателя — WARNING без `user_id`, без записи) | `media_request.decided` → ученику, `support` (всегда включена), ключ `media_request.decided:<request>:<status>` (повтор того же решения — без дубля, изменённое решение — новое сообщение); дальше — общая политика (выключатель, тихие часы, правила детей 6–13, хотя заявки бывают только у аккаунтов 14+). Название заявки в журнал (лог) не пишется |
 | `notifications.assessment` | `assessment.appeal.decided.v1` (спринт 4, только от `assessment`: от другого издателя — WARNING без `user_id`, без записи) | `appeal_decided` → ученику (ребёнку 6–13 — `appeal_decided.kid` опекуну), `support` (всегда включена), ключ `appeal_decided:<appeal_id>` — **одно уведомление на апелляцию** (повтор события и повторная публикация — без дубля); параметры — только `appeal_id`, `evaluation_id`, `decision`; текст решения сотрудника не принимается; дальше — общая политика (выключатель, тихие часы, окно детей) |
 | `notifications.memory` | `memory.reviews.due.v1` (спринт 5, только от `memory`: от другого издателя — WARNING без `user_id`, без записи) | `reviews_due` → ученику (ребёнку 6–13 — `reviews_due.kid` опекуну: имя ребёнка, мягко, без серии), `reminders`, ключ `reviews_due:<user>:<local_date>` — **одно в местный день**; параметры — только `local_date`, `due_count` (слов ученика нет); текст «Пора повторить слова: {due_count}. Это займёт около {review_minutes} минут» (`review_minutes` = ceil(due_count × 0,4), 2..15), кнопка «Повторить» → `route_review`; дальше — как у `lesson.reminder`: категория, выключатель, тихие часы, окно детей 08:00–20:00, лимит дня; позже 19:00 + `REMINDER_STALE_HOURS` (по поясу из события) — только центр. Шаблоны редактируются в админке, как остальные (`{due_count}`, `{review_minutes}`, у детского — ещё `{learner_name}`) |
+| `notifications.game` | `game.streak.frozen.v1`, `game.badge.earned.v1`, `game.hero.stage_reached.v1` (спринт 6, только от `gamification`: от другого издателя — WARNING без `user_id`, без записи) | `streak_frozen` / `badge_earned` / `hero_stage_reached` → ученику (ребёнку 6–13 — `*.kid`, **только центр детского профиля**: опекуну «в сводке», без Telegram), категория **`game`** (см. «Политика»). Ключи: `streak_frozen:<user>:<local_date>` — одно на день; `badge_earned:<user>:<badge_code>` — значок выдаётся один раз; `hero_stage_reached:<user>:<stage>` — ступень не понижается, смена героя нового уведомления не даёт. Значок и ступень с `notify=false` (у ученика выключены `game_notifications`) — **без записи**; заморозка — всегда (информация о серии). Параметры — только коды и числа (`local_date`, `freeze_left`; `badge_code`; `hero_code`, `stage`), `op_id` и тексты ученика не принимаются. Заморозка: позже 22:00 следующего дня (`MISSED_STALE_TIME`, пояс по умолчанию — в событии пояса нет) — только центр; значок и ступень: позже события + `GAME_STALE_HOURS` (12) — только центр |
 | `notifications.user_deleted` | `user.deletion.requested.v1` (только от `identity-consent`, ревью P-7: от другого издателя — предупреждение в логе с типом события и издателем, без `user_id`; подтверждение шине без удаления и без ACK) | `deleted_users` + удаление журнала/центра ученика, записей других учеников с его именем (`subject_user_id`), `missed_state`, `inbox_state`, проекции семьи, кэшей → `user.domain.deleted.v1 {domain: notifications, mode: deleted}`; запоздавшие события для удалённого — без записи |
 | `notifications.delivery_cache` | `user.status.changed.v1`, `consent.revoked.v1`, `user.notification_settings.changed.v1`, `user.profile.updated.v1` | сброс кэша адресации и имени |
 
@@ -93,9 +94,18 @@ scheduled | unscheduled | stopped | finished | failed | test_sent` (object_type 
 3. **тихие часы** (часовой пояс ученика, окно через полночь) → отложить до конца (`scheduled`, `scheduled_for`);
 4. **дети 6–13** (`kind=child` или `is_minor` и `age_band` 6-9/10-13) → окно 08:00–20:00 местного (иначе до 08:00),
    адресат — опекун (`recipient_telegram_user_id`), шаблон `*.kid` с именем ребёнка;
-5. **лимит** ≤ 3 сообщений `reminders`+`missed`+`social` в местные сутки на **ученика** (под advisory-блокировкой
-   ученика; засчитываются отправленные и зарезервированные) → сверх — `in_app_only daily_limit`;
+5. **лимит** ≤ 3 сообщений `reminders`+`missed`+`social`+`game` (спринт 6) в местные сутки на **ученика** (под
+   advisory-блокировкой ученика; засчитываются отправленные и зарезервированные) → сверх — `in_app_only daily_limit`;
 6. **дедупликация** — `dedup_key` UNIQUE при приёме.
+
+**Категория `game` (спринт 6).** В журнале и шаблонах — своя категория (миграция 0004), в лимите дня — как
+`reminders`. Выключатель: пока `game` нет в настройках ученика (bff.ts `NotificationCategories`, identity-consent
+`CATEGORIES`), её включает выключатель `reminders` — `GAME_CATEGORY_GATE=reminders` (`Rules.category_gates`); когда
+категория появится в настройках — `GAME_CATEGORY_GATE=game`. В публичных ответах (центр `InboxItem.category`, карточка
+шаблона `TemplateInfo.category`) — `reminders` (`templates.PUBLIC_CATEGORY`): в контрактах bff.ts и admin.ts категории
+`game` пока нет, а admin-bff проверяет категорию строго. Детям 6–13 (`TemplateSpec.kid_in_app_only`) — после проверки
+категории сразу `in_app_only kid_summary`: запись в центре детского профиля, без Telegram (дайджеста опекуну в сервисе
+нет — «сводка» = центр детского профиля).
 
 Отложенное на момент позже `stale_after` сразу уходит только в центр. Повторы: 429 → через `retry_after`;
 5xx/сеть/identity недоступен → backoff 30 с, 2 мин, 10 мин, 30 мин, 1 ч; после `MAX_ATTEMPTS` (8) → `failed` + событие.
@@ -117,6 +127,8 @@ scheduled | unscheduled | stopped | finished | failed | test_sent` (object_type 
 | `media_request.decided` (спринт 3) | support | `route_media_requests` |
 | `appeal_decided`, `appeal_decided.kid` (спринт 4) | support | `route_lessons` |
 | `reviews_due`, `reviews_due.kid` (спринт 5) | reminders | `route_review` |
+| `streak_frozen`, `streak_frozen.kid`, `hero_stage_reached`, `hero_stage_reached.kid` (спринт 6) | game | `route_home` |
+| `badge_earned`, `badge_earned.kid` (спринт 6) | game | `route_progress` |
 | `pin.reset_code` (только синхронный HTTP, не в центре) | service | — |
 
 Детские тексты — родителю, с именем ребёнка, мягкие: без «потери серии», «провала», давления (тест
@@ -146,6 +158,26 @@ licensed — «материал лицензирован и добавлен», 
 {review_minutes} минут — повторите вместе, будет интересно!» (без серии и давления). Отклонение от буквы INTERNAL_API
 §6 («{имя} пора повторить слова: {n}»): имя — в заголовке через двоеточие, как у остальных детских шаблонов (имя
 ребёнка в именительном падеже без склонения), число — в тексте.
+
+Игра (спринт 6, INTERNAL_API спринта 6 §3), тексты по умолчанию (редактируются в админке):
+- `streak_frozen` — «Серия спасена» / «Заморозка закрыла пропуск {date}. Осталось заморозок: {left}.» (UZ: «Seriya
+  saqlab qolindi» / «Muzlatish {date} kuni oʻtkazib yuborilgan mashgʻulotni yopdi. Qolgan muzlatishlar: {left}.»),
+  `{date}` — ДД.ММ; кнопка «Открыть TilHero» → `route_home`. Детский — «{learner_name}: заморозка помогла» /
+  «Пропуск {date} закрыт заморозкой — можно спокойно продолжать. Заморозок осталось: {left}.» (без слова «серия»).
+- `badge_earned` — «Поздравляем!» / «Новый значок: {badge}.» (UZ: «Tabriklaymiz!» / «Yangi nishon: {badge}.»),
+  кнопка «Открыть достижения» → `route_progress`. `{badge}` — название по коду (`templates.badge_title`):
+  first_lesson «Первый урок», streak_N «N дней подряд» (без слова «серия» — текст бывает и родителю), skills_N
+  «N подтверждённых навыков», skill_retained «Первый закреплённый навык», reviews_N «N повторённых карточек»,
+  readings_N «N прочитанных текстов», first_freeze «Первая заморозка»; неизвестный код — «Новое достижение».
+  Детский — «{learner_name}: новый значок» / «Новый значок: {badge} — отличный повод порадоваться вместе!».
+- `hero_stage_reached` — «Новая ступень героя» / «{hero} {grew}: {stage}!» (UZ: «Qahramonning yangi bosqichi» /
+  «{hero} oʻsdi: {stage}!»), кнопка «Открыть TilHero» → `route_home`. `{grew}` — «вырос» / «выросла» по роду героя
+  (Нилу и Ая), UZ — «oʻsdi»; имена героев и ступеней — словарь сида каталога (`HERO_NAMES`, `STAGE_NAMES`, INTERNAL_API
+  §1.4; неизвестный код героя — «Герой»). Детский — «{learner_name}: новая ступень героя» / «… Посмотрите вместе.».
+- Отклонения от буквы INTERNAL_API §3: тексты разбиты на заголовок и текст (Telegram — `<b>заголовок</b>` + текст);
+  `hero_stage_reached` — с согласованием рода через `{grew}` («Ученица Нилу выросла»). Имена значков и героев — в
+  notifications (в событиях только коды): переименование героя в админке gamification текст уведомления не меняет
+  (запрос к контракту — в отчёте спринта).
 
 ## Версии шаблонов (спринт 2)
 Код (`templates.py`) — тексты по умолчанию; у редактируемого `TemplateSpec` — `description`, `placeholder_names`,
@@ -205,7 +237,7 @@ scheduled` (дошла или в пути); `skipped`, `failed`, `cancelled` в 
 Telegram-рассылки нет (кампании — спринт 2).
 
 ## Данные
-Схема `notifications` (миграции 0001–0003): `notifications` (`notification_id` PK, `user_id` — ученик, `category`,
+Схема `notifications` (миграции 0001–0004; 0004 — категория `game` в CHECK `ck_notifications_category`): `notifications` (`notification_id` PK, `user_id` — ученик, `category`,
 `kind standard|transactional|campaign`, `template`, `params` JSONB, `subject_user_id`, `title`, `body`, `startapp`,
 `dedup_key` UNIQUE, `telegram_status scheduled|sent|in_app_only|failed|skipped|cancelled` (cancelled — рассылка
 остановлена; в центре не видна), `reason`, `center_only`,
@@ -237,7 +269,8 @@ pending|created|skipped_frequency|cancelled`, `notification_id`, `processed_at`;
 `TEMPLATE_CACHE_TTL_SECONDS` (30, ≤ 30), `CAMPAIGN_MIN_INTERVAL_DAYS` (7), `CAMPAIGN_AUDIENCE_PAGE` (500),
 `CAMPAIGN_RECIPIENT_BATCH` (200), `CAMPAIGN_MAX_BATCHES_PER_CALL` (50), `CAMPAIGN_MAX_SCHEDULE_DAYS` (30),
 `CAMPAIGN_ASAP_SECONDS` (60), `CAMPAIGN_PAST_TOLERANCE_SECONDS` (300), `CAMPAIGN_FAILURE_ALERT_ATTEMPTS` (6),
-`CAMPAIGN_START_NOW_BATCHES` (1).
+`CAMPAIGN_START_NOW_BATCHES` (1). Спринт 6: `GAME_CATEGORY_GATE` (`reminders` | `game`, по умолчанию `reminders`),
+`GAME_STALE_HOURS` (12).
 
 ## Runbook
 - Тесты: `infra/dev/stack.sh up`, `source .dev/testenv.sh`, `uv run pytest services/notifications -q`

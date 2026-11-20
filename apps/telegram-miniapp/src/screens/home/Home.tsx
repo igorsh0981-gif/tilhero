@@ -1,11 +1,15 @@
-import type { HomeSectionType, LessonSession, TodayPlan } from "@tilhero/contracts/bff";
+import type { GameSummary, HomeSectionType, LessonSession, TodayPlan } from "@tilhero/contracts/bff";
+import { Fragment } from "react";
 import { flag, homeSections } from "../../config/experience";
+import { weekState } from "../../domain/game";
 import { isOpen } from "../../domain/lessons";
 import { useI18n, type MessageKey } from "../../i18n";
 import { useApp, usePlan } from "../../state/app";
 import { useAction, useLoad } from "../../state/hooks";
 import { Icon } from "../../ui/Icon";
-import { Btn, cx, ErrorLine, HERO, Hero, Margin, NoBreakHyphens, Pill, Skeleton } from "../../ui/kit";
+import { Btn, cx, ErrorLine, Margin, NoBreakHyphens, Pill, Skeleton } from "../../ui/kit";
+import { GameBlock } from "../game/GameBlock";
+import { FreezeChip } from "../game/parts";
 import { ActiveCard } from "../lessons/LessonsTab";
 import { ReviewCard } from "../memory/ReviewCard";
 import { scheduleSummary } from "../schedule/parts";
@@ -26,8 +30,11 @@ export function greetingKey(hour: number): MessageKey {
 
 /**
  * Home: the plan for today by the learner's own schedule (slot, duration, «Начать занятие» → the next lesson, an
- * unfinished one — «Продолжить урок»), the week, the hero and the sections of Remote Experience Config. Sessions are
- * counted from the lessons themselves (sprint 4): there is no manual «Отметить занятие» any more.
+ * unfinished one — «Продолжить урок»), the week, the game block and the sections of Remote Experience Config. Sessions
+ * are counted from the lessons themselves (sprint 4): there is no manual «Отметить занятие» any more.
+ * Sprint 6 (APP-PROG-01): the streak with the stock of freezes, a missed day closed by a freeze in the week, the hero,
+ * level, tils and quests of the day (GameBlock). The game is quiet: its failure (GAME_UNAVAILABLE) only hides the block;
+ * the flag `game` of Remote Experience Config switches it off.
  */
 export function Home() {
   const { bff, session, config, nav } = useApp();
@@ -44,6 +51,13 @@ export function Home() {
   );
   const name = session.learner.display_name;
   const tp0 = today.data;
+  const gameOn = flag(config, "game");
+  // a failure of the game never blocks Home: the block is simply not shown (bff.gameSummary is quiet)
+  const game = useLoad<GameSummary | null>(() => (gameOn ? bff.gameSummary(true) : Promise.resolve(null)), [session.learner.learner_id, gameOn]);
+  const g = game.error ? null : game.data;
+  // the game block goes after the learning sections (today, the lesson, the review): learning first
+  const shown = sections.filter((s, i) => !(s === "news" && sections.slice(0, i).includes("whats_new")));
+  const anchor = [...shown].reverse().find((s) => s === "today_plan" || s === "lesson_of_day" || s === "review") ?? "today_plan";
 
   return (
     <main className="scroll" data-testid="home">
@@ -59,6 +73,7 @@ export function Home() {
                 <span className="flame"><Icon name="flame" size={20} /></span>
                 {tp0.streak_days}
               </span>
+              {g ? <FreezeChip n={g.freeze_stock} max={g.freeze_max} testId="home-freezes" /> : null}
               <span className="stt" aria-label={t("home.minutesAria", { n: tp0.minutes_today })}>
                 <Icon name="clock" size={20} />
                 {t("c.minutesN", { n: tp0.minutes_today })}
@@ -67,11 +82,12 @@ export function Home() {
           ) : null}
         </Margin>
 
-        {sections
-          .filter((s, i) => !(s === "news" && sections.slice(0, i).includes("whats_new")))
-          .map((s) => (
-            <Section key={s} type={s} today={today} active={activeSession} withToday={sections.includes("today_plan")} />
-          ))}
+        {shown.map((s) => (
+          <Fragment key={s}>
+            <Section type={s} today={today} active={activeSession} withToday={sections.includes("today_plan")} />
+            {s === anchor ? <GameBlock s={g} /> : null}
+          </Fragment>
+        ))}
 
         {kid ? (
           <Margin>
@@ -142,6 +158,7 @@ function TodaySection({ today, active }: { today: ReturnType<typeof useLoad<Toda
   }
   if (!d) return null;
   const slot = d.slot_time ?? plan.schedule.preferred_time;
+  const anyFrozen = d.week.some((w) => weekState(w) === "frozen");
 
   return (
     <>
@@ -183,49 +200,38 @@ function TodaySection({ today, active }: { today: ReturnType<typeof useLoad<Toda
           <ol className="week" aria-label={t("home.week")}>
             {d.week.map((w) => {
               const wd = isoWeekday(w.local_date);
-              const state = w.done ? "done" : w.missed ? "missed" : w.scheduled ? "planned" : "rest";
+              // sprint 6: a missed day of the schedule closed by a freeze — a snowflake and a dashed frame, not colour only
+              const state = weekState(w);
               const isToday = w.local_date === d.local_date;
               return (
                 <li
                   key={w.local_date}
-                  className={cx("wd", w.scheduled && "sch", w.done && "done", w.missed && "miss", isToday && "today")}
+                  className={cx("wd", w.scheduled && "sch", state === "done" && "done", state === "missed" && "miss", state === "frozen" && "frz", isToday && "today")}
                   aria-label={`${t(`dayLong.${wd}` as MessageKey)}: ${t(`wd.${state}` as MessageKey)}${isToday ? `, ${t("home.todayMark")}` : ""}`}
+                  data-state={state}
                 >
                   <span aria-hidden="true">{t(`day.${wd}` as MessageKey)}</span>
-                  <b aria-hidden="true">{w.done ? "✓" : w.missed ? "–" : w.scheduled ? "•" : ""}</b>
+                  <b aria-hidden="true" className="wd-ic">
+                    {state === "done" ? "✓" : state === "frozen" ? <Icon name="snow" size={14} stroke={2.2} /> : state === "missed" ? "–" : w.scheduled ? "•" : ""}
+                  </b>
                 </li>
               );
             })}
           </ol>
+          {anyFrozen ? (
+            <p className="sub small frz-legend" data-testid="frozen-legend">
+              <Icon name="snow" size={16} />
+              {kid ? t("home.frozenLegendKid") : t("home.frozenLegend")}
+            </p>
+          ) : null}
         </section>
       </Margin>
-      <HeroCard />
     </>
   );
 }
 
 function dayName(ymd: string, t: (k: MessageKey) => string, localDate: (s: string) => string): string {
   return `${t(`dayLong.${isoWeekday(ymd)}` as MessageKey)}, ${localDate(ymd)}`;
-}
-
-function HeroCard() {
-  const { session } = useApp();
-  const { t } = useI18n();
-  const kid = session.learner.kind === "child";
-  return (
-    <Margin>
-      <div className="card k hero-card" data-testid="hero-card">
-        <Hero src={kid ? HERO.myatikEgg : HERO.volt} alt={kid ? t("hero.myatik") : t("hero.volt")} />
-        <div className="grow">
-          <b className="h3">{kid ? t("home.heroKid") : t("home.hero")}</b>
-          <p className="sub mt4">{t("home.heroText")}</p>
-          <div className="prog mt8" aria-hidden="true">
-            <div style={{ width: "8%" }} />
-          </div>
-        </div>
-      </div>
-    </Margin>
-  );
 }
 
 /**

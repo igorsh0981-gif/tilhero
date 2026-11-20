@@ -118,6 +118,20 @@ describe("config", () => {
     expect(loadConfig({}).urls.memory).toBe("http://127.0.0.1:8116");
   });
 
+  it("спринт 6: GAMIFICATION_URL необязательна везде (без значения по умолчанию): нет — null (игра выключена); только http(s)", () => {
+    expect(loadConfig({}).gamificationUrl).toBeNull();
+    expect(loadConfig(PROD).gamificationUrl).toBeNull();
+    expect(problems({ ...PROD, ENV: "stage" })).toEqual([]);
+    expect(loadConfig({ ...PROD, GAMIFICATION_URL: "http://gamification.railway.internal:8117/" }).gamificationUrl).toBe(
+      "http://gamification.railway.internal:8117",
+    );
+    expect(loadConfig({ GAMIFICATION_URL: "  " }).gamificationUrl).toBeNull();
+    expect(problems({ ...PROD, GAMIFICATION_URL: "gamification:8117" })).toEqual([expect.stringMatching(/^GAMIFICATION_URL=/)]);
+    expect(problems({ GAMIFICATION_URL: "ftp://gamification" })).toEqual([expect.stringMatching(/^GAMIFICATION_URL=/)]);
+    // не входит в обязательные адреса доменов
+    expect(Object.values(DOMAIN_URL_VARS)).not.toContain("GAMIFICATION_URL");
+  });
+
   it("prod: полный набор — ок, без dev-деривации и без имперсонации; NODE_ENV=production тоже защищённое", () => {
     const c = loadConfig(PROD);
     expect(c.isSecure).toBe(true);

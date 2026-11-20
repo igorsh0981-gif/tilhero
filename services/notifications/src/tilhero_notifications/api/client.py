@@ -17,6 +17,7 @@ from tilhero_notifications.domain.pagination import decode_cursor, encode_cursor
 from tilhero_notifications.models import Notification
 from tilhero_notifications.schemas import InboxItem, InboxPage, InboxReadIn, UnreadOut
 from tilhero_notifications.settings import Settings
+from tilhero_notifications.templates import public_category
 
 router = APIRouter(prefix="/internal/v1/me", tags=["client"])
 bff_only = InternalAuth({"telegram-bff"})
@@ -36,7 +37,7 @@ def _horizon(rt: Runtime, now: datetime) -> datetime:
 def _item(n: Notification) -> InboxItem:
     return InboxItem(
         notification_id=n.notification_id,
-        category=n.category,  # type: ignore[arg-type]
+        category=public_category(n.category),  # type: ignore[arg-type]  # game (спринт 6) — как reminders
         title=n.title or "",
         body=n.body or "",
         startapp=n.startapp,

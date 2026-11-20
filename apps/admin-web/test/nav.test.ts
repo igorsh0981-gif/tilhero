@@ -14,23 +14,24 @@ const ALL: Permission[] = [
   "content.read", "content.edit", "content.review", "content.publish", "media.rights", "lang.manage",
   "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "costs.read", "costs.manage",
   "memory.read", "memory.manage", "glossary.manage",
+  "game.read", "game.manage", "game.publish", "wallet.adjust",
 ];
-/** + sprint 5 (PLAN «Права и роли»): memory.read, memory.manage, glossary.manage */
+/** + sprint 5 (PLAN «Права и роли»): memory.read, memory.manage, glossary.manage; + sprint 6: game.*, wallet.adjust */
 const MATRIX: Record<RoleCode, Permission[]> = {
   super_admin: ALL,
-  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read", "memory.manage"],
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read", "memory.manage", "game.read", "game.manage", "game.publish", "wallet.adjust"],
   communications: ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"],
-  support: ["dashboard.read", "users.read", "support.read", "support.reply"],
-  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish", "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "memory.read", "glossary.manage"],
-  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage"],
+  support: ["dashboard.read", "users.read", "support.read", "support.reply", "game.read"],
+  methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish", "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "memory.read", "glossary.manage", "game.read"],
+  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage", "game.read", "game.manage"],
   qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts", "memory.read"],
-  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read"],
-  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read"],
+  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
   read_only: ["dashboard.read"],
 };
-const SOON = ["heroes", "game", "events"];
 const ids = (role: RoleCode, menu?: Array<{ id: string; enabled: boolean }>) => visibleNav(new Set(MATRIX[role]), menu).flatMap((g) => g.items.map((i) => i.id));
-const live = (role: RoleCode) => ids(role).filter((x) => !SOON.includes(x));
+const live = (role: RoleCode) => ids(role);
+const GAME = ["heroes", "game", "events"];
 
 /** sprint 5 sections not yet in the experience-config whitelist (ADMIN_MENU) — they follow the config's sections */
 const NOT_IN_SEED = ["memory"];
@@ -47,16 +48,22 @@ describe("menu: 15 sections of the experience-config seed + «memory» (sprint 5
     expect(ids("super_admin")).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit"]);
     expect(visibleNav(new Set(ALL)).map((g) => g.group)).toEqual(["product", "ai", "game", "comms", "manage"]);
   });
-  it("live sections per role («memory»: forgetting analytics for dashboard.read, the learner's memory for memory.read)", () => {
-    expect(live("operations")).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", "support", "config", "langs", "audit"]);
+  it("live sections per role («memory»: forgetting analytics for dashboard.read, the learner's memory for memory.read; the game — game.read)", () => {
+    expect(live("operations")).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", ...GAME, "support", "config", "langs", "audit"]);
     expect(live("communications")).toEqual(["overview", "memory", "news"]);
-    expect(live("support")).toEqual(["overview", "users", "memory", "support"]);
-    expect(live("methodist")).toEqual(["overview", "users", "content", "memory", "agents", "qa", "langs"]);
-    expect(live("content_manager")).toEqual(["overview", "content", "memory", "langs"]);
+    expect(live("support")).toEqual(["overview", "users", "memory", ...GAME, "support"]);
+    expect(live("methodist")).toEqual(["overview", "users", "content", "memory", "agents", "qa", ...GAME, "langs"]);
+    expect(live("content_manager")).toEqual(["overview", "content", "memory", ...GAME, "langs"]);
     expect(live("qa_analyst")).toEqual(["overview", "content", "memory", "agents", "qa", "langs"]);
-    expect(live("analyst")).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", "langs"]);
-    expect(live("auditor")).toEqual(["overview", "content", "memory", "agents", "qa", "costs", "langs", "audit"]);
+    expect(live("analyst")).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", ...GAME, "langs"]);
+    expect(live("auditor")).toEqual(["overview", "content", "memory", "agents", "qa", "costs", ...GAME, "langs", "audit"]);
     expect(live("read_only")).toEqual(["overview", "memory"]);
+  });
+  it("sprint 6: «Герои», «Геймификация», «События и сезоны» open with game.read only (dashboard.read no longer)", () => {
+    for (const p of GAME) {
+      expect(pageAllowed(p, new Set<Permission>(["game.read"]))).toBe(true);
+      expect(pageAllowed(p, new Set<Permission>(["dashboard.read", "game.manage", "game.publish", "wallet.adjust"]))).toBe(false);
+    }
   });
   it("sprint 5: «memory» opens with memory.read or dashboard.read; with neither it is closed", () => {
     expect(pageAllowed("memory", new Set<Permission>(["memory.read"]))).toBe(true);
@@ -70,9 +77,8 @@ describe("menu: 15 sections of the experience-config seed + «memory» (sprint 5
     expect(pageAllowed("roles", new Set<Permission>(["staff.manage"]))).toBe(true);
     expect(pageAllowed("nope", new Set(ALL))).toBe(false);
   });
-  it("«soon» sections carry the sprint number of the plan", () => {
-    const soon = Object.fromEntries(NAV_ITEMS.filter((i) => i.soon).map((i) => [i.id, i.soon]));
-    expect(soon).toEqual({ heroes: 6, game: 6, events: 6 });
+  it("no section is «soon» any more: sprint 6 made the game sections live", () => {
+    expect(NAV_ITEMS.filter((i) => i.soon).map((i) => i.id)).toEqual([]);
   });
   it("sprint 4: «agents» — ai.read, «qa» — qa.read, «costs» — costs.read (not dashboard.read any more)", () => {
     expect(pageAllowed("agents", new Set<Permission>(["ai.read"]))).toBe(true);
@@ -111,6 +117,15 @@ describe("menu order and switches from the active admin config (layout.menu)", (
     expect(pageAllowed("content", new Set(ALL), menu)).toBe(false);
     // groups follow the first appearance of their sections
     expect(visibleNav(new Set(ALL), menu).map((g) => g.group).slice(0, 2)).toEqual(["comms", "product"]);
+  });
+  it("the config id `game_events` (INTERNAL_API sprint 6 §8) places and switches «События и сезоны» like `events`", () => {
+    const seedMenu = ["overview", "users", "content", "agents", "qa", "costs", "heroes", "game", "game_events", "news", "support", "config", "langs", "roles", "audit"].map((id) => ({ id, enabled: true }));
+    const o = orderedItems(seedMenu).map((i) => i.id);
+    expect(o.indexOf("events")).toBe(o.indexOf("game") + 1);
+    expect(o.filter((x) => x === "events")).toHaveLength(1);
+    const off = seedMenu.map((m) => (m.id === "game_events" ? { ...m, enabled: false } : m));
+    expect(orderedItems(off).map((i) => i.id)).not.toContain("events");
+    expect(pageAllowed("events", new Set(ALL), off)).toBe(false);
   });
   it("an empty menu falls back to the defaults", () => {
     expect(orderedItems([]).map((i) => i.id)).toEqual(NAV_ITEMS.map((i) => i.id));

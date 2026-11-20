@@ -102,6 +102,50 @@
       "description": "Ответы «Повторения дня» (POST /v1/memory/review-sessions/*/tasks/*) — на ученика за 10 минут (спринт 5)"
     },
     {
+      "policy": "tg.game.read",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 120,
+      "window_s": 60,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Игровые экраны (GET /v1/game/*) — на ученика в минуту (спринт 6)"
+    },
+    {
+      "policy": "tg.game.write",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 30,
+      "window_s": 60,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Игровые команды: герой, экипировка, настройки (PUT/PATCH /v1/game/*) — на ученика в минуту (спринт 6)"
+    },
+    {
+      "policy": "tg.game.purchase",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 10,
+      "window_s": 60,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Покупка в магазине за тилы (POST /v1/game/shop/purchases) — на ученика в минуту (спринт 6)"
+    },
+    {
+      "policy": "tg.game.assets",
+      "service": "telegram-bff",
+      "subject": "ip",
+      "limit": 600,
+      "window_s": 60,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Картинки героев и предметов без авторизации (GET /v1/game/assets/*) — с одного IP в минуту (спринт 6)"
+    },
+    {
       "policy": "adm.login_ip",
       "service": "admin-bff",
       "subject": "ip",

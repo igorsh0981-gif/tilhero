@@ -8,6 +8,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { AdminLearnerCard, AdminLearnerRow, AgeBand, LearnerKind, LearnerMemorySummary, LearnerStatus, UiLang } from "@tilhero/contracts/admin";
 import { Learners, Memory, type LearnerFilters } from "../../api/endpoints";
 import { SummaryCard } from "../memory/Summary";
+import { LearnerGameTab } from "../game/LearnerGame";
 import { ApiError } from "../../api/errors";
 import { useI18n, fmtCountdown } from "../../i18n";
 import { shortId } from "../../lib/ids";
@@ -348,7 +349,7 @@ function LearnerMemoryTab({ id }: { id: string }) {
 
 /* ---------------------------------------------------------------- card */
 
-type Tab = "account" | "consent" | "plan" | "notif" | "tickets" | "memory";
+type Tab = "account" | "consent" | "plan" | "notif" | "tickets" | "memory" | "game";
 
 export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () => void; onOpen: (id: string) => void }) {
   const i = useI18n();
@@ -402,6 +403,8 @@ export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () =
               { v: "tickets", label: t("lr.tab.tickets"), cnt: card.tickets ? card.tickets.length : null, testId: "lc-tab-tickets" },
               // sprint 5: the learner's memory (memory.read) — the summary here, the cards and history in «Память»
               ...(can("memory.read") ? [{ v: "memory" as const, label: t("lr.tab.memory"), testId: "lc-tab-memory" }] : []),
+              // sprint 6: the learner's wallet of the game (game.read) — the summary here, the ledger in «Геймификация»
+              ...(can("game.read") ? [{ v: "game" as const, label: t("lr.tab.game"), testId: "lc-tab-game" }] : []),
             ]}
           />
         )
@@ -620,6 +623,7 @@ export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () =
               <Empty icon="support" title={t("lr.noTickets")} />
             ))}
           {tab === "memory" && can("memory.read") && <LearnerMemoryTab id={card.user_id} />}
+          {tab === "game" && can("game.read") && <LearnerGameTab id={card.user_id} />}
           <p className="xs muted mt-16 row">
             <Icon name="shield" /> {t("lr.piiNote")}
           </p>

@@ -24,6 +24,7 @@ import type {
   WhatsNew,
 } from "@tilhero/contracts/bff";
 import { MockContent, type ContentScenario } from "./content";
+import { MockGame, type GameScenario } from "./game";
 import { MockLessons, type LessonsScenario } from "./lessons";
 import { MockMemory, type MemoryScenario } from "./memory";
 import * as F from "./data";
@@ -84,6 +85,15 @@ export interface Scenario {
   childVoice?: boolean;
   /** the account (18+) has a child profile but stays in its own (the parent's view of «Семья») */
   withChild?: boolean;
+  /** sprint 6: the game. Absent — the BFF answers 503 GAME_UNAVAILABLE on /v1/game/* (the app works without the game,
+   *  as before sprint 6); `{}` — the game with its defaults (fixtures/game.ts) */
+  game?: GameScenario;
+  /** «today» of the plan (YYYY-MM-DD) instead of the clock: a stable week for the frozen days and the screenshots */
+  fixedToday?: string;
+  /** past days of the schedule closed by a streak freeze (TodayPlan.week[].frozen; missed stays true) */
+  frozenDays?: string[];
+  /** past days with a session (done) */
+  doneDays?: string[];
 }
 
 /** ~0.1 s of silent MP3 (4 frames of MPEG-1 Layer III, 32 kbit/s, 48 kHz, mono) — the body of the mock speech. */
@@ -101,7 +111,7 @@ export interface Recorded {
   body: unknown;
 }
 
-const PUBLIC = [/^\/v1\/session\/(telegram|refresh)$/, /^\/v1\/legal\/policy/, /^\/v1\/experience\/config/, /^GET \/v1\/guardian-consents\//];
+const PUBLIC = [/^\/v1\/session\/(telegram|refresh)$/, /^\/v1\/legal\/policy/, /^\/v1\/experience\/config/, /^GET \/v1\/guardian-consents\//, /^GET \/v1\/game\/assets\//];
 
 function localYmd(tz: string, d = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
@@ -143,6 +153,7 @@ export class MockBff {
   readonly content: MockContent;
   readonly lessons: MockLessons;
   readonly memory: MockMemory;
+  readonly game: MockGame;
   private dropOnce: Set<string>;
   private lateOnce: Record<string, [number, string]>;
   private access = 0;
@@ -186,6 +197,7 @@ export class MockBff {
     }
     this.lessons = new MockLessons(sc.lessons ?? {}, { self: this.active });
     this.memory = new MockMemory(sc.memory ?? {}, this.lessons, { self: F.ACCOUNT_ID, kid: this.learners.find((l) => l.kind === "child")?.learner_id });
+    this.game = new MockGame(sc.game ?? { mode: "down" }, (owner) => this.learners.some((l) => l.learner_id === owner && l.kind === "child"));
     this.syncVoice();
   }
 
@@ -249,15 +261,18 @@ export class MockBff {
   private today(): TodayPlan {
     const p = this.plan();
     const s = p.schedule;
-    const today = localYmd(s.timezone);
+    const today = this.sc.fixedToday ?? localYmd(s.timezone);
     const acts = this.activities[this.active] ?? {};
+    const doneDays = new Set(this.sc.doneDays ?? []);
+    const frozenDays = new Set(this.sc.frozenDays ?? []);
     const wd = isoWd(today);
     const monday = addDays(today, 1 - wd);
     const week = Array.from({ length: 7 }, (_, i) => {
       const d = addDays(monday, i);
       const scheduled = s.days.includes(i + 1);
-      const done = (acts[d] ?? 0) > 0;
-      return { local_date: d, scheduled, done, missed: scheduled && !done && d < today };
+      const done = (acts[d] ?? 0) > 0 || doneDays.has(d);
+      const missed = scheduled && !done && d < today;
+      return { local_date: d, scheduled, done, missed, frozen: missed && frozenDays.has(d) };
     });
     let next: { local_date: string; time: string } | null = null;
     for (let i = (acts[today] ?? 0) > 0 ? 1 : 0; i < 8; i++) {
@@ -644,6 +659,19 @@ export class MockBff {
       if (sp.mode === "down") return this.err(route, 503, "SPEECH_UNAVAILABLE", { service: "tts" });
       if (typeof b.text !== "string" || !/[A-Za-z]/.test(b.text) || (b.variant !== "en-GB" && b.variant !== "en-US")) return this.err(route, 422, "TEXT_INVALID", { field: "text" });
       return route.fulfill({ status: 200, contentType: "audio/mpeg", body: SPEECH_MP3, headers: { "cache-control": "private, max-age=86400" } });
+    }
+
+    // ---- sprint 6: the game ----
+    if (method === "GET" && path.startsWith("/v1/game/assets/")) {
+      const a = this.game.asset(path);
+      if (!a) return this.err(route, 404, "NOT_FOUND");
+      return route.fulfill({ status: 200, contentType: "image/webp", body: a.body, headers: { etag: `"${a.sha}"`, "cache-control": "public, max-age=31536000, immutable" } });
+    }
+    const s6 = this.game.handle(method, path, url.searchParams, b, headers, this.active);
+    if (s6) {
+      if (key === "POST /v1/game/shop/purchases" && s6.status === 200 && this.game.takeDrop()) return route.abort("failed");
+      if (s6.code) return this.err(route, s6.status, s6.code, s6.details ?? {});
+      return this.ok(route, s6.body, s6.status);
     }
 
     // ---- sprint 5 ----

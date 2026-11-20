@@ -51,7 +51,7 @@ RUN npm run build -w @tilhero/telegram-miniapp \
 # ---------- 3. рантайм: Caddy, только статика ----------
 FROM ${CADDY_IMAGE} AS runtime
 ARG VITE_BFF_URL
-# Порт задаёт платформа (Railway: PORT). BFF_ORIGIN → CSP connect-src (можно переопределить переменной окружения).
+# Порт задаёт платформа (Railway: PORT). BFF_ORIGIN → CSP connect-src и img-src (картинки игры; можно переопределить).
 ENV PORT=8080 BFF_ORIGIN=${VITE_BFF_URL} \
     XDG_CONFIG_HOME=/tmp/caddy/config XDG_DATA_HOME=/tmp/caddy/data
 # Не-root: порт > 1024, поэтому file capability cap_net_bind_service не нужна. Копия бинаря без xattr

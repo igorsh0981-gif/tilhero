@@ -30,6 +30,7 @@ import { loadConfig, type Config } from "../src/config.js";
 import type { App } from "../src/http.js";
 import { signInitData } from "../src/telegramAuth.js";
 import { FakeContent } from "./fakeContent.js";
+import { FakeGame } from "./fakeGame.js";
 import { FakeLessons } from "./fakeLessons.js";
 import { FakeMemory, FakeReading } from "./fakeMemory.js";
 
@@ -53,6 +54,7 @@ const URLS = {
   assessment: "http://assessment.test",
   tts: "http://tts.test",
   memory: "http://memory.test",
+  gamification: "http://gamification.test",
 } as const;
 
 export type Service = keyof typeof URLS;
@@ -70,6 +72,7 @@ const DOMAIN_AUD: Record<Service, string> = {
   assessment: "assessment",
   tts: "tts",
   memory: "memory",
+  gamification: "gamification",
 };
 
 /** MP3-заглушка tts: два беззвучных кадра MPEG-1 Layer III (32 кбит/с, 48 кГц, моно). */
@@ -103,6 +106,7 @@ export function testConfig(env: Record<string, string> = {}): Config {
     ASSESSMENT_URL: URLS.assessment,
     TTS_URL: URLS.tts,
     MEMORY_URL: URLS.memory,
+    GAMIFICATION_URL: URLS.gamification,
     UPSTREAM_RETRIES: "0",
     UPSTREAM_TIMEOUT_MS: "2000",
     LOG_LEVEL: "info",
@@ -265,6 +269,8 @@ export class FakeDomains {
   /** Спринт 5: memory и чтение (catalog readings, lessons reading) — test/fakeMemory.ts. */
   readonly memory = new FakeMemory();
   readonly reading = new FakeReading();
+  /** Спринт 6: gamification — test/fakeGame.ts. */
+  readonly game = new FakeGame();
   private readonly overrides = new Map<string, Handler>();
   private ticketSeq = 3000;
 
@@ -417,6 +423,8 @@ export class FakeDomains {
         return this.ttsRoute(r);
       case "memory":
         return this.memory.memory(r);
+      case "gamification":
+        return this.game.route(r);
     }
   }
 
@@ -802,7 +810,7 @@ export class FakeDomains {
       done_today: minutes >= p.schedule.duration_min,
       next_slot: { local_date: "2026-11-18", time: p.schedule.preferred_time },
       streak_days: minutes > 0 ? 1 : 0,
-      week: [{ local_date: "2026-11-16", scheduled: true, done: false, missed: true }],
+      week: [{ local_date: "2026-11-16", scheduled: true, done: false, missed: true, frozen: false }],
     };
   }
 

@@ -279,7 +279,7 @@ test.describe("ролевая ситуация, итоги, апелляция",
     await page.getByTestId("pl-finish").click();
     await expect(page.getByTestId("sm-pending")).toContainText("Оценка появится позже");
     await page.getByTestId("sm-refresh").click();
-    await expect.poll(() => bff.calls("GET", /\/summary$/).length).toBe(1);
+    await expect.poll(() => bff.calls("GET", /^\/v1\/sessions\/[^/]+\/summary$/).length).toBe(1);
     await expect(page.getByTestId("sm-appeal")).toHaveCount(0);
   });
 });
@@ -467,19 +467,19 @@ test.describe("ревью R2: таймауты, оценка позже, окн�
     await expect(pending).toContainText("Оценка появится позже — пока этот экран открыт, мы проверяем её сами");
     await expect(pending).not.toContainText("Telegram");
     await expect(page.getByTestId("sm-refresh")).toBeVisible();
-    expect(bff.calls("GET", /\/summary$/)).toHaveLength(0);
+    expect(bff.calls("GET", /^\/v1\/sessions\/[^/]+\/summary$/)).toHaveLength(0);
     await page.clock.runFor(5_000);
-    await expect.poll(() => bff.calls("GET", /\/summary$/).length).toBe(1);
+    await expect.poll(() => bff.calls("GET", /^\/v1\/sessions\/[^/]+\/summary$/).length).toBe(1);
     await expect(pending).toBeVisible();
     await page.clock.runFor(10_000);
-    await expect.poll(() => bff.calls("GET", /\/summary$/).length).toBe(2);
+    await expect.poll(() => bff.calls("GET", /^\/v1\/sessions\/[^/]+\/summary$/).length).toBe(2);
     await expect(pending).toHaveCount(0);
     await expect(page.getByTestId("sm-scores")).toBeVisible();
     await expect(page.getByTestId("sm-appeal")).toBeVisible();
     // the evaluation is there — no more reads; after leaving the screen — neither
     await page.getByTestId("sm-done").click();
     await page.clock.runFor(200_000);
-    expect(bff.calls("GET", /\/summary$/)).toHaveLength(2);
+    expect(bff.calls("GET", /^\/v1\/sessions\/[^/]+\/summary$/)).toHaveLength(2);
   });
 
   test("R2-04: оценка старше 14 дней — вместо «Оспорить оценку» короткое пояснение (RU и UZ)", async ({ page }) => {

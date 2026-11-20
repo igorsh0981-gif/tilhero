@@ -3,7 +3,9 @@
 `llm` + `active` — агенты спринта через ai-gateway (`teaching_coach`, `conversation_partner`, `independent_evaluator`);
 `code` — логика сервисов (`learning_orchestrator` — lessons, `curriculum_planner` — learning-plan,
 `diagnostic_assessor` — diagnostics; спринт 5: `spaced_repetition_coach` — memory (FSRS и правила оценки ответа),
-`pronunciation_coach` — ai-gateway (акустическая оценка Azure Speech + советы правилами)); `rules` —
+`pronunciation_coach` — ai-gateway (акустическая оценка Azure Speech + советы правилами); спринт 6:
+`gameplay_director` — gamification (правила игры кодом: награды по подтверждённым действиям, задания дня, значки,
+ступени героя; модель не вызывается)); `rules` —
 детерминированные правила (`safety_quality_gate` — ai-gateway, `error_analyst` — часть вывода оценщика в assessment);
 остальные — `planned` с этапом по docs/SPRINTS.md (`evening_review_coach` — planned: вечернее напоминание спринта 5
 делают memory и notifications без агента).
@@ -12,7 +14,8 @@
 согласием родителя, проверяют memory и telegram-bff).
 
 Таблица `agents` заполняется миграцией 0001 из `AGENTS`; изменения реестра после неё — миграциями (0004 переводит
-`spaced_repetition_coach` и `pronunciation_coach` в `code`/`active`, снимок прежних значений — `AGENTS_SPRINT4`).
+`spaced_repetition_coach` и `pronunciation_coach` в `code`/`active`, снимок прежних значений — `AGENTS_SPRINT4`;
+0007 — `gameplay_director` в `code`/`active`, снимок — `AGENTS_SPRINT5`).
 """
 
 from __future__ import annotations
@@ -93,8 +96,11 @@ AGENTS: Final[tuple[dict[str, Any], ...]] = (
        ("Два независимых вклада и отчёта в паре", "Juftlikda ikki mustaqil hissa va hisobot"),
        "methodist", "llm", "planned", 7, free_text=True),
     _a("gameplay_director", ("Игровой режиссёр", "Oʻyin rejissyori"),
-       ("Предлагает миссии героя, не начисляет награды", "Qahramon missiyalarini taklif qiladi, mukofot bermaydi"),
-       "methodist", "llm", "planned", 6),
+       ("Правила игры кодом: XP и тилы за подтверждённые действия, задания дня, значки, ступени героя; на оценку "
+        "языка не влияет",
+        "Oʻyin qoidalari kodda: tasdiqlangan harakatlar uchun XP va tillar, kunlik topshiriqlar, nishonlar, "
+        "qahramon bosqichlari; til bahosiga taʼsir qilmaydi"),
+       "methodist", "code", implemented_in="gamification"),
     _a("duel_host", ("Ведущий дуэли", "Duel boshlovchisi"),
        ("Равные по сложности игровые вопросы", "Murakkabligi teng oʻyin savollari"),
        "methodist", "llm", "planned", 7),
@@ -123,6 +129,14 @@ AGENTS_SPRINT4: Final[tuple[dict[str, Any], ...]] = (
        "methodist", "llm", "planned", 5, free_text=True),
 )
 SPRINT5_CODE_AGENTS: Final = ("spaced_repetition_coach", "pronunciation_coach")
+
+# Снимок строки реестра до миграции 0007 (спринт 6: gameplay_director — code/gamification; откат возвращает её)
+AGENTS_SPRINT5: Final[tuple[dict[str, Any], ...]] = (
+    _a("gameplay_director", ("Игровой режиссёр", "Oʻyin rejissyori"),
+       ("Предлагает миссии героя, не начисляет награды", "Qahramon missiyalarini taklif qiladi, mukofot bermaydi"),
+       "methodist", "llm", "planned", 6),
+)
+SPRINT6_CODE_AGENTS: Final = ("gameplay_director",)
 
 # Модели и цены по умолчанию (PLAN «Модели по умолчанию», прайс Anthropic на 19.11.2026), $ за 1 млн токенов
 MODELS: Final[tuple[dict[str, Any], ...]] = (

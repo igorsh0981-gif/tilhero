@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 
@@ -44,13 +45,20 @@ class Settings(ServiceSettings):
     retry_delays_seconds: tuple[int, ...] = (30, 120, 600, 1800, 3600)
 
     # Политика (INTERNAL_API §4, PLAN «Правила напоминаний»)
-    daily_limit: int = Field(default=3, ge=1, le=20)  # reminders + missed + social в местные сутки на ученика
+    daily_limit: int = Field(default=3, ge=1, le=20)  # reminders + missed + social + game в местные сутки
     reminder_stale_hours: int = Field(default=3, ge=1, le=24)  # напоминание позже слота + 3 ч → только центр
     missed_stale_time: str = "22:00"  # пропуск: на следующий день после этого времени — только центр
     comeback_min_days: int = Field(default=7, ge=1, le=60)  # consecutive_missed ≥ 4 — не чаще раза в 7 дней
     kid_window_start: str = "08:00"  # дети 6–13: сообщения родителю только в окне 08:00–20:00 местного
     kid_window_end: str = "20:00"
     retention_days: int = Field(default=90, ge=1, le=365)  # журнал = центр уведомлений
+
+    # Спринт 6 — уведомления игры (INTERNAL_API спринта 6 §3)
+    # Какой выключатель настроек ученика включает категорию game: пока её нет в bff.ts NotificationCategories и
+    # identity-consent — reminders; когда появится — game
+    game_category_gate: Literal["reminders", "game"] = "reminders"
+    # значок и ступень героя позже момента события + N ч (тихие часы до утра и т. п.) — только центр
+    game_stale_hours: int = Field(default=12, ge=1, le=48)
 
     # Спринт 2 — шаблоны сотрудников и рассылки (INTERNAL_API спринта 2 §3)
     # Кэш активных версий шаблонов в процессе (≤ 30 с; активация на этой реплике сбрасывает его сразу)

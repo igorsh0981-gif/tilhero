@@ -367,7 +367,9 @@ export const TodayPlanSchema = Type.Object({
   done_today: Type.Boolean(),
   next_slot: Nullable(Type.Object({ local_date: LocalDate, time: Type.String() })),
   streak_days: Type.Integer(),
-  week: Type.Array(Type.Object({ local_date: LocalDate, scheduled: Type.Boolean(), done: Type.Boolean(), missed: Type.Boolean() })),
+  // frozen (спринт 6): день графика без занятия, закрытый заморозкой серии (missed остаётся true). learning-plan до
+  // спринта 6 поля не присылает — BFF ставит false (routes/plan.ts todayView).
+  week: Type.Array(Type.Object({ local_date: LocalDate, scheduled: Type.Boolean(), done: Type.Boolean(), missed: Type.Boolean(), frozen: Type.Boolean() })),
 });
 assertSame<Same<Static<typeof TodayPlanSchema>, C.TodayPlan>>();
 
@@ -1668,3 +1670,227 @@ export const ReadingQuerySchema = Type.Object(
   },
   strict,
 );
+
+// =====================================================================================================================
+// Спринт 6 — игра и герои (bff.ts «Спринт 6», INTERNAL_API спринта 6 §1.7–§1.9, §1.12, §9). Ответы gamification
+// сверяются со схемами GameDomain (src/check.ts) до сборки ответа Mini App: не по контракту → 503 GAME_UNAVAILABLE.
+// Картинки: домен отдаёт {asset_id, sha256, width, height} (как AdminGameImage) — url собирает BFF
+// (/v1/game/assets/{asset_id}/{sha256}); url домена без sha256 принимается, только если это тот же путь (routes/game.ts).
+// =====================================================================================================================
+
+const GameCurrency = Enum(["xp", "til", "freeze"]);
+assertSame<Same<Static<typeof GameCurrency>, C.GameCurrency>>();
+const GameReason = Enum([
+  "lesson", "scenario", "media", "reading", "review", "skill_demonstrated", "skill_retained", "quest", "quest_bonus",
+  "registration_bonus", "referral_bonus", "streak_freeze", "shop", "manual", "reversal", "purchase",
+]);
+assertSame<Same<Static<typeof GameReason>, C.GameReason>>();
+const HeroLine = Enum(["robot", "pet", "human"]);
+assertSame<Same<Static<typeof HeroLine>, C.HeroLine>>();
+const HeroStage = Type.Union([Type.Literal(1), Type.Literal(2), Type.Literal(3)]);
+assertSame<Same<Static<typeof HeroStage>, C.HeroStage>>();
+const QuestKind = Enum(["lesson_complete", "review_cards", "reading_complete", "scenario_complete", "media_complete", "xp_earned", "skill_confirmed"]);
+assertSame<Same<Static<typeof QuestKind>, C.QuestKind>>();
+const GameAction = Enum(["lesson", "scenario", "media", "reading", "review", "skill", "quest"]);
+assertSame<Same<Static<typeof GameAction>, C.GameAction>>();
+const ShopItemKind = Enum(["background", "hero_frame", "streak_freeze"]);
+assertSame<Same<Static<typeof ShopItemKind>, C.ShopItemKind>>();
+
+/** Код героя и предмета магазина: `robot_0`…`human_2`, `[a-z0-9_]{3,40}` (admin.ts ShopItemCreate.code). */
+export const GAME_CODE_PATTERN = "^[a-z0-9_]{3,40}$";
+const GameCode = Type.String({ pattern: GAME_CODE_PATTERN });
+/** asset_id картинки (UUID gamification или иной безопасный идентификатор) и sha256 (hex) — части публичного пути. */
+export const ASSET_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$";
+export const SHA256_PATTERN = "^[0-9a-fA-F]{64}$";
+
+// ---------- Картинки ----------
+export const GameImageSchema = Type.Object({ asset_id: Type.String(), url: Type.String(), width: Count, height: Count });
+assertSame<Same<Static<typeof GameImageSchema>, C.GameImage>>();
+/** Картинка в ответе gamification: sha256 (url собирает BFF) или уже готовый url того же пути. */
+export const GameImageDomainSchema = Type.Object({
+  asset_id: Type.String({ pattern: ASSET_ID_PATTERN }),
+  sha256: Type.Optional(Type.String({ pattern: SHA256_PATTERN })),
+  url: Type.Optional(Type.String({ maxLength: 300 })),
+  width: Count,
+  height: Count,
+});
+/** GET /v1/game/assets/{asset_id}/{sha256}: image/webp | image/png. */
+export const GameImageBytesSchema = Type.Unsafe<Buffer>({ type: "string", format: "binary", description: "image/webp | image/png, неизменяемая" });
+export const GameAssetParamsSchema = Type.Object(
+  { asset_id: Type.String({ pattern: ASSET_ID_PATTERN }), sha256: Type.String({ pattern: SHA256_PATTERN }) },
+  strict,
+);
+export const GameAssetHeadersSchema = Type.Object({ "if-none-match": Type.Optional(Type.String({ maxLength: 200 })) });
+
+// ---------- Настройки, задания, события, операции ----------
+export const GameSettingsSchema = Type.Object({
+  auto_freeze: Type.Boolean(),
+  quests_hidden: Type.Boolean(),
+  celebrations: Enum(["full", "quiet"]),
+  game_notifications: Type.Boolean(),
+});
+assertSame<Same<Static<typeof GameSettingsSchema>, C.GameSettings>>();
+/** PATCH /v1/game/settings — Partial<GameSettings>, хотя бы одно поле. */
+export const GameSettingsPatchSchema = Type.Object(
+  {
+    auto_freeze: Type.Optional(Type.Boolean()),
+    quests_hidden: Type.Optional(Type.Boolean()),
+    celebrations: Type.Optional(Enum(["full", "quiet"])),
+    game_notifications: Type.Optional(Type.Boolean()),
+  },
+  { ...strict, minProperties: 1 },
+);
+assertSame<Same<Static<typeof GameSettingsPatchSchema>, Partial<C.GameSettings>>>();
+
+const GameAmount = Type.Object({ xp: Count, til: Count });
+export const QuestSchema = Type.Object({
+  slot: Type.Union([Type.Literal(1), Type.Literal(2), Type.Literal(3)]),
+  code: Type.String(),
+  kind: QuestKind,
+  target: Count,
+  progress: Count,
+  status: Enum(["active", "completed", "expired"]),
+  reward: GameAmount,
+});
+assertSame<Same<Static<typeof QuestSchema>, C.Quest>>();
+export const DailyQuestsSchema = Type.Object({
+  local_date: LocalDate,
+  hidden: Type.Boolean(),
+  items: Type.Array(QuestSchema),
+  all_done_bonus: GameAmount,
+  bonus_received: Type.Boolean(),
+});
+assertSame<Same<Static<typeof DailyQuestsSchema>, C.DailyQuests>>();
+
+export const ActiveGameEventSchema = Type.Object({
+  event_id: Type.String(),
+  title: Localized,
+  description: Localized,
+  ends_at: IsoTime,
+  multipliers: Type.Array(Type.Object({ action: GameAction, currency: Enum(["xp", "til"]), factor: Type.Number({ minimum: 0 }) })),
+});
+assertSame<Same<Static<typeof ActiveGameEventSchema>, C.ActiveGameEvent>>();
+
+/** Операция реестра для ученика: без actor и комментария сотрудника (они не уходят в Mini App — сериализация по схеме). */
+export const GameOperationSchema = Type.Object({
+  op_id: Type.String(),
+  currency: GameCurrency,
+  amount: Type.Integer(),
+  reason: GameReason,
+  capped: Type.Boolean(),
+  multiplier: Type.Number({ minimum: 0 }),
+  status: Enum(["confirmed", "reversed"]),
+  created_at: IsoTime,
+});
+assertSame<Same<Static<typeof GameOperationSchema>, C.GameOperation>>();
+export const GameHistoryPageSchema = pageOf(GameOperationSchema);
+assertSame<Same<Static<typeof GameHistoryPageSchema>, C.Page<C.GameOperation>>>();
+export const GameHistoryQuerySchema = Type.Object(
+  { currency: Type.Optional(GameCurrency), cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })) },
+  strict,
+);
+export const GameRewardsQuerySchema = Type.Object({ source_session_id: Uuid }, strict);
+
+// ---------- Команды ----------
+export const SelectHeroRequestSchema = Type.Object({ hero_code: GameCode }, strict);
+assertSame<Same<Static<typeof SelectHeroRequestSchema>, C.SelectHeroRequest>>();
+export const EquipmentRequestSchema = Type.Object({ background_code: Nullable(GameCode), frame_code: Nullable(GameCode) }, strict);
+assertSame<Same<Static<typeof EquipmentRequestSchema>, C.EquipmentRequest>>();
+export const PurchaseRequestSchema = Type.Object({ item_code: GameCode }, strict);
+assertSame<Same<Static<typeof PurchaseRequestSchema>, C.PurchaseRequest>>();
+export const PurchaseResultSchema = Type.Object({
+  purchase_id: Type.String(),
+  item_code: Type.String(),
+  price_til: Count,
+  til_balance: Count,
+  freeze_stock: Count,
+  purchased_at: IsoTime,
+});
+assertSame<Same<Static<typeof PurchaseResultSchema>, C.PurchaseResult>>();
+
+// ---------- Объекты с картинками: ответ Mini App (GameImage) и ответ домена (GameImageDomain) ----------
+const BadgeMetric = Enum(["lessons", "streak", "skills", "skill_retained", "reviews_cards", "readings", "freeze"]);
+
+function gameShapes<I extends TSchema, P extends TSchema>(Image: I, PurchaseAvailable: P) {
+  const ShopItemRef = Type.Object({
+    code: Type.String(),
+    kind: ShopItemKind,
+    title: Localized,
+    image: Nullable(Image),
+    theme: Nullable(Type.Object({ bg: Type.String(), accent: Type.String() })),
+  });
+  const HeroStageView = Type.Object({ stage: HeroStage, name: Localized, image: Image, skills_required: Count });
+  const HeroView = Type.Object({ code: Type.String(), line: HeroLine, name: Localized, tagline: Localized, stages: Type.Array(HeroStageView) });
+  const MyHero = Type.Object({
+    code: Type.String(),
+    name: Localized,
+    stage: HeroStage,
+    stage_name: Localized,
+    image: Image,
+    confirmed_skills: Count,
+    next_stage_at: Nullable(Count),
+  });
+  const BadgeView = Type.Object({
+    code: Type.String(),
+    title: Localized,
+    description: Localized,
+    image: Nullable(Image),
+    earned_at: Nullable(IsoTime),
+    basis: Type.Object({ metric: BadgeMetric, value: Count, threshold: Count }),
+  });
+  const ShopItemView = Type.Object({
+    ...ShopItemRef.properties,
+    description: Localized,
+    price_til: Count,
+    owned: Type.Boolean(),
+    equipped: Type.Boolean(),
+    can_buy: Type.Boolean(),
+    reason_unavailable: Nullable(Enum(["owned", "freeze_full", "not_enough_tils"])),
+    available_until: Nullable(IsoTime),
+  });
+  const Summary = Type.Object({
+    level: Count,
+    xp_total: Count,
+    xp_level_start: Count,
+    xp_next_level: Nullable(Count),
+    til_balance: Count,
+    freeze_stock: Count,
+    freeze_max: Count,
+    freeze_price_til: Count,
+    hero: Nullable(MyHero),
+    quests: DailyQuestsSchema,
+    events: Type.Array(ActiveGameEventSchema),
+    equipment: Type.Object({ background: Nullable(ShopItemRef), frame: Nullable(ShopItemRef) }),
+    settings: GameSettingsSchema,
+    purchase_available: PurchaseAvailable,
+  });
+  const Heroes = Type.Object({ items: Type.Array(HeroView), selected: Nullable(Type.String()), stage: HeroStage });
+  const Badges = Type.Object({ items: Type.Array(BadgeView) });
+  const Shop = Type.Object({ items: Type.Array(ShopItemView), til_balance: Count, freeze_stock: Count, freeze_max: Count });
+  const Rewards = Type.Object({
+    status: Enum(["pending", "ready", "none"]),
+    operations: Type.Array(GameOperationSchema),
+    level_up: Nullable(Type.Object({ from: Count, to: Count })),
+    hero_stage_up: Nullable(Type.Object({ from: HeroStage, to: HeroStage })),
+    badges: Type.Array(BadgeView),
+    quests_completed: Type.Array(QuestSchema),
+  });
+  return { ShopItemRef, HeroStageView, HeroView, MyHero, BadgeView, ShopItemView, Summary, Heroes, Badges, Shop, Rewards };
+}
+
+/** Схемы ответов Mini App (сериализация по ним — только поля контракта). */
+export const GameView = gameShapes(GameImageSchema, Type.Literal(false));
+/** Схемы ответов gamification: картинки с sha256; purchase_available необязателен (BFF всегда отдаёт false). */
+export const GameDomain = gameShapes(GameImageDomainSchema, Type.Optional(Type.Boolean()));
+
+assertSame<Same<Static<typeof GameView.ShopItemRef>, C.ShopItemRef>>();
+assertSame<Same<Static<typeof GameView.HeroStageView>, C.HeroStageView>>();
+assertSame<Same<Static<typeof GameView.HeroView>, C.HeroView>>();
+assertSame<Same<Static<typeof GameView.MyHero>, C.MyHero>>();
+assertSame<Same<Static<typeof GameView.BadgeView>, C.BadgeView>>();
+assertSame<Same<Static<typeof GameView.ShopItemView>, C.ShopItemView>>();
+assertSame<Same<Static<typeof GameView.Summary>, C.GameSummary>>();
+assertSame<Same<Static<typeof GameView.Heroes>, { items: C.HeroView[]; selected: string | null; stage: C.HeroStage }>>();
+assertSame<Same<Static<typeof GameView.Badges>, { items: C.BadgeView[] }>>();
+assertSame<Same<Static<typeof GameView.Shop>, { items: C.ShopItemView[]; til_balance: number; freeze_stock: number; freeze_max: number }>>();
+assertSame<Same<Static<typeof GameView.Rewards>, C.SessionRewards>>();

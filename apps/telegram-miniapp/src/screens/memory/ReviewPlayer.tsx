@@ -143,7 +143,7 @@ function ReviewSession() {
       finishing.current = false;
       if (!summary || !st.session) return;
       haptic.notify("success");
-      nav.replace({ name: "reviewSummary", sessionId: st.session.session_id, summary });
+      nav.replace({ name: "reviewSummary", sessionId: st.session.session_id, summary, fresh: true });
     });
   }, [st.phase, st.error, st.session, api, nav]);
 

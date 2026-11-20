@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "game.hero.stage_reached.v1.schema.json",
+  "title": "game.hero.stage_reached.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "hero_code",
+    "stage",
+    "confirmed_skills",
+    "notify",
+    "reached_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "hero_code": {
+      "type": "string",
+      "pattern": "^(robot|pet|human)_[0-9]$"
+    },
+    "stage": {
+      "type": "integer",
+      "enum": [
+        2,
+        3
+      ]
+    },
+    "confirmed_skills": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "notify": {
+      "type": "boolean"
+    },
+    "reached_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

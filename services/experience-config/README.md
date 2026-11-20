@@ -43,8 +43,12 @@ bool, имена `^[a-z][a-z0-9_]{0,63}$`, ≤ 50; payload ≤ 32 КБ. Любо
 
 **admin** — `{theme: {id: admin_light, version, tokens}, layout: {density: compact|comfortable, menu: [{id, enabled}]},
 flags}`; `menu` — порядок и видимость разделов меню прототипа админки (`overview users content agents qa costs heroes game
-events news support config langs roles audit`, без повторов; права всё равно проверяет admin-bff). Контракт admin-bff —
-спринт 2.
+events news support config langs roles audit`; спринт 5 — `memory`; спринт 6 — `game_events`), без повторов; права всё
+равно проверяет admin-bff. Контракт admin-bff — спринт 2. Спринт 6 (INTERNAL_API спринта 6 §8): раздел «Игра» —
+`heroes` («Герои»), `game` («Геймификация»: правила, магазин, кошельки), `game_events` («События и сезоны»).
+`game_events` — новый id раздела событий, `events` — его id из прототипа (сид 1.0.0, остаётся допустимым): это один
+раздел, в одной версии — только один из них (`MENU_ALIASES`; оба → `duplicate`). admin-web понимает оба id. Тема Mini
+App не меняется: косметика ученика накладывается поверх темы на клиенте.
 
 ### Токены темы — только белый список (никакого произвольного CSS/JS)
 Mini App — ровно allowlist санитайзера клиента `packages/ui-tokens/token-names.json` (визуальный язык «Тетрадь»;

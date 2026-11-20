@@ -93,6 +93,12 @@ export interface Config {
   adminOrigin: string;
 
   urls: DomainUrls;
+  /**
+   * Спринт 6: gamification (GAMIFICATION_URL) — необязательна во всех окружениях: не задана → маршруты
+   * `/admin/v1/game/*` отвечают 503 UPSTREAM_UNAVAILABLE {service: gamification}, блок обзора `game` недоступен,
+   * остальная админка работает. Значения по умолчанию нет (в dev тоже) — локальный стенд задаёт её явно.
+   */
+  gamificationUrl: string | null;
   upstreamTimeoutMs: number;
   upstreamRetries: number;
   /** Таймаут одного независимого блока: блок дашборда, блок карточки сессии «Контроля диалогов», затраты строки
@@ -279,6 +285,19 @@ export function loadConfig(env: Env = process.env): Config {
     (Object.entries(DOMAIN_URL_VARS) as Array<[keyof DomainUrls, keyof typeof DEV_DEFAULTS]>).map(([k, name]) => [k, url(name)]),
   ) as unknown as DomainUrls;
 
+  // спринт 6: необязательный адрес gamification (пусто — игра выключена)
+  const gameRaw = raw("GAMIFICATION_URL");
+  let gamificationUrl: string | null = null;
+  if (gameRaw !== undefined) {
+    try {
+      const u = new URL(gameRaw);
+      if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("protocol");
+      gamificationUrl = gameRaw.replace(/\/+$/, "");
+    } catch {
+      problems.push(`GAMIFICATION_URL=${JSON.stringify(gameRaw)}: ожидается http(s) URL`);
+    }
+  }
+
   const cfg: Config = {
     nodeEnv,
     env: appEnv,
@@ -299,6 +318,7 @@ export function loadConfig(env: Env = process.env): Config {
     redisKeyPrefix,
     adminOrigin,
     urls,
+    gamificationUrl,
     upstreamTimeoutMs: int("UPSTREAM_TIMEOUT_MS", 3000, 100, 60_000),
     upstreamRetries: int("UPSTREAM_RETRIES", 1, 0, 5),
     dashboardTimeoutMs: int("DASHBOARD_TIMEOUT_MS", 2000, 100, 30_000),

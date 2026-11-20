@@ -2,6 +2,7 @@ import { useI18n } from "../../i18n";
 import { navItem, type PageId } from "../../state/nav";
 import { Empty } from "../../ui/kit";
 
+/** sections that once were «soon» (sprint 6 made them live); a later sprint may list its sections here again */
 export type SoonPage = Extract<PageId, "heroes" | "game" | "events">;
 
 /** Section of a later sprint: listed in the menu, an honest empty screen with the sprint number — no invented data. */

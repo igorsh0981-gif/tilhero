@@ -1,4 +1,12 @@
 import type {
+  DailyQuests,
+  EquipmentRequest,
+  GameCurrency,
+  GameOperation,
+  GameSettings,
+  GameSummary,
+  PurchaseResult,
+  SessionRewards,
   AddCardRequest,
   CardKind,
   CardStatus,
@@ -82,6 +90,7 @@ import type {
 } from "@tilhero/contracts/bff";
 import type { SessionKind } from "@tilhero/contracts/ai";
 import type { Band, Localized } from "@tilhero/contracts/content";
+import type { BadgesResponse, HeroesResponse, ShopResponse } from "../domain/game";
 import type { ApiClient } from "./client";
 
 export interface ScenarioFilters {
@@ -280,6 +289,25 @@ export function createBff(client: ApiClient) {
     readings: (level: Band | null, cursor: string | null) => get<Page<ReadingCard>>("/v1/practice/readings", { level, cursor, limit: 20 }),
     reading: (id: string) => get<ReadingView>(`/v1/practice/readings/${enc(id)}`),
     startReading: (id: string, key: string) => client.request<LessonSession>("POST", `/v1/practice/readings/${enc(id)}/sessions`, { idempotencyKey: key }),
+
+    // ---- sprint 6: the game (gamification via telegram-bff; 503 GAME_UNAVAILABLE — the game block is hidden) ----
+    /** Home and Profile: a failure only hides the game block (`quiet` — never «Нет связи») */
+    gameSummary: (quiet = true) => get<GameSummary>("/v1/game/summary", undefined, quiet),
+    /** children get the dragons first (the server orders; the client keeps it — domain/game orderHeroes) */
+    gameHeroes: (quiet = false) => get<HeroesResponse>("/v1/game/heroes", undefined, quiet),
+    /** free; XP, the level and the stage stay (AT-65) */
+    selectHero: (heroCode: string) => client.request<GameSummary>("PUT", "/v1/game/hero", { body: { hero_code: heroCode } }),
+    gameQuests: () => get<DailyQuests>("/v1/game/quests"),
+    gameBadges: () => get<BadgesResponse>("/v1/game/badges"),
+    gameShop: () => get<ShopResponse>("/v1/game/shop"),
+    /** one key per purchase, reused when the answer is lost (the same purchase, no second charge — AT-69) */
+    purchase: (itemCode: string, key: string) => client.request<PurchaseResult>("POST", "/v1/game/shop/purchases", { body: { item_code: itemCode }, idempotencyKey: key }),
+    setEquipment: (body: EquipmentRequest) => client.request<GameSummary>("PUT", "/v1/game/equipment", { body }),
+    gameHistory: (currency: GameCurrency | null, cursor: string | null) => get<Page<GameOperation>>("/v1/game/history", { currency, cursor }),
+    /** the rewards of a finished lesson / review / reading: pending → poll (domain/game pollRewards) */
+    gameRewards: (sessionId: string) => get<SessionRewards>("/v1/game/rewards", { source_session_id: sessionId }, true),
+    gameSettings: (quiet = false) => get<GameSettings>("/v1/game/settings", undefined, quiet),
+    patchGameSettings: (patch: Partial<GameSettings>) => client.request<GameSettings>("PATCH", "/v1/game/settings", { body: patch }),
 
     // ---- deletion ----
     requestDeletion: (body: DeletionRequest) => client.request<DeletionResponse>("POST", "/v1/profile/delete-request", { body }),

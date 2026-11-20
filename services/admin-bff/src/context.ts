@@ -22,6 +22,8 @@ export interface BffContext {
   sessions: SessionStore;
   limiter: RateLimiter;
   domains: Domains;
+  /** Спринт 6: gamification; null — GAMIFICATION_URL не задана (маршруты игры → 503, блок обзора недоступен). */
+  gamification: DomainClient | null;
   principals: PrincipalCache;
   names: StaffNames;
   log: FastifyBaseLogger;

@@ -3,6 +3,9 @@
 накладки поздних миграций (<ревизия>/agents/<agent>.v<N>.json, <ревизия>/golden/<agent>.json — только новые кейсы).
 Накладка 0004 (спринт 5): teaching_coach v2 — объединённая схема вывода (anyOf: TeachingCoachOutput |
 TeachingCoachGlossOutput) и кейсы gloss_word (TeachingCoachGlossContext; предложение — дословно из сида catalog).
+Реестр агентов (спринт 6): `domain/registry.py` (разбор AST, без импорта сервиса) — агенты = ai.ts `AgentId`; сид
+только у активных LLM-агентов (LLM_AGENTS); у code/rules — `implemented_in`, у LLM — нет; code-агенты спринтов
+(в т. ч. `gameplay_director` → gamification) — без файлов версий и золотых тестов.
 
 Запуск из корня репозитория:
     python3 services/ai-gateway/migrations/seed/check_seed.py            # проверка, код выхода 1 при ошибках
@@ -16,6 +19,7 @@ services/catalog/migrations/seed/{scenarios,lessons,rubrics,media}.json.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -38,6 +42,10 @@ OUTPUT_TYPE = {
     "conversation_partner": "ConversationPartnerOutput",
     "independent_evaluator": "IndependentEvaluatorOutput",
 }
+# Реестр агентов (domain/registry.py): code-агенты и где они реализованы — спринты 4–6 (INTERNAL_API спринта 6 §7)
+EXPECTED_CODE_AGENTS = {"learning_orchestrator": "lessons", "diagnostic_assessor": "diagnostics",
+                        "curriculum_planner": "learning-plan", "spaced_repetition_coach": "memory",
+                        "pronunciation_coach": "ai-gateway", "gameplay_director": "gamification"}
 # Вид запроса с отдельным контрактом (спринт 5): (агент, context.request) → (контекст, вывод) ai.ts
 REQUEST_TYPES = {("teaching_coach", "gloss_word"): ("TeachingCoachGlossContext", "TeachingCoachGlossOutput")}
 # Схема вывода версии с несколькими видами запроса — anyOf, ветви по порядку (schema_version → типы вывода ai.ts)
@@ -1109,6 +1117,87 @@ def check_coverage(agent: str, cases: list[dict], rep: Report) -> None:
 
 # =====================================================================================================================
 
+# =====================================================================================================================
+# Реестр агентов (domain/registry.py) — разбор AST без импорта сервиса
+# =====================================================================================================================
+
+_A_PARAMS = ("agent_id", "title", "purpose", "owner_role", "implementation", "availability", "planned_sprint",
+             "free_text", "implemented_in")
+_A_DEFAULTS = {"availability": "active", "planned_sprint": None, "free_text": False, "implemented_in": None}
+
+
+def read_registry(path: Path, rep: Report) -> list[dict[str, Any]]:
+    """Строки AGENTS из registry.py: вызовы `_a(...)` с литеральными аргументами (как в сиде миграции 0001)."""
+    where = str(path)
+    try:
+        tree = ast.parse(path.read_text("utf-8"))
+    except (OSError, SyntaxError) as exc:
+        rep.err(where, f"реестр не прочитан: {exc}")
+        return []
+    value = next((n.value for n in tree.body if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+                  and n.target.id == "AGENTS"), None)
+    if not isinstance(value, ast.Tuple):
+        rep.err(where, "нет кортежа AGENTS")
+        return []
+    rows: list[dict[str, Any]] = []
+    for call in value.elts:
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "_a"):
+            rep.err(where, "элемент AGENTS — не вызов _a(...)")
+            continue
+        try:
+            row = dict(_A_DEFAULTS)
+            row.update(zip(_A_PARAMS, (ast.literal_eval(a) for a in call.args), strict=False))
+            row.update({k.arg: ast.literal_eval(k.value) for k in call.keywords if k.arg})
+            for key in ("title", "purpose"):  # _a(…, ("ru", "uz"), …) → {"ru", "uz"}, как в строке реестра
+                if isinstance(row[key], tuple) and len(row[key]) == 2:
+                    row[key] = {"ru": row[key][0], "uz": row[key][1]}
+        except ValueError:
+            rep.err(where, "аргументы _a(...) — не литералы")
+            continue
+        rows.append(row)
+    return rows
+
+
+def check_registry(ts: TS, repo: Path, seed: Path, overlays: list[Path], rep: Report) -> None:
+    path = repo / "services/ai-gateway/src/tilhero_ai_gateway/domain/registry.py"
+    rows = read_registry(path, rep)
+    if not rows:
+        return
+    where = "registry.py"
+    ids = [r["agent_id"] for r in rows]
+    agent_ids = ts.literals(("ref", "AgentId")) or []
+    if ids != agent_ids:
+        rep.err(where, f"агенты AGENTS ≠ ai.ts AgentId: {sorted(set(ids) ^ set(agent_ids))}")
+    impls = ts.literals(("ref", "AgentImplementation")) or []
+    for r in rows:
+        w = f"{where}: {r['agent_id']}"
+        if r["implementation"] not in impls or r["availability"] not in ("active", "planned"):
+            rep.err(w, f"implementation/availability вне контракта: {r['implementation']}/{r['availability']}")
+        if (r["availability"] == "planned") != (r["planned_sprint"] is not None):
+            rep.err(w, "planned_sprint задаётся только у planned")
+        if r["implementation"] in ("code", "rules") and r["availability"] == "active" and not r["implemented_in"]:
+            rep.err(w, "у code/rules-агента нет implemented_in")
+        if r["implementation"] == "llm" and r["implemented_in"] is not None:
+            rep.err(w, "у LLM-агента implemented_in должен быть null")
+        if not all(isinstance(r[k], dict) and set(r[k]) == {"ru", "uz"} and all(r[k].values())
+                   for k in ("title", "purpose")):
+            rep.err(w, "title/purpose — ru и uz, непустые")
+    active_llm = tuple(r["agent_id"] for r in rows if r["implementation"] == "llm" and r["availability"] == "active")
+    if active_llm != LLM_AGENTS:
+        rep.err(where, f"активные LLM-агенты реестра {active_llm} ≠ сид {LLM_AGENTS}")
+    code = {r["agent_id"]: r["implemented_in"] for r in rows if r["implementation"] == "code"}
+    if code != EXPECTED_CODE_AGENTS:
+        rep.err(where, f"code-агенты реестра {code} ≠ ожидаемые {EXPECTED_CODE_AGENTS}")
+    # версии инструкций и золотые тесты — только у LLM-агентов: у code-агента их загрузчик бы не принял
+    not_llm = {r["agent_id"] for r in rows if r["implementation"] != "llm"}
+    for root in (seed, *overlays):
+        for path_ in [*root.glob("agents/*.json"), *root.glob("golden/*.json")]:
+            agent = path_.name.split(".", 1)[0]
+            if agent in not_llm:
+                rep.err(f"{path_.relative_to(seed)}", f"у агента {agent} ({code.get(agent, 'rules')}) нет версий и "
+                        "золотых тестов — файл сида лишний")
+
+
 def main() -> int:
     seed = Path(__file__).resolve().parent
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1124,6 +1213,7 @@ def main() -> int:
     seen: set[str] = set()
     summary = []
     overlays = sorted(d for d in seed.iterdir() if d.is_dir() and re.fullmatch(r"\d{4}", d.name))
+    check_registry(ts, repo, seed, overlays, rep)
     for agent in LLM_AGENTS:
         ap_path = seed / "agents" / f"{agent}.v1.json"
         g_path = seed / "golden" / f"{agent}.json"

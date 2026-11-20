@@ -64,7 +64,7 @@ SERVICES: tuple[Service, ...] = (
     Service("social", 8109, "services/social/Dockerfile", "social", calls=("identity-consent",)),
     Service("telegram-bff", 8001, "services/telegram-bff/Dockerfile", public=True,
             calls=("identity-consent", "learning-plan", "support", "notifications", "experience-config", "social",
-                   "catalog", "diagnostics", "lessons", "assessment", "tts", "memory")),
+                   "catalog", "diagnostics", "lessons", "assessment", "tts", "memory", "gamification")),
     Service("telegram-miniapp", 8080, "apps/telegram-miniapp/Dockerfile", public=True, health="/healthz"),
     # спринт 3 — учебный контур: контент и диагностика
     Service("catalog", 8110, "services/catalog/Dockerfile", "catalog"),
@@ -80,25 +80,29 @@ SERVICES: tuple[Service, ...] = (
     # спринт 5 — память и повторения (FSRS), перевод по тапу, проверки удержания, произношение (через ai-gateway)
     Service("memory", 8116, "services/memory/Dockerfile", "memory",
             calls=("catalog", "assessment", "ai-gateway", "identity-consent")),
+    # спринт 6 — игра и герои: реестр XP, тилов и заморозок, герои, задания, магазин (никого не вызывает — всё событиями)
+    Service("gamification", 8117, "services/gamification/Dockerfile", "gamification"),
     # спринт 2 — админка: admin-bff без публичного домена, admin-web проксирует /admin/v1/* на него (один origin)
     Service("admin-identity", 8120, "services/admin-identity/Dockerfile", "admin_identity"),
     Service("user-admin", 8121, "services/user-admin/Dockerfile", "user_admin",
             calls=("identity-consent", "learning-plan")),
     Service("admin-bff", 8002, "services/admin-bff/Dockerfile", health="/health/ready",
             calls=("admin-identity", "user-admin", "identity-consent", "support", "audit", "experience-config",
-                   "notifications", "catalog", "diagnostics", "ai-gateway", "lessons", "assessment", "memory")),
+                   "notifications", "catalog", "diagnostics", "ai-gateway", "lessons", "assessment", "memory",
+                   "gamification")),
     Service("admin-web", 8080, "apps/admin-web/Dockerfile", public=True, health="/healthz"),
     Service("n8n", 5678, "infra/n8n/Dockerfile", health="/healthz",
             calls=("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment",
-                   "memory")),
+                   "memory", "gamification")),
 )
 JWT_ISSUERS = ("identity-consent", "learning-plan", "support", "notifications", "audit", "experience-config",
                "telegram-bot-gateway", "social", "telegram-bff", "admin-bff", "admin-identity", "user-admin",
-               "catalog", "diagnostics", "lessons", "assessment", "ai-gateway", "memory")
+               "catalog", "diagnostics", "lessons", "assessment", "ai-gateway", "memory", "gamification")
 # только проверяют внутренний JWT (сами никого не вызывают): закрытый ключ нужен ServiceSettings в stage/prod, но их
 # открытый ключ никому не раздаётся
 VERIFY_ONLY = ("tts",)
-SCHEDULED = ("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment", "memory")
+SCHEDULED = ("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment", "memory",
+             "gamification")
 # имя переменной адреса в коде вызывающего (BFF и Python-сервисы называют identity по-разному)
 URL_VAR = {
     ("telegram-bff", "identity-consent"): "IDENTITY_URL",

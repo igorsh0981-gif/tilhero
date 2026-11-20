@@ -1,5 +1,6 @@
 import type { MessageKey } from "./ru";
 import { uzContent } from "./uz.content";
+import { uzGame } from "./uz.game";
 import { uzLessons } from "./uz.lessons";
 import { uzMemory } from "./uz.memory";
 
@@ -9,6 +10,7 @@ export const uz: Record<MessageKey, string> = {
   ...uzContent,
   ...uzLessons,
   ...uzMemory,
+  ...uzGame,
   // ---- common ----
   "c.continue": "Davom etish",
   "c.back": "Orqaga",
@@ -235,9 +237,6 @@ export const uz: Record<MessageKey, string> = {
   "wd.missed": "oʻtkazib yuborildi",
   "wd.planned": "jadval boʻyicha",
   "wd.rest": "mashgʻulotsiz",
-  "home.hero": "Volt · «Yigʻilish»",
-  "home.heroKid": "Myatik · «Tuxum»",
-  "home.heroText": "Qahramon faqat tasdiqlangan koʻnikmalar uchun oʻsadi. Birinchi darslar — tez orada.",
   "home.lessonNote": "tez orada",
   "home.lessonCap": "Kun darsi · 20 daqiqa",
   "home.lessonTitle": "AI-murabbiy bilan darslar",

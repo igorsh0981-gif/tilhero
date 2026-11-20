@@ -35,6 +35,7 @@ from tilhero_notifications.templates import (
     TemplateSpec,
     TextOverride,
     default_texts,
+    public_category,
     sample_values,
 )
 
@@ -109,7 +110,7 @@ def version_view(row: TemplateVersion) -> dict[str, Any]:
 def info_view(spec: TemplateSpec, active: TemplateVersion | None, updated_at: datetime | None) -> dict[str, Any]:
     return {
         "key": spec.name,
-        "category": spec.category,
+        "category": public_category(spec.category),  # game (спринт 6) — как reminders, см. templates
         "kid": spec.kid,
         "description": {"ru": spec.description[0], "en": spec.description[1]},
         "placeholders": placeholders_view(spec),

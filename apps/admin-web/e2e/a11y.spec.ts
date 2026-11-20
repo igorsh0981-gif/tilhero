@@ -4,6 +4,7 @@ import { expectNoHScroll, openAs } from "./helpers";
 import { LEARNER } from "./fixtures/data";
 import { SID } from "./fixtures/ai-data";
 import { CID, GID } from "./fixtures/memory-data";
+import { EVENT_ID } from "./fixtures/game-data";
 
 async function unnamedControls(page: Page): Promise<string[]> {
   return page.evaluate(() => {
@@ -67,6 +68,20 @@ const SCREENS: Array<[string, string]> = [
   ["#/memory", "mem-analytics"],
   [`#/memory/learners/${LEARNER.madina}`, "mem-learner"],
   [`#/memory/learners/${LEARNER.madina}/${CID.c1}`, "mem-card"],
+  // sprint 6
+  ["#/heroes", "heroes"],
+  ["#/heroes/pet_0", "hero-card"],
+  ["#/game", "go"],
+  ["#/game/rules", "gr"],
+  ["#/game/rules/1", "gr-version"],
+  ["#/game/shop", "shop"],
+  ["#/game/shop/frame_gold", "sh-item"],
+  ["#/game/shop/new", "sh-item"],
+  [`#/game/wallets/${LEARNER.madina}`, "wl"],
+  ["#/game/wallets", "wl-lookup"],
+  ["#/events", "events"],
+  [`#/events/${EVENT_ID.kidsReading}`, "ev-card"],
+  ["#/events/new", "ev-card"],
 ];
 
 for (const [hash, id] of SCREENS) {
