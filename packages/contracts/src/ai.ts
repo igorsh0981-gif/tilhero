@@ -204,12 +204,16 @@ export interface IndependentEvaluatorOutput {
 // ---------------------------------------------------------------------------------------------------------------------
 // cooperative_lesson_coach (спринт 7, скилл 11) — ведущий парного урока: два ученика, роли A/B, ходы по очереди.
 // Вызывающий — только lessons; session_kind "pair", session_id = room_id, user_id — участник, чей ход (или
-// пригласивший при старте), audience — teens, если в комнате есть подросток, иначе adults. Комнаты с ребёнком 6–13
+// пригласивший при старте), audience — teens, если в комнате есть подросток, иначе adults; locale — язык этого
+// участника (переводы коуч всё равно отдаёт на оба языка: у участников он может быть разным). Комнаты с ребёнком 6–13
 // коуча не вызывают (сценарий с выбором реплик). Бюджет — AiBudget.room_cap_usd на комнату и месячный потолок;
 // дневной лимит ученика к вызовам коуча не применяется. Агент не меняет кошелёк, не выдаёт уровень и не принимает
 // приглашения; не раскрывает имя, контакты и реплики одного участника другому за пределами комнаты; не присваивает
-// ответ одного участника другому (lessons проверяет: turn_id из individual_evidence принадлежит этой роли). Участники —
-// только роли A/B: user_id, имён и ников во входе нет.
+// ответ одного участника другому (lessons проверяет: turn_id из individual_evidence принадлежит этой роли).
+// Отличия от Output JSON скилла (решение спринта 7, INTERNAL_API §4): участники — только роли A/B (user_id, имён и
+// ников во входе и выходе нет: next_speaker_user_id → next_speaker, individual_evidence[].user_id → role); статусы
+// скилла pause/reconnect → paused (возврат участника — trigger partner_back → in_progress); waiting не используется —
+// lessons вызывает коуча только после входа обоих (ожидание ведёт сама комната, status waiting).
 // ---------------------------------------------------------------------------------------------------------------------
 
 export type CoachRole = "A" | "B";
@@ -228,8 +232,10 @@ export interface CooperativeCoachContext {
   /** free — свободный текст или голос; choices — коуч даёт ≤ 3 варианта реплики для хода */
   mode: "free" | "choices";
   /** что произошло: start — оба вошли (раздать роли и цель); turn — пришла реплика; silence — участник молчит больше
-   *  60 с в свой ход; partner_offline / partner_back — потеря и возврат связи; wrap_up — осталось ≤ 2 минут */
-  trigger: "start" | "turn" | "silence" | "partner_offline" | "partner_back" | "wrap_up";
+   *  60 с в свой ход; partner_offline / partner_back — потеря и возврат связи; wrap_up — осталось ≤ 2 минут;
+   *  end — комната завершается не по цели (участник ушёл, нет активности, остановлена администратором): нужен только
+   *  итоговый отчёт (status finished, next_speaker null) */
+  trigger: "start" | "turn" | "silence" | "partner_offline" | "partner_back" | "wrap_up" | "end";
   participants: Array<{
     role: CoachRole;
     turns: number;
@@ -250,25 +256,35 @@ export interface CooperativeCoachContext {
 }
 
 export interface CooperativeCoachOutput {
+  /** эхо context.room_id (lessons отбрасывает ответ с чужим room_id как invalid_output) */
+  room_id: string;
   /** in_progress — урок идёт; paused — ждём участника (offline); fallback_text — перейти на текст (голос недоступен);
-   *  finished — цель достигнута или время вышло */
+   *  finished — цель достигнута, время вышло или trigger end */
   status: "in_progress" | "paused" | "fallback_text" | "finished";
   /** кто говорит следующим; both — общий ответ команды; null — никто (paused, finished) */
   next_speaker: CoachRole | "both" | null;
-  /** реплика или вопрос коуча (английский, A1–B1, ≤ 300) */
+  /** реплика или вопрос коуча (английский, A1–B1, ≤ 300); при finished — короткое прощание */
   prompt: string;
-  /** перевод подсказки на locale (≤ 300) или null */
-  prompt_gloss: string | null;
+  /** перевод подсказки на оба языка интерфейса (≤ 300 каждый; uz — латиница) или null; ученику BFF отдаёт его язык */
+  prompt_gloss: { ru: string; uz: string } | null;
   /** только mode choices: ≤ 3 варианта реплики для next_speaker (английский, ≤ 160 каждый); иначе null */
   options: Array<{ choice_id: string; text_en: string }> | null;
   /** при trigger start — роли (английский, ≤ 120 каждая) и цель (≤ 200); иначе null */
   roles: { A: string; B: string } | null;
   team_goal_en: string | null;
   team_goal_progress: number; // 0..1, не убывает
-  /** доказательства по ролям для независимого оценщика: только реплики этой роли из turns */
+  /** доказательства по ролям для независимого оценщика: только реплики этой роли из turns (роль без реплик — ни одного
+   *  доказательства: молчавший не оценивается) */
   individual_evidence: Array<{ role: CoachRole; turn_id: string; skill_id: string | null; assist_used: boolean }>;
   /** safety — нарушение безопасности (lessons ставит паузу и предлагает жалобу); abuse — грубость участника */
   escalation: "safety" | "abuse" | null;
+  /** только status finished (скилл 11, шаг 7): общая безопасная похвала команде (≤ 200 каждый язык) и приватные
+   *  подсказки каждой роли (1–3, ≤ 160) — ошибки одной роли не упоминаются ни в похвале, ни в подсказках другой;
+   *  роли без вклада подсказок нет. Иначе null. Без ИИ отчёт собирает lessons по шаблонам сценария. */
+  report: {
+    team_summary: { ru: string; uz: string };
+    tips: Array<{ role: CoachRole; text: { ru: string; uz: string } }>;
+  } | null;
 }
 
 export type AgentContext =
@@ -322,6 +338,32 @@ export interface PronunciationResult {
   /** whisper — свой сервер (релиз 5.1, сервис tts: распознавание faster-whisper и сравнение с эталоном по словам) */
   provider: "whisper" | "azure_speech" | "fake_speech" | null;
   cost_usd: number;
+  latency_ms: number;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// speech:transcribe (спринт 7) — распознавание голосового хода парного урока. POST /internal/v1/speech:transcribe
+// (вызывающий только lessons; иначе 403 CALLER_NOT_ALLOWED): тело audio/wav (PCM 16 бит, моно, 16 кГц, 0,5..15 с,
+// ≤ 600 000 байт — пределы tts /internal/v1/recognize), заголовок X-Speech-Meta = base64url(JSON SpeechTranscribeMeta).
+// Распознавание — tts (faster-whisper), расход $0 (провайдер whisper); Azure не используется. Аварийная остановка
+// (ai_enabled=false) или speech_available=false → 503 SPEECH_UNAVAILABLE; tts недоступен или таймаут → 503
+// SPEECH_UNAVAILABLE; 422 AUDIO_INVALID {reason: format | too_short | too_long | too_large}. Тишина — пустые text и
+// words (не ошибка: lessons просит повторить или перейти на текст). Аудио и текст не хранятся и не пишутся в лог.
+// ---------------------------------------------------------------------------------------------------------------------
+
+export interface SpeechTranscribeMeta {
+  request_id: string; // UUID; повтор ≤ 24 ч → сохранённый результат
+  user_id: string; // участник, чей ход
+  room_id: string;
+  audience: AudienceSegment; // kids → 403 KIDS_NOT_ALLOWED (детям в комнате голос не разрешён)
+  language: "en-US";
+}
+
+export interface SpeechTranscribeResult {
+  text: string; // ≤ 600
+  words: Array<{ word: string; start_ms: number; end_ms: number }>; // ≤ 120
+  duration_ms: number;
+  provider: "whisper" | "fake_speech";
   latency_ms: number;
 }
 

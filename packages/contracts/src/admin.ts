@@ -716,7 +716,9 @@ export type ReleaseNoteRoute =
   // спринт 3
   | "diagnostics" | "plan" | "skills" | "scenarios" | "media" | "media_requests" | "languages"
   // релиз 6.1: игра — герои, магазин, значки, история, настройки; словарь и чтение
-  | "heroes" | "shop" | "badges" | "game_history" | "game_settings" | "dictionary" | "reading";
+  | "heroes" | "shop" | "badges" | "game_history" | "game_settings" | "dictionary" | "reading"
+  // спринт 7: друзья (заявки, блокировки, санкции), лиги недели, дуэли, рефералы (как bff.ts и release-notes.json)
+  | "friends" | "leagues" | "duels" | "referrals";
 export type ReleaseNoteIcon =
   | "spark" | "hero" | "calendar" | "clock" | "bell" | "book" | "chat" | "mic" | "star" | "flame" | "users" | "gift"
   | "shield" | "globe" | "trophy" | "news";

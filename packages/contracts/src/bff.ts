@@ -419,9 +419,13 @@ export interface InviteAcceptResult {
   family: Family | null;
 }
 
+/** member_id (спринт 7) — тот же непрозрачный идентификатор, что в социальном API: по нему ученик семьи вызывает члена
+ *  семьи на дуэль и приглашает в парный урок (детям 6–13 — только так: друзей у них нет). user_id остаётся для
+ *  управления своей семьёй (спринт 1); в социальные маршруты передаётся только member_id. */
 export interface Family {
   family_id: string;
-  members: Array<{ user_id: string; display_name: string; role: "owner" | "adult" | "teen" | "child"; is_me: boolean }>;
+  members: Array<{ user_id: string; member_id: MemberId; display_name: string; role: "owner" | "adult" | "teen" | "child";
+                   is_me: boolean }>;
 }
 /** GET /v1/family → Family | 204 (семьи нет) */
 
@@ -1963,8 +1967,9 @@ export interface DuelChallengeRequest {
  *  (feedback=null; повтор того же шага — тот же результат); POST /v1/sessions/{id}/finish → LessonSummary (evaluation
  *  null, skills [], can_review false: счёт — в DuelView после завершения дуэли). pause/resume — до дедлайна; cancel —
  *  409 SESSION_STATE (незаконченная к дедлайну сессия закрывается, неотвеченные задания — неверные). Сессия дуэли не
- *  участвует в правиле одной активной сессии: 409 SESSION_ACTIVE не возникает, /v1/sessions/active её не возвращает.
- *  Учёбу не меняет: в независимую оценку не идёт. */
+ *  участвует в правиле одной активной сессии: 409 SESSION_ACTIVE не возникает, /v1/sessions/active её не возвращает,
+ *  в истории GET /v1/sessions её нет. Учёбу не меняет: в независимую оценку не идёт. Детскому профилю — та же
+ *  дуэль (только с членом семьи). */
 export interface DuelSessionRequest {
   duel_id: string;
 }
@@ -1991,7 +1996,8 @@ export type PairRoomStatus =
 export type PairRole = "A" | "B";
 /** free — свободный текст или голос; choices — выбор реплик (дети, ИИ недоступен) */
 export type PairRoomMode = "free" | "choices";
-/** completed — сценарий завершён; participant_left — участник вышел и не вернулся за 3 минуты (оставшийся доиграл
+/** completed — сценарий завершён или вышло время комнаты (20 минут в in_progress; цель — по team.goal_reached);
+ *  participant_left — участник вышел и не вернулся за 3 минуты (оставшийся доиграл
  *  или вышел); inactivity — 10 минут без активности; stopped — остановлена администратором */
 export type PairEndReason = "completed" | "participant_left" | "inactivity" | "stopped";
 export type PairRoomEventKind =
@@ -2094,11 +2100,12 @@ export interface PairTurnRequest {
   audio_id?: string;
 }
 
-/** POST /v1/pair-rooms/{room_id}/audio — тело audio/wav (PCM 16 бит, моно, 16 000 Гц, 0,5..30 с, ≤ 1 000 000 байт)
- *  → PairAudio. Аудио не хранится: распознанный текст показывается для подтверждения, ход — POST …/turns {audio_id}
- *  (audio_id живёт 5 минут, один раз). Длительность записи идёт в speaking_seconds. 403 VOICE_CONSENT_REQUIRED {who:
- *  "self" | "guardian"}; 422 AUDIO_INVALID {reason: format | too_short | too_long | too_large}; 503 SPEECH_UNAVAILABLE
- *  (перейти на текст); 409 NOT_YOUR_TURN; лимит tg.room.audio. */
+/** POST /v1/pair-rooms/{room_id}/audio — тело audio/wav (PCM 16 бит, моно, 16 000 Гц, 0,5..15 с, ≤ 600 000 байт —
+ *  как запись произношения спринта 5 и предел распознавания tts) → PairAudio. Аудио не хранится: распознанный текст
+ *  показывается для подтверждения, ход — POST …/turns {audio_id} (audio_id живёт 5 минут, один раз). Длительность
+ *  записи идёт в speaking_seconds. 403 VOICE_CONSENT_REQUIRED {who: "self" | "guardian"}; детский профиль — 403
+ *  KIDS_NOT_ALLOWED (только выбор реплик); 422 AUDIO_INVALID {reason: format | too_short | too_long | too_large};
+ *  503 SPEECH_UNAVAILABLE (перейти на текст); 409 NOT_YOUR_TURN; 409 ROOM_NOT_ACTIVE {status}; лимит tg.room.audio. */
 export interface PairAudio {
   audio_id: string;
   text: string;

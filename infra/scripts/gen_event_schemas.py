@@ -133,8 +133,9 @@ CATALOG = {
                                   ["session_id", "user_id", "kind", "pair_id", "ai_mode", "started_at"]),
     # спринт 7: kind duel — задания дуэли (duel_id, score; practice_only=true, без оценки — учёбу не меняет);
     # kind pair — участие в парном уроке, по событию на участника: session_id — сессия участника
-    # uuid5(room_id, str(user_id)), room_id, evaluation_id — его оценка (без вклада — null). Для плана, памяти и
-    # рефералов duel и pair — не урок (зачётный урок — только kind lesson)
+    # uuid5(room_id, str(user_id)), room_id, evaluation_id — его оценка (без вклада — null). Для рефералов и пройденных
+    # уроков duel и pair — не урок (зачётный — только kind lesson); learning-plan — занятие practice (INTERNAL_API
+    # спринта 7 §10, п. 2)
     "lesson.session.completed.v1": ({"session_id": UUID, "user_id": UUID,
                                      "kind": enum(*SESSION_KINDS, "duel", "pair"), "pair_id": STR,
                                      "lesson_id": STR, "scenario_id": STR, "asset_id": STR,
@@ -156,8 +157,8 @@ CATALOG = {
     "lesson.pair.starting.v1": ({"room_id": UUID, "user_ids": {**arr(UUID, 2), "minItems": 2, "uniqueItems": True},
                                  "scenario_id": STR, "start_at": TS},
                                 ["room_id", "user_ids", "scenario_id", "start_at"]),
-    # комната завершена → gamification (XP за вклад, значок together_1), notifications (end_reason stopped —
-    # pair_stopped). Тексты реплик и оценки в событие не входят
+    # комната завершена (участники — вошедшие в комнату) → gamification (XP за вклад, значок together_1),
+    # notifications (end_reason stopped — pair_stopped). Тексты реплик и оценки в событие не входят
     "lesson.pair.completed.v1": ({"room_id": UUID, "scenario_id": STR, "pair_id": STR,
                                   "status": enum("finished", "abandoned", "stopped"),
                                   "end_reason": enum("completed", "participant_left", "inactivity", "stopped"),

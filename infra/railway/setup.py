@@ -116,7 +116,7 @@ URL_VAR = {
     ("notifications", "telegram-bot-gateway"): "BOT_GATEWAY_URL",
 }
 BOT_INTERNAL_PORT = 8108
-# спринт 7: member_id = "mb_" + base64url(HMAC-SHA256(MEMBER_ID_KEY, user_id)[:16]) — одинаков в этих сервисах
+# спринт 7: member_id = "mb_" + base64url(HMAC-SHA256(MEMBER_ID_KEY, str(user_id))[:16]) — одинаков в этих сервисах
 # (INTERNAL_API спринта 7 §0). Ключ не меняется: смена меняет все member_id (ссылки клиентов, проекции)
 MEMBER_ID_SERVICES = ("social", "gamification", "lessons")
 _USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,31}$")

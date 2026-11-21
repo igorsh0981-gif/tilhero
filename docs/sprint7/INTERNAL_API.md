@@ -3,7 +3,10 @@
 Публичные API:
 - ученик — `packages/contracts/src/bff.ts`, раздел «Спринт 7»;
 - админка — `admin.ts`, раздел «Социальное»;
-- события — `packages/contracts/events/*.schema.json` (генерируются `infra/scripts/gen_event_schemas.py`).
+- события — `packages/contracts/events/*.schema.json` (генерируются `infra/scripts/gen_event_schemas.py`);
+- агенты ИИ и распознавание — `ai.ts`.
+
+Формы ответов ниже — кратко (суть и поля домена); полная форма, коды ошибок и правила — в типах и комментариях контрактов, при расхождении источник истины — они. Маршруты BFF ↔ домен — §9, решения нулевого потока — §10.
 
 Общие механизмы — как в спринтах 1–6: внутренний JWT (`sub` — аккаунт, `lrn`/`age_band` — активный ученик), actor, права в домене, outbox/inbox с проверкой издателя, ErrorBody, Idempotency-Key, пагинация, сага удаления, аудит, step-up заголовком `X-Step-Up: ok` от admin-bff.
 
@@ -17,13 +20,16 @@
   - gamification → lessons (`POST /internal/v1/duel-sets`);
   - gamification → social и lessons → social (`GET /internal/v1/relations/{a}/{b}`);
   - lessons → ai-gateway (`cooperative_lesson_coach`, `speech:transcribe`);
-  - lessons → identity-consent (согласие на голос — как memory в спринте 5).
+  - lessons → identity-consent (согласие на голос — как memory в спринте 5);
+  - admin-bff → social (друзья, модерация, рефералы) — `infra/railway/setup.py`.
 - **Аудитории:** `kids` (6–13), `teens` (14–17), `adults` (18+), по `age_band` из токена или проекции.
   - 6–13: без друзей и заявок (как в спринте 1), без общей лиги; лига, дуэль и парный урок — только с членами своей семьи; парный урок — только выбор реплик.
   - 14–17: друзья и всё социальное — с согласием родителя (`guardian_consent = granted`, как приглашения спринта 1).
 - **Санкция `social_ban`** (активная) запрещает: заявки в друзья, вызовы на дуэль, приглашения в парный урок, участие в общей лиге. Уже идущая дуэль или комната доигрывается. Ответ — 403 `SOCIAL_RESTRICTED {until | null}`.
 - **Блокировка** A→B (односторонняя) отменяет pending-заявки, вызовы и приглашения между ними в обе стороны, удаляет дружбу и скрывает их друг от друга в поиске и лигах друзей. Новые заявки, вызовы и приглашения между ними — 403 `BLOCKED` (без раскрытия, кто заблокировал).
 - **Приватность (APP-SOC-09):** наружу из social — только `nickname`, герой (из gamification), XP, место, разрешённые значки. Без имени, Telegram, возраста, ответов, ошибок, покупок. `user_id` наружу не отдаётся: в API ученика друзья и участники идут по `member_id` — непрозрачному стабильному идентификатору (HMAC от `user_id`, ключ `MEMBER_ID_KEY`, одинаков в social, gamification и lessons; telegram-bff его не расшифровывает).
+  - Формат (одинаково в трёх сервисах): `member_id = "mb_" + base64url(HMAC-SHA256(key=MEMBER_ID_KEY в UTF-8, msg=str(user_id) — UUID в нижнем регистре с дефисами, UTF-8)[:16])` без `=` — 25 символов (`^mb_[A-Za-z0-9_-]{22}$`, схема `social.profile.updated.v1`). Обратного вычисления нет: `member_id → user_id` — по своей проекции или `GET /internal/v1/members/{member_id}` (social). Ключ не меняется: смена меняет все `member_id`.
+  - Семья: `GET /internal/v1/me/family` (social, спринт 1) отдаёт у каждого члена семьи ещё и `member_id` (`Family.members[].member_id`, bff.ts) — по нему дети 6–13 и все остальные вызывают члена семьи на дуэль и зовут в парный урок. `user_id` в семье остаётся (управление своей семьёй, спринт 1), в социальные маршруты не передаётся.
 
 ## 1. social (8109)
 
@@ -193,14 +199,15 @@
   - Ключи в ответ не идут.
 - **`POST /internal/v1/me/duel-sessions {duel_id}`** (telegram-bff) → сессия `kind duel`: только участник набора, одна на участника — повтор возвращает ту же.
   - Задания — без подсказок и ИИ. Ответ — по ключу (как закрытые задания урока), повтор `submission_id` — один результат.
-  - Завершение → `lesson.session.completed.v1 {kind: duel, duel_id, score: {correct, total}}`.
+  - Завершение → `lesson.session.completed.v1 {kind: duel, duel_id, score: {correct, total}, practice_only: true, evaluation_id: null, passed: null}` (в assessment не идёт). Незаконченная к дедлайну сессия закрывается tick'ом с тем же событием (`status completed`, неотвеченные — неверные).
+  - Сессия дуэли — вне правила одной активной сессии (`SESSION_ACTIVE` не возникает), `GET /internal/v1/sessions/active` и история её не показывают; `lesson.session.started.v1` — с `kind duel` и `duel_id`.
   - После дедлайна (из набора) — 409 `DUEL_CLOSED`.
 - **Разбор ошибок** — только после завершения дуэли (`game.duel.finished.v1`). До этого `GET …/sessions/{id}` не отдаёт ключи.
 
 ### 3.2 Парные комнаты (`cooperative_lesson_coach`, APP-SOC-03…06)
 - **Таблицы:**
   - `pair_rooms`: `room_id`, `pair_id`, `scenario_id`, `mode` (`free | choices`), `status`, `start_at`, `inviter`, `invitee`, `created_at`, `started_at`, `ended_at`, `end_reason`, `ai_cost_usd`, `seq`;
-  - `status`: `invited | declined | expired | waiting | in_progress | paused | finished | abandoned | stopped`;
+  - `status`: `invited | declined | expired | cancelled | waiting | in_progress | paused | finished | abandoned | stopped` (`cancelled` — любой участник отменил до старта: `POST …/{id}/cancel` из `invited` или `waiting`);
   - `room_participants`: `room_id`, `user_id`, `role` (`A | B`), `joined_at`, `last_seen_at`, `network` (`online | offline`), `turns`, `speaking_seconds`, `minutes`, `contributed`, `report` (json, приватный);
   - `room_events`: `room_id`, `seq`, `kind`, `payload`, `at` — лента для long-poll; тексты реплик видят только участники.
 - **Приглашение.** `POST /internal/v1/me/pair-rooms {partner_member_id, pair_id, scenario_id, start: now | <ISO ≤ 7 дней>}` (Idempotency-Key):
@@ -212,18 +219,23 @@
   - Без heartbeat 30 с → участник `offline`; если сейчас его ход — `paused`.
   - Возврат в течение 3 мин — продолжение без новой сессии и без повторного учёта.
   - Больше 3 мин нет участника — оставшийся завершает соло с коучем или выходит → `abandoned` для ушедшего, отчёт по сделанному.
-- **Лента.** `GET …/{id}/state?after_seq=N` — long-poll до 25 с → `{status, seq, events[], my_role, next_speaker: A | B | both | null, prompt, options?, team_goal_progress}`.
+- **Лента.** `GET …/{id}/state?after_seq=N` — long-poll до 25 с → `{status, seq, events[], my_role, next_speaker: A | B | both | null, prompt, options?, team_goal_progress}` (полная форма — bff.ts `PairRoomState`).
 - **Ход.** `POST …/{id}/turns {text? | choice_id? | audio_id?}` (Idempotency-Key): только чей ход → 409 `NOT_YOUR_TURN`. Текст ≤ 300; дети — только `choice_id`.
-  - Голос: `POST …/{id}/audio` (тело — запись до 30 с, как произношение спринта 5) → `audio_id`. Только с согласием на голос (политика 1.1+), иначе 403 `VOICE_CONSENT_REQUIRED`. Распознавание — ai-gateway `POST /internal/v1/speech:transcribe` (Whisper в tts). Аудио не хранится; длительность идёт в `speaking_seconds`.
+  - Голос: `POST …/{id}/audio` (тело — запись 0,5..15 с, ≤ 600 000 байт, как произношение спринта 5: это предел tts `/internal/v1/recognize`) → `audio_id` (5 минут, один раз). Только с согласием на голос (политика 1.1+), иначе 403 `VOICE_CONSENT_REQUIRED {who}`; детский профиль — 403 `KIDS_NOT_ALLOWED` (только выбор реплик). Распознавание — ai-gateway `POST /internal/v1/speech:transcribe` (Whisper в tts; контракт — `ai.ts` `SpeechTranscribeMeta`/`SpeechTranscribeResult`). Аудио не хранится; длительность идёт в `speaking_seconds`.
   - Без голоса `speaking_seconds` = время от подсказки до ответа (не больше 60 с на ход).
 - **Коуч.**
-  - ai-gateway `cooperative_lesson_coach` (вход и выход — по скиллу 11) → следующий говорящий, реплика, прогресс цели, `individual_evidence[]`.
+  - ai-gateway `cooperative_lesson_coach` (вход и выход — по скиллу 11, типы — `ai.ts`, §4) → следующий говорящий, реплика, прогресс цели, `individual_evidence[]`, итоговый отчёт.
   - Безопасность и дети — фильтр `safety_quality_gate` как у `conversation_partner`.
   - Без ИИ (бюджет, аварийная остановка, недоступность) — сценарий из каталога: реплики персонажей и варианты для ролей A/B по очереди (`mode` → `choices`).
 - **Оценка.** Свободные ответы каждого → assessment отдельными доказательствами этого ученика (как реплики разговора урока). Молчавший (`turns = 0`) — без оценки, отчёт «не участвовал».
+  - Запрос — существующий `POST /internal/v1/evaluations` (assessment не меняется): `kind: "scenario"` (вида `pair` у assessment нет), `session_id` — сессия участника (ниже), `content_refs` — сценарий и рубрика, `turns` — реплики этого участника (`learner`) и коуча (`character`); реплики партнёра не передаются (чужие ответы не попадают ни в оценку, ни в журнал QA другого ученика); `practice_only: false`. Выбор реплик (дети, сценарий без ИИ) — как ролевая ситуация урока с выбором.
+  - `assessment.completed.v1` придёт с `kind scenario` и этим `session_id`: diagnostics меняет навыки по индивидуальным доказательствам (AT-77), learning-plan пройденным уроком его не считает (только `kind lesson`).
 - **Отчёт.** `GET …/{id}/report` — только свой: реплики, секунды, навыки, 1–3 подсказки, общий итог команды. Чужие ошибки не показываются.
 - **Минуты.** `minutes` = ⌈время в `in_progress` у участника / 60⌉ — учитываются, не списываются (спринт 8). Переподключение не создаёт вторую сессию.
-- **Завершение** → `lesson.pair.completed.v1 {room_id, scenario_id, pair_id, team_goal_reached, participants: [{user_id, contributed, turns, speaking_seconds, minutes}], ended_at, end_reason}`. Плюс по участнику `lesson.session.completed.v1 {kind: pair, session_id = room_id, evaluation_id}` — для памяти, плана и рефералов это не урок (`kind pair`).
+- **Длительность.** Не больше 20 минут в `in_progress` (настройка lessons `PAIR_ROOM_MAX_MINUTES`, по умолчанию 20 — как урок). `remaining_minutes` коуча считается от неё; за 2 минуты — `trigger wrap_up`; по истечении — завершение `end_reason completed` с текущим `team_goal_progress` (`team_goal_reached` — только если цель достигнута).
+- **Завершение** → `lesson.pair.completed.v1 {room_id, scenario_id, pair_id, status, team_goal_reached, participants: [{user_id, role, contributed, turns, speaking_seconds, minutes}], ended_at, end_reason}`. Плюс по участнику, вошедшему в комнату, `lesson.session.completed.v1 {kind: pair, session_id, room_id, evaluation_id | null, minutes}`:
+  - `session_id = uuid5(room_id, str(user_id))` — своя сессия у каждого участника (у двух событий одной комнаты разные `session_id`: потребители ведут «одна запись на сессию»); тот же `session_id` — в запросе оценки;
+  - для рефералов и пройденных уроков это не урок (зачётный — только `kind lesson`); для графика и серии — практика (§10, п. 2).
 - **Админ (`room.read`, `room.manage`):**
   - `GET /internal/v1/admin/pair-rooms?status&from&to&cursor` — комната, участники (`user_id`), сценарий, статус, длительность, секунды каждого, стоимость ИИ. Без реплик и оценок;
   - `GET …/{id}` — то же плюс ход событий без текстов;
@@ -232,21 +244,44 @@
 
 ## 4. ai-gateway
 - **Агент `cooperative_lesson_coach`** → `llm`, версия 1 (черновик, `owner_role methodist`).
-  - Инструкции — по скиллу 11; выход — JSON-схема: `next_speaker`, `prompt` ≤ 300, `options` ≤ 3 для `choices`, `team_goal_progress` 0..1, `individual_evidence[]`, `status`.
+  - Инструкции — по скиллу 11; вход и выход — `ai.ts` `CooperativeCoachContext` / `CooperativeCoachOutput`: `room_id` (эхо), `status`, `next_speaker`, `prompt` ≤ 300, `prompt_gloss {ru, uz}` (языки участников могут различаться), `options` ≤ 3 для `choices`, `roles` и `team_goal_en` при старте, `team_goal_progress` 0..1, `individual_evidence[]`, `escalation`, `report` (только `finished`: похвала команде и 1–3 приватные подсказки каждой роли).
+  - Отличия от Output JSON скилла: вместо `user_id` — роли A/B (ни `user_id`, ни ников, ни имён коуч не видит); `pause/reconnect` скилла → `paused` и `trigger partner_back`; `waiting` не нужен — коуча зовут после входа обоих; `trigger end` — отчёт, когда комната завершается не по цели (ушёл участник, нет активности, остановка).
+  - `session_kind: "pair"` (`AiSessionKind`), `session_id = room_id`; вызывающий — только lessons (иначе 403 `CALLER_NOT_ALLOWED`).
   - 8 золотых тестов: молчащий участник, монополизация, чужой транскрипт, ребёнок, переподключение, грубость, уход от темы, оценка без вклада.
-  - Бюджет: на комнату `ai_room_cap_usd` (0,10) и общий месячный.
+  - Бюджет: на комнату `AiBudget.room_cap_usd` (0,10; ниже) и общий месячный.
   - Публикует владелец после золотых тестов; до публикации комнаты идут по сценарию с выбором.
 - **`duel_host`** → `code` (`implemented_in lessons`), **`referral_integrity_reviewer`** → `rules` (`implemented_in social`).
-- **`POST /internal/v1/speech:transcribe`** (только lessons) → `{text, words, duration_ms}` через tts recognize. Расход $0, аварийная остановка речи действует.
+- **`POST /internal/v1/speech:transcribe`** (только lessons) → `{text, words, duration_ms, provider, latency_ms}` через tts recognize. Тело — WAV 0,5..15 с, ≤ 600 000 байт (пределы tts), мета — заголовок `X-Speech-Meta` (`SpeechTranscribeMeta`). Расход $0, аварийная остановка речи действует (503 `SPEECH_UNAVAILABLE`); `audience kids` → 403 `KIDS_NOT_ALLOWED`.
+- **Бюджет комнаты** — `AiBudget.room_cap_usd` (по умолчанию 0,10; 0..`monthly_cap_usd`; правка — `costs.manage` + step-up, как остальные лимиты). Исчерпан — комната продолжается по сценарию с выбором реплик (`ai_degraded`).
+- **Вид сессии** в ai-gateway: `SessionKind` + `duel` (ИИ не вызывается — только для полноты), `AiSessionKind` + `pair` (`contracts.py` ai-gateway — поток D).
 
 ## 5. notifications
 - **Шаблоны RU/UZ:**
   - `friend_request`, `friend_accepted`;
   - `duel_challenged`, `duel_finished`;
   - `league_closed` (место и приз);
-  - `pair_invited`, `pair_starting` (за 5 мин до запланированного);
+  - `pair_invited`, `pair_starting` (за 5 мин до запланированного), `pair_stopped` (комнату остановил администратор);
   - `referral_qualified`, `referral_rejected`;
   - `sanction_applied`, `appeal_decided`, `complaint_resolved`.
+- **Источник и категория** (`notification.requested.v1.category`; ссылка `startapp`):
+
+  | Шаблон | Событие | Кому | Категория | startapp |
+  |---|---|---|---|---|
+  | `friend_request` | `social.friend_request.created.v1` | `to_user_id` | social | `route_friends` |
+  | `friend_accepted` | `social.friendship.changed.v1` (`added`, `source request`) | `requester_user_id` | social | `route_friends` |
+  | `duel_challenged` | `game.duel.challenged.v1` | `opponent_user_id` | game | `duel_<duel_id>` |
+  | `duel_finished` | `game.duel.finished.v1` (`status finished`; `dedup_key duel_finished:<duel_id>:<user_id>:<result_version>`) | оба | game | `duel_<duel_id>` |
+  | `league_closed` | `game.league.closed.v1` (каждая версия; `dedup_key league_closed:<group_id>:<user_id>:<place>:<prize_til>` — без изменений места и приза повтор не уходит) | участники `standings` | game | `route_leagues` |
+  | `pair_invited` | `lesson.pair.invited.v1` | `invitee_user_id` | social | `room_<room_id>` |
+  | `pair_starting` | `lesson.pair.starting.v1` | оба | social | `room_<room_id>` |
+  | `pair_stopped` | `lesson.pair.completed.v1` (`end_reason stopped`) | участники | social | `room_<room_id>` |
+  | `referral_qualified` | `social.referral.qualified.v1` | `inviter_user_id` | social | `route_referrals` |
+  | `referral_rejected` | `social.referral.rejected.v1` | `inviter_user_id` | social | `route_referrals` |
+  | `sanction_applied` | `social.sanction.changed.v1` (`change applied`) | `user_id` | service | `route_friends` |
+  | `appeal_decided` | `social.appeal.decided.v1` | `user_id` | service | `route_friends` |
+  | `complaint_resolved` | `social.case.resolved.v1` | `reporter_user_id` | social | — |
+
+  `service` — решения о доступе к социальным функциям не выключаются настройкой категорий. Тексты — с ником из события (`*_nickname`, `null` → «Друг»), без имён и Telegram. Детским профилям — только центр (как спринт 6).
 - **Дети** — как в спринте 6 (центр детского профиля, без push).
 - **Категории `game` и `social` — полноценные:**
   - `game` в `NotificationCategory` (bff.ts, admin.ts), identity-consent (`CATEGORIES` + миграция), telegram-bff, admin-bff, Mini App (настройки уведомлений);
@@ -259,21 +294,83 @@
 - **experience-config:** `ADMIN_MENU` — `friends`, `moderation`, `referrals`, `leagues`, `pair_rooms`.
 - **audit:** издатели без изменений (social, gamification, lessons уже есть).
 
-## 7. События (новые)
+## 7. События (новые и изменённые)
+Схемы — `packages/contracts/events/*.schema.json` (строгие: `additionalProperties: false`, вложенные объекты тоже), генератор — `infra/scripts/gen_event_schemas.py` (поля и комментарии — там; ниже — издатель и потребители). Потребитель проверяет издателя по таблице.
+
 | Событие | Издатель | Потребители |
 |---|---|---|
-| `social.profile.updated.v1` | social | gamification |
+| `social.profile.updated.v1` | social | gamification, lessons (проекция `member_id` и ника) |
 | `social.friend_request.created.v1` | social | notifications |
-| `social.friendship.changed.v1` | social | gamification, notifications (`added` → `friend_accepted`) |
+| `social.friendship.changed.v1` | social | gamification, notifications (`added` + `source request` → `friend_accepted`) |
 | `social.block.changed.v1` | social | gamification, lessons |
-| `social.sanction.changed.v1` | social | gamification, lessons, notifications |
+| `social.sanction.changed.v1` | social | gamification, lessons, notifications (`change applied` → `sanction_applied`) |
 | `social.case.resolved.v1` | social | notifications |
-| `social.referral.qualified.v1` · `.rejected.v1` · `.held.v1` | social | gamification, notifications |
-| `game.referral.rewarded.v1` | gamification | social |
+| `social.appeal.decided.v1` | social | notifications (`appeal_decided`) |
+| `social.referral.qualified.v1` | social | gamification (награды → ack), notifications |
+| `social.referral.rejected.v1` | social | notifications (в т. ч. `expired` и `capped` — `reject_code window_expired` / `monthly_cap`) |
+| `social.referral.held.v1` | social | — (аналитика) |
+| `game.referral.rewarded.v1` | gamification | social (`rewarded`) |
 | `game.league.closed.v1` | gamification | notifications |
-| `game.duel.challenged.v1` · `.finished.v1` | gamification | notifications, lessons (разбор после финиша) |
-| `lesson.pair.invited.v1` · `.completed.v1` | lessons | notifications · gamification |
-| `lesson.session.completed.v1` | lessons | `kind` + `duel`, `pair`; поля `duel_id`, `score` (необязательные) |
+| `game.duel.challenged.v1` | gamification | notifications |
+| `game.duel.finished.v1` | gamification | notifications, lessons (разбор ответов открывается) |
+| `lesson.pair.invited.v1` | lessons | notifications |
+| `lesson.pair.starting.v1` | lessons | notifications (`pair_starting`, tick за 5 мин до `start_at` принятой комнаты) |
+| `lesson.pair.completed.v1` | lessons | gamification (XP, `together_1`), notifications (`end_reason stopped` → `pair_stopped`) |
+| `lesson.session.completed.v1` (изм.) | lessons | `kind` + `duel`, `pair`; необязательные `duel_id`, `room_id`, `score {correct, total}`. Потребители: gamification (`duel` → счёт дуэли; `pair` — без начислений, XP по `lesson.pair.completed.v1`), social (новый: рефералы — только `kind lesson`), learning-plan и memory (§10, п. 2) |
+| `lesson.session.started.v1` (изм.) | lessons | `kind` + `duel`, необязательный `duel_id` (потребителей нет) |
+| `notification.requested.v1` (изм.) | все | `category` + `game` |
+
+Новые потребители существующих событий: social — `diagnostics.completed.v1` (рефералы), `lesson.session.completed.v1`; gamification — `diagnostics.completed.v1` (полоса уровня), `social.family.member_added.v1` (семья).
 
 ## 8. Ошибки (новые коды)
-`NICKNAME_TAKEN`, `NICKNAME_INVALID`, `NICKNAME_COOLDOWN`, `NICKNAME_REQUIRED`, `ALREADY_FRIENDS`, `REQUEST_EXISTS`, `FRIENDS_LIMIT`, `REQUESTS_LIMIT`, `FRIENDS_NOT_ALLOWED`, `BLOCKED`, `SOCIAL_RESTRICTED`, `MEMBER_NOT_FOUND`, `COMPLAINTS_LIMIT`, `APPEAL_EXISTS`, `LEVELS_INCOMPATIBLE`, `DUELS_LIMIT`, `DUEL_EXISTS`, `DUEL_SET_UNAVAILABLE`, `DUEL_CLOSED`, `ROOM_LIMIT`, `ROOM_NOT_ACTIVE`, `NOT_YOUR_TURN`, `VOICE_CONSENT_REQUIRED`, `PARTNER_NOT_ALLOWED`, `CAMPAIGN_INVALID`, `REFERRAL_STATE`, `RESULT_STATE`.
+- **Ученик:** `NICKNAME_TAKEN`, `NICKNAME_INVALID`, `NICKNAME_COOLDOWN`, `NICKNAME_REQUIRED`, `FRIEND_CODE_LIMIT`, `ALREADY_FRIENDS`, `REQUEST_EXISTS`, `REQUEST_STATE`, `REQUEST_NOT_FOUND`, `FRIENDS_LIMIT`, `REQUESTS_LIMIT`, `FRIENDS_NOT_ALLOWED`, `BLOCKED`, `SOCIAL_RESTRICTED`, `MEMBER_NOT_FOUND`, `PARTNER_NOT_ALLOWED`, `COMPLAINTS_LIMIT`, `SANCTION_NOT_FOUND`, `SANCTION_STATE`, `APPEAL_EXISTS`, `LEVELS_INCOMPATIBLE`, `DUELS_LIMIT`, `DUEL_EXISTS`, `DUEL_STATE`, `DUEL_NOT_FOUND`, `DUEL_NOT_FINISHED`, `DUEL_SET_UNAVAILABLE`, `DUEL_CLOSED`, `ROOM_LIMIT`, `ROOM_STATE`, `ROOM_NOT_FOUND`, `ROOM_NOT_ACTIVE`, `NOT_YOUR_TURN`, `VOICE_CONSENT_REQUIRED` (спринт 5), `KIDS_NOT_ALLOWED`, `AUDIO_INVALID`, `SPEECH_UNAVAILABLE` (прежние коды — с новыми случаями).
+- **Админка:** `CASE_NOT_FOUND`, `CASE_STATE`, `APPEAL_NOT_FOUND`, `APPEAL_STATE`, `SOCIAL_PROFILE_NOT_FOUND`, `CAMPAIGN_INVALID`, `CAMPAIGN_NOT_VALIDATED`, `CAMPAIGN_VERSION_NOT_FOUND`, `REFERRAL_NOT_FOUND`, `REFERRAL_STATE`, `GROUP_NOT_FOUND`, `RESULT_STATE`, `DRAFT_CONFLICT` (спринт 6), `STEP_UP_REQUIRED`.
+- Тела ошибок (`details`) — в комментариях bff.ts и admin.ts.
+
+## 9. Маршруты BFF → домен
+telegram-bff передаёт `member_id` как есть (не расшифровывает), домен переводит его в `user_id` сам. `Idempotency-Key` — сквозной.
+
+| telegram-bff (`/v1/…`) | Домен (`/internal/v1/…`) |
+|---|---|
+| `GET /community`, `PATCH /community`, `PUT /community/nickname`, `POST /community/friend-code/rotate` | social `GET\|PATCH /me/community`, `PUT /me/community/nickname`, `POST /me/community/friend-code:rotate` |
+| `GET /friends/search?q=` | social `GET /me/friends/search?q=` |
+| `POST /friends/requests`, `GET /friends/requests?direction&cursor`, `POST /friends/requests/{id}/accept\|decline\|cancel` | social `POST\|GET /me/friend-requests`, `POST /me/friend-requests/{id}/accept\|decline\|cancel` |
+| `GET /friends?cursor`, `DELETE /friends/{member_id}` | social `GET /me/friends`, `DELETE /me/friends/{member_id}` |
+| `POST /blocks`, `GET /blocks`, `DELETE /blocks/{member_id}` | social `POST\|GET /me/blocks`, `DELETE /me/blocks/{member_id}` |
+| `POST /complaints` | social `POST /me/complaints` |
+| `GET /sanctions`, `POST /sanctions/{id}/appeal` | social `GET /me/sanctions`, `POST /me/sanctions/{id}/appeal` |
+| `GET /referrals?cursor` | social `GET /me/referrals` |
+| `GET /family` (спринт 1, + `member_id`) | social `GET /me/family` |
+| `GET /game/leagues`, `GET /game/leagues/history?cursor` | gamification `GET /game/leagues`, `GET /game/leagues/history` |
+| `PATCH /game/settings {league_opt_in}` (спринт 6) | gamification `PATCH /game/settings` |
+| `POST /game/duels`, `GET /game/duels?status&cursor`, `GET /game/duels/{id}`, `POST /game/duels/{id}/accept\|decline` | gamification `POST\|GET /game/duels`, `GET /game/duels/{id}`, `POST /game/duels/{id}/accept\|decline` |
+| `POST /duel-sessions`, `GET /duel-sessions/{session_id}/review` | lessons `POST /me/duel-sessions`, `GET /me/duel-sessions/{session_id}/review` |
+| `/sessions/{id}/…` для сессии дуэли (спринт 4) | lessons `/sessions/{id}/…` (существующие) |
+| `POST /pair-rooms`, `GET /pair-rooms?status&cursor`, `GET /pair-rooms/{id}` | lessons `POST\|GET /me/pair-rooms`, `GET /me/pair-rooms/{id}` |
+| `POST /pair-rooms/{id}/accept\|decline\|cancel\|join\|heartbeat\|leave\|turns\|audio`, `GET /pair-rooms/{id}/state?after_seq`, `GET /pair-rooms/{id}/report` | lessons `POST /me/pair-rooms/{id}/…`, `GET /me/pair-rooms/{id}/state`, `GET /me/pair-rooms/{id}/report` |
+
+| admin-bff (`/admin/v1/…`) | Домен |
+|---|---|
+| `GET /social/users/{user_id}` | social `GET /internal/v1/admin/social/users/{user_id}` |
+| `/moderation/cases*`, `/moderation/sanctions*`, `/moderation/appeals*` | social `/internal/v1/admin/moderation/…` (те же хвосты) |
+| `/referrals/campaigns*`, `/referrals*` | social `/internal/v1/admin/referrals/…` (те же хвосты) |
+| `/game/leagues*`, `/game/duels*` | gamification `/internal/v1/admin/game/leagues…`, `/internal/v1/admin/game/duels…` |
+| `/pair-rooms*` | lessons `/internal/v1/admin/pair-rooms…` |
+| `GET /dashboard` → `social` | social `GET /internal/v1/admin/social/stats?period` (+ gamification `GET /internal/v1/admin/game/duels/stats?period`, lessons `GET /internal/v1/admin/pair-rooms/stats?period` — `duels_finished`, `pair_rooms_finished`; недоступен — `null`) |
+
+## 10. Решения нулевого потока (контракты, 21.11.2026)
+Дыры и противоречия, найденные при сверке контрактов; решения внесены в текст выше и в `packages/contracts`.
+1. **`member_id` в семье.** Детям дуэль и парный урок доступны только с семьёй, а `Family.members[]` отдавал только `user_id`. Добавлен `member_id` (bff.ts `Family`, social `GET /internal/v1/me/family`); формат `member_id` закреплён в §0.
+2. **Новые `kind` в `lesson.session.completed.v1` и строгие потребители.** learning-plan проверяет `kind` строгим `Literal` (без `duel`/`pair`): такие события упадут в обработчике и после 10 доставок уйдут в DLQ. Решение: learning-plan принимает `duel` и `pair` как занятие `practice` (день графика и серия засчитываются, минуты — из события; пройденным уроком не считается), memory — как сейчас (день активности по любому `completed`). Изменение — 3 строки в `services/learning-plan` (`SessionCompletedIn.kind`, `ACTIVITY_KIND`); **learning-plan не входит ни в один поток — назначает координатор** (до правки lessons не должен публиковать `duel`/`pair` в prod). diagnostics и assessment не затронуты (`kind` у оценки парного урока — `scenario`, §3.2).
+3. **`session_id` парного урока.** Было `session_id = room_id` для обоих участников — у двух событий одна сессия, а learning-plan, memory и social ведут «одна запись на сессию». Решение: `session_id = uuid5(room_id, str(user_id))`, плюс `room_id` в событии (§3.2).
+4. **Оценка парного урока.** У assessment нет вида `pair`. Решение: `kind scenario`, сессия участника, только свои реплики и реплики коуча (§3.2) — assessment не меняется.
+5. **Голос в комнате.** Было «до 30 с, как произношение спринта 5», но произношение и tts `/recognize` — 0,5..15 с и ≤ 600 000 байт, а tts не входит ни в один поток. Решение: 15 с и 600 000 байт; детям голос в комнате — 403 `KIDS_NOT_ALLOWED` (только выбор реплик, как «дети — только `choice_id`»).
+6. **Статус `cancelled` комнаты** и `POST …/cancel` (отозвать приглашение до старта) — были в bff.ts, нет в §3.2; добавлены.
+7. **События сверх таблицы §7** — `social.appeal.decided.v1` (шаблон `appeal_decided` не из чего было строить) и `lesson.pair.starting.v1` (`pair_starting`); шаблон `pair_stopped` (остановка комнаты администратором, admin.ts). Добавлены в §5 и §7 с категориями и ссылками.
+8. **Коуч и скилл 11.** Выход скилла адресует участников по `user_id` — у коуча только роли A/B (приватность); перевод подсказки — сразу на ru и uz (языки участников разные); итоговый отчёт (скилл, шаг 7) — поле `report`; `trigger end` — отчёт без цели (§4, ai.ts).
+9. **`speech:transcribe`** — описан контракт (ai.ts): мета в заголовке, пределы tts, ошибки.
+10. **Сессия дуэли** — вне правила одной активной сессии, не видна в `sessions/active` и истории, в assessment не идёт; незаконченная к дедлайну закрывается со счётом по отвеченному (§3.1).
+11. **Категории уведомлений** шаблонов спринта 7 и `dedup_key` повторных итогов (переоценка) — таблица §5; санкции и обжалование — `service` (не выключаются).
+12. **Маршруты BFF → домен** — таблица §9 (в bff.ts пути `/v1/friends/requests…`, в домене `/internal/v1/me/friend-requests…`; lessons — по своим префиксам `/internal/v1/me/…` для новых маршрутов ученика).
+13. **Длительность парной комнаты** не была задана, а коучу нужны `remaining_minutes` и `wrap_up`: 20 минут в `in_progress` (`PAIR_ROOM_MAX_MINUTES`), по истечении — `completed` (§3.2).
+14. **ReleaseNoteRoute** в admin.ts дополнен `friends | leagues | duels | referrals` (как bff.ts и `release-notes.json`); отдельного маршрута парного урока нет — вход через «Друзья» и ссылку `room_<room_id>`.
