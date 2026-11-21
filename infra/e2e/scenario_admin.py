@@ -76,10 +76,19 @@ ALL_PERMS = {
     "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "costs.read", "costs.manage",
     # спринт 5 (admin-identity 0005): память ученика, ручная правка карточки, словарь курса
     "memory.read", "memory.manage", "glossary.manage",
+    # спринт 6 (admin-identity 0006): игра — правила, герои, магазин, события; ручные операции кошелька
+    "game.read", "game.manage", "game.publish", "wallet.adjust",
+    # спринт 7 (admin-identity 0007): друзья и жалобы, модерация, рефералы, лиги и дуэли, парные комнаты
+    "social.read", "moderation.manage", "referral.read", "referral.manage", "league.read", "league.manage",
+    "room.read", "room.manage",
 }
 COMMS_PERMS = {"dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage",
                "notif.campaigns.manage", "notif.campaigns.send"}
-SUPPORT_PERMS = {"dashboard.read", "users.read", "support.read", "support.reply"}
+SUPPORT_PERMS = {"dashboard.read", "users.read", "support.read", "support.reply",
+                 "game.read",  # спринт 6 (PLAN «Права и роли»)
+                 # спринт 7 (PLAN «Права»): moderation.manage — право со step-up, поэтому support стал привилегированной
+                 # ролью (four-eyes при создании, обязательная MFA)
+                 "social.read", "moderation.manage", "referral.read", "room.read"}
 SCHEMAS = ["admin_identity", "user_admin", "identity_consent", "notifications", "experience_config", "support"]
 
 
@@ -465,11 +474,21 @@ def s_create_staff(c: Ctx) -> None:
 
     sup_body = {"email": f"support.{tag}@tilhero.local", "display_name": f"Алина Поддержка {c.tag}", "role": "support"}
     sup = expect(b.post("/admin/v1/staff", sup_body, headers=idem()), 201)
-    check(sup.get("approval") is None and sup["staff"]["role"] == "support", sup.get("approval"))
+    sappr = sup.get("approval") or {}
+    check(sup["staff"]["role"] == "support" and sappr.get("kind") == "staff.create_privileged"
+          and sappr.get("waived") == "single_super_admin" and sappr.get("status") == "APPLIED",
+          f"support (moderation.manage со step-up, спринт 7) — four-eyes: {sup.get('approval')}")
     c.remember("временный пароль support", sup["temporary_password"])
     c.staff["support"] = Staff(c.browser("support"), sup_body["email"], sup["temporary_password"],
                                sup_body["display_name"], sup["staff"]["staff_id"])
     expect(b.post("/admin/v1/staff", sup_body, headers=idem()), 409, "STAFF_EMAIL_EXISTS")
+    # учётка без MFA (непривилегированная роль) — step-up без подключённой MFA невозможен
+    ro_body = {"email": f"ro.{tag}@tilhero.local", "display_name": f"Чтение Проверка {c.tag}", "role": "read_only"}
+    ro = expect(b.post("/admin/v1/staff", ro_body, headers=idem()), 201)
+    check(ro.get("approval") is None, f"read_only — four-eyes: {ro.get('approval')}")
+    c.remember("временный пароль ro", ro["temporary_password"])
+    c.staff["ro"] = Staff(c.browser("ro"), ro_body["email"], ro["temporary_password"], ro_body["display_name"],
+                          ro["staff"]["staff_id"])
     # отдельная учётка для проверки блокировки входа (AT-16)
     lock_body = {"email": f"lock.{tag}@tilhero.local", "display_name": f"Блок Проверка {c.tag}", "role": "read_only"}
     lk = expect(b.post("/admin/v1/staff", lock_body, headers=idem()), 201)
@@ -515,10 +534,15 @@ def s_comms_login(c: Ctx) -> None:
 
 def s_support_login(c: Ctx) -> None:
     sp = c.staff["support"]
-    me = login(c, sp, expect_next=["password_change", "done"])
-    check(me["staff"]["role"] == "support" and me["mfa_enabled"] is False, me["staff"])
+    # спринт 7: support — привилегированная роль (moderation.manage со step-up) → MFA при первом входе
+    me = login(c, sp, expect_next=["password_change", "mfa_enroll", "done"])
+    check(me["staff"]["role"] == "support" and me["mfa_enabled"] is True, me["staff"])
     check(set(me["permissions"]) == SUPPORT_PERMS, f"права support: {sorted(me['permissions'])}")
-    r = sp.browser.post("/admin/v1/auth/step-up", {"code": "123456"})
+    ro = c.staff["ro"]
+    me = login(c, ro, expect_next=["password_change", "done"])
+    check(me["staff"]["role"] == "read_only" and me["mfa_enabled"] is False and set(me["permissions"]) == {"dashboard.read"},
+          f"read_only: {me['staff']} {sorted(me['permissions'])}")
+    r = ro.browser.post("/admin/v1/auth/step-up", {"code": "123456"})
     check(r.status_code in (401, 409), f"step-up без подключённой MFA: {r.status_code} {r.text[:200]}")
 
 
@@ -1683,7 +1707,8 @@ STEPS: list[tuple[str, Callable[[Ctx], None], bool]] = [
      s_create_staff, True),
     ("A04 AT-16 5 неверных паролей → 423 ACCOUNT_LOCKED; верный во время блокировки — тоже 423", s_lockout, False),
     ("A05 AT-16 первый вход communications: временный пароль → смена → TOTP → done", s_comms_login, True),
-    ("A06 AT-16 первый вход support: временный пароль → смена → done (MFA по желанию)", s_support_login, True),
+    ("A06 AT-16 первый вход support (спринт 7: привилегированная — TOTP); step-up без MFA (read_only) — отказ",
+     s_support_login, True),
     ("A07 AT-17 RBAC: support без «Что нового»/уведомлений — 403 в admin-bff и в доменах; manage без publish — 403",
      s_rbac, False),
     ("A08 ученики через telegram-bff: LA (product_news, занятие), LB, родитель + ребёнок, R1/R3/R2 со слотами, S, "

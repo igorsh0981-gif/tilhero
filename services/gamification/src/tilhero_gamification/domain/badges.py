@@ -36,6 +36,8 @@ def definitions(rules: Rules) -> list[BadgeDef]:
         *[BadgeDef(f"reviews_{n}", "reviews", "reviews_cards", n) for n in b.get("reviews_cards", [])],
         *[BadgeDef(f"readings_{n}", "readings", "readings", n) for n in b.get("readings", [])],
         BadgeDef("first_freeze", "first_freeze", "freeze", 1),
+        # спринт 7 (APP-SOC-06): парный урок с достигнутой целью и вкладом каждого
+        BadgeDef("together_1", "together", "together", 1),
     ]
 
 
@@ -43,13 +45,13 @@ def metric_value(learner: Learner, metric: str) -> int:
     return int({
         "lessons": learner.lessons_completed, "streak": learner.streak_best, "skills": learner.confirmed_skills,
         "skill_retained": learner.skills_retained, "reviews_cards": learner.reviews_cards,
-        "readings": learner.readings_completed, "freeze": learner.freezes_used,
+        "readings": learner.readings_completed, "freeze": learner.freezes_used, "together": learner.together_count,
     }[metric])
 
 
 def family_of(code: str) -> str:
     for prefix, family in (("streak_", "streak"), ("skills_", "skills"), ("reviews_", "reviews"),
-                           ("readings_", "readings")):
+                           ("readings_", "readings"), ("together_", "together")):
         if code.startswith(prefix):
             return family
     return code

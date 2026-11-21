@@ -15,7 +15,8 @@ from tilhero_identity.models import Consent, GuardianConsentRequest, GuardianLin
 
 CHILD_SETTINGS = {
     "enabled": True,
-    "categories": {"reminders": False, "missed": False, "social": False, "support": True, "product": False},
+    "categories": {"reminders": False, "missed": False, "social": False, "support": True, "product": False,
+                   "game": True},
     "quiet_hours": {"start": "22:00", "end": "08:00"},
     "timezone": "Asia/Tashkent",
 }
@@ -231,7 +232,7 @@ async def test_patch_child_name_and_notifications(env) -> None:
     assert renamed.payload["changed_fields"] == ["display_name"] and "Мадинахон" not in renamed.to_json()
     [notify] = await env.events("user.notification_settings.changed.v1", cid)
     # enabled — итоговая доставка ребёнку: выключатель ребёнка включён, опекун активен и не блокировал бота
-    assert notify.payload == {"user_id": cid, "enabled": True, "categories": ["reminders", "missed", "support"]}
+    assert notify.payload == {"user_id": cid, "enabled": True, "categories": ["reminders", "missed", "support", "game"]}
     assert (await env.delivery(cid)).json()["notifications_enabled"] is True
 
     # свой профиль через learners не меняется (для этого PATCH /me/settings)

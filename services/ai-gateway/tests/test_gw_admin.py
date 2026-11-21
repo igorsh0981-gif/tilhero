@@ -29,8 +29,17 @@ async def test_registry_of_17_agents(env) -> None:
     orchestrator = by_id["learning_orchestrator"]
     assert (orchestrator["implementation"], orchestrator["implemented_in"], orchestrator["rollout"],
             orchestrator["published"], orchestrator["unavailable_pct_7d"]) == ("code", "lessons", None, None, None)
-    planned = by_id["duel_host"]
-    assert planned["availability"] == "planned" and planned["planned_sprint"] == 7 and planned["rollout"] is not None
+    planned = by_id["language_pathway_advisor"]
+    assert planned["availability"] == "planned" and planned["planned_sprint"] == 9 and planned["rollout"] is not None
+    # спринт 7 (0008): коуч парного урока — LLM, активен, версии ещё нет (сид тестов без накладки); ведущий дуэли —
+    # код lessons, проверка рефералов — правила social (маршрутизации версий у них нет)
+    coach, duel, referral = by_id["cooperative_lesson_coach"], by_id["duel_host"], by_id["referral_integrity_reviewer"]
+    assert (coach["implementation"], coach["availability"], coach["planned_sprint"], coach["free_text"],
+            coach["published"]) == ("llm", "active", None, True, None) and coach["rollout"] is not None
+    assert (duel["implementation"], duel["implemented_in"], duel["availability"], duel["rollout"]) == (
+        "code", "lessons", "active", None)
+    assert (referral["implementation"], referral["implemented_in"], referral["availability"],
+            referral["rollout"]) == ("rules", "social", "active", None)
     r = await env.c.get("/admin/v1/ai/agents/nope", headers=env.h(ANALYST))
     assert r.status_code == 404 and r.json()["code"] == "AGENT_NOT_FOUND"
 
@@ -233,7 +242,8 @@ async def test_model_price_drives_cost(env) -> None:
 async def test_budget_get_update_conflict(env) -> None:
     b = (await env.c.get("/admin/v1/ai/budget", headers=env.h(OPERATIONS))).json()
     assert b == {"ai_enabled": True, "monthly_cap_usd": 20.0, "learner_daily_cap_usd": 0.05, "lesson_cap_usd": 0.03,
-                 "speech_monthly_cap_usd": 5.0, "alert_percent": 80, "updated_at": b["updated_at"]}
+                 "speech_monthly_cap_usd": 5.0, "room_cap_usd": 0.1, "alert_percent": 80,
+                 "updated_at": b["updated_at"]}
     body = {"monthly_cap_usd": 25, "learner_daily_cap_usd": 0.04, "lesson_cap_usd": 0.02, "alert_percent": 90,
             "speech_monthly_cap_usd": 5,
             "updated_at": b["updated_at"], "reason": "Пересмотр лимитов"}

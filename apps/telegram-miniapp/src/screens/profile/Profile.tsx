@@ -103,6 +103,20 @@ export function Profile() {
           </div>
         ) : null}
 
+        {flag(config, "social") ? (
+          <div className="pad" data-testid="profile-social">
+            {/* sprint 7: friends (a child — «Моя семья»), the league of the week, duels, the pair lesson, referrals */}
+            <p className="sec mb8">{t("profile.social")}</p>
+            <div className="list">
+              <NavRow title={kid ? t("profile.myFamily") : t("soc.link.friends")} icon="users" onClick={() => nav.push({ name: "friends" })} testId="row-friends" />
+              {gameOn ? <NavRow title={t("soc.link.leagues")} icon="trophy" onClick={() => nav.push({ name: "leagues" })} testId="row-leagues" /> : null}
+              {gameOn ? <NavRow title={t("soc.link.duels")} icon="target" onClick={() => nav.push({ name: "duels" })} testId="row-duels" /> : null}
+              <NavRow title={t("soc.link.pair")} icon="chat" onClick={() => nav.push({ name: "pairRooms" })} testId="row-pair" />
+              {!kid ? <NavRow title={t("soc.link.referrals")} icon="gift" onClick={() => nav.push({ name: "referrals" })} testId="row-referrals" /> : null}
+            </div>
+          </div>
+        ) : null}
+
         <div className="pad">
           <div className="list">
             <NavRow title={t("profile.schedule")} value={`${daysText(plan.schedule, t)} · ${plan.schedule.preferred_time}`} onClick={() => nav.push({ name: "schedule" })} testId="row-schedule" />

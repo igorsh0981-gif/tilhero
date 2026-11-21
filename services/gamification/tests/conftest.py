@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import copy
+import json
 import uuid
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
@@ -23,6 +25,7 @@ from tilhero_common.testing import (
     migrate,
     unique_schema,
 )
+from tilhero_gamification.domain.members import member_id
 from tilhero_gamification.main import build_app
 from tilhero_gamification.settings import Settings
 
@@ -30,13 +33,13 @@ SERVICE_DIR = str(Path(__file__).resolve().parents[1])
 # 10:00 в Ташкенте (UTC+5)
 T0 = datetime(2026, 11, 20, 5, 0, tzinfo=UTC)
 SCHEDULER_TOKEN = "s" * 40
-ALL_PERMS = ("game.read", "game.manage", "game.publish", "wallet.adjust")
+ALL_PERMS = ("game.read", "game.manage", "game.publish", "wallet.adjust", "league.read", "league.manage")
 AUDIENCE_ALL = ("kids", "teens", "adults")
 
 
 def make_settings(**kw: Any) -> Settings:
     base: dict[str, Any] = {"env": "test", "internal_jwt_secret": "t" * 40, "scheduler_token": SCHEDULER_TOKEN,
-                            "redis_url": TEST_REDIS_URL}
+                            "redis_url": TEST_REDIS_URL, "projection_bootstrap_on_start": False}
     base.update(kw)
     return Settings(**base)
 
@@ -62,14 +65,134 @@ class RecordingBus(InMemoryBus):
         await super().subscribe(spec)
 
 
+class FakeSocial:
+    """Заглушка social: GET /internal/v1/relations/{a}/{b}, GET /internal/v1/members/{member_id}."""
+
+    key = "dev-member-id-key-change-me-0000000000"  # dev-ключ member_id у social, gamification и lessons
+
+    def __init__(self) -> None:
+        self.relations: dict[tuple[str, str], dict[str, Any]] = {}
+        self.members: dict[str, str] = {}
+        self.audience: dict[str, str] = {}
+        self.social_allowed: dict[str, bool] = {}
+        self.restricted_until: dict[str, str] = {}
+        self.down = False
+        self.calls: list[str] = []
+        # выгрузки для разовой загрузки проекций: payload событий (families, friendships)
+        self.exports: dict[str, list[dict[str, Any]]] = {"families": [], "friendships": []}
+        self.export_down = False
+
+    def relate(self, a: uuid.UUID, b: uuid.UUID, **flags: Any) -> None:
+        key = tuple(sorted((str(a), str(b))))
+        rel = self.relations.setdefault(key, {"friends": False, "same_family": False, "blocked_any": False})  # type: ignore[arg-type]
+        rel.update(flags)
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.calls.append(request.url.path)
+        if self.down:
+            return httpx.Response(503, json={"code": "UNAVAILABLE", "message": "down"})
+        parts = request.url.path.strip("/").split("/")
+        if parts[:3] == ["internal", "v1", "relations"]:
+            a, b = parts[3], parts[4]
+            rel = dict(self.relations.get(tuple(sorted((a, b))), {"friends": False, "same_family": False,  # type: ignore[arg-type]
+                                                                     "blocked_any": False}))
+            restricted = rel.pop("restricted", set())
+            return httpx.Response(200, json={  # форма social спринта 7 (с необязательными полями сверх §1.2)
+                **{k: rel.get(k, False) for k in ("friends", "same_family", "blocked_any")},
+                "a_restricted": a in restricted, "b_restricted": b in restricted,
+                "a_restricted_until": self.restricted_until.get(a) if a in restricted else None,
+                "b_restricted_until": self.restricted_until.get(b) if b in restricted else None,
+                "a_audience": self.audience.get(a, "adults"), "b_audience": self.audience.get(b, "adults"),
+                "a_social_allowed": self.social_allowed.get(a, True),
+                "b_social_allowed": self.social_allowed.get(b, True),
+                "a_member_id": member_id(uuid.UUID(a), self.key), "b_member_id": member_id(uuid.UUID(b), self.key)})
+        if parts[:3] == ["internal", "v1", "export"]:
+            if self.export_down:
+                return httpx.Response(503, json={"code": "UNAVAILABLE", "message": "down"})
+            return export_page(self.exports.get(parts[3], []), request)
+        if parts[:3] == ["internal", "v1", "members"]:
+            uid = self.members.get(parts[3])
+            if uid is None:
+                return httpx.Response(404, json={"code": "MEMBER_NOT_FOUND", "message": "нет"})
+            return httpx.Response(200, json={"user_id": uid})
+        return httpx.Response(404, json={"code": "NOT_FOUND", "message": request.url.path})
+
+
+def export_page(items: list[dict[str, Any]], request: httpx.Request) -> httpx.Response:
+    """Страница выгрузки по контракту: курсор — номер следующего элемента (непрозрачен для получателя)."""
+    start = int(request.url.params.get("cursor") or 0)
+    limit = int(request.url.params.get("limit") or 500)
+    page = items[start:start + limit]
+    nxt = str(start + limit) if start + limit < len(items) else None
+    return httpx.Response(200, json={"items": page, "next_cursor": nxt})
+
+
+class FakeIdentity:
+    """Заглушка identity-consent: GET /internal/v1/export/profiles — {user_id, kind, age_band, guardian_consent,
+    updated_at} (повторное ревью, Н1)."""
+
+    def __init__(self) -> None:
+        self.profiles: list[dict[str, Any]] = []
+        self.down = False
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        if self.down:
+            return httpx.Response(503, json={"code": "UNAVAILABLE", "message": "down"})
+        if request.url.path == "/internal/v1/export/profiles":
+            return export_page(self.profiles, request)
+        return httpx.Response(404, json={"code": "NOT_FOUND", "message": request.url.path})
+
+
+class FakeDiagnostics:
+    """Заглушка diagnostics: GET /internal/v1/export/levels — payload diagnostics.completed.v1."""
+
+    def __init__(self) -> None:
+        self.levels: list[dict[str, Any]] = []
+        self.down = False
+        self.calls = 0
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.calls += 1
+        if self.down:
+            return httpx.Response(503, json={"code": "UNAVAILABLE", "message": "down"})
+        if request.url.path == "/internal/v1/export/levels":
+            return export_page(self.levels, request)
+        return httpx.Response(404, json={"code": "NOT_FOUND", "message": request.url.path})
+
+
+class FakeLessons:
+    """Заглушка lessons: POST /internal/v1/duel-sets — один набор на дуэль (повтор — тот же set_id)."""
+
+    def __init__(self) -> None:
+        self.sets: dict[str, str] = {}
+        self.calls: list[dict[str, Any]] = []
+        self.down = False
+        self.delay = 0.0
+
+    async def handler(self, request: httpx.Request) -> httpx.Response:
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.down:
+            return httpx.Response(503, json={"code": "UNAVAILABLE", "message": "down"})
+        body = json.loads(request.content)
+        self.calls.append(body)
+        set_id = self.sets.setdefault(body["duel_id"], str(uuid.uuid4()))
+        return httpx.Response(201, json={"set_id": set_id, "duel_id": body["duel_id"], "items": 10})
+
+
 class Env:
     def __init__(self, settings: Settings, client: httpx.AsyncClient, runtime: Runtime, bus: RecordingBus,
-                 app: Any) -> None:
+                 app: Any, social: FakeSocial | None = None, lessons: FakeLessons | None = None,
+                 diagnostics: FakeDiagnostics | None = None, idc: FakeIdentity | None = None) -> None:
         self.settings = settings
         self.c = client
         self.runtime = runtime
         self.bus = bus
         self.app = app
+        self.social = social or FakeSocial()
+        self.lessons = lessons or FakeLessons()
+        self.diagnostics = diagnostics or FakeDiagnostics()
+        self.idc = idc or FakeIdentity()  # identity-consent (выгрузка профилей)
         self.now = T0
 
         def clock() -> datetime:
@@ -138,6 +261,20 @@ class Env:
         async with self.runtime.transaction() as s:
             result = await s.execute(text(stmt), params)
             return result.all() if result.returns_rows else None
+
+    async def bootstrap(self, force: bool = False, expect: int = 200) -> dict[str, Any]:
+        r = await self.c.post("/internal/v1/projections/bootstrap", params={"force": str(force).lower()},
+                              headers={"Authorization": f"Bearer {SCHEDULER_TOKEN}"})
+        assert r.status_code == expect, r.text
+        return dict(r.json())
+
+    async def identity(self, user: uuid.UUID, age_band: str | None, guardian_consent: str | None = None) -> None:
+        """user.profile.updated.v1 (identity-consent): возраст и согласие родителя на социальное."""
+        payload: dict[str, Any] = {"user_id": str(user), "changed_fields": ["guardian_consent"],
+                                   "age_band": age_band, "is_minor": age_band in ("6-9", "10-13", "14-17")}
+        if guardian_consent:
+            payload["guardian_consent"] = guardian_consent
+        await self.publish("user.profile.updated.v1", payload, "identity-consent")
 
     async def tick(self, expect: int = 200) -> dict[str, Any]:
         r = await self.c.post("/internal/v1/game:tick", headers={"Authorization": f"Bearer {SCHEDULER_TOKEN}"})
@@ -213,6 +350,60 @@ class Env:
             "duration_min": 20, "reminders_enabled": True, "onboarding_completed": True, "level_self": None,
             "preset": "daily"}, "learning-plan")
 
+    # ---------- социальное (спринт 7): проекции и заглушка social
+    def mid(self, user: uuid.UUID) -> str:
+        return member_id(user, self.settings.member_id_key.get_secret_value())
+
+    async def community(self, user: uuid.UUID, nickname: str | None = None, hidden: bool = False) -> None:
+        self.social.members[self.mid(user)] = str(user)
+        await self.publish("social.profile.updated.v1", {
+            "user_id": str(user), "member_id": self.mid(user), "nickname": nickname, "game_profile_hidden": hidden,
+            "updated_at": self.ts()}, "social")
+
+    async def befriend(self, a: uuid.UUID, b: uuid.UUID, status: str = "added") -> None:
+        x, y = sorted((a, b), key=str)
+        self.social.relate(a, b, friends=status == "added")
+        await self.publish("social.friendship.changed.v1", {
+            "user_a": str(x), "user_b": str(y), "status": status, "source": "request", "at": self.ts()}, "social")
+
+    async def family(self, owner: uuid.UUID, *users: tuple[uuid.UUID, str]) -> uuid.UUID:
+        fid = uuid.uuid4()
+        everyone = [owner, *[u for u, _ in users]]
+        for u, role in users:
+            await self.publish("social.family.member_added.v1", {
+                "family_id": str(fid), "owner_user_id": str(owner), "user_id": str(u), "role": role,
+                "added_at": self.ts()}, "social")
+        for i, a in enumerate(everyone):
+            for b in everyone[i + 1:]:
+                self.social.relate(a, b, same_family=True)
+        return fid
+
+    async def block(self, blocker: uuid.UUID, blocked: uuid.UUID, status: str = "added") -> None:
+        self.social.relate(blocker, blocked, blocked_any=status == "added")
+        await self.publish("social.block.changed.v1", {
+            "blocker_user_id": str(blocker), "blocked_user_id": str(blocked), "status": status, "at": self.ts()},
+            "social")
+
+    async def sanction(self, user: uuid.UUID, *, days: int | None = 3, active: bool = True,
+                       sanction_id: uuid.UUID | None = None) -> uuid.UUID:
+        sid = sanction_id or uuid.uuid4()
+        until = (self.now + timedelta(days=days)).isoformat().replace("+00:00", "Z") if days else None
+        await self.publish("social.sanction.changed.v1", {
+            "user_id": str(user), "sanction_id": str(sid), "kind": "social_ban", "until": until, "active": active,
+            "change": "applied" if active else "revoked", "changed_at": self.ts()}, "social")
+        return sid
+
+    async def diag(self, user: uuid.UUID, level: str | None = "A2", pair: str = "ru-en") -> None:
+        await self.publish("diagnostics.completed.v1", {
+            "user_id": str(user), "pair_id": pair, "result_id": str(uuid.uuid4()), "revision": 1,
+            "test_id": "placement", "test_version": 1, "provisional_level": level, "areas": {},
+            "completed_at": self.ts()}, "diagnostics")
+
+    async def xp(self, user: uuid.UUID, n: int = 1, **kw: Any) -> None:
+        """n уроков с passed (30 XP каждый при правилах по умолчанию) — XP недели."""
+        for _ in range(n):
+            await self.lesson(user, passed=True, **kw)
+
     # ---------- API ученика
     async def get(self, user: uuid.UUID, path: str, expect: int = 200, params: dict[str, Any] | None = None,
                   **hk: Any) -> Any:
@@ -260,6 +451,13 @@ class Env:
     async def ensure(self, user: uuid.UUID, **hk: Any) -> None:
         await self.get(user, "settings", **hk)
 
+    async def challenge(self, user: uuid.UUID, opponent: uuid.UUID, expect: int = 201, *, key: str | None = None,
+                        pair_id: str | None = None, **hk: Any) -> Any:
+        body: dict[str, Any] = {"opponent_member_id": self.mid(opponent)}
+        if pair_id:
+            body["pair_id"] = pair_id
+        return await self.send("POST", user, "duels", body, expect, key=key or f"k-{uuid.uuid4()}", **hk)
+
     # ---------- правила и события недели через админ-API
     async def active_rules(self) -> dict[str, Any]:
         items = (await self.adm("GET", "rules"))["items"]
@@ -303,6 +501,13 @@ class Env:
         return r.json() if r.content and r.headers.get("content-type", "").startswith("application/json") else None
 
 
+def transports(social: FakeSocial, lessons: FakeLessons, diagnostics: FakeDiagnostics,
+               idc: FakeIdentity | None = None) -> dict[str, httpx.AsyncBaseTransport]:
+    return {"social": httpx.MockTransport(social.handler), "lessons": httpx.MockTransport(lessons.handler),
+            "diagnostics": httpx.MockTransport(diagnostics.handler),
+            "identity-consent": httpx.MockTransport((idc or FakeIdentity()).handler)}
+
+
 @pytest.fixture
 async def env():
     schema = unique_schema("game")
@@ -311,10 +516,11 @@ async def env():
     await migrate(SERVICE_DIR, settings)
     bus = RecordingBus()
     runtime = Runtime(settings, bus=bus)
-    app = build_app(settings, runtime)
+    social, lessons, diagnostics, idc = FakeSocial(), FakeLessons(), FakeDiagnostics(), FakeIdentity()
+    app = build_app(settings, runtime, transports=transports(social, lessons, diagnostics, idc))
     async with app.router.lifespan_context(app):
         client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://gamification")
-        e = Env(settings, client, runtime, bus, app)
+        e = Env(settings, client, runtime, bus, app, social, lessons, diagnostics, idc)
         await e.flush()
         yield e
         await client.aclose()
@@ -327,4 +533,4 @@ def user() -> uuid.UUID:
     return uuid.uuid4()
 
 
-__all__ = ["ALL_PERMS", "T0", "Env", "make_settings"]
+__all__ = ["ALL_PERMS", "T0", "Env", "FakeDiagnostics", "FakeLessons", "FakeSocial", "make_settings", "transports"]

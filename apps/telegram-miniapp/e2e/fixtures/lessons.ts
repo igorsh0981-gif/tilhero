@@ -694,7 +694,7 @@ export class MockLessons {
     if (!idemKey) return fail(422, "IDEMPOTENCY_KEY_REQUIRED");
     const ik = `${owner}:${idemKey}`;
     if (this.idem.has(ik)) return ok(this.runs.get(this.idem.get(ik) as string)!.view, 201);
-    const open = [...this.runs.values()].find((r) => r.owner === owner && isOpenSt(r.view.status));
+    const open = [...this.runs.values()].find((r) => r.owner === owner && isOpenSt(r.view.status) && r.view.kind !== "duel");
     if (open) return fail(409, "SESSION_ACTIVE", { session_id: open.view.session_id, kind: open.view.kind, title: open.view.title });
     const plan: Def[] = [
       { kind: "reading", reading },
@@ -708,6 +708,50 @@ export class MockLessons {
   }
 
   readingOf = new Map<string, string>();
+
+  /* ---------- sprint 7: the tasks of a duel (POST /v1/duel-sessions, routed by MockSocial) ---------- */
+  /** duel_id of a duel session */
+  duelOf = new Map<string, string>();
+  /** called once when a duel session is finished: the score goes to the duel (lesson.session.completed.v1 kind duel) */
+  onDuelFinished: ((duelId: string, owner: string, score: { correct: number; total: number }) => void) | null = null;
+
+  /** One session per participant of a duel: a repeat (any key) returns the same session. */
+  startDuel(owner: string, kids: boolean, duelId: string, items: ReadingQuestionDef[]): { res: Res; created: boolean } {
+    const mine = [...this.runs.values()].find((r) => r.owner === owner && r.view.kind === "duel" && this.duelOf.get(r.view.session_id) === duelId);
+    if (mine) return { res: ok(mine.view, 200), created: false };
+    const plan: Def[] = [
+      ...items.map((q): Def => ({ kind: "item", stage: "assessment", graded: true, item: { item_id: q.item_id, item_type: q.item_type, instruction: q.instruction, prompt_en: q.prompt_en, options: [...q.options], key: q.key, right: q.right } })),
+      { kind: "done" },
+    ];
+    const r = this.newRun(owner, kids, "duel", { title: L("Дуэль", "Duel") }, plan);
+    r.view.ai_mode = "choices";
+    r.view.ai_degraded = false;
+    this.duelOf.set(r.view.session_id, duelId);
+    return { res: ok(r.view, 201), created: true };
+  }
+
+  private finishDuel(r: Run): LessonSummary {
+    const answers = [...r.answers.values()];
+    const total = r.plan.filter((d) => d.kind === "item").length;
+    const score = { correct: answers.filter((a) => a.correct).length, total };
+    const duelId = this.duelOf.get(r.view.session_id);
+    if (duelId) this.onDuelFinished?.(duelId, r.owner, score);
+    return { session_id: r.view.session_id, kind: "duel", title: r.view.title, status: "completed", outcome: null, minutes: Math.max(1, r.view.minutes), evaluation: null, skills: [], key_words: [], next_lesson: null, can_review: false };
+  }
+
+  /** The session of a duel: my answers with the keys (only after the end of the duel — checked by the caller). */
+  duelSession(owner: string, sessionId: string): { duelId: string; status: LessonSession["status"]; items: Array<{ item_id: string; prompt_en: string; your_answer: string | null; correct_answer: string; correct: boolean }>; score: { correct: number; total: number } } | null {
+    const r = this.runs.get(sessionId);
+    if (!r || r.owner !== owner || r.view.kind !== "duel") return null;
+    const items = r.plan.flatMap((d) => (d.kind === "item" ? [d.item] : []));
+    const out = items.map((it) => {
+      const a = r.answers.get(it.item_id);
+      const v = a?.value;
+      const your = v === null || v === undefined ? null : Array.isArray(v) ? v.join(" ") : typeof v === "number" ? it.options[v] ?? String(v) : String(v);
+      return { item_id: it.item_id, prompt_en: it.prompt_en, your_answer: your, correct_answer: it.right, correct: !!a?.correct };
+    });
+    return { duelId: this.duelOf.get(sessionId) ?? "", status: r.view.status, items: out, score: { correct: out.filter((x) => x.correct).length, total: out.length } };
+  }
 
   /** ReadingCard.last_result: the last completed reading session of the learner per text. */
   readingResult(owner: string, readingId: string): { correct: number; total: number; finished_at: string } | null {
@@ -841,20 +885,20 @@ export class MockLessons {
       if (kind === "lesson" && !this.card(m[2]!, kids, owner)) return fail(404, "LESSON_NOT_AVAILABLE");
       if (kind === "scenario" && (kids ? m[2] !== "sc-kids-zoo" : m[2] === "sc-kids-zoo")) return fail(404, "SCENARIO_NOT_FOUND");
       if (kind === "media" && m[2] !== "m-own-coffee") return fail(404, "NO_EXERCISES");
-      const open = [...this.runs.values()].find((r) => r.owner === owner && isOpenSt(r.view.status));
+      const open = [...this.runs.values()].find((r) => r.owner === owner && isOpenSt(r.view.status) && r.view.kind !== "duel");
       if (open) return fail(409, "SESSION_ACTIVE", { session_id: open.view.session_id, kind: open.view.kind, title: open.view.title });
       const r = this.newRun(owner, kids, kind, kind === "lesson" ? { lesson_id: m[2]! } : kind === "scenario" ? { scenario_id: m[2]! } : { asset_id: m[2]! });
       this.idem.set(ik, r.view.session_id);
       return ok(r.view, 201);
     }
     if (key === "GET /v1/sessions/active") {
-      const open = [...this.runs.values()].find((r) => r.owner === owner && isOpenSt(r.view.status));
+      const open = [...this.runs.values()].find((r) => r.owner === owner && isOpenSt(r.view.status) && r.view.kind !== "duel");
       return ok({ session: open ? open.view : null });
     }
     if (key === "GET /v1/sessions") {
       const kind = q.get("kind");
       const items: LessonHistoryItem[] = [...this.runs.values()]
-        .filter((r) => r.owner === owner && (!kind || r.view.kind === kind))
+        .filter((r) => r.owner === owner && r.view.kind !== "duel" && (!kind || r.view.kind === kind))
         .reverse()
         .map((r) => ({
           session_id: r.view.session_id,
@@ -924,7 +968,7 @@ export class MockLessons {
       return ok(r.view);
     }
     if (action === "cancel" && method === "POST") {
-      if (!open) return fail(409, "SESSION_STATE", { status: st });
+      if (!open || r.view.kind === "duel") return fail(409, "SESSION_STATE", { status: st });
       r.view.status = "cancelled";
       r.view.finished_at = new Date().toISOString();
       return ok(r.view);
@@ -991,6 +1035,10 @@ export class MockLessons {
       r.view.status = "completed";
       r.view.stage = "summary";
       r.view.finished_at = new Date().toISOString();
+      if (r.view.kind === "duel") {
+        r.summary = this.finishDuel(r);
+        return ok(r.summary);
+      }
       r.summary = this.finish(r);
       return ok(r.summary);
     }

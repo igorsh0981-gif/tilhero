@@ -15,6 +15,7 @@ const CAT_ICON: Record<NotificationCategory, IconName> = {
   support: "chat",
   product: "spark",
   service: "shield",
+  game: "trophy",
 };
 const CAT_TONE: Partial<Record<NotificationCategory, string>> = { missed: "warn", social: "ok" };
 

@@ -87,6 +87,35 @@ import type {
   UiLang,
   WhatsNew,
   WhatsNewNote,
+  BlockRequest,
+  BlocksResponse,
+  BlockView,
+  CommunityPatch,
+  CommunityProfile,
+  ComplaintRequest,
+  ComplaintResult,
+  DuelChallengeRequest,
+  DuelReview,
+  DuelSessionRequest,
+  DuelView,
+  FriendRequestCreate,
+  FriendRequestView,
+  FriendView,
+  LeagueResult,
+  LeaguesView,
+  MemberId,
+  MemberSearchResult,
+  NicknameRequest,
+  PairAudio,
+  PairRoomInvite,
+  PairRoomReport,
+  PairRoomState,
+  PairRoomView,
+  PairTurnRequest,
+  ReferralsResponse,
+  SanctionAppealRequest,
+  SanctionsResponse,
+  SanctionView,
 } from "@tilhero/contracts/bff";
 import type { SessionKind } from "@tilhero/contracts/ai";
 import type { Band, Localized } from "@tilhero/contracts/content";
@@ -308,6 +337,58 @@ export function createBff(client: ApiClient) {
     gameRewards: (sessionId: string) => get<SessionRewards>("/v1/game/rewards", { source_session_id: sessionId }, true),
     gameSettings: (quiet = false) => get<GameSettings>("/v1/game/settings", undefined, quiet),
     patchGameSettings: (patch: Partial<GameSettings>) => client.request<GameSettings>("PATCH", "/v1/game/settings", { body: patch }),
+
+    // ---- sprint 7: the community profile, friends, blocks, complaints, sanctions, referrals (social via telegram-bff) ----
+    /** `quiet` — Home and Profile: a failure only hides the social block */
+    community: (quiet = false) => get<CommunityProfile>("/v1/community", undefined, quiet),
+    patchCommunity: (patch: CommunityPatch) => client.request<CommunityProfile>("PATCH", "/v1/community", { body: patch }),
+    setNickname: (nickname: string) => client.request<CommunityProfile>("PUT", "/v1/community/nickname", { body: { nickname } satisfies NicknameRequest }),
+    rotateFriendCode: () => client.request<CommunityProfile>("POST", "/v1/community/friend-code/rotate"),
+    searchMembers: (q: string) => get<MemberSearchResult>("/v1/friends/search", { q }),
+    /** one key per «Добавить» tap on this card, reused on a retry */
+    sendFriendRequest: (memberId: MemberId, key: string) =>
+      client.request<FriendRequestView>("POST", "/v1/friends/requests", { body: { member_id: memberId } satisfies FriendRequestCreate, idempotencyKey: key }),
+    friendRequests: (direction: "in" | "out", cursor: string | null = null) => get<Page<FriendRequestView>>("/v1/friends/requests", { direction, cursor }),
+    friendRequestAction: (id: string, action: "accept" | "decline" | "cancel") => client.request<FriendRequestView>("POST", `/v1/friends/requests/${enc(id)}/${action}`),
+    friends: (cursor: string | null = null) => get<Page<FriendView>>("/v1/friends", { cursor }),
+    removeFriend: (memberId: MemberId) => client.request<void>("DELETE", `/v1/friends/${enc(memberId)}`),
+    block: (memberId: MemberId) => client.request<BlockView>("POST", "/v1/blocks", { body: { member_id: memberId } satisfies BlockRequest }),
+    blocks: () => get<BlocksResponse>("/v1/blocks"),
+    unblock: (memberId: MemberId) => client.request<void>("DELETE", `/v1/blocks/${enc(memberId)}`),
+    complain: (body: ComplaintRequest, key: string) => client.request<ComplaintResult>("POST", "/v1/complaints", { body, idempotencyKey: key }),
+    sanctions: () => get<SanctionsResponse>("/v1/sanctions"),
+    appealSanction: (id: string, text: string, key: string) =>
+      client.request<SanctionView>("POST", `/v1/sanctions/${enc(id)}/appeal`, { body: { text } satisfies SanctionAppealRequest, idempotencyKey: key }),
+    referrals: (cursor: string | null = null) => get<ReferralsResponse>("/v1/referrals", { cursor }),
+
+    // ---- sprint 7: leagues of the week and duels (gamification) ----
+    leagues: () => get<LeaguesView>("/v1/game/leagues"),
+    leagueHistory: (cursor: string | null = null) => get<Page<LeagueResult>>("/v1/game/leagues/history", { cursor }),
+    challenge: (body: DuelChallengeRequest, key: string) => client.request<DuelView>("POST", "/v1/game/duels", { body, idempotencyKey: key }),
+    duels: (status: "active" | "finished", cursor: string | null = null) => get<Page<DuelView>>("/v1/game/duels", { status, cursor }),
+    duel: (id: string) => get<DuelView>(`/v1/game/duels/${enc(id)}`),
+    duelAction: (id: string, action: "accept" | "decline") => client.request<DuelView>("POST", `/v1/game/duels/${enc(id)}/${action}`),
+    /** one session per participant: a repeat returns the same one (201 / 200) */
+    startDuelSession: (duelId: string, key: string) =>
+      client.request<LessonSession>("POST", "/v1/duel-sessions", { body: { duel_id: duelId } satisfies DuelSessionRequest, idempotencyKey: key }),
+    duelReview: (sessionId: string) => get<DuelReview>(`/v1/duel-sessions/${enc(sessionId)}/review`),
+
+    // ---- sprint 7: the pair lesson (lessons) ----
+    invitePair: (body: PairRoomInvite, key: string) => client.request<PairRoomView>("POST", "/v1/pair-rooms", { body, idempotencyKey: key }),
+    pairRooms: (status: "active" | "finished", cursor: string | null = null) => get<Page<PairRoomView>>("/v1/pair-rooms", { status, cursor }),
+    pairRoom: (id: string) => get<PairRoomView>(`/v1/pair-rooms/${enc(id)}`),
+    pairAction: (id: string, action: "accept" | "decline" | "cancel" | "leave") => client.request<PairRoomView>("POST", `/v1/pair-rooms/${enc(id)}/${action}`),
+    joinPair: (id: string) => client.request<PairRoomState>("POST", `/v1/pair-rooms/${enc(id)}/join`),
+    /** every 10 s while in the room; quiet — a lost beat is the room's own «Переподключаемся…», not the global banner */
+    pairHeartbeat: (id: string) => client.request<void>("POST", `/v1/pair-rooms/${enc(id)}/heartbeat`, { quiet: true }),
+    /** long-poll ≤ 25 s; aborted when the screen goes away */
+    pairState: (id: string, afterSeq: number, signal?: AbortSignal) =>
+      client.request<PairRoomState>("GET", `/v1/pair-rooms/${enc(id)}/state`, { query: { after_seq: afterSeq }, signal, quiet: true }),
+    /** one key per turn, reused on a retry (the same answer, no second turn) */
+    pairTurn: (id: string, body: PairTurnRequest, key: string) => client.request<PairRoomState>("POST", `/v1/pair-rooms/${enc(id)}/turns`, { body, idempotencyKey: key }),
+    /** the WAV goes as the body (as «Произнести»); recognised text comes back for confirmation, the audio is not kept */
+    pairAudio: (id: string, wav: Blob) => client.request<PairAudio>("POST", `/v1/pair-rooms/${enc(id)}/audio`, { raw: { body: wav, contentType: "audio/wav" } }),
+    pairReport: (id: string) => get<PairRoomReport>(`/v1/pair-rooms/${enc(id)}/report`),
 
     // ---- deletion ----
     requestDeletion: (body: DeletionRequest) => client.request<DeletionResponse>("POST", "/v1/profile/delete-request", { body }),

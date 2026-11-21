@@ -27,6 +27,8 @@ SEED_DIR = Path(__file__).resolve().parent / "fixtures" / "seed"
 REAL_SEED_DIR = Path(__file__).resolve().parents[1] / "migrations" / "seed"
 T0 = datetime(2026, 11, 19, 7, 0, tzinfo=UTC)  # 12:00 по Ташкенту
 SPEECH_URL = "/internal/v1/speech/pronunciation"
+TRANSCRIBE_URL = "/internal/v1/speech:transcribe"
+COACH = "cooperative_lesson_coach"
 
 
 def _actor(role: str, *perms: str) -> Actor:
@@ -110,6 +112,49 @@ def v2_body() -> dict[str, Any]:
     data: dict[str, Any] = json.loads((REAL_SEED_DIR / "0004" / "agents" / "teaching_coach.v2.json")
                                       .read_text(encoding="utf-8"))
     return data
+
+
+def coach_body() -> dict[str, Any]:
+    """Тело cooperative_lesson_coach v1 из накладки миграции 0008 (реальный сид)."""
+    data: dict[str, Any] = json.loads((REAL_SEED_DIR / "0008" / "agents" / f"{COACH}.v1.json")
+                                      .read_text(encoding="utf-8"))
+    return data
+
+
+def coach_cases() -> list[dict[str, Any]]:
+    data: list[dict[str, Any]] = json.loads((REAL_SEED_DIR / "0008" / "golden" / f"{COACH}.json")
+                                            .read_text(encoding="utf-8"))
+    return data
+
+
+def coach_context(case_id: str = "clc-monopoly", **changes: Any) -> dict[str, Any]:
+    """CooperativeCoachContext (ai.ts) — из золотого кейса накладки 0008 с правками полей верхнего уровня."""
+    for case in coach_cases():
+        if case["case_id"] == case_id:
+            ctx = copy.deepcopy(case["input"]["context"])
+            ctx.update(changes)
+            return ctx
+    raise KeyError(case_id)
+
+
+def coach_out(ctx: dict[str, Any], **changes: Any) -> str:
+    """Корректный вывод коуча на ход (trigger turn, режим free) с правками."""
+    out: dict[str, Any] = {
+        "room_id": ctx["room_id"], "status": "in_progress", "next_speaker": "B",
+        "prompt": "Good idea! B, what time is good for you?",
+        "prompt_gloss": {"ru": "Хорошая идея! B, во сколько вам удобно?", "uz": "Yaxshi gʻoya! B, qachon qulay?"},
+        "options": None, "roles": None, "team_goal_en": None, "team_goal_progress": ctx["team_goal_progress"],
+        "individual_evidence": [], "escalation": None, "report": None}
+    out.update(changes)
+    return json.dumps(out, ensure_ascii=False)
+
+
+def transcribe_meta(user_id: uuid.UUID | str | None = None, **overrides: Any) -> dict[str, Any]:
+    """SpeechTranscribeMeta (ai.ts)."""
+    meta: dict[str, Any] = {"request_id": str(uuid.uuid4()), "user_id": str(user_id or uuid.uuid4()),
+                            "room_id": str(uuid.uuid4()), "audience": "adults", "language": "en-US"}
+    meta.update(overrides)
+    return meta
 
 
 def meta_header(meta: dict[str, Any]) -> str:
@@ -281,6 +326,29 @@ class Env:
         body = {k: v for k, v in v2_body().items()}
         return await self.publish_patched("teaching_coach", body)
 
+    async def publish_coach(self, changes: dict[str, Any] | None = None) -> int:
+        """cooperative_lesson_coach v1 (тело накладки 0008) — опубликована в обход золотых тестов."""
+        return await self.publish_patched(COACH, {**coach_body(), **(changes or {})})
+
+    async def coach(self, context: dict[str, Any] | None = None, *, caller: str = "lessons",
+                    **kw: Any) -> httpx.Response:
+        """Вызов коуча как lessons: session_kind pair, session_id = room_id контекста."""
+        ctx = context if context is not None else coach_context()
+        kw.setdefault("session_kind", "pair")
+        kw.setdefault("session_id", ctx["room_id"])
+        return await self.invoke(COACH, ctx, caller=caller, **kw)
+
+    async def transcribe(self, wav: bytes, meta: dict[str, Any] | None = None, *, caller: str = "lessons",
+                         subject: str | None = None, content_type: str = "audio/wav", raw_meta: str | None = None,
+                         **claims: Any) -> httpx.Response:
+        """POST /internal/v1/speech:transcribe как lessons (sub = ученик меты)."""
+        meta = meta if meta is not None else transcribe_meta()
+        headers = {**self.svc(caller, subject or str(meta.get("user_id")), **claims), "Content-Type": content_type}
+        header = raw_meta if raw_meta is not None else meta_header(meta)
+        if header:
+            headers["X-Speech-Meta"] = header
+        return await self.c.post(TRANSCRIBE_URL, content=wav, headers=headers)
+
     async def gloss(self, context: dict[str, Any] | None = None, *, caller: str = "memory",
                     **kw: Any) -> httpx.Response:
         kw.setdefault("session_kind", "memory")
@@ -305,10 +373,11 @@ class Env:
     async def set_budget(self, **values: Any) -> dict[str, Any]:
         current = (await self.c.get("/admin/v1/ai/budget", headers=self.h(OPERATIONS))).json()
         body = {k: current[k] for k in ("monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd",
-                                        "speech_monthly_cap_usd", "alert_percent")}
+                                        "speech_monthly_cap_usd", "room_cap_usd", "alert_percent")}
         body.update(values)
-        if "speech_monthly_cap_usd" not in values:  # подлимит речи — не больше потолка месяца
-            body["speech_monthly_cap_usd"] = min(body["speech_monthly_cap_usd"], body["monthly_cap_usd"])
+        for cap in ("speech_monthly_cap_usd", "room_cap_usd"):  # подлимиты — не больше потолка месяца
+            if cap not in values:
+                body[cap] = min(body[cap], body["monthly_cap_usd"])
         body["reason"] = "Лимиты в тесте"
         r = await self.c.put("/admin/v1/ai/budget", json=body, headers=self.h(OPERATIONS))
         assert r.status_code == 200, r.text

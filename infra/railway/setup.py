@@ -84,7 +84,8 @@ SERVICES: tuple[Service, ...] = (
             calls=("catalog", "assessment", "ai-gateway", "identity-consent")),
     # спринт 6 — игра и герои: реестр XP, тилов и заморозок, герои, задания, магазин (начисления — только событиями);
     # спринт 7 — лиги и дуэли: social (связь учеников, member_id → user_id), lessons (набор заданий дуэли)
-    Service("gamification", 8117, "services/gamification/Dockerfile", "gamification", calls=("social", "lessons")),
+    Service("gamification", 8117, "services/gamification/Dockerfile", "gamification",
+            calls=("social", "lessons", "diagnostics", "identity-consent")),
     # спринт 2 — админка: admin-bff без публичного домена, admin-web проксирует /admin/v1/* на него (один origin)
     Service("admin-identity", 8120, "services/admin-identity/Dockerfile", "admin_identity"),
     Service("user-admin", 8121, "services/user-admin/Dockerfile", "user_admin",

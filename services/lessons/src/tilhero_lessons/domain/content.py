@@ -35,6 +35,10 @@ class Bundle:
     reading: dict[str, Any] | None = None
     exercises: dict[str, dict[str, Any]] = field(default_factory=dict)
     retrieval: dict[tuple[str, int], dict[str, Any]] = field(default_factory=dict)
+    # спринт 7: задания дуэли — снимки набора с ключами (duel_sets.items) и seed набора (перемешивание одинаково у
+    # обоих участников)
+    duel: list[dict[str, Any]] = field(default_factory=list)
+    duel_seed: str = ""
 
 
 def ref(key: str, version: int) -> dict[str, Any]:

@@ -12,6 +12,7 @@ import { GameBlock } from "../game/GameBlock";
 import { FreezeChip } from "../game/parts";
 import { ActiveCard } from "../lessons/LessonsTab";
 import { ReviewCard } from "../memory/ReviewCard";
+import { SocialCard } from "../social/SocialCard";
 import { scheduleSummary } from "../schedule/parts";
 
 /** ISO weekday (1=Mon … 7=Sun) of a plan date "YYYY-MM-DD" (calendar arithmetic, no time zone). */
@@ -85,7 +86,12 @@ export function Home() {
         {shown.map((s) => (
           <Fragment key={s}>
             <Section type={s} today={today} active={activeSession} withToday={sections.includes("today_plan")} />
-            {s === anchor ? <GameBlock s={g} /> : null}
+            {s === anchor ? (
+              <>
+                <GameBlock s={g} />
+                <SocialCard />
+              </>
+            ) : null}
           </Fragment>
         ))}
 

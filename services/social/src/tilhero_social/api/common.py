@@ -12,9 +12,13 @@ from typing import cast
 
 from fastapi import Depends, Request
 
+from tilhero_common.app import Runtime
 from tilhero_common.errors import ApiError, unauthorized, unprocessable
-from tilhero_common.internal_auth import HEADER, InternalAuth, Principal
-from tilhero_social.identity import IdentityGateway
+from tilhero_common.internal_auth import HEADER, Actor, InternalAuth, Principal
+from tilhero_social.domain import invites as inv
+from tilhero_social.domain.access import Me
+from tilhero_social.domain.common import AGE_BANDS, step_up_required
+from tilhero_social.identity import IdentityGateway, Person
 from tilhero_social.settings import Settings
 
 log = logging.getLogger("tilhero.social.api")
@@ -23,6 +27,11 @@ log = logging.getLogger("tilhero.social.api")
 CLIENT_CALLERS = {"telegram-bff"}
 client_auth = InternalAuth(CLIENT_CALLERS)
 no_service = InternalAuth(set())  # внутренний JWT любого сервиса на входе планировщика → 403 CALLER_NOT_ALLOWED
+# спринт 7: связь учеников и member_id → user_id — только домены лиг/дуэлей и парных уроков (§1.2)
+domain_auth = InternalAuth({"gamification", "lessons"})
+# админ-API — только admin-bff с actor (права — в домене)
+staff_auth = InternalAuth({"admin-bff"})
+STEP_UP_HEADER = "x-step-up"
 
 _IDEMPOTENCY_RE = re.compile(r"^[A-Za-z0-9._:\-]{8,128}$")
 
@@ -46,6 +55,42 @@ def current_user(principal: Principal = Depends(client_auth)) -> uuid.UUID:
         return uuid.UUID(principal.user_id)
     except ValueError:
         raise unauthorized("USER_CONTEXT_INVALID", "Некорректный контекст пользователя") from None
+
+
+def _uuid_claim(value: object) -> uuid.UUID:
+    try:
+        return uuid.UUID(str(value))
+    except ValueError:
+        raise unauthorized("USER_CONTEXT_INVALID", "Некорректный контекст пользователя") from None
+
+
+def current_learner(principal: Principal = Depends(client_auth)) -> Me:
+    """Спринт 7: социальное — у активного ученика (claim `lrn`, без него — `sub`); `age_band` — его полоса. Только из
+    внутреннего токена (защита от IDOR)."""
+    account = _uuid_claim(principal.user_id)
+    lrn = principal.claims.get("lrn")
+    learner = _uuid_claim(lrn) if lrn not in (None, "") else account
+    band = principal.claims.get("age_band")
+    return Me(user_id=learner, account_id=account, age_band=band if band in AGE_BANDS else None)
+
+
+async def person_of(rt: Runtime, gateway: IdentityGateway, user_id: uuid.UUID) -> Person | None:
+    """Профиль identity-consent (вне транзакций БД) + согласие родителя из проекции. None — не найден."""
+    pub = await gateway.public(user_id)
+    async with rt.transaction() as session:
+        return await inv.person_for(session, user_id, pub)
+
+
+def require_staff(principal: Principal, permission: str, request: Request | None = None, *,
+                  step_up: bool = False) -> Actor:
+    """Право сотрудника в домене (защита в глубину); step-up — admin-bff проверил свежесть MFA и передал
+    `X-Step-Up: ok` (или claim `step_up: true`)."""
+    actor = principal.require_permission(permission)
+    if step_up:
+        header = (request.headers.get(STEP_UP_HEADER) if request is not None else None) or ""
+        if header.strip().lower() != "ok" and principal.claims.get("step_up") is not True:
+            raise step_up_required(permission)
+    return actor
 
 
 def idempotency_key(value: str | None) -> str:

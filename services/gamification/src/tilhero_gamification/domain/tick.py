@@ -4,9 +4,14 @@
 предыдущий, сразу отвечает `skipped`. Шаги:
 1. задания: active за дни, закончившиеся у ученика (полночь — в Python по его поясу) → expired, без штрафов;
 2. события недели: published → finished после ends_at;
-3. рефералы: pending старше REFERRAL_VOID_DAYS → void;
-4. раз в RECONCILE_HOURS: сверка wallets с суммой реестра — расхождение → лог WALLET_DRIFT и пересчёт;
-5. ключи идемпотентности команд сотрудников старше IDEMPOTENCY_DAYS — удаляются.
+3. лиги (спринт 7): прошлая неделя → closing, открытые группы прошедших недель закрываются (итоги, призы или
+   удержание); включившие общую лигу распределяются по группам текущей недели;
+4. дуэли (спринт 7): вызовы без ответа 24 ч → expired; принятые после play_deadline + DUEL_FINISH_GRACE_MINUTES →
+   завершение (техническая победа, ничья или cancelled);
+5. раз в RECONCILE_HOURS: сверка wallets с суммой реестра — расхождение → лог WALLET_DRIFT и пересчёт;
+6. ключи идемпотентности команд сотрудников старше IDEMPOTENCY_DAYS — удаляются.
+7. рефералы спринта 6: pending старше LEGACY_REFERRAL_DAYS (90) → expired (тихо);
+8. разовая загрузка проекций (семьи, дружбы, полосы уровня), если не завершена — повтор после сбоя источника.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tilhero_common.app import Runtime
+from tilhero_gamification.domain import bootstrap, duels, leagues
 from tilhero_gamification.domain.common import local_date, lock_user, zone
 from tilhero_gamification.models import (
     EvidenceReward,
@@ -85,8 +91,9 @@ async def finish_events(rt: Runtime, now: datetime) -> int:
             GameEvent.status == "published", GameEvent.ends_at <= now).values(status="finished", updated_at=now)))
 
 
-async def void_referrals(rt: Runtime, settings: Settings, now: datetime) -> int:
-    cutoff = now - timedelta(days=settings.referral_void_days)
+async def expire_legacy_referrals(rt: Runtime, settings: Settings, now: datetime) -> int:
+    """Рефералы спринта 6 в pending старше LEGACY_REFERRAL_DAYS с принятия → expired (тихо, без уведомления)."""
+    cutoff = now - timedelta(days=settings.legacy_referral_days)
     total = 0
     while True:
         async with rt.transaction() as db:
@@ -96,10 +103,30 @@ async def void_referrals(rt: Runtime, settings: Settings, now: datetime) -> int:
             if ids:
                 await db.execute(update(Referral).where(Referral.invitee_user_id.in_(ids),
                                                         Referral.status == "pending")
-                                 .values(status="void", updated_at=now))
+                                 .values(status="expired", updated_at=now))
         total += len(ids)
         if len(ids) < settings.tick_batch_size:
             return total
+
+
+async def duel_steps(rt: Runtime, settings: Settings, now: datetime) -> dict[str, int]:
+    """Истечение вызовов (пачками) и завершение дуэлей по дедлайну (по одной транзакции на дуэль)."""
+    expired = 0
+    while True:
+        async with rt.transaction() as db:
+            n = await duels.expire_challenges(db, now, settings.tick_batch_size)
+        expired += n
+        if n < settings.tick_batch_size:
+            break
+    finished = 0
+    while True:
+        async with rt.transaction() as db:
+            ids = await duels.due_for_finish(db, settings, now, settings.tick_batch_size)
+        for duel_id in ids:
+            async with rt.transaction() as db:
+                finished += int(await duels.finish_by_deadline(db, settings, duel_id, now))
+        if len(ids) < settings.tick_batch_size:
+            return {"duels_expired": expired, "duels_finished": finished}
 
 
 async def reconcile(rt: Runtime, settings: Settings, now: datetime, *, force: bool = False) -> int | None:
@@ -179,7 +206,13 @@ async def run(rt: Runtime, settings: Settings, now: datetime) -> dict[str, Any]:
             out: dict[str, Any] = {"skipped": False}
             out["quests_expired"] = await expire_quests(rt, settings, now)
             out["events_finished"] = await finish_events(rt, now)
-            out["referrals_void"] = await void_referrals(rt, settings, now)
+            closed = await leagues.close_weeks(rt, settings, now)
+            out["league_groups_closed"] = closed["groups_closed"]
+            out["league_groups_held"] = closed["groups_held"]
+            out["league_members_assigned"] = await leagues.form_groups(rt, settings, now)
+            out.update(await duel_steps(rt, settings, now))
+            out["legacy_referrals_expired"] = await expire_legacy_referrals(rt, settings, now)
+            out["projections_loaded"] = await bootstrap.run_pending(rt, now)
             fixed = await reconcile(rt, settings, now)
             out["reconciled"] = fixed is not None
             out["wallets_fixed"] = fixed or 0

@@ -81,7 +81,7 @@ async def test_lockout_after_five_failures_for_existing_and_unknown(env: Env, ro
 
 
 async def test_unlock_by_admin_status_change(env: Env, root: Person) -> None:
-    sup = await env.onboard(root.actor, new_email("sup"), "support")
+    sup = await env.onboard(root.actor, new_email("sup"), "analyst")
     for _ in range(5):
         await env.login(sup.email, "Wrong-passw0rd-xx")
     assert (await env.login(sup.email, sup.password)).status_code == 423
@@ -256,7 +256,7 @@ async def test_step_up_replay_rejected_after_step_change(env: Env, root: Person,
 
 
 async def test_step_up_requires_mfa(env: Env, root: Person) -> None:
-    support = await env.onboard(root.actor, new_email("sup"), "support")
+    support = await env.onboard(root.actor, new_email("sup"), "analyst")
     assert support.secret is None and support.principal["mfa_enabled"] is False
     r = await env.post("/auth/step-up", {"staff_id": support.staff_id, "code": "123456"})
     assert _shape(r)[:2] == (409, "MFA_NOT_ENABLED")

@@ -140,6 +140,34 @@ async def test_practice_kinds_and_not_completed_statuses(env, user) -> None:
     assert len(await env.events(ACTIVITY, user)) == 3
 
 
+async def test_duel_and_pair_sessions_are_practice(env, user) -> None:
+    """Спринт 7 (INTERNAL_API §10, решение 2): kind duel и pair (с duel_id, room_id, score) — занятие practice: день
+    графика и серия засчитываются, минуты — из события; пройденным уроком не считаются; не DLQ; повтор — одно
+    занятие."""
+    await env.onboard(user, at=MON_MORNING)
+    duel_sid, pair_sid, room_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    duel = {"session_id": str(duel_sid), "user_id": str(user), "kind": "duel", "pair_id": "ru-en", "lesson_id": None,
+            "status": "completed", "outcome": "success", "minutes": 4, "local_date": "2026-11-16",
+            "evaluation_id": None, "passed": None, "practice_only": True, "finished_at": "2026-11-16T09:00:00Z",
+            "duel_id": str(uuid.uuid4()), "score": {"correct": 4, "total": 5}}
+    await env.publish(COMPLETED, duel, producer="lessons")
+    await env.publish(COMPLETED, {**duel, "session_id": str(pair_sid), "kind": "pair", "minutes": 12,
+                                  "local_date": "2026-11-17", "finished_at": "2026-11-17T09:00:00Z",
+                                  "duel_id": None, "score": None, "room_id": str(room_id),
+                                  "practice_only": False}, producer="lessons")
+    await env.publish(COMPLETED, duel, producer="lessons")  # повтор публикации — та же сессия
+    assert env.bus.dlq == []
+    rows = await activities(env, user)
+    assert [tuple(r) for r in rows] == [("practice", 4, "2026-11-16", duel_sid),
+                                        ("practice", 12, "2026-11-17", pair_sid)]
+    assert await env.sql("SELECT 1 FROM completed_lessons WHERE user_id = :u", u=user) == []
+    assert [e.payload["kind"] for e in await env.events(ACTIVITY, user)] == ["practice", "practice"]
+    assert (await env.tick(z(17, 14, 0), since=z(17, 13, 55)))["reminders"] == 0  # день засчитан
+    env.now = z(17, 12)
+    today = (await env.c.get("/internal/v1/me/plan/today", headers=env.h(user))).json()
+    assert today["done_today"] is True and today["minutes_today"] == 12 and today["streak_days"] == 2
+
+
 async def test_local_date_from_event_or_plan_timezone(env) -> None:
     moscow, tashkent, no_plan = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     r = await env.c.patch("/internal/v1/me/plan", json={"schedule": {"timezone": "Europe/Moscow"}},

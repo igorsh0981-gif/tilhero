@@ -91,7 +91,7 @@ async def test_snapshot_account_child_teen(env) -> None:
     assert p["consent"]["revoked_at"] is None
     assert p["security"] == {"pin_enabled": True, "pin_reset_pending": False}
     assert p["notifications"] == {"enabled": True, "categories": {
-        "reminders": False, "missed": False, "social": False, "support": True, "product": True}}
+        "reminders": False, "missed": False, "social": False, "support": True, "product": True, "game": True}}
 
     c = items[child]
     assert c["kind"] == "child" and c["guardian_user_id"] == parent and c["children_count"] == 0

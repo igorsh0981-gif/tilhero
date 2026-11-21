@@ -28,7 +28,7 @@ from tilhero_common.app import Runtime
 from tilhero_common.errors import ApiError, conflict, unprocessable
 from tilhero_lessons import clients
 from tilhero_lessons.catalog import CatalogGateway, ContentGone, catalog_unavailable
-from tilhero_lessons.domain import evaluation, flow, machine
+from tilhero_lessons.domain import duels, evaluation, flow, machine
 from tilhero_lessons.domain.common import (
     IdempotencyReused,
     answer_invalid,
@@ -117,10 +117,11 @@ def history_item(s: Session) -> dict[str, Any]:
 
 
 async def own(db: AsyncSession, learner: Learner, session_id: uuid.UUID, *, lock: bool = False) -> Session:
-    """Сессия ученика из токена; чужая или несуществующая — 404 (не раскрываем существование)."""
-    await ensure_not_deleted(db, learner.user_id)
+    """Сессия ученика из токена; чужая или несуществующая — 404 (не раскрываем существование). Под блокировкой
+    отметка удаления проверяется после её захвата (сага держит ту же блокировку до фиксации)."""
     if lock:
         await lock_user(db, learner.user_id)
+    await ensure_not_deleted(db, learner.user_id)
     s = await db.get(Session, session_id, populate_existing=True)
     if s is None or s.user_id != learner.user_id:
         raise session_not_found()
@@ -130,17 +131,22 @@ async def own(db: AsyncSession, learner: Learner, session_id: uuid.UUID, *, lock
 async def housekeep(ctx: Ctx) -> str | None:
     """Авто-пауза и истечение незавершённой сессии ученика (своя транзакция — фиксируется до команды)."""
     async with ctx.rt.transaction() as db:
-        await ensure_not_deleted(db, ctx.learner.user_id)
         await lock_user(db, ctx.learner.user_id)
+        await ensure_not_deleted(db, ctx.learner.user_id)
         s = (await db.execute(select(Session).where(
-            Session.user_id == ctx.learner.user_id, Session.status.in_(machine.ACTIVE)))).scalar_one_or_none()
+            Session.user_id == ctx.learner.user_id, Session.status.in_(machine.ACTIVE),
+            Session.kind != "duel"))).scalar_one_or_none()
         if s is None:
             return None
         return await machine.housekeep(db, s, ctx.now, ctx.settings)
 
 
 async def bundle_for(ctx: Ctx, s: Session) -> Bundle:
-    """Контент зафиксированных версий. Версия исчезла из catalog (404) — сессия failed (content_unpublished)."""
+    """Контент зафиксированных версий. Версия исчезла из catalog (404) — сессия failed (content_unpublished).
+    Дуэль — снимки заданий набора (catalog не нужен)."""
+    if s.kind == "duel":
+        async with ctx.rt.transaction() as db:
+            return await duels.bundle(db, s)
     try:
         return await load_bundle(ctx.catalog, s.content_versions)
     except ContentGone:
@@ -160,6 +166,21 @@ async def _load(ctx: Ctx, session_id: uuid.UUID) -> Session:
 def _ensure_active(s: Session) -> None:
     if s.status in machine.TERMINAL:
         raise session_state(s.status)
+
+
+async def _duel_guard(ctx: Ctx, s: Session) -> bool:
+    """Сессия дуэли после срока набора (или итога дуэли): незаконченная закрывается со счётом (своя транзакция —
+    фиксируется), → True — вызывающий отвечает 409 DUEL_CLOSED (finish — итогом)."""
+    if s.kind != "duel":
+        return False
+    async with ctx.rt.transaction() as db:
+        fresh = await own(db, ctx.learner, s.session_id, lock=True)
+        return await duels.close_if_due(db, fresh, ctx.now, ctx.settings)
+
+
+async def _guard_or_raise(ctx: Ctx, s: Session) -> None:
+    if await _duel_guard(ctx, s):
+        raise duels.duel_closed()
 
 
 async def _wake(db: AsyncSession, s: Session, ctx: Ctx) -> None:
@@ -258,8 +279,8 @@ async def _replay(ctx: Ctx, key: str, rhash: str) -> Session | None:
 async def _insert(ctx: Ctx, s: Session, key: str, rhash: str) -> tuple[Session, bool]:
     """Вставка под блокировкой ученика: повтор ключа → та же сессия; есть незавершённая → 409 SESSION_ACTIVE."""
     async with ctx.rt.transaction() as db:
-        await ensure_not_deleted(db, ctx.learner.user_id)
         await lock_user(db, ctx.learner.user_id)
+        await ensure_not_deleted(db, ctx.learner.user_id)  # после блокировки (сага держит её до фиксации)
         existing = (await db.execute(select(Session).where(
             Session.user_id == ctx.learner.user_id, Session.idempotency_key == key))).scalar_one_or_none()
         if existing is not None:
@@ -267,7 +288,8 @@ async def _insert(ctx: Ctx, s: Session, key: str, rhash: str) -> tuple[Session, 
                 raise IdempotencyReused
             return existing, True
         active = (await db.execute(select(Session).where(
-            Session.user_id == ctx.learner.user_id, Session.status.in_(machine.ACTIVE)))).scalar_one_or_none()
+            Session.user_id == ctx.learner.user_id, Session.status.in_(machine.ACTIVE),
+            Session.kind != "duel"))).scalar_one_or_none()
         if active is not None:
             raise session_active(active.session_id, active.kind, active.title)
         s.idempotency_key, s.request_hash = key, rhash
@@ -664,10 +686,12 @@ async def reading_results(ctx: Ctx, reading_ids: list[str]) -> dict[str, Any]:
 
 
 async def active(ctx: Ctx) -> dict[str, Any] | None:
+    """Незавершённая сессия ученика — кроме сессий дуэли (они вне правила одной активной сессии, §3.1)."""
     await housekeep(ctx)
     async with ctx.rt.transaction() as db:
         s = (await db.execute(select(Session).where(
-            Session.user_id == ctx.learner.user_id, Session.status.in_(machine.ACTIVE)))).scalar_one_or_none()
+            Session.user_id == ctx.learner.user_id, Session.status.in_(machine.ACTIVE),
+            Session.kind != "duel"))).scalar_one_or_none()
         return session_view(s, ctx.settings) if s is not None else None
 
 
@@ -682,6 +706,7 @@ async def current(ctx: Ctx, session_id: uuid.UUID) -> dict[str, Any]:
     восстановления); шаги не теряются при обрыве и повторном входе."""
     await housekeep(ctx)
     s = await _load(ctx, session_id)
+    await _guard_or_raise(ctx, s)
     _ensure_active(s)
     b = await bundle_for(ctx, s)
     async with ctx.rt.transaction() as db:
@@ -757,6 +782,7 @@ async def answer(ctx: Ctx, session_id: uuid.UUID, step_id: str, body: dict[str, 
         async with ctx.rt.transaction() as db:
             if s.audience == "kids" or await is_child(db, ctx.learner):
                 raise kids_not_allowed()
+    await _guard_or_raise(ctx, s)  # дуэль после срока — 409 DUEL_CLOSED
     _ensure_active(s)
     b = await bundle_for(ctx, s)
     ai: clients.AgentResult | None = None
@@ -855,6 +881,7 @@ async def _converse(ctx: Ctx, s: Session, b: Bundle, step_id: str, text: str) ->
 async def hint(ctx: Ctx, session_id: uuid.UUID, step_id: str) -> dict[str, Any]:
     await housekeep(ctx)
     s = await _load(ctx, session_id)
+    await _guard_or_raise(ctx, s)
     _ensure_active(s)
     b = await bundle_for(ctx, s)
     async with ctx.rt.transaction() as db:
@@ -946,6 +973,7 @@ async def retry(ctx: Ctx, session_id: uuid.UUID) -> dict[str, Any]:
 
 async def pause(ctx: Ctx, session_id: uuid.UUID) -> dict[str, Any]:
     happened = await housekeep(ctx)
+    await _guard_or_raise(ctx, await _load(ctx, session_id))
     async with ctx.rt.transaction() as db:
         s = await own(db, ctx.learner, session_id, lock=True)
         if not (s.status == "paused" and happened == "auto_pause"):
@@ -956,6 +984,7 @@ async def pause(ctx: Ctx, session_id: uuid.UUID) -> dict[str, Any]:
 async def resume(ctx: Ctx, session_id: uuid.UUID) -> dict[str, Any]:
     await housekeep(ctx)
     s = await _load(ctx, session_id)
+    await _guard_or_raise(ctx, s)
     if s.status != "paused":
         raise session_state(s.status)
     b = await bundle_for(ctx, s)
@@ -970,6 +999,8 @@ async def cancel(ctx: Ctx, session_id: uuid.UUID) -> dict[str, Any]:
     await housekeep(ctx)
     async with ctx.rt.transaction() as db:
         s = await own(db, ctx.learner, session_id, lock=True)
+        if s.kind == "duel":  # дуэль не отменяется: незаконченная к сроку закрывается со счётом (bff.ts)
+            raise session_state(s.status, kind="duel")
         await machine.terminate(db, s, "cancelled", "cancel", ctx.now, ctx.settings)
         return session_view(s, ctx.settings)
 
@@ -984,7 +1015,7 @@ async def _skill_titles(ctx: Ctx, s: Session) -> dict[str, Any]:
 
 
 async def _next_lesson(ctx: Ctx, s: Session) -> dict[str, Any] | None:
-    if s.status != "completed":
+    if s.status != "completed" or s.kind == "duel":
         return None
     card_ = await _bounded(clients.next_lesson_card(ctx.rt, s.user_id, s.pair_id, s.audience),
                            ctx.settings.summary_aux_timeout_seconds, None, "next_lesson")
@@ -1012,6 +1043,9 @@ async def finish(ctx: Ctx, session_id: uuid.UUID) -> dict[str, Any]:
     событие (один раз), LessonSummary. assessment недоступен — completed без оценки («оценка появится позже»),
     повтор — tick. Вместе с второстепенными вызовами (≤ 2 + 2 с) — меньше таймаута BFF для finish (35 с)."""
     await housekeep(ctx)
+    loaded = await _load(ctx, session_id)
+    if loaded.kind == "duel":
+        return await _finish_duel(ctx, loaded)
     async with ctx.rt.transaction() as db:
         s = await own(db, ctx.learner, session_id)
         if s.status == "completed":
@@ -1044,6 +1078,41 @@ async def finish(ctx: Ctx, session_id: uuid.UUID) -> dict[str, Any]:
     return evaluation.summary_view(s, await _next_lesson(ctx, s))
 
 
+async def _finish_duel(ctx: Ctx, s: Session) -> dict[str, Any]:
+    """Дуэль: счёт по ключам снимка набора — сервер, без assessment; итог — без оценки и навыков (счёт обоих — в
+    DuelView после завершения дуэли). После срока — сессия закрывается со счётом по отвеченному (итог тот же)."""
+    await _duel_guard(ctx, s)
+    async with ctx.rt.transaction() as db:
+        s = await own(db, ctx.learner, s.session_id, lock=True)
+        if s.status != "completed":
+            _ensure_active(s)
+            step = await flow.current_step(db, s)
+            if step is None or step.type != "done":
+                raise step_not_current(step.step_id if step is not None else None)
+            await duels.finish(db, s, ctx.now, ctx.settings)
+    return evaluation.summary_view(s, None)
+
+
+async def start_duel(ctx: Ctx, duel_id: uuid.UUID, locale: str, key: str) -> tuple[Session, bool]:
+    """POST /internal/v1/me/duel-sessions (§3.1): сессия kind duel — одна на участника набора (повтор — та же)."""
+    async with ctx.rt.transaction() as db:
+        await lock_user(db, ctx.learner.user_id)
+        await ensure_not_deleted(db, ctx.learner.user_id)  # после блокировки
+        audience = await audience_for(db, ctx.learner, None)
+        return await duels.start_session(db, user_id=ctx.learner.user_id, account_id=ctx.learner.account_id,
+                                         audience=audience, locale=locale, duel_id=duel_id, key=key, now=ctx.now,
+                                         settings=ctx.settings)
+
+
+async def duel_review(ctx: Ctx, session_id: uuid.UUID) -> dict[str, Any]:
+    """DuelReview — свои ответы только после завершения дуэли; чужая сессия или не дуэль — 404."""
+    async with ctx.rt.transaction() as db:
+        s = await own(db, ctx.learner, session_id)
+        if s.kind != "duel":
+            raise session_not_found()
+        return await duels.review(db, s)
+
+
 async def summary(ctx: Ctx, session_id: uuid.UUID) -> dict[str, Any]:
     """Итоги завершённой сессии. Актуальная оценка (после переоценки или апелляции) — повторным POST в assessment
     (идемпотентен по session_id, оценка уже есть — без ИИ); assessment недоступен или не ответил за
@@ -1070,7 +1139,8 @@ async def history(ctx: Ctx, kind: str | None, cursor: str | None, limit: int) ->
     after = decode_cursor(cursor, 2)
     async with ctx.rt.transaction() as db:
         await ensure_not_deleted(db, ctx.learner.user_id)
-        stmt = select(Session).where(Session.user_id == ctx.learner.user_id)
+        # сессии дуэли в истории не показываются (bff.ts DuelSessionRequest)
+        stmt = select(Session).where(Session.user_id == ctx.learner.user_id, Session.kind != "duel")
         if kind:
             stmt = stmt.where(Session.kind == kind)
         if after is not None:

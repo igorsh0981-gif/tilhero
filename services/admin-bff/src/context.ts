@@ -24,6 +24,8 @@ export interface BffContext {
   domains: Domains;
   /** Спринт 6: gamification; null — GAMIFICATION_URL не задана (маршруты игры → 503, блок обзора недоступен). */
   gamification: DomainClient | null;
+  /** Спринт 7: social; null — SOCIAL_URL не задана (маршруты social → 503, блок обзора `social` недоступен). */
+  social: DomainClient | null;
   principals: PrincipalCache;
   names: StaffNames;
   log: FastifyBaseLogger;

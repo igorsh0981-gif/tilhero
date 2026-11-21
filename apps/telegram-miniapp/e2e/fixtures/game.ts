@@ -53,6 +53,10 @@ export interface GameScenario {
   rewards?: { pendingReads?: number; outcome?: "ready" | "none" | "never"; levelUp?: boolean; heroUp?: boolean; badge?: boolean; quest?: boolean; capped?: boolean; multiplier?: number };
   /** the first purchase is handled, then its answer is lost (network) — the retry with the same key gets the same answer */
   dropPurchaseOnce?: boolean;
+  /** sprint 7: GameSettings.league_opt_in at start */
+  leagueOptIn?: boolean;
+  /** sprint 7: pair lessons with the team goal and both contributions (the badge «Вместе») */
+  together?: number;
 }
 
 const L = (ru: string, uz: string): Localized => ({ ru, uz });
@@ -220,7 +224,7 @@ export class MockGame {
       hero: sc.hero === undefined ? (kid ? "pet_0" : "robot_0") : sc.hero,
       stage: sc.stage ?? 1,
       skills: sc.skills ?? 3,
-      settings: { auto_freeze: true, quests_hidden: !!sc.questsHidden, celebrations: sc.celebrations ?? (kid ? "quiet" : "full"), game_notifications: true },
+      settings: { auto_freeze: true, quests_hidden: !!sc.questsHidden, celebrations: sc.celebrations ?? (kid ? "quiet" : "full"), game_notifications: true, league_opt_in: !!sc.leagueOptIn },
       equipment: { background: null, frame: null },
       owned: new Set(),
       ops: [],
@@ -230,7 +234,7 @@ export class MockGame {
         { slot: 3, code: "reading_1", kind: "reading_complete", target: 1, progress: 1, status: "completed", reward: { xp: 10, til: 5 } },
       ],
       bonusReceived: false,
-      counters: { lessons: 3, streak: 4, skills: sc.skills ?? 3, skill_retained: 0, reviews_cards: 42, readings: 2, freeze: 0 },
+      counters: { lessons: 3, streak: 4, skills: sc.skills ?? 3, skill_retained: 0, reviews_cards: 42, readings: 2, freeze: 0, together: sc.together ?? 0 },
       earned: new Map([["first_lesson", "2026-11-12T15:20:00Z"]]),
       purchases: new Map(),
       rewardReads: new Map(),
@@ -500,7 +504,7 @@ export class MockGame {
     }
     if (key === "GET /v1/game/settings") return ok({ ...s.settings });
     if (key === "PATCH /v1/game/settings") {
-      const allowed = ["auto_freeze", "quests_hidden", "celebrations", "game_notifications"];
+      const allowed = ["auto_freeze", "quests_hidden", "celebrations", "game_notifications", "league_opt_in"];
       if (Object.keys(b).some((k) => !allowed.includes(k))) return fail(422, "VALIDATION_ERROR");
       if (b.celebrations !== undefined && b.celebrations !== "full" && b.celebrations !== "quiet") return fail(422, "VALIDATION_ERROR");
       s.settings = { ...s.settings, ...(b as Partial<GameSettings>) };

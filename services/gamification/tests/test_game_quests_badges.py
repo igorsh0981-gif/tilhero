@@ -61,7 +61,7 @@ async def test_quests_progress_rewards_and_bonus(env: Env, user: uuid.UUID) -> N
     expected = sum(i["reward"]["xp"] for i in q["items"])
     assert sum(op.amount for op in quest_ops if op.currency == "xp") == expected
     assert sorted((op.currency, op.amount) for op in ops if op.reason == "quest_bonus") == [("til", 10), ("xp", 10)]
-    assert all(op.rules_version == 1 for op in quest_ops)
+    assert all(op.rules_version == 2 for op in quest_ops)
     # повторные события после выполнения — без второй награды за задания
     for quest in q["items"]:
         await play(env, user, quest)
@@ -105,7 +105,7 @@ async def test_quest_multiplier_and_version_of_day(env: Env, user: uuid.UUID) ->
     [xp_op] = [op for op in await env.ops(user) if op.reason == "quest" and op.currency == "xp"
                and op.idempotency_key.endswith(":1:xp")] or [None]
     if quest["reward"]["xp"]:
-        assert xp_op is not None and xp_op.amount == quest["reward"]["xp"] * 2 and xp_op.rules_version == 1
+        assert xp_op is not None and xp_op.amount == quest["reward"]["xp"] * 2 and xp_op.rules_version == 2
     # задания дня доигрываются по своей версии; следующий день — по новой
     env.now += timedelta(days=1)
     q2 = await env.get(user, "quests")

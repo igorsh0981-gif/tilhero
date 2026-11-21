@@ -72,7 +72,7 @@ export function pronunciationView(r: Static<typeof PronunciationDomainSchema>): 
 }
 
 /** Ошибки разбора тела этого маршрута → контрактные: больше лимита — too_large, не WAV-тип — format. */
-function mapBodyError(err: FastifyError): Error {
+export function mapBodyError(err: FastifyError): Error {
   if (err.code === "FST_ERR_CTP_BODY_TOO_LARGE" || err.statusCode === 413) return audioInvalid("too_large");
   if (err.code === "FST_ERR_CTP_INVALID_MEDIA_TYPE" || err.statusCode === 415) return audioInvalid("format");
   return err;

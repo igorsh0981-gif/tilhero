@@ -52,6 +52,13 @@ export type DomainKey = keyof typeof DOMAIN;
  */
 export const GAME_SERVICE = "gamification";
 
+/**
+ * Спринт 7: social — необязательный домен (SOCIAL_URL), как gamification: адрес не задан → маршруты «Друзья и жалобы»,
+ * «Модерация», «Реферальные кампании» отвечают 503 UPSTREAM_UNAVAILABLE {service: social}, блок обзора `social`
+ * недоступен, остальная админка работает.
+ */
+export const SOCIAL_SERVICE = "social";
+
 const INTERNAL_AUTH_CODES = new Set([
   "INTERNAL_TOKEN_INVALID",
   "INTERNAL_TOKEN_EXPIRED",

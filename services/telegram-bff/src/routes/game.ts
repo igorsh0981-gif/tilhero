@@ -25,6 +25,7 @@ import { createHash } from "node:crypto";
 import { Type, type Static, type TSchema } from "@fastify/type-provider-typebox";
 import type * as C from "@tilhero/contracts/bff";
 import { AppError } from "@tilhero/ts-common";
+import type { FastifyBaseLogger } from "fastify";
 import { asAccount } from "../account.js";
 import { expectShape } from "../check.js";
 import type { BffContext } from "../context.js";
@@ -40,6 +41,8 @@ import {
   GameImageBytesSchema,
   GameOperationSchema,
   GameRewardsQuerySchema,
+  CommunityProfileSchema,
+  GameSettingsDomainSchema,
   GameSettingsPatchSchema,
   GameSettingsSchema,
   GameView,
@@ -49,6 +52,7 @@ import {
   SelectHeroRequestSchema,
   type GameImageDomainSchema,
 } from "../schemas.js";
+import { isChildProfile, kidsNotAllowed, learnerCall, socialUnavailable } from "../socialApi.js";
 import type { AccessClaims } from "../tokens.js";
 import { GAME_SERVICE, type RawMethod, type RawRequest } from "../upstream.js";
 import { etagMatches, pageView } from "./content.js";
@@ -122,40 +126,81 @@ async function readImage(resp: Response): Promise<{ contentType: string; bytes: 
 type DomainImage = Static<typeof GameImageDomainSchema>;
 type D<K extends keyof typeof GameDomain> = Static<(typeof GameDomain)[K]>;
 
-export function gameRoutes(app: App, ctx: BffContext): void {
-  const log = ctx.log;
+/**
+ * Картинка из ответа домена → GameImage Mini App: sha256 → url пути BFF; готовый url — только тот же путь того же
+ * asset_id; иначе ответ не по контракту → `fail()` (gamification — 503 GAME_UNAVAILABLE; lessons — 503 UPSTREAM_UNAVAILABLE
+ * {service: lessons}: герой партнёра в парной комнате, спринт 7).
+ */
+export function imageView(log: FastifyBaseLogger, service: string, what: string, i: DomainImage, fail: () => Error): C.GameImage {
+  if (i.sha256) return { asset_id: i.asset_id, url: assetPath(i.asset_id, i.sha256), width: i.width, height: i.height };
+  const m = i.url !== undefined ? ASSET_URL_RE.exec(i.url) : null;
+  if (m && m[1] === i.asset_id) return { asset_id: i.asset_id, url: assetPath(i.asset_id, m[2]!), width: i.width, height: i.height };
+  log.warn({ upstream: service, check: what, rule: "image_url", upstream_code: "UPSTREAM_BAD_RESPONSE" }, "domain response does not match the contract");
+  throw fail();
+}
 
-  // ---------------------------------------------------------------- вызов и проверка ответа
-  /** Вызов gamification от имени активного ученика: лимит политики, claims lrn/age_band; сбой → GAME_UNAVAILABLE. */
-  async function call(auth: AccessClaims, policy: string, method: RawMethod, path: string, extra: Pick<RawRequest, "query" | "body" | "idempotencyKey"> = {}): Promise<unknown> {
+/** Настройки игры для Mini App: league_opt_in до спринта 7 gamification не присылает → false. */
+export const settingsView = (s: Static<typeof GameSettingsDomainSchema>): C.GameSettings => ({
+  auto_freeze: s.auto_freeze,
+  quests_hidden: s.quests_hidden,
+  celebrations: s.celebrations,
+  game_notifications: s.game_notifications,
+  league_opt_in: s.league_opt_in ?? false,
+});
+
+/** Вызов gamification от имени активного ученика (спринт 6, спринт 7 — лиги и дуэли): лимит политики (null — лимит уже
+ *  проверен вызывающим), sub = аккаунт, claims lrn / age_band активного ученика; нет адреса или сбой → 503 GAME_UNAVAILABLE. */
+export interface GameApi {
+  call(auth: AccessClaims, policy: string | null, method: RawMethod, path: string, extra?: Pick<RawRequest, "query" | "body" | "idempotencyKey">): Promise<unknown>;
+  /** То же и статус ответа домена (201 — создано, 200 — уже было). */
+  callWithStatus(auth: AccessClaims, policy: string | null, method: RawMethod, path: string, extra?: Pick<RawRequest, "query" | "body" | "idempotencyKey">): Promise<{ status: number; body: unknown }>;
+  /** Ответ по схеме контракта; не по схеме → 503 GAME_UNAVAILABLE (в лог — проверка, путь, правило). */
+  shape<S extends TSchema>(what: string, schema: S, raw: unknown): Static<S>;
+  img(what: string, i: DomainImage): C.GameImage;
+}
+
+export function gameApi(ctx: BffContext): GameApi {
+  const log = ctx.log;
+  async function callWithStatus(auth: AccessClaims, policy: string | null, method: RawMethod, path: string, extra: Pick<RawRequest, "query" | "body" | "idempotencyKey"> = {}) {
     const game = ctx.game;
     if (!game) throw gameUnavailable();
-    await ctx.limiter.enforce(policy, auth.learnerId);
+    if (policy) await ctx.limiter.enforce(policy, auth.learnerId);
     const band = await ctx.audience.learnerBand(ctx, auth);
     try {
-      return await game.json(method, path, { subject: asAccount(auth), claims: { lrn: auth.learnerId, ...(band ? { age_band: band } : {}) }, ...extra });
+      return await game.jsonWithStatus<unknown>(method, path, { subject: asAccount(auth), claims: { lrn: auth.learnerId, ...(band ? { age_band: band } : {}) }, ...extra });
     } catch (err) {
       throw asGameError(err);
     }
   }
+  return {
+    callWithStatus,
+    call: async (...a) => (await callWithStatus(...a)).body,
+    shape(what, schema, raw) {
+      try {
+        return expectShape(log, GAME_SERVICE, what, schema, raw);
+      } catch (err) {
+        throw asGameError(err);
+      }
+    },
+    img: (what, i) => imageView(log, GAME_SERVICE, what, i, gameUnavailable),
+  };
+}
 
-  /** Ответ gamification по схеме контракта; не по схеме → 503 GAME_UNAVAILABLE (в лог — проверка, путь, правило). */
-  function shape<S extends TSchema>(what: string, schema: S, raw: unknown): Static<S> {
-    try {
-      return expectShape(log, GAME_SERVICE, what, schema, raw);
-    } catch (err) {
-      throw asGameError(err);
-    }
+export function gameRoutes(app: App, ctx: BffContext): void {
+  const log = ctx.log;
+  const { call, shape, img } = gameApi(ctx);
+
+  /** Социальное доступно активному ученику (спринт 7, включение общей лиги): детский профиль — 403 KIDS_NOT_ALLOWED без
+   *  вызова; иначе профиль сообщества social (sub = аккаунт, claims lrn / age_band): friends_available=false → 403
+   *  FRIENDS_NOT_ALLOWED {reason} | CONSENT_REQUIRED {purpose: social}; сбой social и ответ не по контракту → 503 {service: social}. */
+  async function requireSocial(auth: AccessClaims): Promise<void> {
+    if (isChildProfile(auth)) throw kidsNotAllowed("В детском профиле общей лиги нет — только семейная");
+    const { ro } = await learnerCall(ctx, auth);
+    const p = expectShape(log, "social", "community", CommunityProfileSchema, await ctx.domains.socialRaw.json("GET", "/internal/v1/me/community", ro));
+    if (!p.friends_available) throw socialUnavailable(p.friends_unavailable_reason ?? "consent");
   }
 
   // ---------------------------------------------------------------- картинки в ответах
-  function img(what: string, i: DomainImage): C.GameImage {
-    if (i.sha256) return { asset_id: i.asset_id, url: assetPath(i.asset_id, i.sha256), width: i.width, height: i.height };
-    const m = i.url !== undefined ? ASSET_URL_RE.exec(i.url) : null;
-    if (m && m[1] === i.asset_id) return { asset_id: i.asset_id, url: assetPath(i.asset_id, m[2]!), width: i.width, height: i.height };
-    log.warn({ upstream: GAME_SERVICE, check: what, rule: "image_url", upstream_code: "UPSTREAM_BAD_RESPONSE" }, "domain response does not match the contract");
-    throw gameUnavailable();
-  }
   const imgOrNull = (what: string, i: DomainImage | null): C.GameImage | null => (i ? img(what, i) : null);
   const refView = (what: string, r: D<"ShopItemRef"> | null): C.ShopItemRef | null => (r ? { ...r, image: imgOrNull(what, r.image) } : null);
   const badgeView = (what: string, b: D<"BadgeView">): C.BadgeView => ({ ...b, image: imgOrNull(what, b.image) });
@@ -166,6 +211,7 @@ export function gameRoutes(app: App, ctx: BffContext): void {
       background: refView("summary.equipment.background.image", s.equipment.background),
       frame: refView("summary.equipment.frame.image", s.equipment.frame),
     },
+    settings: settingsView(s.settings),
     purchase_available: false,
   });
   const summaryOf = (raw: unknown) => summaryView(shape("summary", GameDomain.Summary, raw));
@@ -310,7 +356,7 @@ export function gameRoutes(app: App, ctx: BffContext): void {
         response: { 200: GameSettingsSchema, ...errorResponses(401, 410, 423) },
       },
     },
-    async (req) => shape("settings", GameSettingsSchema, await call(authOf(req), READ, "GET", "/internal/v1/game/settings")),
+    async (req) => settingsView(shape("settings", GameSettingsDomainSchema, await call(authOf(req), READ, "GET", "/internal/v1/game/settings"))),
   );
 
   // ---------------------------------------------------------------- команды (tg.game.write)
@@ -358,9 +404,15 @@ export function gameRoutes(app: App, ctx: BffContext): void {
       schema: {
         tags: TAG,
         summary: "Изменить игровые настройки (только переданные поля) → GameSettings",
+        description:
+          "Спринт 7: league_opt_in — участие в общей лиге недели (14+, только ник). Включение (league_opt_in: true) — сначала " +
+          "доступность социального в social (профиль сообщества): детскому профилю — 403 KIDS_NOT_ALLOWED; 403 FRIENDS_NOT_ALLOWED " +
+          "{reason: kids | guardian_consent}; 403 CONSENT_REQUIRED {purpose: social}; social недоступен — 503 UPSTREAM_UNAVAILABLE " +
+          "{service: social}; gamification в этих случаях не вызывается. Затем gamification: 409 NICKNAME_REQUIRED; 403 " +
+          "SOCIAL_RESTRICTED {until}. Выключение — без проверки.",
         security: BEARER,
         body: GameSettingsPatchSchema,
-        response: { 200: GameSettingsSchema, ...errorResponses(401, 410, 423) },
+        response: { 200: GameSettingsSchema, ...errorResponses(401, 403, 409, 410, 423) },
       },
     },
     async (req) => {
@@ -370,8 +422,14 @@ export function gameRoutes(app: App, ctx: BffContext): void {
         ...(b.quests_hidden !== undefined ? { quests_hidden: b.quests_hidden } : {}),
         ...(b.celebrations !== undefined ? { celebrations: b.celebrations } : {}),
         ...(b.game_notifications !== undefined ? { game_notifications: b.game_notifications } : {}),
+        ...(b.league_opt_in !== undefined ? { league_opt_in: b.league_opt_in } : {}),
       };
-      return shape("settings", GameSettingsSchema, await call(authOf(req), WRITE, "PATCH", "/internal/v1/game/settings", { body }));
+      const auth = authOf(req);
+      if (!ctx.game) throw gameUnavailable();
+      await ctx.limiter.enforce(WRITE, auth.learnerId);
+      // общая лига — социальная функция: согласие и доступность проверяет social (gamification их не знает)
+      if (b.league_opt_in === true) await requireSocial(auth);
+      return settingsView(shape("settings", GameSettingsDomainSchema, await call(auth, null, "PATCH", "/internal/v1/game/settings", { body })));
     },
   );
 

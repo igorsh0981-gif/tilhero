@@ -433,15 +433,21 @@ async def finish(session: AsyncSession, *, user_id: uuid.UUID, session_id: uuid.
     session.add(r)
     s.status, s.finished_at = "finished", now
     await session.flush()
-    await emit(session, COMPLETED, {
-        "user_id": str(user_id), "pair_id": s.pair_id, "result_id": str(result_id), "revision": revision,
-        "test_id": test.test_id, "test_version": test.version, "provisional_level": prof.provisional_level,
-        "areas": {a["area"]: {"status": a["status"], "band": a["band"], "confidence": a["confidence"]}
-                  for a in areas},
-        "recommended_start_lesson_id": r.recommended_start_lesson_id,
-        "completed_at": now.isoformat().replace("+00:00", "Z"),
-    }, producer=PRODUCER)
+    await emit(session, COMPLETED, completed_payload(r), producer=PRODUCER)
     return result_out(r)
+
+
+def completed_payload(r: Result) -> dict[str, Any]:
+    """Payload diagnostics.completed.v1 по ревизии результата — один код для события и выгрузки `levels`
+    (спринт 7: разовая загрузка проекций в gamification и lessons)."""
+    return {
+        "user_id": str(r.user_id), "pair_id": r.pair_id, "result_id": str(r.result_id), "revision": int(r.revision),
+        "test_id": r.test_id, "test_version": int(r.test_version), "provisional_level": r.provisional_level,
+        "areas": {a["area"]: {"status": a["status"], "band": a["band"], "confidence": a["confidence"]}
+                  for a in (r.profile or {}).get("areas") or []},
+        "recommended_start_lesson_id": r.recommended_start_lesson_id,
+        "completed_at": r.created_at.isoformat().replace("+00:00", "Z"),
+    }
 
 
 async def start_followup(session: AsyncSession, *, user_id: uuid.UUID, result_id: uuid.UUID, area: str,

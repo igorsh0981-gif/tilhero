@@ -7,6 +7,9 @@ advisory-блокировкой бюджета — параллельные вы
 Фактическая стоимость — по usage ответа провайдера (общая формула tilhero_common.ai_pricing, Decimal).
 Оценка произношения (спринт 5) — ещё подлимит речи `speech_monthly_cap_usd` (календарный месяц UTC, расход агента
 `pronunciation_coach`); вызовы агентов его не проверяют, но речь входит в общий потолок месяца.
+Парная комната (спринт 7, INTERNAL_API §4): вызовы коуча `cooperative_lesson_coach` (`session_kind pair`,
+`session_id = room_id`) — потолок комнаты `room_cap_usd` (сумма по session_id) и месячный потолок; дневной лимит
+ученика и лимит урока к ним не применяются (коуча зовут за обоих участников).
 """
 
 from __future__ import annotations
@@ -57,6 +60,7 @@ class Scope:
     session_id: uuid.UUID | None
     learner_limits: bool
     speech: bool = False  # оценка произношения: + подлимит речи в месяц
+    room: bool = False  # коуч парной комнаты: потолок комнаты по session_id вместо лимитов ученика и урока
 
 
 async def lock(session: AsyncSession) -> None:
@@ -89,7 +93,11 @@ async def try_reserve(session: AsyncSession, budget: BudgetRow, scope: Scope, *,
     if scope.speech and await _spent(session, others, UsageRow.agent_id == SPEECH_AGENT,
                                      UsageRow.created_at >= month_start(now)) + need > budget.speech_monthly_cap_usd:
         return False
-    if scope.learner_limits:
+    if scope.room:
+        if scope.session_id is not None and await _spent(
+                session, others, UsageRow.session_id == scope.session_id) + need > budget.room_cap_usd:
+            return False
+    elif scope.learner_limits:
         if scope.user_id is not None and await _spent(
                 session, others, UsageRow.user_id == scope.user_id,
                 UsageRow.created_at >= local_day_start(now, tz)) + need > budget.learner_daily_cap_usd:

@@ -3,7 +3,8 @@ import type { IconName } from "../ui/Icon";
 
 /**
  * Menu sections of TilHero Admin = the ids of the experience-config `admin` seed (layout.menu, 0002_seed.py) and the
- * NAV of the approved prototype (Admin.dc.html): 15 sections in 5 groups, + «memory» of sprint 5. The active admin config decides the order
+ * NAV of the approved prototype (Admin.dc.html): 15 sections in 5 groups, + «memory» of sprint 5, + the group «Сообщество»
+ * of sprint 7 (friends, moderation, referrals, leagues, pair_rooms — LinguaFlow «Социальное»). The active admin config decides the order
  * and which sections are switched on; the role decides which of them the staff member sees (RBAC is re-checked by
  * admin-bff and every domain — the menu is UX only).
  */
@@ -18,6 +19,11 @@ export type PageId =
   | "heroes"
   | "game"
   | "events"
+  | "friends"
+  | "moderation"
+  | "referrals"
+  | "leagues"
+  | "pair_rooms"
   | "news"
   | "support"
   | "config"
@@ -25,7 +31,7 @@ export type PageId =
   | "roles"
   | "audit";
 
-export type NavGroup = "product" | "ai" | "game" | "comms" | "manage";
+export type NavGroup = "product" | "ai" | "game" | "social" | "comms" | "manage";
 
 export interface NavItem {
   id: PageId;
@@ -55,6 +61,15 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: "heroes", group: "game", icon: "hero", perms: ["game.read"] },
   { id: "game", group: "game", icon: "trophy", perms: ["game.read"] },
   { id: "events", group: "game", icon: "calendar", perms: ["game.read"] },
+  // sprint 7: «Сообщество» — friends and complaints (social.read), moderation (moderation.manage), referral campaigns
+  // and the review queue (referral.read), leagues and duels (league.read), pair rooms (room.read). The commands need
+  // referral.manage / league.manage / room.manage (buttons hidden without them; admin-bff and the domains re-check).
+  // Not in the experience-config seed yet: they follow the config's sections until a version places them.
+  { id: "friends", group: "social", icon: "userPlus", perms: ["social.read"] },
+  { id: "moderation", group: "social", icon: "flag", perms: ["moderation.manage"] },
+  { id: "referrals", group: "social", icon: "gift", perms: ["referral.read"] },
+  { id: "leagues", group: "social", icon: "podium", perms: ["league.read"] },
+  { id: "pair_rooms", group: "social", icon: "mic", perms: ["room.read"] },
   // «Новости и „Что нового“» of the prototype: release notes + notification templates + campaigns (tabs by right)
   { id: "news", group: "comms", icon: "sparkles", perms: ["whatsnew.manage", "notif.templates.manage", "notif.campaigns.manage"] },
   { id: "support", group: "comms", icon: "support", perms: ["support.read"] },
@@ -66,7 +81,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
 ];
 
 export const PAGE_IDS: readonly PageId[] = NAV_ITEMS.map((i) => i.id);
-export const GROUPS: readonly NavGroup[] = ["product", "ai", "game", "comms", "manage"];
+export const GROUPS: readonly NavGroup[] = ["product", "ai", "game", "social", "comms", "manage"];
 export const navItem = (id: string): NavItem | undefined => NAV_ITEMS.find((i) => i.id === id);
 /**
  * Ids of the experience-config menu that name a section of admin-web by another id: INTERNAL_API sprint 6 §8 calls the

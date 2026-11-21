@@ -74,7 +74,8 @@ class ModelUpdateIn(BaseModel):
 
 
 class BudgetIn(BaseModel):
-    """AiBudget-поля & {reason}: ai_enabled и updated_at — необязательны (updated_at — защита от гонки правок)."""
+    """AiBudget-поля & {reason}: ai_enabled и updated_at — необязательны (updated_at — защита от гонки правок);
+    room_cap_usd (спринт 7) — необязателен, пока админка его не передаёт (не передан — прежнее значение)."""
 
     model_config = _IN
     monthly_cap_usd: float = Field(ge=0, le=100_000)
@@ -82,6 +83,8 @@ class BudgetIn(BaseModel):
     lesson_cap_usd: float = Field(ge=0, le=1000)
     # подлимит речи (спринт 5, решение владельца 20.11.2026): обязателен, 0..monthly_cap_usd (проверка — в домене)
     speech_monthly_cap_usd: float = Field(ge=0, le=100_000)
+    # потолок парной комнаты (спринт 7): 0..monthly_cap_usd (проверка — в домене); не передан — прежний
+    room_cap_usd: float | None = Field(default=None, ge=0, le=100_000)
     alert_percent: int = Field(ge=1, le=100)
     ai_enabled: bool | None = None
     updated_at: str | None = Field(default=None, max_length=40)

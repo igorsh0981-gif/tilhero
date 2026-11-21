@@ -12,6 +12,18 @@ teaching_coach `gloss_word` (спринт 5, INTERNAL_API §3.1): без ссы�
 без кириллицы → `wrong_language`; длины — схема версии и контракт ai.ts (≤ 60 / 80 / 6 форм). Апострофы узбекского
 oʻ/gʻ, записанные ' ‘ ’ `, исправляются на ʻ (U+02BB) без повтора (`uz_apostrophe_fixed`). Провайдер fake
 (`[ru] word`, решение §3.1) языковые правила gloss не проверяет — это заглушка стенда, не перевод.
+
+cooperative_lesson_coach (спринт 7, INTERNAL_API §4, скилл 11):
+- `room_id` — эхо context.room_id (`room_mismatch`); тексты проверяются только в человекочитаемых полях (prompt,
+  переводы, варианты, роли, цель, отчёт): идентификаторы (room_id, turn_id, skill_id, choice_id) — не текст;
+- согласованность (`coach_state`): finished ⇔ есть отчёт, next_speaker null; paused — next_speaker null;
+  in_progress/fallback_text — next_speaker — роль из комнаты или both; trigger end → finished; trigger start — роли и
+  цель, иначе null; варианты — только mode choices при ходе (≤ 3), иначе null; прогресс цели не убывает;
+- язык (`wrong_language`): prompt, варианты, роли и цель — английский без кириллицы; prompt_gloss.ru и отчёт ru —
+  кириллица, uz — латиница; апострофы oʻ/gʻ в uz исправляются (`uz_apostrophe_fixed`);
+- исправления без повтора: доказательство, чей turn_id — не реплика этой роли в context.turns (ответ одного не
+  присваивается другому, молчавший не оценивается), отбрасывается (`evidence_dropped`); подсказка отчёта роли без
+  вклада или четвёртая подсказка роли отбрасывается (`tips_dropped`).
 """
 
 from __future__ import annotations
@@ -55,6 +67,11 @@ CONSTRAINTS: Final[dict[str, str]] = {
                       "на английском.",
     "intent_unknown": "intent — только один из переходов текущего узла, либо unclear, либо off_topic.",
     "criterion_unknown": "scores — только критерии рубрики из контекста.",
+    "room_mismatch": "room_id — точная копия context.room_id.",
+    "coach_state": "Согласуй поля со статусом и триггером: finished — next_speaker null и report; paused — "
+                   "next_speaker null; in_progress и fallback_text — next_speaker из комнаты (A, B или both); "
+                   "trigger end — finished; roles и team_goal_en — только при trigger start; options — только в "
+                   "режиме choices при ходе (≤ 3), иначе null; team_goal_progress не меньше текущего.",
 }
 
 
@@ -121,6 +138,11 @@ def check_output(agent_id: str, output: dict[str, Any], context: dict[str, Any],
             if "secret" in check_text(text, secrets):
                 result.add("secret")
             continue
+        # идентификаторы коуча (UUID комнаты, T{n}, коды) — не текст: цифры UUID похожи на телефон
+        if agent_id == "cooperative_lesson_coach" and _coach_id_path(path):
+            if "secret" in check_text(text, secrets):
+                result.add("secret")
+            continue
         for code in check_text(text, secrets):
             result.add(code)
     if "pronunciation_score" in output and output.get("pronunciation_score") is not None:
@@ -135,6 +157,8 @@ def check_output(agent_id: str, output: dict[str, Any], context: dict[str, Any],
         _teaching_coach(output, context, result)
     elif agent_id == "independent_evaluator":
         _independent_evaluator(output, context, result)
+    elif agent_id == "cooperative_lesson_coach":
+        _cooperative_coach(output, context, result)
     return result
 
 
@@ -198,3 +222,117 @@ def _independent_evaluator(output: dict[str, Any], context: dict[str, Any], resu
     if len(kept) != len(output.get("confirmed_errors") or []):
         result.output = {**output, "confirmed_errors": kept}
         result.redactions.append("evidence_dropped")
+
+
+# ---------------------------------------------------------------- cooperative_lesson_coach (спринт 7)
+
+COACH_ID_FIELDS: Final = frozenset({"room_id", "status", "next_speaker", "escalation", "turn_id", "skill_id",
+                                     "choice_id", "role"})
+COACH_TIPS_PER_ROLE: Final = 3
+RU_MIN_CYRILLIC: Final = 0.4
+UZ_MAX_CYRILLIC: Final = 0.2
+
+
+def _coach_id_path(path: str) -> bool:
+    return path.rsplit(".", 1)[-1] in COACH_ID_FIELDS
+
+
+def _fix_uz(text: str) -> str:
+    return UZ_APOSTROPHE_RE.sub("ʻ", text)
+
+
+def _bilingual_ok(pair: Any) -> bool:
+    """{ru, uz}: ru — кириллицей (английские слова-примеры внутри допустимы), uz — латиницей."""
+    if not isinstance(pair, dict):
+        return True
+    return _cyrillic_share(str(pair.get("ru", ""))) >= RU_MIN_CYRILLIC \
+        and _cyrillic_share(str(pair.get("uz", ""))) <= UZ_MAX_CYRILLIC
+
+
+def _with_uz_fixed(pair: Any, changed: list[bool]) -> Any:
+    """{ru, uz} с исправленными апострофами uz; changed[0] = True, если что-то исправлено."""
+    if not isinstance(pair, dict) or not isinstance(pair.get("uz"), str):
+        return pair
+    fixed = _fix_uz(pair["uz"])
+    if fixed != pair["uz"]:
+        changed[0] = True
+    return {**pair, "uz": fixed}
+
+
+def _coach_state(output: dict[str, Any], context: dict[str, Any]) -> bool:
+    """Согласованность вывода со статусом, триггером и комнатой (ai.ts CooperativeCoachOutput)."""
+    status, speaker = output.get("status"), output.get("next_speaker")
+    trigger, mode = context.get("trigger"), context.get("mode")
+    roles = {str(p.get("role")) for p in context.get("participants", [])}
+    report = output.get("report")
+    if (status == "finished") != (report is not None):
+        return False
+    if status in ("finished", "paused") and speaker is not None:
+        return False
+    if status in ("in_progress", "fallback_text") and (speaker is None or (speaker != "both" and speaker not in roles)):
+        return False
+    if trigger == "end" and status != "finished":
+        return False
+    started = trigger == "start"
+    if started != (output.get("roles") is not None) or started != (output.get("team_goal_en") is not None):
+        return False
+    options = output.get("options")
+    turn_open = status in ("in_progress", "fallback_text")
+    if mode == "choices" and turn_open:
+        if not options:
+            return False
+    elif options is not None:
+        return False
+    progress = output.get("team_goal_progress")
+    current = context.get("team_goal_progress")
+    return not (isinstance(progress, int | float) and isinstance(current, int | float) and progress + 1e-9 < current)
+
+
+def _cooperative_coach(output: dict[str, Any], context: dict[str, Any], result: GateResult) -> None:
+    if str(output.get("room_id", "")).lower() != str(context.get("room_id", "")).lower():
+        result.add("room_mismatch")
+    if not _coach_state(output, context):
+        result.add("coach_state")
+    english = [str(output.get("prompt", "")), str(output.get("team_goal_en") or "")]
+    english += [str(o.get("text_en", "")) for o in output.get("options") or []]
+    english += [str(v) for v in (output.get("roles") or {}).values()]
+    report = output.get("report") or {}
+    bilingual = [output.get("prompt_gloss"), report.get("team_summary"),
+                 *(t.get("text") for t in report.get("tips") or [])]
+    if any(CYRILLIC_RE.search(t) for t in english) or not all(_bilingual_ok(b) for b in bilingual if b is not None):
+        result.add("wrong_language")
+    if result.violations:
+        return
+    fixed = dict(output)
+    changed = [False]
+    # доказательства — только реплики этой роли из context.turns (ответ одного не присваивается другому)
+    owner = {str(t.get("turn_id")): str(t.get("speaker")) for t in context.get("turns", [])}
+    seen: set[tuple[str, str]] = set()
+    kept = []
+    for ev in output.get("individual_evidence") or []:
+        key = (str(ev.get("role")), str(ev.get("turn_id")))
+        if owner.get(key[1]) == key[0] and key not in seen:
+            seen.add(key)
+            kept.append(ev)
+    if len(kept) != len(output.get("individual_evidence") or []):
+        fixed["individual_evidence"] = kept
+        result.redactions.append("evidence_dropped")
+    # отчёт: подсказки — только ролям с вкладом, не больше трёх на роль
+    if output.get("report") is not None:
+        contributed = {str(p.get("role")) for p in context.get("participants", []) if int(p.get("turns", 0)) > 0}
+        per_role: dict[str, int] = {}
+        tips = []
+        for tip in report.get("tips") or []:
+            role = str(tip.get("role"))
+            per_role[role] = per_role.get(role, 0) + 1
+            if role in contributed and per_role[role] <= COACH_TIPS_PER_ROLE:
+                tips.append({**tip, "text": _with_uz_fixed(tip.get("text"), changed)})
+        if len(tips) != len(report.get("tips") or []):
+            result.redactions.append("tips_dropped")
+        fixed["report"] = {**report, "team_summary": _with_uz_fixed(report.get("team_summary"), changed),
+                           "tips": tips}
+    if output.get("prompt_gloss") is not None:
+        fixed["prompt_gloss"] = _with_uz_fixed(output.get("prompt_gloss"), changed)
+    if changed[0]:
+        result.redactions.append("uz_apostrophe_fixed")
+    result.output = fixed

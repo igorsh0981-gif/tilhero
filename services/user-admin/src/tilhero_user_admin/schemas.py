@@ -238,6 +238,9 @@ class CardCategories(BaseModel):
     social: bool
     support: bool
     product: bool
+    # спринт 7 (admin.ts NotificationCategory + game): по умолчанию включена у источника; строки до миграции 0003
+    # получили её миграцией — значение по умолчанию только на случай гонки со сверкой
+    game: bool = True
 
 
 class CardNotifications(BaseModel):

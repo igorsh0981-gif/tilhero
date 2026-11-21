@@ -244,9 +244,15 @@ CATALOG = {
                                  "activated_at": TS},
                                 ["version", "activated_by", "activated_at"]),
     # ------------------------------------------------------------ gamification (спринт 7)
-    # награды по social.referral.qualified.v1 начислены (ack) → social: referral rewarded
+    # награды по social.referral.qualified.v1 обработаны (ack) → social: referral rewarded. outcome (необязательное,
+    # нет — rewarded): rewarded — награды выданы; legacy — приглашённый уже награждён (или упёрся в лимит) по правилу
+    # спринта 6, пригласившему по кампании ничего; inviter_capped — месячный лимит пригласившего исчерпан с наградами
+    # спринта 6, пригласившему ничего. Приветственная награда приглашённого — во всех исходах. inviter_reward
+    # (необязательное) — фактически выданное пригласившему; null — ничего (legacy, inviter_capped, пригласивший удалён).
+    # notifications: referral_qualified пригласившему — только при outcome rewarded (или без поля)
     "game.referral.rewarded.v1": ({"referral_id": UUID, "inviter_user_id": UUID, "invitee_user_id": UUID,
-                                   "rewarded_at": TS},
+                                   "rewarded_at": TS, "outcome": enum("rewarded", "legacy", "inviter_capped"),
+                                   "inviter_reward": REWARD},
                                   ["referral_id", "inviter_user_id", "rewarded_at"]),
     # итоги группы общей лиги закрыты (version 1) или переоценены / призы выданы после удержания (version + 1) →
     # notifications league_closed (место и приз). prizes_held — призы удержаны до решения администратора (prize_til 0)
@@ -368,12 +374,15 @@ CATALOG = {
                                   "decision": enum("upheld", "overturned"), "decided_at": TS},
                                  ["appeal_id", "sanction_id", "user_id", "decision", "decided_at"]),
     # реферал квалифицирован (условия кампании, проверка, лимит месяца) → gamification (награды, ack
-    # game.referral.rewarded.v1), notifications referral_qualified
+    # game.referral.rewarded.v1). inviter_monthly_cap — месячный лимит кампании: gamification считает против него
+    # награды пригласившего обоих правил (кампании и «доживающих» спринта 6) за месяц qualified_at по Ташкенту
     "social.referral.qualified.v1": ({"referral_id": UUID, "inviter_user_id": UUID, "invitee_user_id": UUID,
                                       "campaign_version": {"type": "integer", "minimum": 1},
-                                      "inviter_reward": REWARD, "invitee_reward": REWARD, "qualified_at": TS},
+                                      "inviter_reward": REWARD, "invitee_reward": REWARD,
+                                      "inviter_monthly_cap": {"type": "integer", "minimum": 1, "maximum": 100},
+                                      "qualified_at": TS},
                                      ["referral_id", "inviter_user_id", "invitee_user_id", "campaign_version",
-                                      "inviter_reward", "invitee_reward", "qualified_at"]),
+                                      "inviter_reward", "invitee_reward", "inviter_monthly_cap", "qualified_at"]),
     # реферал без награды: rejected (правила или оператор), expired (window_expired), capped (monthly_cap) →
     # notifications referral_rejected; reject_code — публичный, без правил антифрода
     "social.referral.rejected.v1": ({"referral_id": UUID, "inviter_user_id": UUID,

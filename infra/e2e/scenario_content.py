@@ -88,11 +88,16 @@ ALL_PERMS = s2.ALL_PERMS | S3_PERMS
 # + права спринта 4 (admin-identity 0004): methodist — агенты и контроль диалогов, analyst — только чтение
 # + права спринта 5 (admin-identity 0005): methodist — memory.read и glossary.manage, content_manager — glossary.manage,
 #   analyst — memory.read
+# + права спринта 6 (admin-identity 0006, PLAN «Права и роли»): methodist и analyst — game.read, content_manager —
+#   game.read и game.manage
+# + права спринта 7 (admin-identity 0007, PLAN «Права»): content_manager — league.read, analyst — все *.read
 METHODIST_PERMS = {"dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish",
                    "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review",
-                   "memory.read", "glossary.manage"}
-CM_PERMS = {"dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage"}
-ANALYST_PERMS = {"dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read"}
+                   "memory.read", "glossary.manage", "game.read"}
+CM_PERMS = {"dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage", "game.read",
+            "game.manage", "league.read"}
+ANALYST_PERMS = {"dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read",
+                 "game.read", "social.read", "referral.read", "league.read", "room.read"}
 
 # bff.ts DiagnosticItem — ровно эти поля (ключа ответа, полосы и тегов нет)
 ITEM_KEYS = {"item_id", "area", "type", "instruction", "prompt_en", "passage_en", "audio_text_en", "options", "position"}

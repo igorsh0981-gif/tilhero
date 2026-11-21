@@ -51,6 +51,16 @@ import {
   PURCHASE_ID,
   PNG_BYTES,
   gameRulesPayload,
+  CASE_ID,
+  DUEL_ID,
+  GROUP_ID,
+  REFERRAL_ID,
+  ROOM_ID,
+  SANCTION_APPEAL_ID,
+  SANCTION_ID,
+  TARGET_USER_ID,
+  WEEK,
+  campaignPayload,
   type Harness,
   type Service,
 } from "./helpers.js";
@@ -85,6 +95,7 @@ const IK = (k: string) => ({ "idempotency-key": `matrix-${k}-0001` });
 
 const GM = "/admin/v1/game";
 const GI = "/internal/v1/admin/game";
+const IA = "/internal/v1/admin";
 const L = (ru: string, uz: string) => ({ ru, uz });
 const HERO_DRAFT_BODY = {
   name: L("Дракончик Мятик", "Ajdarcha Yalpiz"),
@@ -850,6 +861,92 @@ const CASES: Record<string, Case> = {
     payload: { reason: "Покупка по ошибке ребёнка" },
     status: 200,
     domain: ["gamification", "POST", `${GI}/wallets/${LEARNER_USER_ID}/purchases/${PURCHASE_ID}/refund`],
+  },
+  // ---------- спринт 7: социальное — social, gamification (лиги, дуэли), lessons (парные комнаты)
+  "GET /admin/v1/social/users/:userId": { url: `/admin/v1/social/users/${LEARNER_USER_ID}`, status: 200, domain: ["social", "GET", `${IA}/social/users/${LEARNER_USER_ID}`] },
+  "GET /admin/v1/moderation/cases": { url: "/admin/v1/moderation/cases?status=open&limit=20", status: 200, domain: ["social", "GET", `${IA}/moderation/cases`] },
+  "GET /admin/v1/moderation/cases/:caseId": { url: `/admin/v1/moderation/cases/${CASE_ID}`, status: 200, domain: ["social", "GET", `${IA}/moderation/cases/${CASE_ID}`] },
+  "POST /admin/v1/moderation/cases/:caseId/resolve": {
+    url: `/admin/v1/moderation/cases/${CASE_ID}/resolve`,
+    payload: { action: "social_ban", days: 14, basis: "Оскорбления в нике и комнате" },
+    headers: IK("resolve"),
+    status: 200,
+    domain: ["social", "POST", `${IA}/moderation/cases/${CASE_ID}/resolve`],
+  },
+  "GET /admin/v1/moderation/sanctions": { url: `/admin/v1/moderation/sanctions?user_id=${TARGET_USER_ID}&active=true`, status: 200, domain: ["social", "GET", `${IA}/moderation/sanctions`] },
+  "POST /admin/v1/moderation/sanctions/:sanctionId/revoke": {
+    url: `/admin/v1/moderation/sanctions/${SANCTION_ID}/revoke`,
+    payload: { reason: "Ошибка модератора, снимаем" },
+    status: 200,
+    domain: ["social", "POST", `${IA}/moderation/sanctions/${SANCTION_ID}/revoke`],
+  },
+  "GET /admin/v1/moderation/appeals": { url: "/admin/v1/moderation/appeals?status=open", status: 200, domain: ["social", "GET", `${IA}/moderation/appeals`] },
+  "POST /admin/v1/moderation/appeals/:appealId/decide": {
+    url: `/admin/v1/moderation/appeals/${SANCTION_APPEAL_ID}/decide`,
+    payload: { decision: "upheld", note: "Санкция обоснована, оставляем" },
+    status: 200,
+    domain: ["social", "POST", `${IA}/moderation/appeals/${SANCTION_APPEAL_ID}/decide`],
+  },
+  "GET /admin/v1/referrals/campaigns": { url: "/admin/v1/referrals/campaigns", status: 200, domain: ["social", "GET", `${IA}/referrals/campaigns`] },
+  "GET /admin/v1/referrals/campaigns/stats": { url: "/admin/v1/referrals/campaigns/stats", status: 200, domain: ["social", "GET", `${IA}/referrals/campaigns/stats`] },
+  "GET /admin/v1/referrals/campaigns/:version": { url: "/admin/v1/referrals/campaigns/1", status: 200, domain: ["social", "GET", `${IA}/referrals/campaigns/1`] },
+  "PUT /admin/v1/referrals/campaigns/draft": {
+    url: "/admin/v1/referrals/campaigns/draft",
+    payload: { payload: campaignPayload({ monthly_cap: 12 }), comment: null, based_on: 1 },
+    status: 200,
+    domain: ["social", "PUT", `${IA}/referrals/campaigns/draft`],
+  },
+  "DELETE /admin/v1/referrals/campaigns/draft": { url: "/admin/v1/referrals/campaigns/draft", status: 204, domain: ["social", "DELETE", `${IA}/referrals/campaigns/draft`] },
+  "POST /admin/v1/referrals/campaigns/draft/validate": { url: "/admin/v1/referrals/campaigns/draft/validate", status: 200, domain: ["social", "POST", `${IA}/referrals/campaigns/draft/validate`] },
+  "POST /admin/v1/referrals/campaigns/draft/activate": {
+    url: "/admin/v1/referrals/campaigns/draft/activate",
+    payload: { comment: "Лимит 12 в месяц с декабря" },
+    status: 200,
+    domain: ["social", "POST", `${IA}/referrals/campaigns/draft/activate`],
+  },
+  "GET /admin/v1/referrals": { url: "/admin/v1/referrals?status=review", status: 200, domain: ["social", "GET", `${IA}/referrals`] },
+  "GET /admin/v1/referrals/:referralId": { url: `/admin/v1/referrals/${REFERRAL_ID}`, status: 200, domain: ["social", "GET", `${IA}/referrals/${REFERRAL_ID}`] },
+  "POST /admin/v1/referrals/:referralId/approve": {
+    url: `/admin/v1/referrals/${REFERRAL_ID}/approve`,
+    payload: { note: "Уроки реальные, проверено" },
+    status: 200,
+    domain: ["social", "POST", `${IA}/referrals/${REFERRAL_ID}/approve`],
+  },
+  "POST /admin/v1/referrals/:referralId/reject": {
+    url: `/admin/v1/referrals/${REFERRAL_ID}/reject`,
+    payload: { reject_code: "family_member", note: "Приглашённый — член семьи" },
+    status: 200,
+    domain: ["social", "POST", `${IA}/referrals/${REFERRAL_ID}/reject`],
+  },
+  "GET /admin/v1/game/leagues": { url: `${GM}/leagues?week=${WEEK}`, status: 200, domain: ["gamification", "GET", `${GI}/leagues`] },
+  "GET /admin/v1/game/leagues/:groupId": { url: `${GM}/leagues/${GROUP_ID}`, status: 200, domain: ["gamification", "GET", `${GI}/leagues/${GROUP_ID}`] },
+  "POST /admin/v1/game/leagues/:groupId/reevaluate": {
+    url: `${GM}/leagues/${GROUP_ID}/reevaluate`,
+    payload: { exclude_user_ids: [LEARNER_USER_ID], reason: "Накрутка XP, исключаем" },
+    status: 200,
+    domain: ["gamification", "POST", `${GI}/leagues/${GROUP_ID}/reevaluate`],
+  },
+  "POST /admin/v1/game/leagues/:groupId/release-prizes": {
+    url: `${GM}/leagues/${GROUP_ID}/release-prizes`,
+    payload: { reason: "Аномалия проверена: честно" },
+    status: 200,
+    domain: ["gamification", "POST", `${GI}/leagues/${GROUP_ID}/release-prizes`],
+  },
+  "GET /admin/v1/game/duels": { url: `${GM}/duels?status=finished`, status: 200, domain: ["gamification", "GET", `${GI}/duels`] },
+  "GET /admin/v1/game/duels/:duelId": { url: `${GM}/duels/${DUEL_ID}`, status: 200, domain: ["gamification", "GET", `${GI}/duels/${DUEL_ID}`] },
+  "POST /admin/v1/game/duels/:duelId/reevaluate": {
+    url: `${GM}/duels/${DUEL_ID}/reevaluate`,
+    payload: { result: "opponent", reason: "Сбой проверки ответа 7" },
+    status: 200,
+    domain: ["gamification", "POST", `${GI}/duels/${DUEL_ID}/reevaluate`],
+  },
+  "GET /admin/v1/pair-rooms": { url: "/admin/v1/pair-rooms?status=finished&from=2026-11-01", status: 200, domain: ["lessons", "GET", `${IA}/pair-rooms`] },
+  "GET /admin/v1/pair-rooms/:roomId": { url: `/admin/v1/pair-rooms/${ROOM_ID}`, status: 200, domain: ["lessons", "GET", `${IA}/pair-rooms/${ROOM_ID}`] },
+  "POST /admin/v1/pair-rooms/:roomId/stop": {
+    url: `/admin/v1/pair-rooms/${ROOM_ID}/stop`,
+    payload: { reason: "Грубость в комнате, жалоба" },
+    status: 200,
+    domain: ["lessons", "POST", `${IA}/pair-rooms/${ROOM_ID}/stop`],
   },
 };
 

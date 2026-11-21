@@ -112,7 +112,7 @@
   - очередь `review`: факты — даты, число уроков, дни, минуты, `risk_flags`, без ПДн. Команды: `POST …/referrals/{id}/approve {note}` и `…/reject {reject_code, note}` — `referral.manage`, причина ≥ 10, аудит; решение можно пересмотреть один раз с сохранением прежнего (`decision_history`);
   - статистика по кампаниям.
 - **События:**
-  - `social.referral.qualified.v1 {referral_id, inviter_user_id, invitee_user_id, campaign_version, inviter_reward, invitee_reward, qualified_at}` → gamification, notifications;
+  - `social.referral.qualified.v1 {referral_id, inviter_user_id, invitee_user_id, campaign_version, inviter_reward, invitee_reward, qualified_at}` → gamification (сообщение пригласившему — notifications по `game.referral.rewarded.v1`);
   - `social.referral.rejected.v1 {referral_id, inviter_user_id, reject_code}` → notifications;
   - `social.referral.held.v1 {referral_id}` → только аналитика.
 
@@ -123,6 +123,41 @@
   - у пригласившего — обезличивает: `invitee_user_id → null`, статус сохраняется;
   - дела модерации обезличивает: `reporter/target → null`, решение и основание остаются;
   - санкции удаляет.
+
+### 1.6 Внутренние выгрузки (начальная загрузка проекций; ревью спринта 7, п. 3)
+- **Контракт (единый):** `GET /internal/v1/export/<name>?cursor=<opaque>&limit=500` (`limit` 1..1000, по умолчанию
+  500) → `{"items": [...], "next_cursor": str | null}`; каждый элемент — ровно `payload` соответствующего события (схема
+  из `packages/contracts/events`). Порядок — по ключу (keyset), курсор непрозрачный (битый — 400 `INVALID_CURSOR`).
+  Доступ — внутренний JWT, вызывающие только gamification и lessons (иначе 403 `CALLER_NOT_ALLOWED`); неизвестная
+  выгрузка — 404 `EXPORT_NOT_FOUND`. Удалённые ученики (сага) не выгружаются.
+- **`families`** — payload `social.family.member_added.v1` для каждого текущего члена семьи, включая владельца
+  (`role owner`); `added_at` — момент вступления.
+- **`friendships`** — payload `social.friendship.changed.v1` (`status added`) для каждой действующей дружбы; `source` —
+  `invite` (приглашение Telegram) или `request` (заявка), `at` — момент начала дружбы; `requester_user_id` и
+  `accepter_nickname` не передаются.
+- Профиль сообщества, блокировки, санкции — новые в спринте 7 (истории нет): их проекции строятся из событий.
+- **identity-consent `profiles`** (повторное ревью, Н1) — исключение из правила «payload события»: social возраст не
+  хранит, поэтому возраст и согласие родителя для общей лиги gamification загружает из identity-consent
+  `GET /internal/v1/export/profiles` → `{items: [{user_id, kind, age_band, guardian_consent, updated_at}],
+  next_cursor}`; `age_band` и `guardian_consent` — та же функция, что строит `user.profile.updated.v1`. Вызывающий —
+  только gamification; неудалённые (ACTIVE, DISABLED), порядок по `user_id`; без имени, username и Telegram ID.
+- Порядок загрузки у потребителя: подписка на события → выгрузка до `next_cursor = null` (идемпотентный upsert) —
+  событие, пришедшее во время выгрузки, не теряется.
+
+### 1.7 Переход рефералов спринта 6 → 7 (ревью, п. 2)
+Решение оркестратора: никто не получает дважды и никто не теряет обещанное.
+- Миграция social 0002 переносит принятые реферальные приглашения последних 30 дней в `referrals` (`invited`,
+  кампания 1) с отметкой `legacy`: диагностика засчитана (`diagnostic_at = accepted_at` — до спринта 7 входила в
+  онбординг), окно условий отсчитывается от выкладки (`window_from`), а не от принятия; уроки до выкладки не
+  считаются. Правила, зависящие от истории до спринта 7 (`not_new_user`, `activity_before_accept`), к перенесённым не
+  применяются; семья, скорость, короткие уроки и лимит месяца — применяются.
+- Истечение окна перенесённого — тихо: `expired window_expired` без `social.referral.rejected.v1`; ученику — без
+  причины (`reject_code null`, `legacy true`: «Приглашение по прежней программе»).
+- Квалификация → `social.referral.qualified.v1` как обычно; gamification не даёт вторую награду уже награждённым по
+  правилу спринта 6 и присылает обычный `game.referral.rewarded.v1` — social закрывает перенесённый реферал как
+  `rewarded` из любого незавершённого статуса (в т. ч. `expired`), обычный — только из `qualified`.
+- `downgrade` 0002 симметричен: таблицы спринта 7 удаляются, данные спринта 1 не меняются; повторный `upgrade` снова
+  переносит рефералы.
 
 ## 2. gamification (8117)
 
@@ -177,11 +212,11 @@
   - событие `game.duel.finished.v1` с новой версией.
 
 ### 2.4 Рефералы и парные уроки
-- **Рефералы.** Consumer `social.referral.qualified.v1` (только social): пригласившему `inviter_reward` (freeze, til), приглашённому `invitee_reward` — reason `referral_bonus` / `referral_welcome`, ключ `referral:<id>:<role>` → событие `game.referral.rewarded.v1 {referral_id}`. Правило спринта 6 «после первого урока» отключено: `referrals` gamification — только история, pending → `void` миграцией.
-- **Парные уроки.** Consumer `lesson.pair.completed.v1` (только lessons): участнику с `contributed = true` — XP `rules.pair_lesson.xp` (по умолчанию 25), reason `pair_lesson`, ключ `pair:<room>:<user>`. Если `team_goal_reached` и вклад обоих — значок `together_1` обоим (APP-SOC-06). Молчавший ничего не получает.
+- **Рефералы.** Consumer `social.referral.qualified.v1` (только social): пригласившему `inviter_reward` (freeze, til), приглашённому `invitee_reward` — reason `referral_bonus` / `referral_welcome`, ключ `referral:<id>:<role>:<валюта>`; месячный лимит пригласившего — `inviter_monthly_cap` кампании из события (§11) → событие `game.referral.rewarded.v1 {referral_id, outcome, inviter_reward}`. Новых pending по правилу спринта 6 «после первого урока» нет; существующие «доживают» (§11).
+- **Парные уроки.** Consumer `lesson.pair.completed.v1` (только lessons): участнику с `contributed = true` в комнате `finished` и ≥ `rules.pair_lesson.min_turns` (1) собственных ходов — XP `rules.pair_lesson.xp` (по умолчанию 25), reason `pair_lesson`, ключ `pair:<room>:<user>`, не больше `daily_cap` (3) уроков в день. Если `finished`, `team_goal_reached` и ≥ 1 ход у обоих — значок `together_1` обоим (APP-SOC-06, AT-77). Молчавший ничего не получает (§11).
 
 ### 2.5 Правила
-`rules` (версия 3 миграцией, на основе активной): `+ league {prizes: [50, 30, 20], group_size: [20, 30], anomaly: {median_factor: 5, min_xp: 1500}}`, `+ duel {...}`, `+ pair_lesson {xp: 25}`; `bonuses.referral_*` больше не используются. Валидатор — как в спринте 6.
+`rules` (версия `max + 1` миграцией, на основе активной; §11): `+ league {prizes: [50, 30, 20], group_size: [20, 30], anomaly: {median_factor: 5, min_xp: 1500}}`, `+ duel {...}`, `+ pair_lesson {xp: 25, min_turns: 1, daily_cap: 3}`. `bonuses.referral_freeze` и `bonuses.referral_monthly_cap` действуют только для «доживающих» pending спринта 6 (награда и лимит по первому уроку); награды и месячный лимит кампании задаёт social (`inviter_reward`, `invitee_reward`, `inviter_monthly_cap` в `social.referral.qualified.v1`). Валидатор — как в спринте 6.
 
 ### 2.6 Админ (`league.read`, `league.manage`)
 - `GET /internal/v1/admin/game/leagues?week` — группы, размеры, статус закрытия, аномалии;
@@ -227,6 +262,7 @@
   - ai-gateway `cooperative_lesson_coach` (вход и выход — по скиллу 11, типы — `ai.ts`, §4) → следующий говорящий, реплика, прогресс цели, `individual_evidence[]`, итоговый отчёт.
   - Безопасность и дети — фильтр `safety_quality_gate` как у `conversation_partner`.
   - Без ИИ (бюджет, аварийная остановка, недоступность) — сценарий из каталога: реплики персонажей и варианты для ролей A/B по очереди (`mode` → `choices`).
+  - **Суточный лимит коуча** (ревью спринта 7): не больше `PAIR_AI_ROOMS_PER_DAY` (lessons, по умолчанию 5; 0 — коуч в комнатах выключен) комнат с ИИ-коучем на ученика за местные сутки (Asia/Tashkent). Проверяется при старте комнаты (оба вошли) по обоим участникам; сверх лимита — не отказ, а комната без коуча: сценарий с выбором реплик (`mode choices`, `ai_degraded: true`, событие ленты `mode_changed`). Учитываются комнаты, начатые с коучем (`pair_rooms.coach_used`).
 - **Оценка.** Свободные ответы каждого → assessment отдельными доказательствами этого ученика (как реплики разговора урока). Молчавший (`turns = 0`) — без оценки, отчёт «не участвовал».
   - Запрос — существующий `POST /internal/v1/evaluations` (assessment не меняется): `kind: "scenario"` (вида `pair` у assessment нет), `session_id` — сессия участника (ниже), `content_refs` — сценарий и рубрика, `turns` — реплики этого участника (`learner`) и коуча (`character`); реплики партнёра не передаются (чужие ответы не попадают ни в оценку, ни в журнал QA другого ученика); `practice_only: false`. Выбор реплик (дети, сценарий без ИИ) — как ролевая ситуация урока с выбором.
   - `assessment.completed.v1` придёт с `kind scenario` и этим `session_id`: diagnostics меняет навыки по индивидуальным доказательствам (AT-77), learning-plan пройденным уроком его не считает (только `kind lesson`).
@@ -256,6 +292,11 @@
 - **Вид сессии** в ai-gateway: `SessionKind` + `duel` (ИИ не вызывается — только для полноты), `AiSessionKind` + `pair` (`contracts.py` ai-gateway — поток D).
 
 ## 5. notifications
+- **Дневной лимит и приглашения** (решение владельца после ревью): приглашения `pair_invited`, `pair_starting` и
+  `duel_challenged` не входят в общий лимит 3 Telegram-сообщений в местные сутки и его не тратят. Свой лимит против
+  спама: не больше `INVITE_DAILY_LIMIT` (5) приглашений получателю в сутки и `INVITE_PER_SENDER_LIMIT` (2) от одного
+  отправителя одному получателю (`pair_starting` по отправителю не считается); сверх — только центр,
+  `in_app_only invite_limit`. Остальные уведомления social и game — в общем лимите.
 - **Шаблоны RU/UZ:**
   - `friend_request`, `friend_accepted`;
   - `duel_challenged`, `duel_finished`;
@@ -275,8 +316,8 @@
   | `pair_invited` | `lesson.pair.invited.v1` | `invitee_user_id` | social | `room_<room_id>` |
   | `pair_starting` | `lesson.pair.starting.v1` | оба | social | `room_<room_id>` |
   | `pair_stopped` | `lesson.pair.completed.v1` (`end_reason stopped`) | участники | social | `room_<room_id>` |
-  | `referral_qualified` | `social.referral.qualified.v1` | `inviter_user_id` | social | `route_referrals` |
-  | `referral_rejected` | `social.referral.rejected.v1` | `inviter_user_id` | social | `route_referrals` |
+  | `referral_qualified` | `game.referral.rewarded.v1` (только от gamification; `outcome` нет или `rewarded`; награда — `inviter_reward {freeze, til}`, `null` — не отправляется, WARNING в лог; `legacy`, `inviter_capped` — без сообщения; `dedup_key referral_qualified:<referral_id>`). `social.referral.qualified.v1` notifications не слушает: квалификация — ещё не награда (лимит месяца и награда по правилу спринта 6 решаются в gamification) | `inviter_user_id` | social | `route_referrals` |
+  | `referral_rejected` | `social.referral.rejected.v1` (в т. ч. `monthly_cap` — social публикует при `inviter_capped`) | `inviter_user_id` | social | `route_referrals` |
   | `sanction_applied` | `social.sanction.changed.v1` (`change applied`) | `user_id` | service | `route_friends` |
   | `appeal_decided` | `social.appeal.decided.v1` | `user_id` | service | `route_friends` |
   | `complaint_resolved` | `social.case.resolved.v1` | `reporter_user_id` | social | — |
@@ -306,10 +347,10 @@
 | `social.sanction.changed.v1` | social | gamification, lessons, notifications (`change applied` → `sanction_applied`) |
 | `social.case.resolved.v1` | social | notifications |
 | `social.appeal.decided.v1` | social | notifications (`appeal_decided`) |
-| `social.referral.qualified.v1` | social | gamification (награды → ack), notifications |
+| `social.referral.qualified.v1` | social | gamification (награды → ack) |
 | `social.referral.rejected.v1` | social | notifications (в т. ч. `expired` и `capped` — `reject_code window_expired` / `monthly_cap`) |
 | `social.referral.held.v1` | social | — (аналитика) |
-| `game.referral.rewarded.v1` | gamification | social (`rewarded`) |
+| `game.referral.rewarded.v1` | gamification | social (`rewarded`), notifications (`referral_qualified` — только `rewarded` с `inviter_reward`) |
 | `game.league.closed.v1` | gamification | notifications |
 | `game.duel.challenged.v1` | gamification | notifications |
 | `game.duel.finished.v1` | gamification | notifications, lessons (разбор ответов открывается) |
@@ -374,3 +415,21 @@ telegram-bff передаёт `member_id` как есть (не расшифро
 12. **Маршруты BFF → домен** — таблица §9 (в bff.ts пути `/v1/friends/requests…`, в домене `/internal/v1/me/friend-requests…`; lessons — по своим префиксам `/internal/v1/me/…` для новых маршрутов ученика).
 13. **Длительность парной комнаты** не была задана, а коучу нужны `remaining_minutes` и `wrap_up`: 20 минут в `in_progress` (`PAIR_ROOM_MAX_MINUTES`), по истечении — `completed` (§3.2).
 14. **ReleaseNoteRoute** в admin.ts дополнен `friends | leagues | duels | referrals` (как bff.ts и `release-notes.json`); отдельного маршрута парного урока нет — вход через «Друзья» и ссылку `room_<room_id>`.
+
+## 11. Решения по итогам исполнителей (21.11.2026)
+- **Согласие при включении общей лиги** проверяет telegram-bff: перед `PATCH /v1/game/settings {league_opt_in: true}` — social `GET /internal/v1/me/community`; социальные функции недоступны → 403 `FRIENDS_NOT_ALLOWED` / `CONSENT_REQUIRED`. gamification проверяет ник, аудиторию и санкцию.
+- **n8n:** отдельные league-tick и duel-tick не нужны — лиги и дуэли обслуживает `game:tick` (15 мин), комнаты и наборы дуэли — `lessons:tick`.
+- **Dev-ключ member_id** одинаков у social, gamification, lessons: `dev-member-id-key-change-me-0000000000`; в stage/prod `MEMBER_ID_KEY` обязателен.
+- **Версия правил игры** создаётся миграцией как `max + 1` (на prod — 2).
+- **XP дуэлей и парных уроков** не подпадает под общий дневной лимит и множители событий недели; у дуэлей свой лимит.
+- **Выгрузки для разовой загрузки проекций** (ревью 🔴3; события живут в стриме 7 дней): `GET /internal/v1/export/<name>?cursor=<opaque>&limit=1..500` (по умолчанию 500) → `{"items": [...], "next_cursor": str | null}`; элемент — ровно payload соответствующего события (получатель пропускает его через обработчик проекции); внутренний JWT, вызывающие — gamification, lessons; неверный курсор — 400 `INVALID_CURSOR`.
+  - social: `families` — payload `social.family.member_added.v1` для каждого текущего члена семьи; `friendships` — payload `social.friendship.changed.v1` (`status added`) для каждой действующей дружбы.
+  - diagnostics: `levels` — payload `diagnostics.completed.v1` `{user_id, pair_id, result_id, revision, test_id, test_version, provisional_level, areas: {<area>: {status, band, confidence}}, recommended_start_lesson_id, completed_at}` последней ревизии последнего результата **по каждой паре** каждого неудалённого ученика; порядок — `user_id`, `pair_id`; payload собирается тем же кодом, что и событие.
+  - identity-consent: `profiles` (повторное ревью, 🔴 Н1; social возраст не хранит) — **своя форма, не payload события**: `{"user_id": str, "kind": "account" | "child", "age_band": str | null, "guardian_consent": str | null, "updated_at": iso}` по каждому неудалённому ученику (`IDENTITY_CONSENT_URL`); gamification заполняет `learners.age_band` / `guardian_consent`, если поле пустое или выгрузка новее `profile_updated_at` (событие `user.profile.updated.v1` новее выгрузки не перетирается); null и неизвестные значения известное не стирают; детский профиль возраст не получает.
+  - gamification: отметки `projection_loads (name, cursor, completed_at)`; загрузка — в фоне при старте, если не завершена, повтор после сбоя — каждым `game:tick`, вручную — `POST /internal/v1/projections/bootstrap?force=` (токен планировщика). Только вставка отсутствующих строк: более свежее состояние из событий не перетирается, снятые дружбы не возвращаются, удалённые (`DeletedUser`) пропускаются. Адрес — `DIAGNOSTICS_URL` (в stage/prod обязателен; `infra/railway/setup.py`: gamification → `calls` + `diagnostics`).
+- **Рефералы спринта 6 → 7** (решение оркестратора): pending спринта 6 не аннулируются — первый завершённый урок приглашённого в 90 дней с принятия (как `REFERRAL_VOID_DAYS` спринта 6, повторное ревью 🟡 Н2; `LEGACY_REFERRAL_DAYS`) даёт пригласившему `bonuses.referral_freeze` (2) заморозки, позже — тихо `expired`; новых pending нет. Квалификация кампании для приглашённого, уже `rewarded`/`capped` по спринту 6, — без награды пригласившему (`referral_rewards.outcome legacy`, ack уходит); pending спринта 6 при квалификации → `void`.
+- **Месячный лимит пригласившего** (повторное ревью 🟡 Н3): считаются награды обоих правил за календарный месяц по Ташкенту — по кампании по `qualified_at` (как social), по спринту 6 по времени награды. Для квалификации действует лимит кампании `inviter_monthly_cap` (обязательное поле `social.referral.qualified.v1`, 1..100): исчерпан — пригласившему нет (`inviter_capped`), ack уходит, social закрывает реферал как `capped`. Для «доживающих» pending — `rules.bonuses.referral_monthly_cap`: исчерпан — `capped`.
+- **Ack `game.referral.rewarded.v1`:** `outcome` (`rewarded | legacy | inviter_capped`, необязательное, нет — `rewarded`) и `inviter_reward {freeze, til} | null` — фактически выданное пригласившему по операциям реестра (повтор события даёт то же); null — ничего: `legacy`, `inviter_capped`, пригласивший удалён. notifications шлёт `referral_qualified` пригласившему только по нему: `outcome rewarded` (или без поля) и ненулевая награда.
+- **Доступ 14–17 к общей лиге** — и в gamification: проекция `user.profile.updated.v1` (`age_band`, `guardian_consent`) плюс начальная загрузка identity-consent `profiles` (возраст и согласия старше окна стрима); 14–17 без `granted` — 403 `FRIENDS_NOT_ALLOWED {guardian_consent}`, неизвестный возраст — как ребёнок. Отзыв согласия посреди недели (🟢 Н7) сразу убирает подростка из текущей группы: другим не показывается, в итоги и призы не входит, сам видит `unavailable_reason guardian_consent` без группы; со следующей недели — без группы. Цель согласия `social` gamification не проверяет: `consent.revoked.v1` не несёт целей — нужна проекция действующих целей от identity-consent (проверку оставляет telegram-bff).
+- **Парный урок** (повторное ревью 🟡 Н4): XP — только комната `finished` (цель достигнута), вклад и ≥ `rules.pair_lesson.min_turns` (1) собственных ходов, не больше `rules.pair_lesson.daily_cap` (3) награждаемых уроков в день; значок «Вместе» — `finished`, `team_goal_reached` и ≥ 1 ход у каждого из двоих (от `min_turns` не зависит; сценарии с выбором реплик — 2–8 ходов на двоих). Фарм брошенными комнатами закрыт требованием `finished`.
+- **Дуэль:** пара — активная пара вызывающего (последняя диагностика); `pair_id` в запросе, отличный от неё, — 422. Санкция `social_ban` отменяет неотвеченные вызовы ученика; принятие перепроверяет санкцию вызвавшего (→ 409 `DUEL_STATE {cancelled}`). Операции сотрудника (в т. ч. `duel` при переоценке) в XP недели не идут.

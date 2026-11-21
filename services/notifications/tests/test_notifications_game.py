@@ -1,6 +1,7 @@
 """Спринт 6 (INTERNAL_API спринта 6 §3, AT-65/66/70): шаблоны игры `streak_frozen`, `badge_earned`,
 `hero_stage_reached` (+ `*.kid`, RU/UZ, редактируемые) и потребитель событий gamification (только от gamification):
-категория game (выключатель — GAME_CATEGORY_GATE, пока reminders; в центре и в админке — как reminders), общий
+категория game (спринт 7: собственный выключатель game, GAME_CATEGORY_GATE=game; reminders — поведение спринта 6;
+в центре и в админке — game), общий
 лимит дня, тихие часы и выключатель; флаг notify у значка и ступени; дети 6–13 — только центр детского профиля
 (опекуну «в сводке», без Telegram); одно уведомление на день заморозки, на значок и на ступень."""
 
@@ -69,7 +70,8 @@ def test_registry_category_kid_variants_and_editable() -> None:
     assert TEMPLATES["streak_frozen"].placeholder_names == ("date", "left")
     assert TEMPLATES["badge_earned"].placeholder_names == ("badge",)
     assert TEMPLATES["hero_stage_reached"].placeholder_names == ("hero", "grew", "stage")
-    assert public_category("game") == "reminders" and public_category("missed") == "missed"
+    # спринт 7: game — категория контрактов (bff.ts, admin.ts), замен нет
+    assert public_category("game") == "game" and public_category("missed") == "missed"
 
 
 def test_streak_frozen_texts() -> None:
@@ -232,8 +234,8 @@ async def test_streak_frozen_reaches_telegram_and_center(env) -> None:
     row = await env.row(row.notification_id)
     assert row.telegram_status == "sent" and row.params is None and row.limit_day == day + timedelta(days=1)
     [item] = (await env.inbox(user))["items"]
-    # в центре — категория контракта (game там пока нет — reminders)
-    assert (item["category"], item["title"], item["startapp"]) == ("reminders", "Серия спасена", "route_home")
+    # в центре — категория контракта (спринт 7: game)
+    assert (item["category"], item["title"], item["startapp"]) == ("game", "Серия спасена", "route_home")
     assert env.bus.dlq == []
 
 
@@ -278,29 +280,34 @@ async def test_notify_false_creates_nothing_but_streak_always(env) -> None:
 
 async def test_category_gate_switch_and_quiet_hours(env) -> None:
     day = local_day(1)
-    no_reminders = env.add_user(categories=("missed", "social", "support", "product"))
+    assert env.settings.game_category_gate == "game"  # спринт 7: собственный выключатель по умолчанию
+    no_game = env.add_user(categories=("reminders", "missed", "social", "support", "product"))
     switched_off = env.add_user(enabled=False)
     quiet = env.add_user(quiet={"start": "11:00", "end": "13:00"})
-    for user in (no_reminders, switched_off, quiet):
+    for user in (no_game, switched_off, quiet):
         await badge(env, user, earned_at=at(day, "12:00"))
     await env.dispatch(at(day, "12:00"))
-    row = await env.one(no_reminders)
+    row = await env.one(no_game)
     # выключатель выключен — без Telegram, но запись остаётся в центре (e2e спринта 6: «Серия спасена» видна всегда)
     assert (row.telegram_status, row.reason) == ("in_app_only", "category_disabled_center")
-    assert len((await env.inbox(no_reminders))["items"]) == 1
+    assert len((await env.inbox(no_game))["items"]) == 1
     row = await env.one(switched_off)
     assert (row.telegram_status, row.reason) == ("in_app_only", "notifications_disabled")
     row = await env.one(quiet)
     assert (row.telegram_status, row.reason, row.scheduled_for) == ("scheduled", "quiet_hours", at(day, "13:00"))
     assert env.gateway.calls == []
-    # GAME_CATEGORY_GATE=game (когда категория появится в настройках ученика): reminders её больше не включает
-    env.settings.game_category_gate = "game"
-    with_game, only_reminders = env.add_user(categories=("reminders", "game")), env.add_user()
+    # GAME_CATEGORY_GATE=game: reminders категорию игры не включает; reminders — поведение спринта 6 (откат)
+    with_game, only_reminders = env.add_user(categories=("game",)), env.add_user(categories=("reminders",))
     for user in (with_game, only_reminders):
         await badge(env, user, earned_at=at(day, "12:00"))
     await env.dispatch(at(day, "12:05"))
     assert (await env.one(only_reminders)).reason == "category_disabled_center"
     assert [c["telegram_user_id"] for c in env.gateway.calls] == [env.telegram_id(with_game)]
+    env.settings.game_category_gate = "reminders"
+    legacy = env.add_user(categories=("reminders",))
+    await badge(env, legacy, earned_at=at(day, "12:00"))
+    await env.dispatch(at(day, "12:06"))
+    assert env.gateway.calls[-1]["telegram_user_id"] == env.telegram_id(legacy)
 
 
 async def test_daily_limit_counts_game(env) -> None:
@@ -419,8 +426,8 @@ async def test_staff_list_category_and_active_version(env) -> None:
     assert r.status_code == 200, r.text
     items = {i["key"]: i for i in r.json()["items"]}
     for key in (*KEYS, *(f"{k}.kid" for k in KEYS)):
-        # в контракте admin.ts категории game пока нет — карточка показывает reminders
-        assert items[key]["category"] == "reminders", key
+        # спринт 7: game — категория admin.ts TemplateInfo
+        assert items[key]["category"] == "game", key
     r = await env.client.get("/admin/v1/notifications/templates/hero_stage_reached", headers=env.staff(MANAGE))
     assert [p["name"] for p in r.json()["placeholders"]] == ["hero", "grew", "stage"]
     # детская версия с давлением не сохраняется

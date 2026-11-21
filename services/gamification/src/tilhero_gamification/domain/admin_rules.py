@@ -167,7 +167,8 @@ async def activate_draft(session: AsyncSession, actor: Actor, comment: str, now:
 
 async def rollback(session: AsyncSession, actor: Actor, version: int, comment: str, now: datetime) -> dict[str, Any]:
     """Новая версия n+1 с payload архивной, based_on = version, сразу active. Есть черновик — 409 RULES_STATE
-    {draft_version} (сначала удалить); payload архивной снова проходит валидатор (422 RULES_INVALID)."""
+    {draft_version} (сначала удалить); payload архивной снова проходит валидатор (422 RULES_INVALID). Версия до
+    спринта 7 (без league / duel / pair_lesson) дополняется этими разделами активной версии."""
     await _lock_rules(session)
     source = await session.get(RulesVersion, version)
     if source is None:
@@ -177,13 +178,14 @@ async def rollback(session: AsyncSession, actor: Actor, version: int, comment: s
     draft = await _draft(session)
     if draft is not None:
         raise conflict("RULES_STATE", "Сначала удалите черновик правил", {"draft_version": draft.version})
-    errors = rl.validate(source.payload)
+    active = await _active(session, lock=True)
+    payload = rl.with_social_sections(dict(source.payload), dict(active.payload))
+    errors = rl.validate(payload)
     if errors:
         raise rules_invalid(errors)
-    active = await _active(session, lock=True)
     active.status = "archived"
     await session.flush()
-    target = RulesVersion(version=await _next_version(session), status="active", payload=dict(source.payload),
+    target = RulesVersion(version=await _next_version(session), status="active", payload=payload,
                           comment=comment, based_on=version, created_by=actor.id[:64],
                           created_by_name=(actor.name or "")[:120], created_at=now, updated_at=now, validated_at=now,
                           activated_by=actor.id[:64], activated_by_name=(actor.name or "")[:120], activated_at=now)

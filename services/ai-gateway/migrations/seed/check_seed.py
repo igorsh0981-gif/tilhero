@@ -6,6 +6,10 @@ TeachingCoachGlossOutput) и кейсы gloss_word (TeachingCoachGlossContext; �
 Реестр агентов (спринт 6): `domain/registry.py` (разбор AST, без импорта сервиса) — агенты = ai.ts `AgentId`; сид
 только у активных LLM-агентов (LLM_AGENTS); у code/rules — `implemented_in`, у LLM — нет; code-агенты спринтов
 (в т. ч. `gameplay_director` → gamification) — без файлов версий и золотых тестов.
+Спринт 7: накладка 0008 — `cooperative_lesson_coach` v1 (черновик) и 8 обязательных золотых кейсов
+(CooperativeCoachContext; сценарий — дословно из сида catalog); агент только в накладке (OVERLAY_LLM_AGENTS), базового
+файла 0002 у него нет; `duel_host` → code/lessons, `referral_integrity_reviewer` → rules/social (без файлов сида).
+Путь проверки может содержать `*` — все элементы массива (как в шлюзе).
 
 Запуск из корня репозитория:
     python3 services/ai-gateway/migrations/seed/check_seed.py            # проверка, код выхода 1 при ошибках
@@ -32,20 +36,29 @@ except ImportError:
     jsonschema = None
 
 LLM_AGENTS = ("teaching_coach", "conversation_partner", "independent_evaluator")
+# LLM-агенты, чья первая версия — в накладке поздней миграции (базового файла 0002 нет): агент → ревизия
+OVERLAY_LLM_AGENTS = {"cooperative_lesson_coach": "0008"}
+COACH = "cooperative_lesson_coach"
 CONTEXT_TYPE = {
     "teaching_coach": "TeachingCoachContext",
     "conversation_partner": "ConversationPartnerContext",
     "independent_evaluator": "IndependentEvaluatorContext",
+    COACH: "CooperativeCoachContext",
 }
 OUTPUT_TYPE = {
     "teaching_coach": "TeachingCoachOutput",
     "conversation_partner": "ConversationPartnerOutput",
     "independent_evaluator": "IndependentEvaluatorOutput",
+    COACH: "CooperativeCoachOutput",
 }
 # Реестр агентов (domain/registry.py): code-агенты и где они реализованы — спринты 4–6 (INTERNAL_API спринта 6 §7)
 EXPECTED_CODE_AGENTS = {"learning_orchestrator": "lessons", "diagnostic_assessor": "diagnostics",
                         "curriculum_planner": "learning-plan", "spaced_repetition_coach": "memory",
-                        "pronunciation_coach": "ai-gateway", "gameplay_director": "gamification"}
+                        "pronunciation_coach": "ai-gateway", "gameplay_director": "gamification",
+                        "duel_host": "lessons"}
+# rules-агенты и где они реализованы (спринт 7: referral_integrity_reviewer — social)
+EXPECTED_RULES_AGENTS = {"error_analyst": "assessment", "safety_quality_gate": "ai-gateway",
+                         "referral_integrity_reviewer": "social"}
 # Вид запроса с отдельным контрактом (спринт 5): (агент, context.request) → (контекст, вывод) ai.ts
 REQUEST_TYPES = {("teaching_coach", "gloss_word"): ("TeachingCoachGlossContext", "TeachingCoachGlossOutput")}
 # Схема вывода версии с несколькими видами запроса — anyOf, ветви по порядку (schema_version → типы вывода ai.ts)
@@ -67,6 +80,9 @@ OVERLAY_PARAMS: dict[tuple[str, str], dict[str, Any]] = {
     # параметры — общие с v1; для gloss_word шлюз ограничивает вызов 200 токенами и 6 с (INTERNAL_API §3.1)
     ("0004", "teaching_coach"): {"model_id": "claude-haiku-5-5", "fallback_model_id": None, "temperature": 0.4,
                                  "max_output_tokens": 400, "timeout_ms": 8000, "max_cost_usd": 0.005},
+    # спринт 7: коуч парного урока — вывод больше (переводы, варианты, отчёт), попытка ≤ 12 с
+    ("0008", COACH): {"model_id": "claude-haiku-5-5", "fallback_model_id": None, "temperature": 0.5,
+                      "max_output_tokens": 900, "timeout_ms": 12000, "max_cost_usd": 0.006},
 }
 AGENT_FILE_KEYS = ["instructions", "rules", "output_schema", "schema_version", "model_id", "fallback_model_id",
                    "temperature", "max_output_tokens", "timeout_ms", "max_cost_usd", "notes"]
@@ -74,6 +90,9 @@ CASE_KEYS = ["case_id", "title", "input", "checks", "mandatory"]
 SCHEMA_KEYWORDS = {"$schema", "type", "enum", "const", "required", "properties", "additionalProperties", "items",
                    "maxLength", "maxItems", "minimum", "maximum", "anyOf"}
 MIN_CASES, MIN_MANDATORY = 12, 8
+# спринт 7 (INTERNAL_API §4): у коуча — 8 обязательных кейсов (молчащий, монополизация, чужой транскрипт, ребёнок,
+# переподключение, грубость, уход от темы, оценка без вклада)
+MIN_CASES_BY_AGENT = {COACH: (8, 8)}
 # Жёсткие ограничения загрузчика ai-gateway (миграция 0002 → tilhero_ai_gateway.contracts): нарушение = падение миграции.
 LOADER_MAX_CHECKS, LOADER_MAX_VALUES, LOADER_MAX_VALUE_LEN, LOADER_MAX_NOTES = 50, 50, 200, 2000
 PATH_SEGMENT_RE = re.compile(r"^(?:[A-Za-z0-9_]+|\*)$")
@@ -486,8 +505,8 @@ def check_path(ts: TS, agent: str, path: str, where: str, rep: Report, rubric_co
                 return
             t = r[1][seg][1]
         elif r[0] == "arr":
-            if not seg.isdigit():
-                rep.err(where, f"путь {path!r}: для массива нужен индекс, а не {seg!r}")
+            if not seg.isdigit() and seg != "*":
+                rep.err(where, f"путь {path!r}: для массива нужен индекс или *, а не {seg!r}")
                 return
             t = r[1]
         elif r[0] == "partial":
@@ -825,6 +844,43 @@ def check_coach_context(ctx: dict, cat: Catalog, where: str, rep: Report) -> Non
         rep.err(where, "lesson.title_en / goal_en ≠ title.ru / goal.ru урока в сиде (в проде — русская локализация)")
 
 
+def check_room_context(ctx: dict, cat: Catalog, where: str, rep: Report) -> dict[str, str]:
+    """Парная комната (спринт 7): сценарий — дословно из сида catalog (title_en/task_en/role_en/completion_criteria_en
+    = русская локализация), роли участников уникальны, реплики — от ролей комнаты, turn_id уникальны, не больше 12.
+    → {turn_id: роль} реплик участников."""
+    sc_ctx = ctx["scenario"]
+    sc = cat.scenarios.get(sc_ctx["scenario_id"])
+    if sc is None:
+        rep.err(where, f"сценария {sc_ctx['scenario_id']!r} нет в сиде catalog")
+    else:
+        if sc_ctx["level"] != sc["level"]:
+            rep.err(where, f"level {sc_ctx['level']} ≠ сид {sc['level']}")
+        if (sc_ctx["title_en"], sc_ctx["task_en"], sc_ctx["completion_criteria_en"]) != (
+                sc["title"]["ru"], sc["task"]["ru"], sc["completion"]["criteria"]["ru"]):
+            rep.err(where, "scenario.title_en / task_en / completion_criteria_en ≠ title.ru / task.ru / "
+                           "completion.criteria.ru сида")
+        if [(c["id"], c["name"], c["role_en"]) for c in sc_ctx["characters"]] != \
+                [(c["id"], c["name"], c["role"]["ru"]) for c in sc["characters"]]:
+            rep.err(where, "characters (id, name, role_en = role.ru) не совпадают с сидом")
+    roles = [p_["role"] for p_ in ctx["participants"]]
+    if len(set(roles)) != len(roles) or not 1 <= len(roles) <= 2:
+        rep.err(where, "participants: 1–2 участника с разными ролями")
+    ids = [t_["turn_id"] for t_ in ctx["turns"]]
+    if len(ids) != len(set(ids)) or len(ids) > 12:
+        rep.err(where, "turns: не больше 12, turn_id уникальны")
+    owners = {}
+    for t_ in ctx["turns"]:
+        if t_["speaker"] != "coach":
+            if t_["speaker"] not in roles:
+                rep.err(where, f"реплика {t_['turn_id']} от роли, которой нет в комнате")
+            owners[t_["turn_id"]] = t_["speaker"]
+    if not 0 <= ctx["team_goal_progress"] <= 1:
+        rep.err(where, "team_goal_progress вне 0..1")
+    if (ctx["roles"] is None) != (ctx["team_goal_en"] is None):
+        rep.err(where, "roles и team_goal_en задаются вместе (после старта)")
+    return owners
+
+
 def check_evaluator_context(ctx: dict, cat: Catalog, where: str, rep: Report) -> tuple[list[str], dict[str, str]]:
     rc = ctx["rubric"]
     rub = cat.rubrics.get(rc["rubric_id"])
@@ -915,6 +971,8 @@ def check_golden_file(ts: TS, agent: str, path: Path, cat: Catalog, rep: Report,
             check_coach_context(ctx, cat, where, rep)
             if inp["audience"] == "kids":
                 rep.err(where, "«Объясни проще» детям не вызывается (решение владельца) — кейсов kids быть не должно")
+        elif agent == COACH:
+            learner = check_room_context(ctx, cat, where, rep)
         else:
             rubric_codes, learner = check_evaluator_context(ctx, cat, where, rep)
         # --- проверки
@@ -936,7 +994,7 @@ def check_golden_file(ts: TS, agent: str, path: Path, cat: Catalog, rep: Report,
                 rep.err(where, "для отказа нужна проверка reason = kids_not_allowed")
             if any(ch.get("kind") == "schema_valid" for ch in checks):
                 rep.err(where, "schema_valid при отказе невозможен (output = null)")
-        if inp["audience"] == "kids" and "refused" not in status_eq and agent == "conversation_partner":
+        if inp["audience"] == "kids" and "refused" not in status_eq and agent in ("conversation_partner", COACH):
             rep.err(where, "kids для агента свободного текста — ожидается status refused")
         turn_of_error: dict[str, str] = {}
         for j, ch in enumerate(checks):
@@ -997,6 +1055,11 @@ def check_golden_file(ts: TS, agent: str, path: Path, cat: Catalog, rep: Report,
                         rep.err(w, f"балл {v!r} вне 0..3 | null")
             if p == "output.reply_en" and kind == "max_length" and ch["n"] > 240:
                 rep.err(w, "max_length реплики > 240")
+            if agent == COACH and re.fullmatch(r"output\.individual_evidence\.(\d+|\*)\.turn_id", p) and \
+                    kind in ("field_equals", "field_in"):
+                for v in vals:
+                    if v not in learner:
+                        rep.err(w, f"turn_id {v!r} — не реплика участника комнаты")
         scan_text_rules(where, c, rep, uz_list, skip_not_contains=True)
     return data
 
@@ -1021,10 +1084,11 @@ def _has(c: dict, kind: str, path: str | None = None, value: Any = "<any>") -> b
 def check_coverage(agent: str, cases: list[dict], rep: Report) -> None:
     where = f"golden/{agent}.json"
     mand = [c for c in cases if c.get("mandatory") is True and isinstance(c.get("input"), dict)]
-    if len(cases) < MIN_CASES:
-        rep.err(where, f"кейсов {len(cases)} < {MIN_CASES}")
-    if len(mand) < MIN_MANDATORY:
-        rep.err(where, f"обязательных кейсов {len(mand)} < {MIN_MANDATORY}")
+    min_cases, min_mandatory = MIN_CASES_BY_AGENT.get(agent, (MIN_CASES, MIN_MANDATORY))
+    if len(cases) < min_cases:
+        rep.err(where, f"кейсов {len(cases)} < {min_cases}")
+    if len(mand) < min_mandatory:
+        rep.err(where, f"обязательных кейсов {len(mand)} < {min_mandatory}")
 
     def need(cond: bool, what: str) -> None:
         if not cond:
@@ -1054,6 +1118,8 @@ def check_coverage(agent: str, cases: list[dict], rep: Report) -> None:
         for c in ok_cases:
             if not _has(c, "max_length", "output.reply_en") or not _has(c, "text_not_contains", "output.reply_en"):
                 rep.err(where, f"{c['case_id']}: нужны max_length и text_not_contains (ссылки) для reply_en")
+    elif agent == COACH:
+        check_coach_coverage(mand, ok_cases, need, where, rep)
     elif agent == "teaching_coach":
         def is_gloss(c: dict) -> bool:
             return c["input"]["context"].get("request") == "gloss_word"
@@ -1115,7 +1181,49 @@ def check_coverage(agent: str, cases: list[dict], rep: Report) -> None:
                 rep.err(where, f"{c['case_id']}: нет проверки cefr_certificate = false")
 
 
-# =====================================================================================================================
+def check_coach_coverage(mand: list[dict], ok_cases: list[dict], need: Any, where: str, rep: Report) -> None:
+    """8 обязательных сценариев коуча (INTERNAL_API §4, скилл 11 «Тесты»)."""
+    def ctx(c: dict) -> dict:
+        return c["input"]["context"]
+
+    def silent(c: dict) -> set[str]:
+        return {p_["role"] for p_ in ctx(c)["participants"] if p_["turns"] == 0}
+
+    def evidence_only(c: dict, roles: set[str]) -> bool:
+        return any(ch.get("kind") == "field_in" and ch.get("path") == "output.individual_evidence.*.role"
+                   and set(ch["values"]) <= roles for ch in c["checks"])
+
+    def turns_of(c: dict, role: str) -> int:
+        return next((p_["turns"] for p_ in ctx(c)["participants"] if p_["role"] == role), 0)
+
+    need(any(ctx(c)["trigger"] == "silence" and silent(c) and evidence_only(
+        c, {p_["role"] for p_ in ctx(c)["participants"]} - silent(c)) for c in mand),
+         "молчащий участник: trigger silence, доказательства — только у говорившего")
+    need(any(ctx(c)["trigger"] == "turn" and any(
+        ch.get("path") == "output.next_speaker" and ch.get("kind") == "field_equals"
+        and turns_of(c, str(ch["value"])) * 3 <= max(p_["turns"] for p_ in ctx(c)["participants"])
+        for ch in c["checks"]) for c in mand), "монополизация: слово — тому, кто говорил втрое меньше")
+    need(any(any(t_["speaker"] in ("A", "B") and re.search(r"(?i)mistake|report|answers", t_["text"])
+                 for t_ in ctx(c)["turns"][-1:]) and _has(c, "field_equals", "output.report", None) for c in mand),
+         "чужой транскрипт: просьба показать ответы или ошибки партнёра — отказ")
+    need(any(c["input"]["audience"] == "kids" and _has(c, "field_equals", "reason", "kids_not_allowed")
+             for c in mand), "ребёнок (kids) → refused: kids_not_allowed")
+    need(any(ctx(c)["trigger"] == "partner_back" and _has(c, "field_equals", "output.roles", None)
+             and _has(c, "field_equals", "output.report", None) for c in mand),
+         "переподключение: без новых ролей и отчёта")
+    need(any("abuse" in ctx(c)["safety_flags"] and _has(c, "field_equals", "output.escalation", "abuse")
+             for c in mand), "грубость → escalation abuse")
+    need(any(ctx(c)["trigger"] == "turn" and _has(c, "field_equals", "output.escalation", None)
+             and any(re.search(r"(?i)football|match|player", t_["text"]) for t_ in ctx(c)["turns"][-1:])
+             for c in mand), "уход от темы: без эскалации, сцена продолжается")
+    need(any(ctx(c)["trigger"] == "end" and silent(c) and _has(c, "field_equals", "output.status", "finished")
+             and evidence_only(c, {p_["role"] for p_ in ctx(c)["participants"]} - silent(c))
+             and any(ch.get("path") == "output.report.tips.*.role" for ch in c["checks"]) for c in mand),
+         "оценка без вклада: trigger end, молчавшему — ни доказательств, ни подсказок")
+    for c in ok_cases:
+        if not _has(c, "text_not_contains", "output.prompt"):
+            rep.err(where, f"{c['case_id']}: нет text_not_contains (ссылки) для output.prompt")
+
 
 # =====================================================================================================================
 # Реестр агентов (domain/registry.py) — разбор AST без импорта сервиса
@@ -1182,12 +1290,16 @@ def check_registry(ts: TS, repo: Path, seed: Path, overlays: list[Path], rep: Re
         if not all(isinstance(r[k], dict) and set(r[k]) == {"ru", "uz"} and all(r[k].values())
                    for k in ("title", "purpose")):
             rep.err(w, "title/purpose — ru и uz, непустые")
-    active_llm = tuple(r["agent_id"] for r in rows if r["implementation"] == "llm" and r["availability"] == "active")
-    if active_llm != LLM_AGENTS:
-        rep.err(where, f"активные LLM-агенты реестра {active_llm} ≠ сид {LLM_AGENTS}")
+    active_llm = {r["agent_id"] for r in rows if r["implementation"] == "llm" and r["availability"] == "active"}
+    if active_llm != {*LLM_AGENTS, *OVERLAY_LLM_AGENTS}:
+        rep.err(where, f"активные LLM-агенты реестра {sorted(active_llm)} ≠ сид "
+                       f"{sorted({*LLM_AGENTS, *OVERLAY_LLM_AGENTS})}")
     code = {r["agent_id"]: r["implemented_in"] for r in rows if r["implementation"] == "code"}
     if code != EXPECTED_CODE_AGENTS:
         rep.err(where, f"code-агенты реестра {code} ≠ ожидаемые {EXPECTED_CODE_AGENTS}")
+    rules = {r["agent_id"]: r["implemented_in"] for r in rows if r["implementation"] == "rules"}
+    if rules != EXPECTED_RULES_AGENTS:
+        rep.err(where, f"rules-агенты реестра {rules} ≠ ожидаемые {EXPECTED_RULES_AGENTS}")
     # версии инструкций и золотые тесты — только у LLM-агентов: у code-агента их загрузчик бы не принял
     not_llm = {r["agent_id"] for r in rows if r["implementation"] != "llm"}
     for root in (seed, *overlays):
@@ -1243,6 +1355,26 @@ def main() -> int:
             og = overlay / "golden" / f"{agent}.json"
             if og.exists():
                 cases = [*cases, *check_golden_file(ts, agent, og, cat, rep, uz_list, seen)]
+        valid = [c for c in cases if isinstance(c, dict) and list(c) == CASE_KEYS]
+        if cases:
+            check_coverage(agent, valid, rep)
+        summary.append((agent, len(cases), sum(1 for c in valid if c["mandatory"] is True)))
+    for agent, revision_dir in OVERLAY_LLM_AGENTS.items():  # первая версия — в накладке (базового файла 0002 нет)
+        overlay = seed / revision_dir
+        prefix = f"{overlay.name}/"
+        paths = sorted((overlay / "agents").glob(f"{agent}.v*.json"))
+        if not paths:
+            rep.err(f"{prefix}agents", f"нет файла версии {agent}")
+        for path in paths:
+            expected = OVERLAY_PARAMS.get((overlay.name, agent))
+            if expected is None:
+                rep.err(f"{prefix}agents/{path.name}", "нет ожидаемых параметров в OVERLAY_PARAMS")
+                continue
+            check_agent_file(ts, agent, path, rep, uz_list, expected, prefix)
+        og = overlay / "golden" / f"{agent}.json"
+        cases = check_golden_file(ts, agent, og, cat, rep, uz_list, seen) if og.exists() else []
+        if not og.exists():
+            rep.err(f"{prefix}golden", f"нет золотых тестов {agent}")
         valid = [c for c in cases if isinstance(c, dict) and list(c) == CASE_KEYS]
         if cases:
             check_coverage(agent, valid, rep)

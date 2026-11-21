@@ -140,3 +140,49 @@ uv run python infra/railway/extend.py --env-from .dev/railway-prod/learning-plan
 6. **Telegram-сообщение** о заметке нынешний notifications не отправляет (событие публикации → только центр уведомлений, `in_app_only`). Если нужно сообщение в Telegram — рассылка в админке «Рассылки» (кнопка «Выбор героя», сегмент 14–17 / 18+, детям рассылки не адресуются).
 7. **Откат:** снять заметку — админка → «В архив» (ученики её больше не видят). Полный откат данных — `alembic downgrade 0006` в experience-config: удаляет обе заметки и их отметки просмотра, неотправленные события публикации, возвращает черновик `2026.11` и снимает иллюстрацию приветствия (уже ушедшие события и записи центра уведомлений остаются).
 
+
+## 11. Выкладка спринта 7 поверх релиза 6.1 (социальное)
+Новых сервисов нет. Миграции (Pre-Deploy `alembic upgrade head`): social **0002** (сообщество, друзья, блокировки, жалобы
+и модерация, реферальные кампании и перенос рефералов спринта 6, реестр `member_id`), gamification **0002** (лиги, дуэли,
+награды рефералов, дожитие pending спринта 6, проекции и `projection_loads`), lessons **0003** (наборы дуэлей, комнаты
+уроков вдвоём), admin-identity **0007** (права `social.read`, `moderation.manage`, `referral.*`, `league.*`, `room.*`;
+**support становится привилегированной**), ai-gateway **0008** (`cooperative_lesson_coach` — llm, черновик v1 с
+golden-тестами, бюджет комнаты 0,10 $; `duel_host` → code; `referral_integrity_reviewer` → rules), identity-consent
+**0005** и user-admin **0003** (категория уведомлений `game`), experience-config **0008** (меню админки 1.7.0 —
+«Сообщество» после «Игры») и **0009** (заметки «Что нового» `s7-social` 14+ и `s7-social-kids` 6–13, иллюстрации
+`s7-social` и `s7-family`).
+
+**Переменные** (значения не в чат и не в репозиторий):
+- `MEMBER_ID_KEY` — новый общий секрет ≥ 32 символов (`secrets.token_urlsafe(48)`), один на social, gamification и
+  lessons: shared variable проекта и ссылка `${{shared.MEMBER_ID_KEY}}` в трёх сервисах. **Не менять после выкладки** —
+  смена меняет все `member_id`. Без ключа social, gamification и lessons в prod не стартуют (и миграция social не идёт).
+- gamification: `SOCIAL_URL` (:8109), `LESSONS_URL` (:8112), `DIAGNOSTICS_URL` (:8111), `IDENTITY_CONSENT_URL` (:8101).
+- lessons: `SOCIAL_URL`, `IDENTITY_CONSENT_URL` (+ действующие `AI_GATEWAY_URL` и прочие).
+- admin-bff: `SOCIAL_URL`.
+- Новые callers в `infra/railway/setup.py` — открытые ключи JWT у всех уже есть (новых издателей нет).
+
+Порядок:
+1. **Перед мержем:** выставить переменные выше (автоперезапуск текущих деплоев безопасен — старый код их не читает);
+   experience-config привязать к текущему коммиту main (`connect-service-source commitSha=<main>`), чтобы заметки
+   «Что нового» опубликовались только после Mini App.
+2. **Мерж → автодеплой** остальных сервисов. Зависимости разрешаются сами: начальная загрузка проекций gamification
+   (семьи и дружбы — social, уровни — diagnostics, возраст и согласие — identity-consent) идёт в фоне и повторяется
+   каждым `game:tick`, пока источники не ответят; learning-plan принимает `kind duel|pair` до первых уроков вдвоём.
+3. **n8n** — перезапуск: `lessons-tick` теперь каждые 5 минут (обслуживание комнат).
+4. **telegram-miniapp**, **admin-web** — по автодеплою; убедиться, что новая версия Mini App отдаётся
+   (`/whatsnew/s7-social.webp`, `/whatsnew/s7-family.webp`).
+5. **experience-config — последним:** снять привязку к коммиту (`connect-service-source` без `commitSha`) → 0008, 0009.
+6. **Сотрудники support:** миграция admin-identity 0007 отзывает их сессии; при следующем входе — подключение TOTP.
+   Предупредить заранее.
+7. **Проверка:**
+   - логи gamification: `projection bootstrap` без повторяющихся ошибок; `SELECT name, completed_at, items FROM
+     gamification.projection_loads` — четыре строки (`families`, `friendships`, `levels`, `profiles`) завершены;
+   - Mini App: профиль сообщества (ник, код друга), друзья и заявки, лиги (друзья, семья, общая 14+), дуэль, урок вдвоём,
+     рефералы; детский профиль — только семья и выбор реплик; при входе — «Что изменилось» с иллюстрацией (детям —
+     `s7-family`);
+   - админка: «Сообщество» (друзья и жалобы, модерация, рефералы, лиги и дуэли, комнаты), права ролей, аудит;
+   - ai-gateway: `cooperative_lesson_coach` v1 — черновик; до публикации владельцем комнаты идут по сценарию с выбором
+     реплик.
+8. **Откат:** код — предыдущий деплой сервиса; данные — `alembic downgrade` соответствующих миграций (social 0001,
+   gamification 0001 — `expired` → `void` у рефералов спринта 6, lessons 0002, experience-config 0007 — снимает заметки
+   спринта 7). `MEMBER_ID_KEY` не удалять: при повторной выкладке нужен тот же ключ.

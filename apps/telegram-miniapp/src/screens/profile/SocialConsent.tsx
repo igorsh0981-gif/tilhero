@@ -36,7 +36,7 @@ export function useSocialConsentGate(): { intercept: (e: unknown, again: () => v
   return { intercept, sheet };
 }
 
-function SocialConsentSheet({ onClose, onAllowed }: { onClose: () => void; onAllowed: () => void }) {
+export function SocialConsentSheet({ onClose, onAllowed }: { onClose: () => void; onAllowed: () => void }) {
   const { bff, session, patchSession } = useApp();
   const { t, lang } = useI18n();
   const allow = useAction(async () => {

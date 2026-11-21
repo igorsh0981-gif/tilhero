@@ -40,7 +40,7 @@ for (const vp of [
   { width: 1440, height: 900 },
   { width: 1280, height: 720 },
 ]) {
-  test(`shell ${vp.width}×${vp.height}: all 16 sections and the footer are visible without scrolling; KPI notes are not cut`, async ({ page }) => {
+  test(`shell ${vp.width}×${vp.height}: all 21 sections (sprint 7: + «Сообщество») and the footer are visible without scrolling; KPI notes are not cut`, async ({ page }) => {
     await page.setViewportSize(vp);
     await openAs(page, "admin@tilhero.local", "#/overview");
     await expect(page.getByTestId("block-learners")).toBeVisible();
@@ -58,7 +58,9 @@ for (const vp of [
 
 async function expectAllVisible(page: Page): Promise<void> {
   const m = await navMetrics(page);
-  expect(m.items.map((i) => i.id)).toHaveLength(16);
+  expect(m.items.map((i) => i.id)).toHaveLength(21);
+  // WCAG 2.5.8: even the densest rows stay ≥ 24 px high
+  for (const it of m.items) expect(it.bottom - it.top, `${it.id} height`).toBeGreaterThanOrEqual(24);
   expect(m.scroll.scrollHeight, "the menu panel needs no scrolling").toBeLessThanOrEqual(m.scroll.clientHeight + 1);
   for (const it of m.items) {
     expect(it.top, `${it.id} top`).toBeGreaterThanOrEqual(m.scroll.top - 0.5);

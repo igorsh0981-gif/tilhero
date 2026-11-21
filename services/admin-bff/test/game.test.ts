@@ -298,7 +298,9 @@ const inject = (s: Session | null, c: { method: Case["method"]; url: string; pay
 const get = (s: Session, url: string) => h.app.inject({ url, headers: browser(s) });
 const send = (s: Session, method: Case["method"], url: string, payload?: unknown, headers: Record<string, string> = {}) =>
   inject(s, { method, url, payload, headers });
-const gameRoutes = () => h.app.adminRoutes.filter((r) => r.url.startsWith(`${GM}/`));
+/** Маршруты игры спринта 6 — без лиг и дуэлей спринта 7 (social.test.ts). */
+const gameRoutes = () =>
+  h.app.adminRoutes.filter((r) => r.url.startsWith(`${GM}/`) && !r.url.startsWith(`${GM}/leagues`) && !r.url.startsWith(`${GM}/duels`));
 const gameCalls = () => h.fake.callsTo("gamification");
 
 function denied(res: { statusCode: number; json(): { code: string; details: { permission?: string } } }, permission: string) {

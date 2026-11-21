@@ -36,9 +36,13 @@ TokenName = Annotated[str, StringConstraints(max_length=64)]
 # кошельки) и game_events («События и сезоны»). heroes и game были в прототипе; game_events — новый id раздела событий,
 # events — его прежний id из прототипа (сид 1.0.0): admin-web понимает оба (MENU_ALIASES), в одной версии — только
 # один из них (иначе раздел дважды → duplicate).
+# Спринт 7 (INTERNAL_API спринта 7 §6): группа «Сообщество» — friends («Друзья и жалобы»), moderation («Модерация»),
+# referrals («Реферальные кампании»), leagues («Лиги и дуэли»), pair_rooms («Парные комнаты»). Версия 1.7.0 (миграция
+# 0008) ставит её сразу после «Игры»; в 1.0.0 этих разделов нет — admin-web добавляет их в конец.
 ADMIN_MENU: Final[tuple[str, ...]] = (
     "overview", "users", "content", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config",
     "langs", "roles", "audit", "memory", "game_events",
+    "friends", "moderation", "referrals", "leagues", "pair_rooms",
 )
 # id прототипа → id раздела (для проверки дублей)
 MENU_ALIASES: Final[dict[str, str]] = {"events": "game_events"}

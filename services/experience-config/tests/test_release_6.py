@@ -128,7 +128,7 @@ async def test_events_like_staff_publication(env) -> None:
     """В outbox миграции — событие публикации той же формы, что у сотрудника (notifications положит заметку в центр
     уведомлений), и аудит system:release без текстов заметок."""
     adult, kids = await active_note(env, ADULT), await active_note(env, KIDS)
-    events = [e for e in env.migration_events if e.event_type == PUBLISHED]
+    events = [e for e in env.migration_events if e.event_type == PUBLISHED and e.payload["slug"] in (ADULT, KIDS)]
     assert len(events) == 2
     by_slug = {e.payload["slug"]: e for e in events}
     for n in (adult, kids):
@@ -140,7 +140,8 @@ async def test_events_like_staff_publication(env) -> None:
                                                  n["segments"], datetime.fromisoformat(
                                                      n["published_at"].replace("Z", "+00:00")))
         assert_event_conforms(e)
-    audits = [e for e in env.migration_events if e.event_type == AUDIT and e.payload["object_type"] == "release_note"]
+    audits = [e for e in env.migration_events if e.event_type == AUDIT and e.payload["object_type"] == "release_note"
+              and not e.payload["after"]["slug"].startswith("s7-")]  # релиз 7 — test_release_7.py
     for e in audits:
         assert_event_conforms(e)
         assert (e.payload["actor_type"], e.payload["actor_id"], e.payload["actor_role"]) == (
@@ -185,9 +186,12 @@ async def test_learners_see_release_note_once_at_next_login(env) -> None:
         r = await env.for_me(user, onboarded_at=BEFORE_RELEASE, lang=lang, age=age)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["mode"] == "updates" and len(body["notes"]) == 1, body
-        n = body["notes"][0]
-        assert (await env.seen(user, [n["release_note_id"]])).status_code == 204
+        # с 18.11 вышли релизы 6.1 и 7 — обе заметки сегмента, новая первой
+        assert body["mode"] == "updates" and len(body["notes"]) == 2, body
+        assert body["notes"][0]["slug"].startswith("s7-social"), body
+        n = body["notes"][1]
+        ids = [x["release_note_id"] for x in body["notes"]]
+        assert (await env.seen(user, ids)).status_code == 204
         assert await ids_for_me(env, user, onboarded_at=BEFORE_RELEASE, lang=lang, age=age) == ("none", [])
         return n
 

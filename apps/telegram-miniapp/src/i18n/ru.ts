@@ -3,12 +3,14 @@ import { ruContent } from "./ru.content";
 import { ruGame } from "./ru.game";
 import { ruLessons } from "./ru.lessons";
 import { ruMemory } from "./ru.memory";
+import { ruSocial } from "./ru.social";
 
 export const ru = {
   ...ruContent,
   ...ruLessons,
   ...ruMemory,
   ...ruGame,
+  ...ruSocial,
   // ---- common ----
   "c.continue": "Продолжить",
   "c.back": "Назад",

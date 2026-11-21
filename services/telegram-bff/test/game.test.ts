@@ -87,7 +87,7 @@ describe("сводка и вызов gamification от имени ученика
     expect(b.quests.items).toHaveLength(3);
     expect(b.events[0]).not.toHaveProperty("created_by");
     expect(b.equipment).toEqual({ background: null, frame: null });
-    expect(b.settings).toEqual({ auto_freeze: true, quests_hidden: false, celebrations: "full", game_notifications: true });
+    expect(b.settings).toEqual({ auto_freeze: true, quests_hidden: false, celebrations: "full", game_notifications: true, league_opt_in: false });
     for (const k of ["user_id", "rules_version"]) expect(b).not.toHaveProperty(k);
     expect(res.headers["cache-control"]).toBe("no-store");
 
@@ -221,10 +221,10 @@ describe("герои, задания, значки, магазин, истори
   });
 
   it("настройки: GET; PATCH — только переданные поля; пусто, чужое значение, лишнее поле, не JSON-тип — 422 без вызова", async () => {
-    expect((await get("/v1/game/settings")).json()).toEqual({ auto_freeze: true, quests_hidden: false, celebrations: "full", game_notifications: true });
+    expect((await get("/v1/game/settings")).json()).toEqual({ auto_freeze: true, quests_hidden: false, celebrations: "full", game_notifications: true, league_opt_in: false });
     const res = await send("PATCH", "/v1/game/settings", { quests_hidden: true, celebrations: "quiet" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ auto_freeze: true, quests_hidden: true, celebrations: "quiet", game_notifications: true });
+    expect(res.json()).toEqual({ auto_freeze: true, quests_hidden: true, celebrations: "quiet", game_notifications: true, league_opt_in: false });
     expect(gameCalls("PATCH", "/internal/v1/game/settings")[0]!.body).toEqual({ quests_hidden: true, celebrations: "quiet" });
     expect((await get("/v1/game/quests")).json()).toMatchObject({ hidden: true, items: [] });
     const n = gameCalls().length;

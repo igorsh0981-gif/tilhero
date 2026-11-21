@@ -19,10 +19,11 @@ from tilhero_common.messaging import InMemoryBus, make_envelope, messaging_metad
 from tilhero_common.testing import assert_event_conforms, ddl_allowed_for, migrated_under_roles, schema_drift
 from tilhero_lessons.main import build_app
 from tilhero_lessons.models import Base
-from tilhero_lessons.settings import DEV_USER_REF_SECRET, Settings
+from tilhero_lessons.settings import DEV_MEMBER_ID_KEY, DEV_USER_REF_SECRET, Settings
 
 TABLES = ("sessions", "status_history", "steps", "turns", "review_items", "learner_profiles", "deleted_users",
-          "outbox", "inbox")
+          "outbox", "inbox", "duel_sets", "pair_rooms", "room_participants", "room_events", "room_audio",
+          "community_members", "social_blocks", "social_sanctions")
 
 
 async def test_models_match_migrations_and_runtime_role() -> None:
@@ -102,10 +103,22 @@ def test_settings_guards() -> None:
     with pytest.raises(ValidationError, match="CATALOG_URL"):
         Settings(env="prod", internal_jwt_secret="x" * 40, internal_jwt_private_key="a" * 43)
     urls: dict[str, str] = {k: "http://x:1" for k in ("catalog_url", "ai_gateway_url", "assessment_url",
-                                                      "learning_plan_url", "diagnostics_url")}
+                                                      "learning_plan_url", "diagnostics_url", "social_url",
+                                                      "identity_consent_url")}
     prod: dict[str, str] = {"env": "prod", "internal_jwt_secret": "x" * 40, "internal_jwt_private_key": "a" * 43,
-                            "scheduler_token": "t" * 43}
+                            "scheduler_token": "t" * 43, "member_id_key": "m" * 32}
+    # спринт 7: адреса social и identity-consent обязательны в stage/prod
+    for missing in ("social_url", "identity_consent_url"):
+        with pytest.raises(ValidationError, match=missing.upper()):
+            Settings(**prod, **{k: v for k, v in urls.items() if k != missing}, user_ref_secret="r" * 32)
+    # MEMBER_ID_KEY обязателен в stage/prod (не dev-значение, ≥ 32 символов): общий с social и gamification
+    for bad_key in ({"member_id_key": "short"}, {"member_id_key": DEV_MEMBER_ID_KEY}):
+        with pytest.raises(ValidationError, match="MEMBER_ID_KEY"):
+            Settings(**{**prod, **bad_key}, **urls, user_ref_secret="r" * 32)
+    with pytest.raises(ValidationError, match="MEMBER_ID_KEY"):
+        Settings(**{k: v for k, v in prod.items() if k != "member_id_key"}, **urls, user_ref_secret="r" * 32)
     ok = Settings(**prod, **urls, user_ref_secret="r" * 32)
+    assert ok.pair_room_max_minutes == 20 and ok.pair_poll_seconds <= 25 and ok.duel_items == 10
     assert ok.port == 8112 and ok.db_schema == "lessons"
     # цепочка таймаутов (R1-16, R2-02): статус ИИ 2 с; finish = 2 + 32 + 2 < 45 с BFF; 32 > 26 + 3 (assessment → ИИ
     # и чтение ключей из catalog)

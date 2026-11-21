@@ -66,6 +66,8 @@ export interface ValidationOverride {
   withField?: boolean;
   /** Добавлять details.reason — правило схемы (контракт: PLAN_INVALID {field, reason}). */
   withReason?: boolean;
+  /** Постоянные details (спринт 7: NICKNAME_INVALID {reason: "length" | "chars"}). */
+  details?: Record<string, unknown>;
 }
 
 function fieldOf(e: FastifySchemaValidationError | undefined): string {
@@ -107,6 +109,7 @@ export function schemaErrors(overrides: ValidationOverride[] = []) {
       return new AppError(o.status ?? 422, o.code, o.message, {
         ...(o.withField ? { field } : {}),
         ...(o.withReason ? { reason: keyword } : {}),
+        ...(o.details ?? {}),
       });
     }
     return new AppError(422, "VALIDATION_ERROR", "Некорректные данные запроса", {

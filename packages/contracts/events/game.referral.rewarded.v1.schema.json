@@ -32,6 +32,48 @@
     "rewarded_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "outcome": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "rewarded",
+            "legacy",
+            "inviter_capped"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "inviter_reward": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "freeze",
+            "til"
+          ],
+          "properties": {
+            "freeze": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "til": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   }
 }

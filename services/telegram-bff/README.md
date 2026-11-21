@@ -27,6 +27,7 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
   | identity `telegram-login`, `legal/policy`, `GET guardian-consents/{token}`; experience `experience/miniapp/current` | без sub |
   | catalog (контент ученика), lessons, **memory** (спринт 5) | аккаунт + claims `lrn`, `age_band` (у memory — полоса **активного ученика**, см. «Спринт 5») |
   | **gamification** (спринт 6) — игра ученика | аккаунт + claims `lrn`, `age_band` активного ученика (как memory); картинки — без sub |
+  | **спринт 7:** social (сообщество, друзья, блокировки, жалобы, санкции, рефералы), gamification (лиги, дуэли), lessons (задания дуэли, парные комнаты) | аккаунт + claims `lrn`, `age_band` **активного ученика** (детский профиль — полоса ребёнка); приглашения и семья спринта 1 — по-прежнему аккаунт без claims |
 
   Матрица по всем маршрутам — `test/subjects.test.ts`.
 - **Переключение ученика** (`POST /v1/session/learner`): BFF проверяет ученика в identity-consent `GET /internal/v1/me/learners/{id}` от имени аккаунта (свой или свой ребёнок, иначе `404 LEARNER_NOT_FOUND`; ответ сверяется: тот же id, `kind=child`, есть в `/me.learners`). Выход **из** детского профиля (к родителю или другому ребёнку) при заданном коде родителя требует `pin` (нет/неверный → `401 PIN_INVALID`, блокировка → `423 PIN_LOCKED`, лимит `tg.pin` 5/мин); вход в детский профиль кода не требует. Ответ собирается до перевыпуска refresh (сбой домена не ломает текущую сессию), затем в той же сессии перевыпускаются токены с новым `lrn`. **Активный ученик — свойство сессии в Redis:** access-токен, выданный до переключения, сразу перестаёт действовать (`401 TOKEN_EXPIRED {reason: learner_switched}` → клиент делает refresh).
@@ -201,6 +202,73 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 - **`TodayPlan.week[].frozen`:** learning-plan до спринта 6 поля не присылает — BFF отдаёт `false`
   (`routes/plan.ts todayView`).
 
+### Спринт 7 — социальное
+
+Маршруты — по таблице INTERNAL_API спринта 7 §9; файлы: `src/routes/social.ts`, `src/routes/leagues.ts`,
+`src/routes/pairRooms.ts`, общий вызов от имени ученика — `src/socialApi.ts`.
+
+| Метод | Путь | Домен (`/internal/v1/…`) | Лимит (на ученика) |
+|---|---|---|---|
+| GET / PATCH | `/v1/community` | social `GET\|PATCH /me/community` | — / `tg.social.write` |
+| PUT | `/v1/community/nickname` | social `PUT /me/community/nickname` | `tg.social.write` |
+| POST | `/v1/community/friend-code/rotate` | social `POST /me/community/friend-code:rotate` | `tg.social.write` |
+| GET | `/v1/friends/search?q=` | social `GET /me/friends/search` | `tg.social.search` |
+| POST / GET | `/v1/friends/requests` (`?direction=in\|out` обязателен) | social `POST\|GET /me/friend-requests` | `tg.social.write` / — |
+| POST | `/v1/friends/requests/{request_id}/accept\|decline\|cancel` | social `POST /me/friend-requests/{id}/…` | `tg.social.write` |
+| GET / DELETE | `/v1/friends`, `/v1/friends/{member_id}` | social `GET /me/friends`, `DELETE /me/friends/{member_id}` | — / `tg.social.write` |
+| POST / GET / DELETE | `/v1/blocks`, `/v1/blocks/{member_id}` | social `/me/blocks…` | `tg.social.write` (команды) |
+| POST | `/v1/complaints` | social `POST /me/complaints` | `tg.social.complaint` (10/сутки) |
+| GET / POST | `/v1/sanctions`, `/v1/sanctions/{id}/appeal` | social `/me/sanctions…` | — / `tg.social.write` |
+| GET | `/v1/referrals` | social `GET /me/referrals` | — |
+| GET | `/v1/game/leagues`, `/v1/game/leagues/history` | gamification `/game/leagues…` | `tg.game.read` |
+| PATCH | `/v1/game/settings {league_opt_in}` | gamification `PATCH /game/settings` | `tg.game.write` |
+| POST / GET | `/v1/game/duels`, `/v1/game/duels/{id}`, `…/accept\|decline` | gamification `/game/duels…` | `tg.duel.write` / `tg.game.read` |
+| POST / GET | `/v1/duel-sessions`, `/v1/duel-sessions/{session_id}/review` | lessons `/me/duel-sessions…` | `tg.duel.write` / — |
+| POST / GET | `/v1/pair-rooms`, `/v1/pair-rooms/{id}` | lessons `/me/pair-rooms…` | `tg.room.write` / — |
+| POST | `/v1/pair-rooms/{id}/accept\|decline\|cancel\|join\|leave\|turns` | lessons `/me/pair-rooms/{id}/…` | `tg.room.write` |
+| POST / GET | `/v1/pair-rooms/{id}/heartbeat`, `…/state?after_seq=` | lessons | `tg.room.poll` |
+| POST | `/v1/pair-rooms/{id}/audio` (audio/wav) | lessons | `tg.room.audio` (30 за 10 мин) |
+| GET | `/v1/pair-rooms/{id}/report` | lessons | — |
+
+- **member_id** — `mb_` + 22 символа base64url (INTERNAL_API §0). BFF передаёт его как есть (не расшифровывает) и сверяет
+  формат на входе (иначе 422; в пути — 404 `MEMBER_NOT_FOUND`) и в ответах доменов: «сырой» UUID вместо member_id —
+  элемент списка отбрасывается (`list items dropped`), объект — 503. `GET /v1/family` отдаёт `member_id` каждого члена
+  семьи из social (нет или не того формата — 503 `UPSTREAM_UNAVAILABLE {service: social}`); `user_id` семьи остаётся
+  (управление своей семьёй, контракт).
+- **Приватность:** ответы собираются явно и сериализуются по схемам контракта — `user_id`, имя, Telegram, возраст,
+  покупки, ошибки, флаги антифрода, исполнитель санкции, чужие реплики и оценки наружу не уходят (тест
+  `test/privacy7.test.ts` обходит все маршруты спринта 7 по OpenAPI). Счёт соперника — только у дуэли `finished`
+  (иначе `result = null`); значков у строки рейтинга ≤ 3, строк ≤ 50; подсказок отчёта ≤ 3, вариантов реплики ≤ 3,
+  событий ленты ≤ 50 (больше — первые 50 и `seq` последнего отданного).
+- **Idempotency-Key** обязателен: `POST /v1/friends/requests`, `/v1/complaints`, `/v1/sanctions/{id}/appeal`,
+  `/v1/game/duels`, `/v1/duel-sessions`, `/v1/pair-rooms`, `/v1/pair-rooms/{id}/turns`; у прочих команд — необязателен
+  и пробрасывается, если есть. Статус создающих команд — домена (201 создано, 200 повтор / встречная заявка).
+- **Дети** (детский профиль `lrn ≠ sub`, до вызова домена): поиск, заявки, друзья — 403 `FRIENDS_NOT_ALLOWED {reason:
+  kids}`; блокировки, жалобы, рефералы — 403 `KIDS_NOT_ALLOWED`; свободный текст хода и голос в комнате — 403
+  `KIDS_NOT_ALLOWED` (и при детской полосе аккаунта; голос — до чтения тела). Защита в глубину (6–13 — профиль или
+  полоса): лиги — `friends = null`, общая недоступна (`kids`) даже при другом ответе домена (предупреждение
+  `kids_no_strangers`); комната — `mode = choices`, `voice_available = false`. Прочее решает домен по `age_band`.
+- **Ошибки:** коды доменов — как есть (в т. ч. новые lessons: 409 `FREE_TEXT_NOT_ALLOWED`, `DUEL_SET_CONFLICT`); `503 DUEL_SET_UNAVAILABLE` (принятие дуэли) и `503 SPEECH_UNAVAILABLE` (голос) —
+  тоже как есть (`DOMAIN_BUSINESS_503`). Недоступность / 5xx / ответ не по контракту: social и lessons — `503
+  UPSTREAM_UNAVAILABLE {service}`, лиги и дуэли (`/v1/game/*`) — `503 GAME_UNAVAILABLE {service: gamification}`, как
+  игра спринта 6 (в т. ч. без `GAMIFICATION_URL`).
+- **Long-poll ленты** (`GET /v1/pair-rooms/{id}/state`): lessons держит запрос до 25 с, BFF ждёт
+  `PAIR_ROOM_POLL_TIMEOUT_MS` (30 с), без повторов GET; клиент закрыл соединение — вызов lessons прерывается
+  (`AbortSignal`, лог `long-poll cancelled by client`, 499 `CLIENT_CLOSED_REQUEST` без записи «domain unavailable»).
+  **Вход, ход и выход** (`join`, `turns`, `leave`) синхронно ждут ИИ-коуча — `PAIR_ROOM_COACH_TIMEOUT_MS` (30 с, ≥ 25 с),
+  без повторов (ход идемпотентен по Idempotency-Key: повтор — только клиентом с тем же ключом).
+- **Включение общей лиги** (`PATCH /v1/game/settings` с `league_opt_in: true`): gamification согласий не знает — BFF
+  сначала читает профиль сообщества social (`GET /internal/v1/me/community`, тот же ученик): детский профиль — 403
+  `KIDS_NOT_ALLOWED` без вызовов; `friends_available = false` → 403 `FRIENDS_NOT_ALLOWED {reason: kids |
+  guardian_consent}` или 403 `CONSENT_REQUIRED {purpose: social}` (`reason = consent`); social недоступен или ответ не
+  по контракту — 503 `UPSTREAM_UNAVAILABLE {service: social}`; в этих случаях gamification не вызывается. `league_opt_in:
+  false` и прочие поля — без проверки. Лимит `tg.game.write` — один на запрос.
+- **Голос** (`POST /v1/pair-rooms/{id}/audio`): своя область Fastify, как произношение спринта 5 — только `audio/wav`
+  (`audio/x-wav`, `audio/wave`), ≤ 600 000 байт, WAV PCM 16 бит моно 16 кГц 0,5..15 с (иначе 422 `AUDIO_INVALID
+  {reason}`); в lessons — сырое тело как есть, без повторов. Аудио и распознанный текст в лог не пишутся (`audio_ms`).
+- **Логи:** ник, код друга, запрос поиска, комментарий жалобы, текст обжалования и ходов, подсказки коуча и отчёт — не
+  пишутся (`SENSITIVE_KEYS`, redact-пути).
+
 ## Переменные окружения
 
 | Переменная | По умолчанию (вне production) | Описание |
@@ -228,9 +296,11 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
 | `MEMORY_URL` | `http://127.0.0.1:8116` | спринт 5: memory (Railway: `http://memory.railway.internal:8116`); в stage/prod обязателен |
 | `MEMORY_TIMEOUT_MS` / `MEMORY_TRANSLATE_TIMEOUT_MS` / `MEMORY_PRONUNCIATION_TIMEOUT_MS` | `10000` / `12000` / `20000` | таймауты memory (1000–60000): обычные вызовы / перевод по тапу (memory ждёт `gloss_word` до 8 с) / оценка произношения (memory ждёт ai-gateway до 15 с); GET повторяются по `UPSTREAM_RETRIES`, команды и аудио — нет |
 | `GAMIFICATION_URL` | — | спринт 6: gamification (Railway: `http://gamification.railway.internal:8117`, локально `http://127.0.0.1:8117`). **Необязателен и в stage/prod**: без него `/v1/game/*` отвечают 503 `GAME_UNAVAILABLE`, при старте — предупреждение `GAMIFICATION_URL is not set`. Таймаут и повторы GET — `UPSTREAM_TIMEOUT_MS` / `UPSTREAM_RETRIES`; команды не повторяются |
+| `PAIR_ROOM_POLL_TIMEOUT_MS` | `30000` | спринт 7: таймаут long-poll ленты парной комнаты (`GET /v1/pair-rooms/{id}/state`), 1000–120000; lessons держит запрос до 25 с, поэтому в **stage/prod — больше 25000** (иначе процесс не стартует); без повторов. Остальные вызовы lessons — `LESSONS_TIMEOUT_MS`, social — `UPSTREAM_TIMEOUT_MS` |
+| `PAIR_ROOM_COACH_TIMEOUT_MS` | `30000` | спринт 7: таймаут `join`, `turns`, `leave` парной комнаты — lessons синхронно ждёт ИИ-коуча; 1000–120000, в **stage/prod — не меньше 25000**; без повторов |
 | `UPSTREAM_TIMEOUT_MS` / `UPSTREAM_RETRIES` | `3000` / `1` | таймаут и повторы (GET и команды с `Idempotency-Key`) |
 | `EXPERIENCE_CACHE_SECONDS` | `60` | кэш конфига интерфейса |
-| `RATE_LIMIT_USER_PER_MIN` / `RATE_LIMIT_SESSION_IP_PER_MIN` / `RATE_LIMIT_PIN_PER_MIN` / `RATE_LIMIT_PUBLIC_IP_PER_MIN` | `120` / `10` / `5` / `120` | политики `tg.user`, `tg.session_ip`, `tg.pin` (код родителя, в т. ч. при выходе из детского профиля; сброс — отдельный счётчик), `tg.public_ip`; `tg.support_create`, `tg.speech` (120 за 600 с на аккаунт, `POST /v1/speech`) и спринт 5 — `tg.memory.translate` (60), `tg.memory.pronunciation` (20), `tg.memory.answer` (300) за 600 с на **ученика**; спринт 6 — `tg.game.read` (120), `tg.game.write` (30), `tg.game.purchase` (10) в минуту на **ученика**, `tg.game.assets` (600 в минуту с IP) — из каталога |
+| `RATE_LIMIT_USER_PER_MIN` / `RATE_LIMIT_SESSION_IP_PER_MIN` / `RATE_LIMIT_PIN_PER_MIN` / `RATE_LIMIT_PUBLIC_IP_PER_MIN` | `120` / `10` / `5` / `120` | политики `tg.user`, `tg.session_ip`, `tg.pin` (код родителя, в т. ч. при выходе из детского профиля; сброс — отдельный счётчик), `tg.public_ip`; `tg.support_create`, `tg.speech` (120 за 600 с на аккаунт, `POST /v1/speech`) и спринт 5 — `tg.memory.translate` (60), `tg.memory.pronunciation` (20), `tg.memory.answer` (300) за 600 с на **ученика**; спринт 6 — `tg.game.read` (120), `tg.game.write` (30), `tg.game.purchase` (10) в минуту на **ученика**, `tg.game.assets` (600 в минуту с IP); спринт 7 — `tg.social.search` (30), `tg.social.write` (30), `tg.duel.write` (20), `tg.room.write` (60), `tg.room.poll` (240) в минуту, `tg.social.complaint` (10 в сутки), `tg.room.audio` (30 за 10 минут) на **ученика** — из каталога |
 | `RATE_LIMITS_ENABLED`, `RATE_LIMIT_OVERRIDE_REFRESH_SECONDS` | `true`, `30` | единый лимитер ts-common |
 | `TRUST_PROXY_HOPS` | `1` | доверенные прокси (Railway edge) |
 | `LOG_LEVEL`, `SERVICE_VERSION` | `info`, версия package.json | |
@@ -321,6 +391,30 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
   - **`PATCH /v1/game/settings {}`** → 422 (нужно хотя бы одно поле); `?limit=` у истории не принимается (контракт — по 30).
   - **Покупка** всегда отвечает 200 (в т. ч. на первый запрос): «повтор ключа — тот же ответ».
   - **Картинки:** 4xx gamification (кроме 429) → `404 ASSET_NOT_FOUND`, путь неверного формата — тот же 404 (не 422).
+
+- **Спринт 7:**
+  - **Субъект:** social, gamification и lessons спринта 7 — `sub` = аккаунт, claims `lrn` и `age_band` **активного**
+    ученика (у lessons спринта 4 `age_band` — возраст аккаунта; для новых маршрутов lessons — полоса ученика, как
+    требует §0 «аудитории по `age_band` из токена»). Query `locale` — во все вызовы lessons спринта 7.
+  - **Лиги и дуэли** при сбое gamification — `503 GAME_UNAVAILABLE {service: gamification}` (как весь `/v1/game/*`
+    спринта 6), а не `UPSTREAM_UNAVAILABLE`; `details.service` есть в обоих случаях.
+  - **`GameSettings.league_opt_in`:** gamification до спринта 7 поля не присылает — BFF отдаёт `false` (как
+    `TodayPlan.week[].frozen` спринта 6). **Категория уведомлений `game`:** identity до спринта 7 поля не присылает — BFF
+    отдаёт `true` (по умолчанию включена, §5).
+  - **`PairRoomState.prompt_gloss`:** lessons может прислать строку или `{ru, uz}` коуча (ai.ts: «ученику BFF отдаёт его
+    язык») — BFF выбирает язык ученика (`?locale=` → `Accept-Language` → ru); в контракте Mini App — строка.
+  - **Неверный формат id в пути** → 404 кода домена без вызова (`REQUEST_NOT_FOUND`, `MEMBER_NOT_FOUND`,
+    `SANCTION_NOT_FOUND`, `DUEL_NOT_FOUND`, `SESSION_NOT_FOUND`, `ROOM_NOT_FOUND`), как приглашения спринта 1.
+  - **Ник:** длина и символы проверяются в BFF → `422 NICKNAME_INVALID {reason: length | chars}` (буквы `\p{L}`, цифры,
+    «_»; RU/UZ/EN-алфавиты и запрещённые слова — social). **Поиск** `q`: 3..20, буквы, цифры, «_», «-», иначе 422.
+  - **Жалоба:** `subject_id` обязателен для `friend_request | invite | duel | pair_room` и равен `null` для `user |
+    nickname` — иначе `422 VALIDATION_ERROR {field: subject_id}`; комментарий обрезается, пустой не передаётся.
+    **Обжалование:** 10..1000 знаков после обрезки.
+  - **Приглашение в комнату:** `start` — `now` или ISO-8601 с зоной, не раньше `now − 1 мин` и не позже `now + 7 дней +
+    1 мин` (допуск на часы клиента), иначе 422; окончательно решает lessons.
+  - **`GET /v1/friends/requests`:** `direction` обязателен (в контракте всегда указан). **`GET /v1/sessions?kind=duel`**
+    → 422: сессий дуэли в истории нет (контракт).
+  - **`vitest.config.ts`:** `hookTimeout` 30 с — сборка приложения (≈ 250 маршрутов) на нагруженном стенде дольше 10 с.
 
 ## Локальная разработка
 

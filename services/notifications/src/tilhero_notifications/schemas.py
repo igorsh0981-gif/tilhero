@@ -11,7 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_valid
 
 from tilhero_notifications.templates import DIRECT_TEMPLATES
 
-InboxCategory = Literal["reminders", "missed", "social", "support", "product", "service"]
+# bff.ts NotificationCategory (спринт 7: + game)
+InboxCategory = Literal["reminders", "missed", "social", "support", "product", "service", "game"]
 InboxTelegram = Literal["sent", "scheduled", "in_app_only", "failed"]
 
 

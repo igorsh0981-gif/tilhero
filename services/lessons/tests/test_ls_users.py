@@ -86,5 +86,8 @@ async def test_scheduler_auth(env: Env, user: uuid.UUID) -> None:
     assert r.status_code == 403 and r.json()["code"] == "CALLER_NOT_ALLOWED"
     out = await env.tick()
     assert out == {"auto_paused": 0, "expired": 0, "redacted_turns": 0, "redacted_answers": 0,
-                   "redacted_evaluations": 0, "evaluations_sent": 0, "evaluations_failed": 0,
-                   "evaluations_given_up": 0}
+                   "redacted_evaluations": 0, "redacted_room_texts": 0, "evaluations_sent": 0,
+                   "evaluations_failed": 0, "evaluations_given_up": 0, "duel_sets_closed": 0,
+                   "duel_sessions_closed": 0, "pair_rooms_tended": 0, "pair_rooms_ended": 0, "pair_starting_sent": 0,
+                   "pair_audio_purged": 0, "pair_evaluations_sent": 0, "pair_evaluations_failed": 0,
+                   "pair_evaluations_given_up": 0}

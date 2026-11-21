@@ -43,8 +43,8 @@ import type {
 import type {
   GameAction, GameCurrency, GameReason, HeroLine, HeroStage, QuestKind, ShopItemKind,
   ComplaintReason, ComplaintSubjectKind, DuelScore, DuelStatus, FriendRequestStatus, LeagueLevelBand, PairEndReason,
-  PairRole, PairRoomEventKind, PairRoomMode, PairRoomStatus, ReferralRejectCode, ReferralReward, ReferralStatus,
-  SanctionAppealStatus, SanctionKind,
+  PairRole, PairRoomEventKind, PairRoomMode, PairRoomStatus, ReferralRejectCode, ReferralReward,
+  ReferralRewardOutcome, ReferralStatus, SanctionAppealStatus, SanctionKind,
 } from "./bff.js";
 import type {
   Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiModel, AiProviderStatus, ConfirmedError, GoldenCase,
@@ -1744,8 +1744,9 @@ export interface GameRules {
   league?: { prizes: number[]; group_size: [number, number]; anomaly: { median_factor: number; min_xp: number } };
   /** XP за дуэль: победа 30, ничья 15, участие 10; не больше daily_cap (3) наградных дуэлей в день на ученика */
   duel?: { win: number; draw: number; participation: number; daily_cap: number };
-  /** XP участнику парного урока с вкладом (по умолчанию 25) */
-  pair_lesson?: { xp: number };
+  /** XP участнику урока вдвоём, доведённого до цели (`finished`), при ≥ min_turns своих ходов (25 XP, 1 ход);
+   *  не больше daily_cap (3) награждаемых уроков в день на ученика — повторное ревью спринта 7, Н4 */
+  pair_lesson?: { xp: number; min_turns: number; daily_cap: number };
 }
 
 export type RulesStatus = "draft" | "active" | "archived";
@@ -1990,7 +1991,10 @@ export interface AdminSocialCard {
   user_id: string;
   member_id: string;
   nickname: string | null;
-  /** null — профиль сообщества ещё не создан */
+  /** null — профиль сообщества ещё не создан. Решение по F7-20 (ревью спринта 7): код друга — ключ поиска ученика,
+   *  поэтому сотруднику без `moderation.manage` admin-bff отдаёт маску `TH-••••-XXXX` (видны последние 4 символа),
+   *  с `moderation.manage` — полностью. Маскирует сервер (admin-bff, по эффективным правам сессии), не UI; то же
+   *  правило — для любого ответа admin-bff с кодом друга. */
   friend_code: string | null;
   game_profile_hidden: boolean;
   nickname_changed_at: string | null;
@@ -2183,6 +2187,9 @@ export interface AdminReferralRow {
   minutes_total: number;
   risk_flags: ReferralRiskFlag[];
   reject_code: ReferralRejectCode | null;
+  /** исход ack gamification: rewarded — награда кампании; legacy — выдана раньше по правилу спринта 6;
+   *  inviter_capped — пригласивший упёрся в месячный лимит gamification (status capped); null — подтверждения нет */
+  reward_outcome: ReferralRewardOutcome | null;
   qualified_at: string | null;
   decided_by: StaffRef | null;
   decided_at: string | null;

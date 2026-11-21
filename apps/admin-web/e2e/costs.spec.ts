@@ -144,3 +144,22 @@ test("overview: the lessons and ai blocks are independent; attention links go to
   await expect(page.getByTestId("qf-flag")).toHaveValue("human_review");
   await expect(page.locator('[data-testid^="qa-row-"]')).toHaveCount(1);
 });
+
+test("sprint 7: the limit of one pair room — 0…the month, saved with the other limits (step-up)", async ({ page }) => {
+  const bff = await openAs(page, "ops@tilhero.local", "#/costs");
+  await expect(page.getByTestId("csf-room_cap_usd")).toHaveValue("0.1");
+  await expect(page.getByTestId("cs-settings")).toContainText("исчерпан — комната идёт по сценарию с выбором реплик");
+  await page.getByTestId("csf-room_cap_usd").fill("25");
+  await page.getByTestId("csf-save").click();
+  await expect(page.getByTestId("cs-settings")).toContainText("Не больше месячного потолка");
+  await page.getByTestId("csf-room_cap_usd").fill("0.2");
+  await page.getByTestId("csf-save").click();
+  const sd = page.getByTestId("csf-dialog");
+  await expect(sd).toContainText("парная комната $0,2");
+  await sd.locator("#cmd-reason").fill("Коучу парного урока не хватает 10 центов");
+  await sd.getByTestId("confirm-ok").click();
+  await typeOtp(page, "stepup", TOTP);
+  await expect(page.getByTestId("toasts")).toContainText("Лимиты сохранены");
+  expect(bff.calls("PUT", "/ai/budget").at(-1)!.body).toMatchObject({ room_cap_usd: 0.2, monthly_cap_usd: 20 });
+  expect(bff.ai.budget.room_cap_usd).toBe(0.2);
+});

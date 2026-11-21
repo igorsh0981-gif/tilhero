@@ -1,4 +1,4 @@
-import type { DiagnosticResult, LessonSummary, ReviewSummary } from "@tilhero/contracts/bff";
+import type { DiagnosticResult, LessonSummary, MemberId, ReviewSummary } from "@tilhero/contracts/bff";
 import type { Localized } from "@tilhero/contracts/content";
 import { useCallback, useMemo, useState } from "react";
 import type { AppRoute } from "../tg/deeplink";
@@ -34,7 +34,8 @@ export type Pushed =
   | { name: "languages" }
   // sprint 4
   | { name: "lessonCard"; id: string }
-  | { name: "player"; sessionId: string }
+  /** duelId (sprint 7) — the tasks of a duel: the end of the player leads back to the duel, not to a lesson summary */
+  | { name: "player"; sessionId: string; duelId?: string }
   /** fresh — just finished in the player (sprint 6: the rewards of the game are shown and polled only then) */
   | { name: "lessonSummary"; sessionId: string; summary?: LessonSummary; fresh?: boolean }
   | { name: "appeal"; evaluationId: string; title: Localized }
@@ -51,7 +52,21 @@ export type Pushed =
   | { name: "shop" }
   | { name: "gameHistory" }
   | { name: "badges" }
-  | { name: "gameSettings" };
+  | { name: "gameSettings" }
+  // sprint 7: friends (a child — «Моя семья»), blocks, sanctions, leagues of the week, duels, the pair lesson, referrals
+  | { name: "friends" }
+  | { name: "blocked" }
+  | { name: "sanctions" }
+  | { name: "leagues"; tab?: "friends" | "family" | "general" }
+  | { name: "leagueHistory" }
+  | { name: "duels" }
+  | { name: "duel"; id: string }
+  | { name: "duelReview"; sessionId: string; duelId: string }
+  | { name: "pairRooms" }
+  | { name: "pairInvite"; partner?: MemberId; partnerLabel?: string }
+  | { name: "pairRoom"; id: string }
+  | { name: "pairReport"; id: string }
+  | { name: "referrals" };
 
 export type PracticeTab = "scenarios" | "media" | "reading";
 
@@ -91,12 +106,17 @@ const ROUTE_SCREEN: Partial<Record<AppRoute, Pushed>> = {
   game_history: { name: "gameHistory" },
   game_settings: { name: "gameSettings" },
   reading: { name: "practice", tab: "reading" },
+  // sprint 7
+  friends: { name: "friends" },
+  leagues: { name: "leagues" },
+  duels: { name: "duels" },
+  referrals: { name: "referrals" },
 };
 /** Routes that open a tab root: the skill map lives on the «Прогресс» tab, the dictionary (release 6.1) is the root
  *  of the «Словарь» tab. */
 const ROUTE_TAB: Partial<Record<AppRoute, Tab>> = { skills: "progress", dictionary: "review" };
 /** Routes into the game: when the operator switched the game off (flag `game`), they lead Home. */
-export const GAME_ROUTES: readonly AppRoute[] = ["heroes", "shop", "badges", "game_history", "game_settings"];
+export const GAME_ROUTES: readonly AppRoute[] = ["heroes", "shop", "badges", "game_history", "game_settings", "leagues", "duels"];
 export const routeAllowed = (r: AppRoute, gameOn: boolean): AppRoute => (!gameOn && GAME_ROUTES.includes(r) ? "home" : r);
 /** Sprint 5: route_review (the evening notification reviews_due, «Что нового») opens «Повторение дня» above the
  *  «Словарь» tab — «Назад» lands in the dictionary. */

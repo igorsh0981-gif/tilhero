@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -12,7 +14,7 @@ import pytest
 from sqlalchemy import text
 
 from tilhero_common.app import Runtime
-from tilhero_common.internal_auth import HEADER, verify_token
+from tilhero_common.internal_auth import HEADER, Actor, issue_token, verify_token
 from tilhero_common.messaging import Envelope, InMemoryBus, make_envelope
 from tilhero_common.testing import (
     TEST_ADMIN_URL,
@@ -30,17 +32,41 @@ SERVICE_DIR = str(Path(__file__).resolve().parents[1])
 SCHEDULER_TOKEN = "s" * 43
 SECRET = "t" * 40
 APP_LINK = "https://t.me/tilhero_test_bot/app"
+MEMBER_KEY = "member-id-key-for-tests-0123456789abcdef"
+STAFF_PERMS = ("social.read", "moderation.manage", "referral.read", "referral.manage", "dashboard.read")
 _PUBLIC = re.compile(r"^/internal/v1/users/([0-9a-f-]{36})/public$")
 
 
 def make_settings(**kw: Any) -> Settings:
     base: dict[str, Any] = {"env": "test", "internal_jwt_secret": SECRET, "scheduler_token": SCHEDULER_TOKEN,
-                            "telegram_app_link": APP_LINK, "identity_consent_url": "http://identity-consent"}
+                            "telegram_app_link": APP_LINK, "identity_consent_url": "http://identity-consent",
+                            "member_id_key": MEMBER_KEY}
     base.update(kw)
     return Settings(**base)
 
 
 DEFAULT_PURPOSES = ("terms", "privacy", "learning", "social")
+
+
+# Поля, которые social уже публикует, а схему добавляет другой поток (gen_event_schemas.py — агент B). Пока схема
+# поля не знает, payload проверяется без него (и поле — по типу); как только схема обновлена — полная строгая проверка.
+PENDING_SCHEMA_FIELDS: dict[str, dict[str, type]] = {
+    "social.referral.qualified.v1": {"inviter_monthly_cap": int},
+}
+
+
+def conforms(e: Envelope) -> None:
+    pending = PENDING_SCHEMA_FIELDS.get(e.event_type, {})
+    path = Path(__file__).resolve().parents[3] / "packages" / "contracts" / "events" / f"{e.event_type}.schema.json"
+    known = set(json.loads(path.read_text())["properties"]) if path.exists() else set()
+    missing = {k: t for k, t in pending.items() if k not in known}
+    if not missing:
+        assert_event_conforms(e)
+        return
+    for field, typ in missing.items():
+        assert isinstance(e.payload.get(field), typ), (e.event_type, field)
+    assert_event_conforms(e.model_copy(update={"payload": {k: v for k, v in e.payload.items()
+                                                           if k not in missing}}))
 
 
 class IdentityStub:
@@ -92,6 +118,7 @@ class Env:
         self.identity = identity
         self.now = datetime(2026, 11, 16, 8, 0, tzinfo=UTC)
         app.state.clock = lambda: self.now
+        runtime.clock = lambda: self.now  # type: ignore[attr-defined]  # часы потребителей (рефералы)
 
     def h(self, user: uuid.UUID | str | None = None, issuer: str = "telegram-bff") -> dict[str, str]:
         return internal_headers(self.settings, issuer=issuer, subject=str(user) if user else None)
@@ -108,7 +135,7 @@ class Env:
         await self.flush()
         found = self.bus.of_type(event_type)
         for e in found:
-            assert_event_conforms(e)
+            conforms(e)
             assert e.producer == "social"
         return found
 
@@ -139,6 +166,11 @@ class Env:
         return await self.c.post(f"/internal/v1/invites/{invite_id}/decline", headers=self.h(user))
 
     async def tick(self) -> dict[str, int]:
+        """Шаги приглашений спринта 1 (reminders, expired); всё — tick_all."""
+        out = await self.tick_all()
+        return {"reminders": out["reminders"], "expired": out["expired"]}
+
+    async def tick_all(self) -> dict[str, int]:
         r = await self.c.post("/internal/v1/invites:tick", headers=self.sched)
         assert r.status_code == 200, r.text
         return r.json()
@@ -155,13 +187,66 @@ class Env:
         await self.profile_event("user.profile.updated.v1", {
             "user_id": str(teen), "changed_fields": ["guardian_consent"], "guardian_consent": value})
 
+    # ---------------------------------------------------------------- спринт 7
 
-@pytest.fixture
-async def env():
-    schema = unique_schema("soc")
-    await create_schema(schema)
-    settings = make_settings(database_url=TEST_ADMIN_URL, db_schema=schema)
-    await migrate(SERVICE_DIR, settings)
+    def lh(self, learner: uuid.UUID, *, account: uuid.UUID | None = None, age_band: str | None = "18+",
+           issuer: str = "telegram-bff") -> dict[str, str]:
+        """Ученик спринта 7: sub — аккаунт, lrn — активный ученик, age_band — его полоса."""
+        extra: dict[str, Any] = {"lrn": str(learner)}
+        if age_band:
+            extra["age_band"] = age_band
+        return {HEADER: issue_token(SECRET, issuer=issuer, audience="social", subject=str(account or learner),
+                                    extra=extra)}
+
+    def svc(self, issuer: str = "gamification") -> dict[str, str]:
+        return {HEADER: issue_token(SECRET, issuer=issuer, audience="social")}
+
+    def staff(self, *perms: str, step_up: bool = False, issuer: str = "admin-bff", staff_id: str = "staff-1",
+              actor: bool = True) -> dict[str, str]:
+        a = Actor(id=staff_id, role="support", permissions=frozenset(perms or STAFF_PERMS), name="Модератор")
+        out = {HEADER: issue_token(SECRET, issuer=issuer, audience="social", actor=a if actor else None)}
+        if step_up:
+            out["X-Step-Up"] = "ok"
+        return out
+
+    def mid(self, user: uuid.UUID) -> str:
+        from tilhero_social.domain.members import member_id_of
+        return member_id_of(MEMBER_KEY.encode(), user)
+
+    async def community(self, user: uuid.UUID, **kw: Any) -> dict[str, Any]:
+        r = await self.c.get("/internal/v1/me/community", headers=self.lh(user, **kw))
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    async def nick(self, user: uuid.UUID, nickname: str, **kw: Any) -> httpx.Response:
+        return await self.c.put("/internal/v1/me/community/nickname", json={"nickname": nickname},
+                                headers=self.lh(user, **kw))
+
+    async def request_friend(self, user: uuid.UUID, target: uuid.UUID | str, key: str | None = None,
+                             **kw: Any) -> httpx.Response:
+        mid = target if isinstance(target, str) else self.mid(target)
+        if not isinstance(target, str):
+            await self.community(target)  # цель известна social (реестр member_id)
+        return await self.c.post("/internal/v1/me/friend-requests", json={"member_id": mid},
+                                 headers={**self.lh(user, **kw), "Idempotency-Key": key or str(uuid.uuid4())})
+
+    async def befriend(self, a: uuid.UUID, b: uuid.UUID) -> None:
+        r = await self.request_friend(a, b)
+        assert r.status_code == 201, r.text
+        r = await self.c.post(f"/internal/v1/me/friend-requests/{r.json()['request_id']}/accept", headers=self.lh(b))
+        assert r.status_code == 200, r.text
+
+    async def publish(self, event_type: str, payload: dict[str, Any], producer: str) -> Envelope:
+        ev = make_envelope(event_type, payload, producer=producer)
+        assert_event_conforms(ev)
+        await self.bus.publish(ev)
+        await self.flush()
+        return ev
+
+
+@asynccontextmanager
+async def open_env(settings: Settings) -> AsyncIterator[Env]:
+    """Приложение на уже подготовленной схеме (миграции прогнаны)."""
     bus = InMemoryBus()
     runtime = Runtime(settings, bus=bus)
     identity = IdentityStub()
@@ -170,6 +255,18 @@ async def env():
         client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://social")
         e = Env(settings, client, runtime, bus, app, identity)
         await e.flush()  # прогрев пула
+        try:
+            yield e
+        finally:
+            await client.aclose()
+
+
+@pytest.fixture
+async def env():
+    schema = unique_schema("soc")
+    await create_schema(schema)
+    settings = make_settings(database_url=TEST_ADMIN_URL, db_schema=schema)
+    await migrate(SERVICE_DIR, settings)
+    async with open_env(settings) as e:
         yield e
-        await client.aclose()
     await drop_schema(schema)

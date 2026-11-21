@@ -19,26 +19,27 @@ def after_privileged(roles_response, code: str) -> bool:
 
 async def test_staff_create_list_lookup(env: Env, root: Person) -> None:
     email = new_email("Support.Agent").upper()
-    r = await env.create_staff(root.actor, email, "support", "Алина")
+    r = await env.create_staff(root.actor, email, "auditor", "Алина")
     assert r.status_code == 201 and r.headers["cache-control"] == "no-store"
     body = r.json()
     temp = body["temporary_password"]
     assert len(temp) == 20 and any(c.isdigit() for c in temp) and any(c.isalpha() for c in temp)
     staff = body["staff"]
-    assert staff["email"] == email.lower() and staff["role"] == "support" and body["approval"] is None
+    assert staff["email"] == email.lower() and staff["role"] == "auditor" and body["approval"] is None
     assert staff["must_change_password"] is True and staff["mfa_enabled"] is False
     assert staff["created_by"] == root.staff_id and staff["status"] == "ACTIVE" and "auth_provider" not in staff
     env.leaks.append(temp)
     dup = await env.create_staff(root.actor, email, "analyst")
     assert _err(dup) == (409, "STAFF_EMAIL_EXISTS")
-    bad = await env.create_staff(root.actor, "not-an-email", "support")
+    bad = await env.create_staff(root.actor, "not-an-email", "analyst")
     assert _err(bad) == (422, "VALIDATION_ERROR")
     bad_role = await env.create_staff(root.actor, new_email(), "god")
     assert bad_role.status_code == 422
-    # вход временным паролем → смена пароля; support не привилегированная → без MFA
+    # вход временным паролем → смена пароля; auditor не привилегированная → без MFA (спринт 7: support — уже да)
     person = await env.first_login(email.lower(), temp)
     assert person.secret is None and person.principal["permissions"] == [
-        "dashboard.read", "users.read", "support.read", "support.reply", "game.read"]  # спринт 6: + game.read
+        "dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read",
+        "game.read", "social.read", "referral.read", "league.read", "room.read"]
     for i in range(3):
         await env.create_staff(root.actor, new_email(f"p{i}"), "analyst", f"Аналитик {i}")
     page1 = (await env.c.get("/admin/v1/staff?limit=2", headers=env.h(root.actor))).json()
@@ -131,6 +132,7 @@ async def test_self_action_and_last_super_admin(env: Env, root: Person) -> None:
     grant = await env.c.put("/admin/v1/roles/auditor",
                             json={"permissions": ["dashboard.read", "audit.read", "content.read", "ai.read",
                                                   "qa.read", "costs.read", "memory.read", "game.read",
+                                                  "social.read", "referral.read", "league.read", "room.read",
                                                   "staff.manage"],
                                   "reason": "Аудитор ведёт учётки"}, headers=env.h(me))
     assert grant.status_code == 202, grant.text
@@ -151,15 +153,15 @@ async def test_self_action_and_last_super_admin(env: Env, root: Person) -> None:
 
 
 async def test_four_eyes_role_grant(env: Env, root: Person, root2: Person) -> None:
-    created = await env.onboard(root.actor, new_email("ops"), "support")
+    created = await env.onboard(root.actor, new_email("ops"), "analyst")
     sv = created.principal["session_version"]
     r = await env.patch(root.actor, created.staff_id, {"role": "communications", "reason": "Перевод в коммуникации"})
     assert r.status_code == 202, r.text
     a = r.json()["approval"]
     assert a["status"] == "PENDING" and a["waived"] is None and a["kind"] == "staff.role_grant"
     assert a["requested_by"]["staff_id"] == root.staff_id and a["decided_by"] is None
-    assert a["summary"]["from_role"] == "support" and a["summary"]["to_role"] == "communications"
-    assert (await env.principal(created.staff_id)).json()["staff"]["role"] == "support"  # ещё не применено
+    assert a["summary"]["from_role"] == "analyst" and a["summary"]["to_role"] == "communications"
+    assert (await env.principal(created.staff_id)).json()["staff"]["role"] == "analyst"  # ещё не применено
     dup = await env.patch(root.actor, created.staff_id, {"role": "operations", "reason": "Ещё одна"})
     assert _err(dup) == (409, "APPROVAL_PENDING")
     same = await env.approve(root.actor, a["approval_id"])
@@ -252,15 +254,19 @@ async def test_role_matrix_update_via_approval(env: Env, root: Person, root2: Pe
     assert [r["code"] for r in roles["items"]] == ["super_admin", "operations", "communications", "support",
                                                      "methodist", "content_manager", "qa_analyst", "analyst",
                                                      "auditor", "read_only"]
-    assert len(roles["permissions"]) == 38
+    assert len(roles["permissions"]) == 46
     by = {r["code"]: r for r in roles["items"]}
     assert by["super_admin"]["staff_count"] == 2 and by["analyst"]["staff_count"] == 1
-    assert by["operations"]["privileged"] is True and by["support"]["privileged"] is False
+    # спринт 7: support получила moderation.manage (step-up) — привилегированна
+    assert by["operations"]["privileged"] is True and by["support"]["privileged"] is True
+    assert by["analyst"]["privileged"] is False
     assert by["operations"]["permissions"] == ["dashboard.read", "users.read", "support.read", "audit.read",
                                                "config.read", "config.edit", "config.publish", "content.read",
                                                "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read",
                                                "memory.manage", "game.read", "game.manage", "game.publish",
-                                               "wallet.adjust"]
+                                               "wallet.adjust", "social.read", "moderation.manage", "referral.read",
+                                               "referral.manage", "league.read", "league.manage", "room.read",
+                                               "room.manage"]
     assert by["methodist"]["privileged"] is True and by["content_manager"]["privileged"] is True
     assert by["qa_analyst"]["privileged"] is False
     assert by["read_only"]["name"] == {"ru": "Только просмотр", "en": "Read Only"}
@@ -301,14 +307,15 @@ async def test_role_matrix_update_via_approval(env: Env, root: Person, root2: Pe
 
 
 async def test_session_version_grows_and_principal_reflects(env: Env, root: Person, root2: Person) -> None:
-    person = await env.onboard(root.actor, new_email("sv"), "support")
+    person = await env.onboard(root.actor, new_email("sv"), "auditor")
     sv = (await env.principal(person.staff_id)).json()["session_version"]
     r = await env.patch(root.actor, person.staff_id, {"role": "analyst", "reason": "Перевод"})
     assert r.status_code == 200 and r.json()["role"] == "analyst"  # непривилегированная — сразу
     p = (await env.principal(person.staff_id)).json()
     assert p["session_version"] == sv + 1 and p["staff"]["role"] == "analyst"
     assert p["permissions"] == ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read",
-                                "memory.read", "game.read"]
+                                "memory.read", "game.read", "social.read", "referral.read", "league.read",
+                                "room.read"]
     name = await env.patch(root.actor, person.staff_id, {"display_name": "Новое имя", "reason": "Имя"})
     assert name.status_code == 200
     assert (await env.principal(person.staff_id)).json()["session_version"] == sv + 1  # имя не отзывает сессии
@@ -347,5 +354,5 @@ async def test_session_version_grows_and_principal_reflects(env: Env, root: Pers
     actions = await env.actions()
     assert {"staff.updated", "staff.password_reset"} <= set(actions)
     upd = [e.payload for e in await env.audit() if e.payload["action"] == "staff.updated"]
-    assert any(p["before"] == {"role": "support"} and p["after"] == {"role": "analyst"} and p["reason"] == "Перевод"
+    assert any(p["before"] == {"role": "auditor"} and p["after"] == {"role": "analyst"} and p["reason"] == "Перевод"
                for p in upd)

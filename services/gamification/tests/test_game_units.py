@@ -13,11 +13,21 @@ import pytest
 from conftest import SERVICE_DIR
 
 from tilhero_gamification.domain.common import plural_ru, render
-from tilhero_gamification.domain.rules import diff, level_of, stage_of, structural, validate, warnings
+from tilhero_gamification.domain.rules import (
+    diff,
+    level_of,
+    stage_of,
+    structural,
+    validate,
+    warnings,
+    with_social_sections,
+)
 from tilhero_gamification.images import ImageInvalid, inspect_image
 
-RULES: dict[str, Any] = json.loads((Path(SERVICE_DIR) / "migrations" / "seed" / "game_seed.json").read_text())[
+RULES_V1: dict[str, Any] = json.loads((Path(SERVICE_DIR) / "migrations" / "seed" / "game_seed.json").read_text())[
     "rules_v1"]
+# спринт 7: league / duel / pair_lesson обязательны (миграция 0002 дополняет активную версию)
+RULES: dict[str, Any] = with_social_sections(RULES_V1, None)
 
 
 def riff(chunk: bytes, data: bytes) -> bytes:
@@ -55,6 +65,8 @@ def test_webp_variants_and_png() -> None:
 
 def test_rules_validator_semantics() -> None:
     assert validate(RULES) == []
+    assert {(e["path"], e["code"]) for e in validate(RULES_V1)} == {
+        ("league", "required"), ("duel", "required"), ("pair_lesson", "required")}
 
     def errors(mutate: Any) -> set[tuple[str, str]]:
         p = copy.deepcopy(RULES)
@@ -73,6 +85,21 @@ def test_rules_validator_semantics() -> None:
     assert ("earn.lesson.xp", "range") in errors(lambda p: p["earn"]["lesson"].__setitem__("xp", -1))
     assert ("caps.til_per_day", "cap_below_reward") in errors(lambda p: p["caps"].__setitem__("til_per_day", 9))
     assert ("badges.streak", "not_increasing") in errors(lambda p: p["badges"].__setitem__("streak", [7, 7]))
+    # спринт 7: лиги, дуэли, парные уроки
+    assert ("league.prizes", "order") in errors(lambda p: p["league"].__setitem__("prizes", [20, 30, 50]))
+    assert ("league.prizes[0]", "range") in errors(lambda p: p["league"].__setitem__("prizes", [10_001]))
+    assert ("league.prizes", "length") in errors(lambda p: p["league"].__setitem__("prizes", []))
+    assert ("league.group_size", "order") in errors(lambda p: p["league"].__setitem__("group_size", [30, 20]))
+    assert ("league.group_size[1]", "range") in errors(lambda p: p["league"].__setitem__("group_size", [20, 51]))
+    assert ("league.group_size", "length") in errors(lambda p: p["league"].__setitem__("group_size", [20]))
+    assert ("league.anomaly.median_factor", "range") in errors(
+        lambda p: p["league"]["anomaly"].__setitem__("median_factor", 0))
+    assert ("duel", "order") in errors(lambda p: p["duel"].__setitem__("draw", 40))
+    assert ("duel.daily_cap", "range") in errors(lambda p: p["duel"].__setitem__("daily_cap", 51))
+    assert ("pair_lesson.xp", "range") in errors(lambda p: p["pair_lesson"].__setitem__("xp", 10_001))
+    assert ("pair_lesson.min_turns", "range") in errors(lambda p: p["pair_lesson"].__setitem__("min_turns", 0))
+    assert ("pair_lesson.daily_cap", "range") in errors(lambda p: p["pair_lesson"].__setitem__("daily_cap", 21))
+    assert ("duel.bonus", "unknown_key") in errors(lambda p: p["duel"].__setitem__("bonus", 1))
 
     def dup(p: dict[str, Any]) -> None:
         p["quests"]["templates"][1]["code"] = p["quests"]["templates"][0]["code"]

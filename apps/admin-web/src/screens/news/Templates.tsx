@@ -20,7 +20,8 @@ import { errMeta, errText } from "../../ui/errors";
 import { checkTexts, cloneTexts, issuesIn, LANGS, normalizeTexts, sameJson, samples, serverIssues, substitute, TEXT_LIMITS, type Issues } from "./catalog";
 import { PreviewControls, TelegramMessage, TextInput, useInsertAtCaret } from "./parts";
 
-export const TEMPLATE_CATEGORIES: ReadonlyArray<Exclude<NotificationCategory, "service">> = ["reminders", "missed", "social", "support", "product"];
+/** sprint 7: + game (leagues, duels; the category switchable by the learner like the others) */
+export const TEMPLATE_CATEGORIES: ReadonlyArray<Exclude<NotificationCategory, "service">> = ["reminders", "missed", "social", "game", "support", "product"];
 const VER_TONE: Record<TemplateVersion["status"], Tone> = { active: "good", draft: "warn", archived: "neutral" };
 
 type Detail = TemplateInfo & { versions: TemplateVersion[] };

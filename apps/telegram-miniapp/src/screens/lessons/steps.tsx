@@ -525,7 +525,7 @@ export function RoleplayEndView({ api, step, top, error, chat }: StepProps<Rolep
 }
 
 /* ---------------------------------------------------------------- done */
-export function DoneView({ api, kid, top, error, onFinish }: StepProps<Extract<LessonStep, { type: "done" }>> & { onFinish: () => void }) {
+export function DoneView({ api, kid, top, error, onFinish, duel }: StepProps<Extract<LessonStep, { type: "done" }>> & { onFinish: () => void; duel?: boolean }) {
   const { t } = useI18n();
   const finishing = api.st.phase === "finishing";
   return (
@@ -535,14 +535,14 @@ export function DoneView({ api, kid, top, error, onFinish }: StepProps<Extract<L
       testId="pl-done"
       foot={
         <Btn busy={finishing} onClick={onFinish} data-testid="pl-finish">
-          {t("pl.done.finish")}
+          {duel ? t("du.done.finish") : t("pl.done.finish")}
         </Btn>
       }
     >
       <div className="stack lp-done center">
         <Hero src={kid ? HERO.myatik : HERO.voltUp} alt="" />
-        <h2 className="h1">{t("pl.done.title")}</h2>
-        <p className="sub">{finishing ? t("pl.finishing") : t("pl.done.text")}</p>
+        <h2 className="h1">{duel ? t("du.done.title") : t("pl.done.title")}</h2>
+        <p className="sub">{finishing ? t("pl.finishing") : duel ? t(kid ? "du.done.textKid" : "du.done.text") : t("pl.done.text")}</p>
       </div>
     </StepFrame>
   );

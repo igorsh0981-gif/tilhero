@@ -31,7 +31,8 @@ import { staffRoutes } from "./routes/staff.js";
 import { supportRoutes } from "./routes/support.js";
 import { SessionStore } from "./sessions.js";
 import { gameRoutes, registerAssetParser } from "./routes/game.js";
-import { DomainClient, GAME_SERVICE, SERVICE_NAME, createDomains } from "./upstream.js";
+import { socialRoutes } from "./routes/social.js";
+import { DomainClient, GAME_SERVICE, SERVICE_NAME, SOCIAL_SERVICE, createDomains } from "./upstream.js";
 
 export interface AppDeps {
   redis?: Redis;
@@ -194,19 +195,25 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
     ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
     onFailure,
   });
-  // спринт 6: gamification необязателен — без GAMIFICATION_URL маршруты игры отвечают 503, обзор — блок недоступен
-  const gamification = config.gamificationUrl
-    ? new DomainClient({
-        target: GAME_SERVICE,
-        baseUrl: config.gamificationUrl,
-        key: keyRing,
-        timeoutMs: config.upstreamTimeoutMs,
-        retries: config.upstreamRetries,
-        ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
-        onFailure,
-      })
-    : null;
-  if (!gamification) log.warn({ upstream: GAME_SERVICE }, "GAMIFICATION_URL is not set: game routes respond 503");
+  // необязательные домены: без адреса их маршруты отвечают 503, блок обзора недоступен, остальная админка работает
+  const optionalClient = (target: string, baseUrl: string | null, variable: string): DomainClient | null => {
+    if (!baseUrl) {
+      log.warn({ upstream: target }, `${variable} is not set: ${target} routes respond 503`);
+      return null;
+    }
+    return new DomainClient({
+      target,
+      baseUrl,
+      key: keyRing,
+      timeoutMs: config.upstreamTimeoutMs,
+      retries: config.upstreamRetries,
+      ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+      onFailure,
+    });
+  };
+  // спринт 6: gamification (игра, спринт 7 — ещё лиги и дуэли); спринт 7: social (друзья, модерация, рефералы)
+  const gamification = optionalClient(GAME_SERVICE, config.gamificationUrl, "GAMIFICATION_URL");
+  const social = optionalClient(SOCIAL_SERVICE, config.socialUrl, "SOCIAL_URL");
   const ctx: BffContext = {
     config,
     redis,
@@ -217,6 +224,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
     limiter: createLimiter(redis, config, log),
     domains,
     gamification,
+    social,
     principals: new PrincipalCache(redis, config.redisKeyPrefix, config.session.principalCacheSeconds, domains.adminIdentity, store),
     names: new StaffNames(domains.adminIdentity, log),
     log,
@@ -280,6 +288,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   // спринт 6: игра и герои (gamification); сырое тело картинки — только на маршруте загрузки
   registerAssetParser(app);
   gameRoutes(app, ctx);
+  // спринт 7: социальное — друзья и жалобы, модерация, рефералы (social), лиги и дуэли (gamification), парные комнаты
+  // (lessons)
+  socialRoutes(app, ctx);
 
   app.addHook("onClose", async () => {
     redis.off("error", onRedisError);

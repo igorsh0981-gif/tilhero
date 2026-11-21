@@ -11,6 +11,7 @@ import "./styles/content.css";
 import "./styles/ai.css";
 import "./styles/memory.css";
 import "./styles/game.css";
+import "./styles/social.css";
 import { App } from "./App";
 import { I18nProvider, normLang, type Lang } from "./i18n";
 import { prefs } from "./lib/storage";

@@ -8,6 +8,9 @@
 Начисление активности (§1.2): множитель — максимум одного опубликованного события недели, активного сейчас, с
 подходящей аудиторией (округление вниз); дневной лимит `caps` — по подтверждённым операциям активностей и заданий
 местного дня: превышение урезает сумму до остатка (`capped = true`), нулевой остаток — без операции.
+
+Спринт 7: операция XP с reason из WEEK_REASONS получает неделю лиг (`league_week`, weeks.attribute — под
+разделяемой блокировкой недели): по ней считаются «XP недели» лиг друзей, семьи и общей.
 """
 
 from __future__ import annotations
@@ -22,10 +25,12 @@ from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tilhero_gamification.domain import weeks
 from tilhero_gamification.domain.common import (
     ACTIVITY_REASONS,
     CAPPED_REASONS,
     LEVEL_REACHED,
+    WEEK_REASONS,
     audience_of,
     balance_negative,
     emit_event,
@@ -58,6 +63,13 @@ _STAT_BY_OP: dict[tuple[str, str], str] = {
     ("referral_bonus", "freeze"): "freezes_granted",
     ("shop", "freeze"): "freezes_bought",
     ("streak_freeze", "freeze"): "freezes_used",
+    # спринт 7
+    ("duel", "xp"): "earned_xp",
+    ("pair_lesson", "xp"): "earned_xp",
+    ("league_prize", "til"): "earned_til",
+    ("referral_bonus", "til"): "earned_til",
+    ("referral_welcome", "til"): "earned_til",
+    ("referral_welcome", "freeze"): "freezes_granted",
 }
 
 
@@ -93,6 +105,7 @@ class Turn:
     effects: Effects = field(default_factory=Effects)
     _events: list[GameEvent] | None = None
     _seq: int = 0
+    _week: date | None = None
 
     @property
     def user_id(self) -> uuid.UUID:
@@ -154,6 +167,12 @@ class Turn:
                 Ledger.reason.in_(reasons), Ledger.status == "confirmed"))
         return int(total or 0)
 
+    async def league_week(self) -> date:
+        """Неделя лиг для XP этого хода (по времени события; закрывающаяся неделя → следующая)."""
+        if self._week is None:
+            self._week = await weeks.attribute(self.session, self.settings, self.moment, self.now)
+        return self._week
+
     # ---------------------------------------------------------------- проводка
 
     async def post(self, *, currency: str, amount: int, reason: str, key: str, source_kind: str, source_ref: str,
@@ -168,6 +187,9 @@ class Turn:
             raise balance_negative(currency, balance, amount)
         op_id = uuid.uuid4()
         sid = session_id if session_id is not None else (self.session_id if use_session else None)
+        # ручные операции сотрудника (source_kind staff — в т. ч. с reason duel при переоценке) в XP недели не идут
+        league_week = (await self.league_week() if currency == "xp" and amount > 0 and reason in WEEK_REASONS
+                       and source_kind != "staff" else None)
         values: dict[str, Any] = {
             "op_id": op_id, "user_id": self.user_id, "currency": currency, "amount": amount, "reason": reason,
             "source_kind": source_kind, "source_ref": source_ref[:200], "source_session_id": sid,
@@ -175,6 +197,7 @@ class Turn:
             "status": "confirmed", "actor": actor, "comment": comment, "idempotency_key": key[:200],
             # операции одного хода — в порядке проводки (история сортируется по created_at, op_id)
             "reversal_of": reversal_of, "created_at": self.now + timedelta(microseconds=self._seq),
+            "league_week": league_week,
         }
         inserted = (await self.session.execute(
             insert(Ledger).values(**values)

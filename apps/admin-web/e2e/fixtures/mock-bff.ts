@@ -30,6 +30,7 @@ import { ContentStore } from "./content-bff";
 import { AiStore, type AiScenario } from "./ai-bff";
 import { MemoryStore, type MemoryScenario } from "./memory-bff";
 import { GameStore, type GameScenario } from "./game-bff";
+import { SocialStore, type SocialScenario } from "./social-bff";
 import * as CD from "./content-data";
 
 export interface Scenario {
@@ -54,6 +55,8 @@ export interface Scenario {
   memory?: MemoryScenario;
   /** sprint 6: the game (hero in use, a draft conflict, the stats down, the ledger page size) */
   game?: GameScenario;
+  /** sprint 7: «Сообщество» (the dashboard block or its duel / room counters down, a campaign draft conflict, page size) */
+  social?: SocialScenario;
   /** the audit log cannot be written: reveal → 503 AUDIT_UNAVAILABLE */
   auditDown?: boolean;
   /** no ADMIN_TEST_CHAT_IDS in notifications */
@@ -158,6 +161,7 @@ export class MockBff {
   ai: AiStore;
   memory: MemoryStore;
   game: GameStore;
+  social: SocialStore;
   session: Session | null = null;
   versions: Record<ConfigApp, ConfigVersion[]>;
   activations: Record<ConfigApp, ConfigActivation[]>;
@@ -176,6 +180,7 @@ export class MockBff {
     this.ai = new AiStore(sc.ai ?? {});
     this.memory = new MemoryStore(sc.memory ?? {});
     this.game = new GameStore(sc.game ?? {});
+    this.social = new SocialStore(sc.social ?? {});
     if (sc.singleSuperAdmin) this.accounts = this.accounts.filter((a) => a.staff.staff_id !== F.ID.admin2);
     if (sc.stalled) {
       const c = this.campaigns.find((x) => x.campaign_id === "e1000000-0000-4000-8000-000000000002")!;
@@ -394,6 +399,8 @@ export class MockBff {
       memory: this.sc.memory?.statsDown ? { available: false, data: null, service: "memory" } : blk("memory", "memory", this.memory.stats(period)),
       // sprint 6: the game block (gamification); its failure never breaks the overview
       game: ((st) => (st ? blk("game", "gamification", st) : { available: false, data: null, service: "gamification" }))(this.game.stats(period)),
+      // sprint 7: the community block (social; duels and rooms counters — null when gamification / lessons are down)
+      social: ((st) => (st ? { available: true, data: st } : { available: false, data: null, service: "social" }))(this.social.stats(period)),
     };
   }
 
@@ -1116,6 +1123,8 @@ export class MockBff {
           err: (st: number, code: string, details?: Record<string, unknown>) => err(st, code, details),
           binary: (st: number, buf: Buffer, ct: string) => route.fulfill({ status: st, contentType: ct, body: buf, headers: { "Cache-Control": "private, max-age=3600" } }),
         };
+        // sprint 7 before the game: /game/leagues* and /game/duels* belong to «Сообщество»
+        if (await this.social.handle(method, path, body, q, idemKey, headers, ctx)) return;
         if (await this.game.handle(method, path, body, q, idemKey, req.postDataBuffer(), headers, ctx)) return;
         if (await this.ai.handle(method, path, body, q, idemKey, headers, ctx)) return;
         if (await this.memory.handle(method, path, body, q, headers, ctx)) return;

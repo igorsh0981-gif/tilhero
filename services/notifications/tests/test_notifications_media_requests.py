@@ -239,15 +239,17 @@ async def test_foreign_producer_deleted_user_and_invalid_payload(env) -> None:
 
 SPRINT3_ROUTES = ("diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages")
 RELEASE61_ROUTES = ("heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading")
+SPRINT7_ROUTES = ("friends", "leagues", "duels", "referrals")
 
 
 def test_campaign_routes_include_sprint3_and_catalog() -> None:
     assert set(SPRINT3_ROUTES) <= set(ROUTES) and set(RELEASE61_ROUTES) <= set(ROUTES)
+    assert set(SPRINT7_ROUTES) <= set(ROUTES)
     catalog = json.loads(CATALOG_JSON.read_text())
     assert set(catalog["routes"]) == set(ROUTES)  # общий каталог маршрутов принимается целиком и только он
     texts = {"ru": {"title": "Заголовок", "body": "Текст", "button": None},
              "uz": {"title": "Sarlavha", "body": "Matn", "button": None}}
-    for route in SPRINT3_ROUTES + RELEASE61_ROUTES:
+    for route in SPRINT3_ROUTES + RELEASE61_ROUTES + SPRINT7_ROUTES:
         assert check_content("Рассылка", texts, route, {}) == [], route
         assert render_campaign("ru", texts, route, None).startapp == f"route_{route}"
     assert check_content("Рассылка", texts, "media-requests", {}) == [{"path": "route", "reason": "invalid"}]

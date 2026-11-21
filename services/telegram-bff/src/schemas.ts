@@ -38,6 +38,12 @@ export const UUID_PATTERN = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a
 export const UUID_RE = new RegExp(UUID_PATTERN);
 const Uuid = Type.String({ pattern: UUID_PATTERN, description: "UUID" });
 
+/** Спринт 7: другой ученик в API ученика — `mb_` + 22 символа base64url (HMAC-SHA256 от user_id, INTERNAL_API §0).
+ *  Сверяется и на входе, и в ответах доменов: «сырой» UUID вместо member_id — ответ не по контракту (утечка user_id). */
+export const MEMBER_ID_PATTERN = "^mb_[A-Za-z0-9_-]{22}$";
+export const MEMBER_ID_RE = new RegExp(MEMBER_ID_PATTERN);
+const MemberId = Type.String({ pattern: MEMBER_ID_PATTERN, description: "member_id: mb_ + 22 символа base64url" });
+
 // ---------- Errors ----------
 export const ErrorBodySchema = Type.Object({
   code: Type.String(),
@@ -142,7 +148,7 @@ export const SwitchLearnerRequestSchema = Type.Object({ learner_id: Uuid, pin: T
 assertSame<Same<Static<typeof SwitchLearnerRequestSchema>, C.SwitchLearnerRequest>>();
 
 // ---------- Профиль, возраст, дети ----------
-export const NOTIFICATION_CATEGORY_KEYS = ["reminders", "missed", "social", "support", "product"] as const;
+export const NOTIFICATION_CATEGORY_KEYS = ["reminders", "missed", "social", "support", "product", "game"] as const;
 
 export const NotificationCategoriesSchema = Type.Object({
   reminders: Type.Boolean(),
@@ -150,6 +156,8 @@ export const NotificationCategoriesSchema = Type.Object({
   social: Type.Boolean(),
   support: Type.Boolean(),
   product: Type.Boolean(),
+  /** спринт 7: игра и лиги (по умолчанию включена — нет поля у identity → true, views.ts settingsView) */
+  game: Type.Boolean(),
 });
 assertSame<Same<Static<typeof NotificationCategoriesSchema>, C.NotificationCategories>>();
 
@@ -189,6 +197,7 @@ export const NotificationsPatchSchema = Type.Object(
           social: Type.Optional(Type.Boolean()),
           support: Type.Optional(Type.Boolean()),
           product: Type.Optional(Type.Boolean()),
+          game: Type.Optional(Type.Boolean()),
         },
         strict,
       ),
@@ -383,7 +392,7 @@ export const DirectoryItemSchema = Type.Object({ code: Type.String(), label: Lab
 assertSame<Same<Static<typeof DirectoryItemSchema>, C.DirectoryItem>>();
 
 // ---------- Центр уведомлений ----------
-export const NOTIFICATION_CATEGORIES = ["reminders", "missed", "social", "support", "product", "service"] as const;
+export const NOTIFICATION_CATEGORIES = ["reminders", "missed", "social", "support", "product", "service", "game"] as const;
 const NotificationCategory = Enum(NOTIFICATION_CATEGORIES);
 assertSame<Same<Static<typeof NotificationCategory>, C.NotificationCategory>>();
 export const INBOX_TELEGRAM = ["sent", "scheduled", "in_app_only", "failed"] as const;
@@ -455,6 +464,8 @@ export const FamilySchema = Type.Object({
   members: Type.Array(
     Type.Object({
       user_id: Type.String(),
+      /** спринт 7: по нему член семьи вызывается на дуэль и зовётся в парный урок (social, как есть) */
+      member_id: MemberId,
       display_name: Type.String(),
       role: Enum(["owner", "adult", "teen", "child"]),
       is_me: Type.Boolean(),
@@ -473,6 +484,8 @@ export const NOTE_ROUTES = [
   "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
   // релиз 6.1
   "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
+  // спринт 7
+  "friends", "leagues", "duels", "referrals",
 ] as const;
 export const NOTE_ICONS = [
   "spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield", "globe", "trophy", "news",
@@ -1001,9 +1014,12 @@ export const MediaRequestListSchema = itemsOf(MediaRequestSchema);
 // (routes/lessons.ts); ответ Mini App собирается явно, поле за полем: ключей ответов в нём нет по построению.
 // =====================================================================================================================
 
-export const SESSION_KINDS = ["lesson", "scenario", "media", "review", "reading"] as const;
+/** Спринт 7: + duel — задания дуэли (без ИИ и независимой оценки; в истории GET /v1/sessions их нет). */
+export const SESSION_KINDS = ["lesson", "scenario", "media", "review", "reading", "duel"] as const;
 const SessionKind = Enum(SESSION_KINDS);
 assertSame<Same<Static<typeof SessionKind>, AI.SessionKind>>();
+/** Фильтр истории ?kind=: сессий дуэли в истории нет (bff.ts DuelSessionRequest) — duel → 422. */
+const HistoryKind = Enum(["lesson", "scenario", "media", "review", "reading"]);
 const SessionStatus = Enum(["ready", "in_progress", "paused", "completed", "failed", "cancelled"]);
 assertSame<Same<Static<typeof SessionStatus>, C.SessionStatus>>();
 const SessionStage = Enum(["retrieval", "explanation", "roleplay", "assessment", "summary", "listen", "exercises", "reading", "questions"]);
@@ -1309,7 +1325,7 @@ export const LessonHistoryPageSchema = pageOf(LessonHistoryItemSchema);
 assertSame<Same<Static<typeof LessonHistoryPageSchema>, C.Page<C.LessonHistoryItem>>>();
 export const HistoryQuerySchema = Type.Object(
   {
-    kind: Type.Optional(SessionKind),
+    kind: Type.Optional(HistoryKind),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, default: 20 })),
     cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   },
@@ -1692,6 +1708,8 @@ assertSame<Same<Static<typeof GameCurrency>, C.GameCurrency>>();
 const GameReason = Enum([
   "lesson", "scenario", "media", "reading", "review", "skill_demonstrated", "skill_retained", "quest", "quest_bonus",
   "registration_bonus", "referral_bonus", "streak_freeze", "shop", "manual", "reversal", "purchase",
+  // спринт 7
+  "duel", "pair_lesson", "league_prize", "referral_welcome",
 ]);
 assertSame<Same<Static<typeof GameReason>, C.GameReason>>();
 const HeroLine = Enum(["robot", "pet", "human"]);
@@ -1737,8 +1755,15 @@ export const GameSettingsSchema = Type.Object({
   quests_hidden: Type.Boolean(),
   celebrations: Enum(["full", "quiet"]),
   game_notifications: Type.Boolean(),
+  /** спринт 7: участие в общей лиге недели (14+, по умолчанию false) */
+  league_opt_in: Type.Boolean(),
 });
 assertSame<Same<Static<typeof GameSettingsSchema>, C.GameSettings>>();
+/** Настройки в ответе gamification: league_opt_in до спринта 7 домен не присылает — BFF отдаёт false (routes/game.ts). */
+export const GameSettingsDomainSchema = Type.Object({
+  ...GameSettingsSchema.properties,
+  league_opt_in: Type.Optional(Type.Boolean()),
+});
 /** PATCH /v1/game/settings — Partial<GameSettings>, хотя бы одно поле. */
 export const GameSettingsPatchSchema = Type.Object(
   {
@@ -1746,6 +1771,7 @@ export const GameSettingsPatchSchema = Type.Object(
     quests_hidden: Type.Optional(Type.Boolean()),
     celebrations: Type.Optional(Enum(["full", "quiet"])),
     game_notifications: Type.Optional(Type.Boolean()),
+    league_opt_in: Type.Optional(Type.Boolean()),
   },
   { ...strict, minProperties: 1 },
 );
@@ -1818,9 +1844,9 @@ export const PurchaseResultSchema = Type.Object({
 assertSame<Same<Static<typeof PurchaseResultSchema>, C.PurchaseResult>>();
 
 // ---------- Объекты с картинками: ответ Mini App (GameImage) и ответ домена (GameImageDomain) ----------
-const BadgeMetric = Enum(["lessons", "streak", "skills", "skill_retained", "reviews_cards", "readings", "freeze"]);
+const BadgeMetric = Enum(["lessons", "streak", "skills", "skill_retained", "reviews_cards", "readings", "freeze", "together"]);
 
-function gameShapes<I extends TSchema, P extends TSchema>(Image: I, PurchaseAvailable: P) {
+function gameShapes<I extends TSchema, P extends TSchema, S extends TSchema>(Image: I, PurchaseAvailable: P, Settings: S) {
   const ShopItemRef = Type.Object({
     code: Type.String(),
     kind: ShopItemKind,
@@ -1870,7 +1896,7 @@ function gameShapes<I extends TSchema, P extends TSchema>(Image: I, PurchaseAvai
     quests: DailyQuestsSchema,
     events: Type.Array(ActiveGameEventSchema),
     equipment: Type.Object({ background: Nullable(ShopItemRef), frame: Nullable(ShopItemRef) }),
-    settings: GameSettingsSchema,
+    settings: Settings,
     purchase_available: PurchaseAvailable,
   });
   const Heroes = Type.Object({ items: Type.Array(HeroView), selected: Nullable(Type.String()), stage: HeroStage });
@@ -1888,9 +1914,10 @@ function gameShapes<I extends TSchema, P extends TSchema>(Image: I, PurchaseAvai
 }
 
 /** Схемы ответов Mini App (сериализация по ним — только поля контракта). */
-export const GameView = gameShapes(GameImageSchema, Type.Literal(false));
-/** Схемы ответов gamification: картинки с sha256; purchase_available необязателен (BFF всегда отдаёт false). */
-export const GameDomain = gameShapes(GameImageDomainSchema, Type.Optional(Type.Boolean()));
+export const GameView = gameShapes(GameImageSchema, Type.Literal(false), GameSettingsSchema);
+/** Схемы ответов gamification: картинки с sha256; purchase_available необязателен (BFF всегда отдаёт false);
+ *  league_opt_in необязателен (до спринта 7 — false). */
+export const GameDomain = gameShapes(GameImageDomainSchema, Type.Optional(Type.Boolean()), GameSettingsDomainSchema);
 
 assertSame<Same<Static<typeof GameView.ShopItemRef>, C.ShopItemRef>>();
 assertSame<Same<Static<typeof GameView.HeroStageView>, C.HeroStageView>>();
@@ -1903,3 +1930,419 @@ assertSame<Same<Static<typeof GameView.Heroes>, { items: C.HeroView[]; selected:
 assertSame<Same<Static<typeof GameView.Badges>, { items: C.BadgeView[] }>>();
 assertSame<Same<Static<typeof GameView.Shop>, { items: C.ShopItemView[]; til_balance: number; freeze_stock: number; freeze_max: number }>>();
 assertSame<Same<Static<typeof GameView.Rewards>, C.SessionRewards>>();
+
+// =====================================================================================================================
+// Спринт 7 — социальное (bff.ts «Спринт 7», INTERNAL_API спринта 7 §0, §9). Ответы social, gamification и lessons
+// сверяются с этими схемами (src/check.ts) до ответа Mini App; сериализация — по ним же: наружу только поля контракта.
+// Другой ученик — только member_id (MEMBER_ID_PATTERN): «сырой» UUID в member_id — ответ не по контракту → 503.
+// Вход — additionalProperties: false; member_id, id сущностей (UUID), pair_id, scenario_id — по формату.
+// =====================================================================================================================
+
+/** Ник: 3..20, буквы, цифры, «_» (RU/UZ/EN-алфавиты и запрещённые слова проверяет social). Ajv — с флагом u. */
+export const NICKNAME_PATTERN = "^[\\p{L}\\p{N}_]+$";
+/** Поиск: точный ник или код друга (TH-XXXX-XXXX, дефисы и регистр — как угодно). */
+export const MEMBER_SEARCH_PATTERN = "^[\\p{L}\\p{N}_-]+$";
+const Cursor = Type.String({ minLength: 1, maxLength: 512 });
+const Place = Type.Integer({ minimum: 1 });
+const Version = Type.Integer({ minimum: 1 });
+const Fraction = Type.Number({ minimum: 0, maximum: 1 });
+/** Текст ученика (обжалование, жалоба): без управляющих символов, кроме перевода строки. */
+const LearnerText = (maxLength: number, minLength = 0) => Type.String({ minLength, maxLength, pattern: COMMENT_TEXT });
+
+export const CursorOnlyQuerySchema = Type.Object({ cursor: Type.Optional(Cursor) }, strict);
+export const MemberParamsSchema = Type.Object({ member_id: MemberId }, strict);
+
+// ---------- Профиль сообщества ----------
+const FriendsUnavailableReason = Enum(["kids", "guardian_consent", "consent"]);
+assertSame<Same<Static<typeof FriendsUnavailableReason>, C.FriendsUnavailableReason>>();
+export const SocialRestrictionsSchema = Type.Object({ social_ban: Type.Boolean(), social_ban_until: Nullable(IsoTime) });
+assertSame<Same<Static<typeof SocialRestrictionsSchema>, C.SocialRestrictions>>();
+export const CommunityProfileSchema = Type.Object({
+  member_id: MemberId,
+  nickname: Nullable(Type.String()),
+  friend_code: Type.String(),
+  game_profile_hidden: Type.Boolean(),
+  restrictions: SocialRestrictionsSchema,
+  nickname_change_available_at: Nullable(IsoTime),
+  friends_available: Type.Boolean(),
+  friends_unavailable_reason: Nullable(FriendsUnavailableReason),
+});
+assertSame<Same<Static<typeof CommunityProfileSchema>, C.CommunityProfile>>();
+export const NicknameRequestSchema = Type.Object({ nickname: Type.String({ minLength: 3, maxLength: 20, pattern: NICKNAME_PATTERN }) }, strict);
+assertSame<Same<Static<typeof NicknameRequestSchema>, C.NicknameRequest>>();
+/** PATCH /v1/community — хотя бы одно поле. */
+export const CommunityPatchSchema = Type.Object({ game_profile_hidden: Type.Optional(Type.Boolean()) }, { ...strict, minProperties: 1 });
+assertSame<Same<Static<typeof CommunityPatchSchema>, C.CommunityPatch>>();
+
+// ---------- Поиск, заявки, друзья, блокировки ----------
+const MemberRelation = Enum(["none", "friend", "request_out", "request_in", "self"]);
+assertSame<Same<Static<typeof MemberRelation>, C.MemberRelation>>();
+export const MemberCardSchema = Type.Object({
+  member_id: MemberId,
+  nickname: Nullable(Type.String()),
+  relation: MemberRelation,
+  request_id: Nullable(Uuid),
+});
+assertSame<Same<Static<typeof MemberCardSchema>, C.MemberCard>>();
+export const MemberSearchResultSchema = itemsOf(MemberCardSchema);
+assertSame<Same<Static<typeof MemberSearchResultSchema>, C.MemberSearchResult>>();
+export const MemberSearchQuerySchema = Type.Object({ q: Type.String({ minLength: 3, maxLength: 20, pattern: MEMBER_SEARCH_PATTERN }) }, strict);
+
+const FriendRequestStatus = Enum(["pending", "accepted", "declined", "cancelled", "expired"]);
+assertSame<Same<Static<typeof FriendRequestStatus>, C.FriendRequestStatus>>();
+export const FriendRequestCreateSchema = Type.Object({ member_id: MemberId }, strict);
+assertSame<Same<Static<typeof FriendRequestCreateSchema>, C.FriendRequestCreate>>();
+export const FriendRequestViewSchema = Type.Object({
+  request_id: Uuid,
+  direction: Enum(["in", "out"]),
+  member_id: MemberId,
+  nickname: Nullable(Type.String()),
+  status: FriendRequestStatus,
+  created_at: IsoTime,
+  decided_at: Nullable(IsoTime),
+});
+assertSame<Same<Static<typeof FriendRequestViewSchema>, C.FriendRequestView>>();
+export const FriendRequestPageSchema = pageOf(FriendRequestViewSchema);
+assertSame<Same<Static<typeof FriendRequestPageSchema>, C.Page<C.FriendRequestView>>>();
+export const FriendRequestsQuerySchema = Type.Object({ direction: Enum(["in", "out"]), cursor: Type.Optional(Cursor) }, strict);
+export const FriendRequestParamsSchema = Type.Object({ request_id: Uuid }, strict);
+export const FriendViewSchema = Type.Object({ member_id: MemberId, nickname: Nullable(Type.String()), since: IsoTime });
+assertSame<Same<Static<typeof FriendViewSchema>, C.FriendView>>();
+export const FriendPageSchema = pageOf(FriendViewSchema);
+assertSame<Same<Static<typeof FriendPageSchema>, C.Page<C.FriendView>>>();
+
+export const BlockRequestSchema = Type.Object({ member_id: MemberId }, strict);
+assertSame<Same<Static<typeof BlockRequestSchema>, C.BlockRequest>>();
+export const BlockViewSchema = Type.Object({ member_id: MemberId, nickname: Nullable(Type.String()), created_at: IsoTime });
+assertSame<Same<Static<typeof BlockViewSchema>, C.BlockView>>();
+export const BlocksResponseSchema = itemsOf(BlockViewSchema);
+assertSame<Same<Static<typeof BlocksResponseSchema>, C.BlocksResponse>>();
+
+// ---------- Жалобы, санкции, обжалование ----------
+export const COMPLAINT_SUBJECT_KINDS = ["user", "nickname", "friend_request", "invite", "duel", "pair_room"] as const;
+const ComplaintSubjectKind = Enum(COMPLAINT_SUBJECT_KINDS);
+assertSame<Same<Static<typeof ComplaintSubjectKind>, C.ComplaintSubjectKind>>();
+const ComplaintReason = Enum(["spam", "abuse", "inappropriate_nickname", "cheating", "other"]);
+assertSame<Same<Static<typeof ComplaintReason>, C.ComplaintReason>>();
+/** subject_id — id заявки, приглашения, дуэли или комнаты (UUID); для user и nickname — null (сверка — routes/social.ts). */
+export const ComplaintRequestSchema = Type.Object(
+  {
+    member_id: MemberId,
+    subject_kind: ComplaintSubjectKind,
+    subject_id: Nullable(Uuid),
+    reason: ComplaintReason,
+    comment: Type.Optional(LearnerText(500)),
+    block: Type.Optional(Type.Boolean()),
+  },
+  strict,
+);
+assertSame<Same<Static<typeof ComplaintRequestSchema>, C.ComplaintRequest>>();
+export const ComplaintResultSchema = Type.Object({ case_id: Uuid, created_at: IsoTime, blocked: Type.Boolean() });
+assertSame<Same<Static<typeof ComplaintResultSchema>, C.ComplaintResult>>();
+
+const SanctionKind = Enum(["warning", "social_ban", "nickname_reset"]);
+assertSame<Same<Static<typeof SanctionKind>, C.SanctionKind>>();
+const SanctionAppealStatus = Enum(["open", "upheld", "overturned"]);
+assertSame<Same<Static<typeof SanctionAppealStatus>, C.SanctionAppealStatus>>();
+export const SanctionAppealViewSchema = Type.Object({
+  appeal_id: Uuid,
+  status: SanctionAppealStatus,
+  text: Type.String(),
+  created_at: IsoTime,
+  decided_at: Nullable(IsoTime),
+  decision_note: Nullable(Type.String()),
+});
+assertSame<Same<Static<typeof SanctionAppealViewSchema>, C.SanctionAppealView>>();
+export const SanctionViewSchema = Type.Object({
+  sanction_id: Uuid,
+  kind: SanctionKind,
+  basis: Type.String(),
+  decided_at: IsoTime,
+  until: Nullable(IsoTime),
+  active: Type.Boolean(),
+  revoked_at: Nullable(IsoTime),
+  appeal: Nullable(SanctionAppealViewSchema),
+  can_appeal: Type.Boolean(),
+});
+assertSame<Same<Static<typeof SanctionViewSchema>, C.SanctionView>>();
+export const SanctionsResponseSchema = itemsOf(SanctionViewSchema);
+assertSame<Same<Static<typeof SanctionsResponseSchema>, C.SanctionsResponse>>();
+/** 10..1000 знаков (без пробелов по краям — routes/social.ts), перевод строки допустим. */
+export const SanctionAppealRequestSchema = Type.Object({ text: LearnerText(1000, 10) }, strict);
+assertSame<Same<Static<typeof SanctionAppealRequestSchema>, C.SanctionAppealRequest>>();
+export const SanctionParamsSchema = Type.Object({ sanction_id: Uuid }, strict);
+
+// ---------- Рефералы ----------
+const ReferralStatus = Enum(["invited", "diagnostic_done", "learning", "review", "qualified", "rewarded", "rejected", "expired", "capped"]);
+assertSame<Same<Static<typeof ReferralStatus>, C.ReferralStatus>>();
+const ReferralRejectCode = Enum(["not_new_user", "family_member", "window_expired", "review_rejected", "monthly_cap"]);
+assertSame<Same<Static<typeof ReferralRejectCode>, C.ReferralRejectCode>>();
+/** rewarded — начислена по кампании; legacy — по правилу спринта 6; inviter_capped — не начислена (лимит пригласившего) */
+const ReferralRewardOutcome = Enum(["rewarded", "legacy", "inviter_capped"]);
+assertSame<Same<Static<typeof ReferralRewardOutcome>, C.ReferralRewardOutcome>>();
+const ReferralRewardSchema = Type.Object({ freeze: Count, til: Count });
+assertSame<Same<Static<typeof ReferralRewardSchema>, C.ReferralReward>>();
+export const ReferralViewSchema = Type.Object({
+  referral_id: Uuid,
+  invitee_nickname: Nullable(Type.String()),
+  status: ReferralStatus,
+  progress: Type.Object({
+    diagnostic: Type.Boolean(),
+    diagnostic_required: Type.Boolean(),
+    lessons: Count,
+    lessons_required: Count,
+    days: Count,
+    days_required: Count,
+    window_ends_at: IsoTime,
+  }),
+  reward: Nullable(ReferralRewardSchema),
+  reward_outcome: Nullable(ReferralRewardOutcome),
+  reject_code: Nullable(ReferralRejectCode),
+  /** приглашение по прежней программе (принято до спринта 7) */
+  legacy: Type.Boolean(),
+  accepted_at: IsoTime,
+});
+assertSame<Same<Static<typeof ReferralViewSchema>, C.ReferralView>>();
+export const ReferralTermsSchema = Type.Object({
+  campaign_version: Version,
+  require_diagnostic: Type.Boolean(),
+  min_lessons: Count,
+  min_days: Count,
+  window_days: Count,
+  inviter_reward: ReferralRewardSchema,
+  invitee_reward: ReferralRewardSchema,
+  monthly_cap: Count,
+});
+assertSame<Same<Static<typeof ReferralTermsSchema>, C.ReferralTerms>>();
+export const ReferralsResponseSchema = Type.Object({
+  items: Type.Array(ReferralViewSchema),
+  next_cursor: Nullable(Type.String()),
+  terms: ReferralTermsSchema,
+  month: Type.Object({ qualified: Count, cap: Count }),
+});
+assertSame<Same<Static<typeof ReferralsResponseSchema>, C.ReferralsResponse>>();
+
+// ---------- Лиги, дуэли, парные комнаты: объекты с героем (картинка — как в спринте 6) ----------
+const LeagueLevelBand = Enum(["A0-A1", "A2", "B1+"]);
+assertSame<Same<Static<typeof LeagueLevelBand>, C.LeagueLevelBand>>();
+const GeneralLeagueUnavailableReason = Enum(["kids", "guardian_consent", "consent", "nickname_required", "restricted", "hidden"]);
+assertSame<Same<Static<typeof GeneralLeagueUnavailableReason>, C.GeneralLeagueUnavailableReason>>();
+const DuelStatus = Enum(["challenged", "declined", "expired", "accepted", "finished", "cancelled"]);
+assertSame<Same<Static<typeof DuelStatus>, C.DuelStatus>>();
+export const DuelScoreSchema = Type.Object({ correct: Count, total: Count });
+assertSame<Same<Static<typeof DuelScoreSchema>, C.DuelScore>>();
+export const DuelResultViewSchema = Type.Object({
+  outcome: Enum(["win", "loss", "draw"]),
+  technical: Type.Boolean(),
+  my_score: Nullable(DuelScoreSchema),
+  opponent_score: Nullable(DuelScoreSchema),
+  xp: Count,
+  version: Version,
+});
+assertSame<Same<Static<typeof DuelResultViewSchema>, C.DuelResultView>>();
+const PairRoomStatus = Enum(["invited", "declined", "expired", "cancelled", "waiting", "in_progress", "paused", "finished", "abandoned", "stopped"]);
+assertSame<Same<Static<typeof PairRoomStatus>, C.PairRoomStatus>>();
+const PairRole = Enum(["A", "B"]);
+assertSame<Same<Static<typeof PairRole>, C.PairRole>>();
+const PairRoomMode = Enum(["free", "choices"]);
+assertSame<Same<Static<typeof PairRoomMode>, C.PairRoomMode>>();
+const PairEndReason = Enum(["completed", "participant_left", "inactivity", "stopped"]);
+assertSame<Same<Static<typeof PairEndReason>, C.PairEndReason>>();
+const PairRoomEventKind = Enum(["joined", "left", "offline", "online", "paused", "resumed", "roles", "coach", "turn", "mode_changed", "finished", "stopped"]);
+assertSame<Same<Static<typeof PairRoomEventKind>, C.PairRoomEventKind>>();
+
+function socialShapes<I extends TSchema>(Image: I) {
+  const MemberHero = Type.Object({ code: Type.String(), stage: HeroStage, image: Image });
+  const StandingRow = Type.Object({
+    member_id: MemberId,
+    nickname: Nullable(Type.String()),
+    hero: Nullable(MemberHero),
+    xp: Count,
+    place: Place,
+    badges: Type.Array(Type.String()),
+    me: Type.Boolean(),
+  });
+  const Standings = Type.Object({ rows: Type.Array(StandingRow), me_row: Nullable(StandingRow), participants: Count, total_xp: Count });
+  const GeneralLeague = Type.Object({
+    opt_in: Type.Boolean(),
+    available: Type.Boolean(),
+    unavailable_reason: Nullable(GeneralLeagueUnavailableReason),
+    pair_id: Nullable(Type.String()),
+    level_band: Nullable(LeagueLevelBand),
+    group: Nullable(Standings),
+    prizes: Type.Array(Count),
+  });
+  const LeaguesView = Type.Object({ week: LocalDate, ends_at: IsoTime, friends: Nullable(Standings), family: Nullable(Standings), general: GeneralLeague });
+  const Opponent = Type.Object({ member_id: MemberId, nickname: Nullable(Type.String()), hero: Nullable(MemberHero) });
+  const DuelView = Type.Object({
+    duel_id: Uuid,
+    status: DuelStatus,
+    role: Enum(["challenger", "opponent"]),
+    opponent: Opponent,
+    pair_id: Type.String(),
+    level_band: LeagueLevelBand,
+    created_at: IsoTime,
+    accept_deadline: IsoTime,
+    play_deadline: Nullable(IsoTime),
+    my_session: Nullable(Type.Object({ session_id: Uuid, status: SessionStatus })),
+    my_played: Type.Boolean(),
+    opponent_played: Type.Boolean(),
+    can_accept: Type.Boolean(),
+    can_play: Type.Boolean(),
+    result: Nullable(DuelResultViewSchema),
+    finished_at: Nullable(IsoTime),
+  });
+  const PairRoomView = Type.Object({
+    room_id: Uuid,
+    status: PairRoomStatus,
+    side: Enum(["inviter", "invitee"]),
+    partner: Opponent,
+    pair_id: Type.String(),
+    scenario: Type.Object({ scenario_id: Type.String(), title: Localized, level: Band }),
+    mode: PairRoomMode,
+    start_at: IsoTime,
+    respond_until: Nullable(IsoTime),
+    created_at: IsoTime,
+    started_at: Nullable(IsoTime),
+    ended_at: Nullable(IsoTime),
+    end_reason: Nullable(PairEndReason),
+    my_role: Nullable(PairRole),
+    can_accept: Type.Boolean(),
+    can_join: Type.Boolean(),
+    minutes: Count,
+    report_available: Type.Boolean(),
+  });
+  return { MemberHero, StandingRow, Standings, GeneralLeague, LeaguesView, DuelView, PairRoomView };
+}
+/** Ответы Mini App: картинка героя — url пути BFF. */
+export const SocialView = socialShapes(GameImageSchema);
+/** Ответы gamification и lessons: картинка героя — {asset_id, sha256 | url, width, height} (url собирает BFF). */
+export const SocialDomain = socialShapes(GameImageDomainSchema);
+assertSame<Same<Static<typeof SocialView.MemberHero>, C.MemberHero>>();
+assertSame<Same<Static<typeof SocialView.StandingRow>, C.StandingRow>>();
+assertSame<Same<Static<typeof SocialView.Standings>, C.Standings>>();
+assertSame<Same<Static<typeof SocialView.GeneralLeague>, C.GeneralLeague>>();
+assertSame<Same<Static<typeof SocialView.LeaguesView>, C.LeaguesView>>();
+assertSame<Same<Static<typeof SocialView.DuelView>, C.DuelView>>();
+assertSame<Same<Static<typeof SocialView.PairRoomView>, C.PairRoomView>>();
+export const DuelPageSchema = pageOf(SocialView.DuelView);
+assertSame<Same<Static<typeof DuelPageSchema>, C.Page<C.DuelView>>>();
+export const PairRoomPageSchema = pageOf(SocialView.PairRoomView);
+assertSame<Same<Static<typeof PairRoomPageSchema>, C.Page<C.PairRoomView>>>();
+
+// ---------- Лиги ----------
+export const LeagueResultSchema = Type.Object({
+  week: LocalDate,
+  pair_id: Type.String(),
+  level_band: LeagueLevelBand,
+  place: Place,
+  participants: Count,
+  xp: Count,
+  prize_til: Count,
+  prize_held: Type.Boolean(),
+  version: Version,
+  closed_at: IsoTime,
+});
+assertSame<Same<Static<typeof LeagueResultSchema>, C.LeagueResult>>();
+export const LeagueHistoryPageSchema = pageOf(LeagueResultSchema);
+assertSame<Same<Static<typeof LeagueHistoryPageSchema>, C.Page<C.LeagueResult>>>();
+
+// ---------- Дуэли ----------
+export const DuelChallengeRequestSchema = Type.Object({ opponent_member_id: MemberId, pair_id: Type.Optional(PairId) }, strict);
+assertSame<Same<Static<typeof DuelChallengeRequestSchema>, C.DuelChallengeRequest>>();
+export const DuelsQuerySchema = Type.Object({ status: Type.Optional(Enum(["active", "finished"])), cursor: Type.Optional(Cursor) }, strict);
+export const DuelParamsSchema = Type.Object({ duel_id: Uuid }, strict);
+export const DuelSessionRequestSchema = Type.Object({ duel_id: Uuid }, strict);
+assertSame<Same<Static<typeof DuelSessionRequestSchema>, C.DuelSessionRequest>>();
+export const DuelSessionParamsSchema = Type.Object({ session_id: Uuid }, strict);
+export const DuelReviewSchema = Type.Object({
+  session_id: Uuid,
+  duel_id: Uuid,
+  score: DuelScoreSchema,
+  items: Type.Array(
+    Type.Object({ item_id: Type.String(), prompt_en: Type.String(), your_answer: Nullable(Type.String()), correct_answer: Type.String(), correct: Type.Boolean() }),
+  ),
+});
+assertSame<Same<Static<typeof DuelReviewSchema>, C.DuelReview>>();
+
+// ---------- Парный урок ----------
+/** "now" или ISO-8601 с зоной; прошлое и дальше 7 дней — 422 (routes/pairRooms.ts). */
+export const PAIR_START_PATTERN = "^(now|\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,6})?)?(Z|[+-]\\d{2}:\\d{2}))$";
+export const PairRoomInviteSchema = Type.Object(
+  { partner_member_id: MemberId, pair_id: PairId, scenario_id: ContentId, start: Type.String({ maxLength: 40, pattern: PAIR_START_PATTERN }) },
+  strict,
+);
+assertSame<Same<Static<typeof PairRoomInviteSchema>, C.PairRoomInvite>>();
+export const PairRoomsQuerySchema = Type.Object({ status: Type.Optional(Enum(["active", "finished"])), cursor: Type.Optional(Cursor) }, strict);
+export const PairRoomParamsSchema = Type.Object({ room_id: Uuid }, strict);
+export const PairRoomStateQuerySchema = Type.Object(
+  { after_seq: Type.Optional(Type.Integer({ minimum: 0, maximum: 2_147_483_647 })), locale: Type.Optional(UiLang) },
+  strict,
+);
+
+export const PairRoomEventSchema = Type.Object({
+  seq: Count,
+  kind: PairRoomEventKind,
+  role: Nullable(PairRole),
+  text: Nullable(Type.String()),
+  at: IsoTime,
+});
+assertSame<Same<Static<typeof PairRoomEventSchema>, C.PairRoomEvent>>();
+const NextSpeaker = Nullable(Type.Union([PairRole, Type.Literal("both")]));
+const PairOption = Type.Object({ choice_id: Type.String(), text_en: Type.String() });
+const pairStateFields = {
+  room_id: Uuid,
+  status: PairRoomStatus,
+  seq: Count,
+  events: Type.Array(PairRoomEventSchema),
+  mode: PairRoomMode,
+  my_role: Nullable(PairRole),
+  my_role_brief: Nullable(Type.String()),
+  team_goal: Nullable(Type.String()),
+  team_goal_progress: Fraction,
+  next_speaker: NextSpeaker,
+  prompt: Nullable(Type.String()),
+  options: Nullable(Type.Array(PairOption)),
+  participants: Type.Array(Type.Object({ role: Nullable(PairRole), me: Type.Boolean(), network: Enum(["online", "offline"]) })),
+  ai_degraded: Type.Boolean(),
+  voice_available: Type.Boolean(),
+  my_speaking_seconds: Count,
+};
+export const PairRoomStateSchema = Type.Object({ ...pairStateFields, prompt_gloss: Nullable(Type.String()) });
+assertSame<Same<Static<typeof PairRoomStateSchema>, C.PairRoomState>>();
+/** Ответ lessons: перевод подсказки — строка на языке ученика или {ru, uz} от коуча (BFF выбирает язык ученика). */
+export const PairRoomStateDomainSchema = Type.Object({ ...pairStateFields, prompt_gloss: Nullable(Type.Union([Type.String(), Localized])) });
+
+/** Ровно одно поле: text (≤ 300), choice_id (из options) или audio_id. */
+export const PairTurnRequestSchema = Type.Object(
+  {
+    text: Type.Optional(Type.String({ minLength: 1, maxLength: 300, pattern: PLAIN_TEXT })),
+    choice_id: Type.Optional(Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9_.:-]+$" })),
+    audio_id: Type.Optional(Type.String({ minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9_.:-]+$" })),
+  },
+  { ...strict, minProperties: 1, maxProperties: 1 },
+);
+assertSame<Same<Static<typeof PairTurnRequestSchema>, C.PairTurnRequest>>();
+export const PairAudioSchema = Type.Object({ audio_id: Type.String(), text: Type.String(), duration_ms: Count, expires_at: IsoTime });
+assertSame<Same<Static<typeof PairAudioSchema>, C.PairAudio>>();
+
+export const PairRoomReportSchema = Type.Object({
+  room_id: Uuid,
+  scenario: Type.Object({ scenario_id: Type.String(), title: Localized }),
+  status: PairRoomStatus,
+  end_reason: Nullable(PairEndReason),
+  ended_at: Nullable(IsoTime),
+  team: Type.Object({ goal_reached: Type.Boolean(), progress: Fraction, summary: Nullable(Localized) }),
+  me: Type.Object({
+    role: Nullable(PairRole),
+    contributed: Type.Boolean(),
+    turns: Count,
+    speaking_seconds: Count,
+    minutes: Count,
+    lines: Type.Array(Type.Object({ text: Type.String(), at: IsoTime })),
+    skills: Type.Array(Type.Object({ skill_id: Type.String(), title: Localized })),
+    tips: Type.Array(Localized),
+    evaluation_id: Nullable(Uuid),
+  }),
+});
+assertSame<Same<Static<typeof PairRoomReportSchema>, C.PairRoomReport>>();

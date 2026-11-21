@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from tilhero_common.app import Runtime, create_app
 from tilhero_diagnostics.api.admin import router as admin_router
 from tilhero_diagnostics.api.client import router as client_router
+from tilhero_diagnostics.api.export import router as export_router
 from tilhero_diagnostics.catalog import CATALOG, CatalogGateway
 from tilhero_diagnostics.consumers import (
     ASSESSMENT_COMPLETED,
@@ -45,7 +46,8 @@ def build_app(
         # спринт 5: проверки удержания (только от memory) → retained / learning
         rt.add_consumer("diagnostics.retention", [RETENTION_CHECKED], on_retention_checked)
 
-    app = create_app(settings, routers=[client_router, admin_router], runtime=runtime, configure=configure,
+    app = create_app(settings, routers=[client_router, admin_router, export_router], runtime=runtime,
+                     configure=configure,
                      title="TilHero diagnostics-service")
     app.state.catalog = CatalogGateway(runtime)
     return app

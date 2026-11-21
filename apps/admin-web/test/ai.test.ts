@@ -4,9 +4,9 @@ import type { AgentVersion, GoldenCheck } from "@tilhero/contracts/ai";
 import { translate } from "../src/i18n";
 import {
   CALL_REASONS,
-  buildCheck, budgetLevel, capPct, checkBudget, checkContextJson, checkForm, checkLine, checkOutputSchema, collapseDiff, diffStats, draftOf,
+  buildCheck, budgetForm, budgetLevel, capPct, checkBudget, checkContextJson, checkForm, checkLine, checkOutputSchema, collapseDiff, diffStats, draftOf,
   emptyCheck, formOf, isOutputPath, lineDiff, mergeBudgetForm, niceMax, parseValueList, patchOf, PATH_RE, publishGate, scrubPii, speechHourPrice, speechHours, taskFileName, isSpeech, isOwnServer,
-  taskMarkdown, usd,
+  taskMarkdown, usd, ROOM_CAP_DEFAULT,
 } from "../src/screens/ai/model";
 
 /* ---------------------------------------------------------------- line diff */
@@ -181,8 +181,8 @@ describe("budget share and levels", () => {
     expect(budgetLevel(120, 100)).toBe("over");
   });
   it("limits: positive, lesson ≤ day ≤ month, threshold 1…100", () => {
-    const ok = { monthly_cap_usd: "20", learner_daily_cap_usd: "0.05", lesson_cap_usd: "0,03", speech_monthly_cap_usd: "5", alert_percent: "80" };
-    expect(checkBudget(ok).value).toEqual({ monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80 });
+    const ok = { monthly_cap_usd: "20", learner_daily_cap_usd: "0.05", lesson_cap_usd: "0,03", speech_monthly_cap_usd: "5", room_cap_usd: "0.10", alert_percent: "80" };
+    expect(checkBudget(ok).value).toEqual({ monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, room_cap_usd: 0.1, alert_percent: 80 });
     const codes = (p: Partial<typeof ok>) => checkBudget({ ...ok, ...p }).issues.map((x) => `${x.field}:${x.code}`);
     expect(codes({ lesson_cap_usd: "0.06" })).toEqual(["lesson_cap_usd:gt_daily"]);
     expect(codes({ learner_daily_cap_usd: "25" })).toEqual(["learner_daily_cap_usd:gt_monthly"]);
@@ -195,6 +195,17 @@ describe("budget share and levels", () => {
     expect(codes({ speech_monthly_cap_usd: "20,01" })).toEqual(["speech_monthly_cap_usd:gt_monthly"]);
     expect(codes({ speech_monthly_cap_usd: "-1" })).toEqual(["speech_monthly_cap_usd:range0"]);
     expect(codes({ speech_monthly_cap_usd: "" })).toEqual(["speech_monthly_cap_usd:range0"]);
+    // sprint 7: the coach of one pair room is 0…the month (0 — rooms go by the scenario with choices)
+    expect(codes({ room_cap_usd: "0" })).toEqual([]);
+    expect(codes({ room_cap_usd: "20" })).toEqual([]);
+    expect(codes({ room_cap_usd: "20.5" })).toEqual(["room_cap_usd:gt_monthly"]);
+    expect(codes({ room_cap_usd: "-0.1" })).toEqual(["room_cap_usd:range0"]);
+    expect(codes({ room_cap_usd: "" })).toEqual(["room_cap_usd:range0"]);
+  });
+  it("sprint 7: a budget of an ai-gateway without room_cap_usd shows the default of the contract (0.10)", () => {
+    const b = { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80 } as unknown as Parameters<typeof budgetForm>[0];
+    expect(budgetForm(b).room_cap_usd).toBe(String(ROOM_CAP_DEFAULT));
+    expect(budgetForm({ ...b, room_cap_usd: 0.25 }).room_cap_usd).toBe("0.25");
   });
   it("release 5.1: whisper is a speech model of the own server; LLMs are not speech", () => {
     expect(isSpeech({ provider: "whisper" })).toBe(true);
@@ -220,10 +231,10 @@ describe("budget share and levels", () => {
     expect(speechHours(-1, 1.32)).toBeNull();
   });
   it("R2-07 BUDGET_CONFLICT: edited fields keep the entered values, untouched ones take the values saved now", () => {
-    const read = { monthly_cap_usd: "20", learner_daily_cap_usd: "0.05", lesson_cap_usd: "0.03", speech_monthly_cap_usd: "5", alert_percent: "80" };
+    const read = { monthly_cap_usd: "20", learner_daily_cap_usd: "0.05", lesson_cap_usd: "0.03", speech_monthly_cap_usd: "5", room_cap_usd: "0.1", alert_percent: "80" };
     const entered = { ...read, lesson_cap_usd: "0.04", alert_percent: "90" };
     const now = { ...read, monthly_cap_usd: "25", alert_percent: "70" };
-    expect(mergeBudgetForm(read, entered, now)).toEqual({ monthly_cap_usd: "25", learner_daily_cap_usd: "0.05", lesson_cap_usd: "0.04", speech_monthly_cap_usd: "5", alert_percent: "90" });
+    expect(mergeBudgetForm(read, entered, now)).toEqual({ monthly_cap_usd: "25", learner_daily_cap_usd: "0.05", lesson_cap_usd: "0.04", speech_monthly_cap_usd: "5", room_cap_usd: "0.1", alert_percent: "90" });
     // nothing edited — exactly the values saved now
     expect(mergeBudgetForm(read, read, now)).toEqual(now);
   });

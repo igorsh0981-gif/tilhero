@@ -99,6 +99,8 @@ AT-04…08).
 `learning.activity.recorded.v1` (kind `review`). День графика, серия, пропуски и напоминания (tick, TodayPlan)
 учитывают его как любое занятие. Сессия чтения lessons (`lesson.session.completed.v1` kind `reading`) — занятие
 `practice`; оценка вопросов (`assessment.completed.v1` kind `reading`) принимается без влияния на пройденные уроки.
+Спринт 7 (INTERNAL_API спринта 7 §10, решение 2): дуэль и парный урок (`lesson.session.completed.v1` kind `duel`,
+`pair`) — тоже занятие `practice` (день графика и серия, минуты из события; пройденным уроком не считаются).
 
 **Спринт 6 — `streak_days` в `learning.activity.recorded.v1`** (необязательное поле схемы, всегда заполняется): серия
 на последний день ученика с занятием после записи (для занятия сегодня — то же, что `TodayPlan.streak_days`; занятие
@@ -226,7 +228,7 @@ computed_at}` — на каждую новую ревизию траектори
 | | `skills.state.changed.v1` (diagnostics) | `skill_states` — локальная карта навыков (изменение старше сохранённого по `occurred_at` — не применяется) |
 | `learning-plan.catalog` | `catalog.version.published.v1` (catalog) | kind `course\|module\|lesson\|skill` → снимок курса (`course_id` события; нет — все) помечается устаревшим |
 | `learning-plan.profiles` | `user.profile.created.v1`, `user.profile.updated.v1` (identity-consent) | `learner_audience`: детский профиль / 6–13 → kids, 14–17 → teens, иначе adults (возраст не хранится; `age_band: null` в обновлении — без изменений; kids не понижается) |
-| `learning-plan.lessons` | `lesson.session.completed.v1` (lessons) | спринт 4: `completed` → занятие (`activities`, + `learning.activity.recorded.v1`) и для kind `lesson` — пройденный урок (`completed_lessons`); kind `reading` (спринт 5) — занятие `practice`; идемпотентно по `session_id`; `cancelled`/`failed` — без действия |
+| `learning-plan.lessons` | `lesson.session.completed.v1` (lessons) | спринт 4: `completed` → занятие (`activities`, + `learning.activity.recorded.v1`) и для kind `lesson` — пройденный урок (`completed_lessons`); kind `reading` (спринт 5), `duel` и `pair` (спринт 7) — занятие `practice`; идемпотентно по `session_id`; `cancelled`/`failed` — без действия |
 | | `assessment.completed.v1` (assessment) | спринт 4 (R1-05): kind `lesson` → проекция `lesson_evaluations` (session_id из события); пройденному уроку сессии — актуальная оценка (`evaluation_id`, `passed`). Оценка, полученная после завершения (assessment был недоступен при finish, событие сессии ушло с null), доходит до траектории; пришла раньше события сессии — применяется при его записи. Остальные kind — без действия |
 | | `assessment.reevaluated.v1` (assessment) | спринт 4: `session_id` в схеме v1 нет (появится в событии — используется напрямую) — сессия берётся у заменённой оценки (`supersedes`: проекция или пройденный урок с этой оценкой); заменённая ещё не пришла — запись ждёт с `session_id = null`, затем он протягивается по цепочке. Актуальна последняя оценка цепочки (`created_at`); чужая оценка не трогается; повтор — без изменений |
 | `learning-plan.memory` | `memory.review.completed.v1` (memory) | спринт 5: `completed` / `expired` → занятие kind `review` (`activities`, + `learning.activity.recorded.v1`), `local_date` по зоне плана из `finished_at`; идемпотентно по `session_id`; `minutes = 0` — без действия |

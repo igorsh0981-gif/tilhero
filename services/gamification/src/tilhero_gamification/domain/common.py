@@ -1,5 +1,5 @@
-"""Общее для домена gamification: события, права, ошибки (коды §12, bff.ts/admin.ts «Спринт 6»), блокировки,
-время, курсоры, аудит, тексты."""
+"""Общее для домена gamification: события, права, ошибки (коды §12, bff.ts/admin.ts «Спринт 6», спринт 7 — §8),
+блокировки, время, курсоры, аудит, тексты."""
 
 from __future__ import annotations
 
@@ -30,6 +30,11 @@ PURCHASE_COMPLETED: Final = "game.purchase.completed.v1"
 RULES_ACTIVATED: Final = "game.rules.activated.v1"
 DOMAIN_DELETED: Final = "user.domain.deleted.v1"
 AUDIT_EVENT: Final = "admin.audit.recorded.v1"
+# спринт 7 (§7)
+LEAGUE_CLOSED: Final = "game.league.closed.v1"
+DUEL_CHALLENGED: Final = "game.duel.challenged.v1"
+DUEL_FINISHED: Final = "game.duel.finished.v1"
+REFERRAL_REWARDED: Final = "game.referral.rewarded.v1"
 
 # права сотрудников (PLAN «Права и роли») — проверяются в домене по actor (защита в глубину)
 GAME_READ: Final = "game.read"
@@ -37,6 +42,9 @@ GAME_MANAGE: Final = "game.manage"
 GAME_PUBLISH: Final = "game.publish"
 WALLET_ADJUST: Final = "wallet.adjust"
 DASHBOARD_READ: Final = "dashboard.read"
+# спринт 7: лиги недели и дуэли (переоценка — step-up)
+LEAGUE_READ: Final = "league.read"
+LEAGUE_MANAGE: Final = "league.manage"
 
 KIDS_BANDS: Final = frozenset({"6-9", "10-13"})
 AGE_BANDS: Final = frozenset({"6-9", "10-13", "14-17", "18+"})
@@ -47,6 +55,8 @@ SYSTEM_ACTOR: Final = "system"
 ACTIVITY_REASONS: Final = ("lesson", "scenario", "media", "reading", "review", "skill_demonstrated",
                            "skill_retained")
 CAPPED_REASONS: Final = (*ACTIVITY_REASONS, "quest")
+# «XP недели» лиг (§2.2): занятия, задания, дуэли, парные уроки; ручные операции, призы и бонусы не считаются
+WEEK_REASONS: Final = (*ACTIVITY_REASONS, "quest", "quest_bonus", "duel", "pair_lesson")
 
 _LOCK_USER: Final = 0x47414D55  # 'GAMU' — все изменения одного ученика (кошелёк, задания, значки)
 
@@ -98,6 +108,58 @@ def wallet_not_found() -> ApiError:
 def step_up_required(permission: str) -> ApiError:
     return forbidden("STEP_UP_REQUIRED", "Подтвердите действие кодом из приложения-аутентификатора",
                      {"permission": permission})
+
+
+# ---------------------------------------------------------------- ошибки спринта 7 (INTERNAL_API §8)
+
+
+def member_not_found() -> ApiError:
+    return not_found("MEMBER_NOT_FOUND", "Участник не найден")
+
+
+def blocked() -> ApiError:
+    return forbidden("BLOCKED", "Действие недоступно")
+
+
+def social_restricted(until: datetime | None) -> ApiError:
+    return forbidden("SOCIAL_RESTRICTED", "Социальные действия временно ограничены", {"until": iso(until)})
+
+
+def friends_not_allowed(reason: str) -> ApiError:
+    return forbidden("FRIENDS_NOT_ALLOWED", "Социальные функции недоступны", {"reason": reason})
+
+
+def partner_not_allowed() -> ApiError:
+    return forbidden("PARTNER_NOT_ALLOWED", "Вызвать можно только друга или члена семьи")
+
+
+def kids_not_allowed() -> ApiError:
+    return forbidden("KIDS_NOT_ALLOWED", "Недоступно в детском профиле")
+
+
+def nickname_required() -> ApiError:
+    return conflict("NICKNAME_REQUIRED", "Чтобы участвовать в общей лиге, задайте ник")
+
+
+def upstream_unavailable(service: str) -> ApiError:
+    return ApiError(503, "UPSTREAM_UNAVAILABLE", "Сервис временно недоступен — попробуйте позже",
+                    {"service": service})
+
+
+def duel_not_found() -> ApiError:
+    return not_found("DUEL_NOT_FOUND", "Дуэль не найдена")
+
+
+def duel_state(status: str) -> ApiError:
+    return conflict("DUEL_STATE", "Дуэль уже в другом состоянии", {"status": status})
+
+
+def group_not_found() -> ApiError:
+    return not_found("GROUP_NOT_FOUND", "Группа лиги не найдена")
+
+
+def result_state(status: str) -> ApiError:
+    return conflict("RESULT_STATE", "Действие недоступно в этом состоянии", {"status": status})
 
 
 # ---------------------------------------------------------------- блокировки, время
@@ -196,6 +258,24 @@ def cursor_time_id(cursor: str | None) -> tuple[datetime, uuid.UUID] | None:
         if not isinstance(parts, list) or len(parts) != 2:
             raise ValueError("arity")
         return datetime.fromisoformat(str(parts[0])), uuid.UUID(str(parts[1]))
+    except Exception as exc:
+        raise bad_request("INVALID_CURSOR", "Некорректный курсор") from exc
+
+
+def _cursor_parts(cursor: str, arity: int) -> list[Any]:
+    raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+    parts = json.loads(raw)
+    if not isinstance(parts, list) or len(parts) != arity:
+        raise ValueError("arity")
+    return parts
+
+
+def decode_week_cursor(cursor: str | None) -> date | None:
+    """Курсор истории лиг — неделя (понедельник)."""
+    if cursor is None:
+        return None
+    try:
+        return date.fromisoformat(str(_cursor_parts(cursor, 1)[0]))
     except Exception as exc:
         raise bad_request("INVALID_CURSOR", "Некорректный курсор") from exc
 

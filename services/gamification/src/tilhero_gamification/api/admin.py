@@ -241,7 +241,8 @@ async def shop_item_create(body: ShopItemCreateIn, request: Request,
     async with rt.transaction() as db:
         async def run() -> tuple[int, dict[str, Any]]:
             return 201, await shop.create(db, actor, data, now(request), await _freeze_price(db))
-        return await staff_idempotent(db, actor, "shop_item_create", k, body.model_dump(mode="json"), run)
+        return await staff_idempotent(db, actor, "shop_item_create", k, body.model_dump(mode="json"), run,
+                                      now(request))
 
 
 @router.patch("/shop/items/{code}", responses={
@@ -302,7 +303,8 @@ async def event_create(body: GameEventIn, request: Request,
     async with rt.transaction() as db:
         async def run() -> tuple[int, dict[str, Any]]:
             return 201, await game_events.create(db, actor, body.data(), now(request))
-        return await staff_idempotent(db, actor, "event_create", k, body.model_dump(mode="json"), run)
+        return await staff_idempotent(db, actor, "event_create", k, body.model_dump(mode="json"), run,
+                                      now(request))
 
 
 @router.patch("/events/{event_id}", responses={**_AUTH, 404: {"description": "EVENT_NOT_FOUND"},
@@ -376,7 +378,8 @@ async def wallet_adjust(user_id: uuid.UUID, body: AdjustmentIn, request: Request
         async def run() -> tuple[int, dict[str, Any]]:
             return 201, await wallets.adjust(db, settings_of(request), actor, user_id, body.currency, body.amount,
                                              body.reason, k, now(request))
-        return await staff_idempotent(db, actor, f"adjust:{user_id}", k, body.model_dump(mode="json"), run)
+        return await staff_idempotent(db, actor, f"adjust:{user_id}", k, body.model_dump(mode="json"), run,
+                                      now(request))
 
 
 @router.post("/wallets/{user_id}/ledger/{op_id}/reverse", responses={

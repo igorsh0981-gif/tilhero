@@ -291,6 +291,7 @@ async def test_card_refreshes_from_identity(env) -> None:
     assert card["consent"] == {"policy_version": "1.0", "purposes": ["terms", "privacy"],
                                "accepted_at": snap["consent"]["accepted_at"], "revoked_at": None, "basis": "self"}
     assert card["notifications"] == snap["notifications"]
+    assert set(card["notifications"]["categories"]) == {"reminders", "missed", "social", "support", "product", "game"}
     assert card["plan"]["goal"] == "exam" and card["plan"]["level_self"] == "some"
     assert card["plan"]["schedule"]["preset"] == "weekdays" and card["plan"]["onboarding_completed_at"]
     assert (card["goal"], card["onboarding_completed"]) == ("exam", True)

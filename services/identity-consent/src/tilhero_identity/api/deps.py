@@ -18,12 +18,15 @@ from tilhero_identity.service import IdentityService
 telegram_bff = InternalAuth({"telegram-bff"})
 notifications_only = InternalAuth({"notifications"})
 bot_gateway_only = InternalAuth({"telegram-bot-gateway"})
-# /public: social (семья, приглашения), notifications (имена), спринт 5 — memory (цель voice_recording)
-public_profile_callers = InternalAuth({"social", "notifications", "memory"})
+# /public: social (семья, приглашения), notifications (имена), спринт 5 — memory (цель voice_recording),
+# спринт 7 — lessons (согласие на голос в уроке вдвоём)
+public_profile_callers = InternalAuth({"social", "notifications", "memory", "lessons"})
 # Админ-контур (спринт 2): read-модель user-admin сверяется без контекста сотрудника; раскрытие Telegram ID — только
 # admin-bff с actor и правом users.sensitive.read.
 user_admin_only = InternalAuth({"user-admin"})
 admin_bff_only = InternalAuth({"admin-bff"})
+# Спринт 7 (Н1): выгрузка профилей для начальной загрузки проекции — только gamification
+gamification_only = InternalAuth({"gamification"})
 
 
 def no_user_context(principal: Principal) -> Principal:
@@ -39,6 +42,10 @@ def user_admin_service_call(principal: Principal = Depends(user_admin_only)) -> 
 
 
 def notifications_service_call(principal: Principal = Depends(notifications_only)) -> Principal:
+    return no_user_context(principal)
+
+
+def gamification_service_call(principal: Principal = Depends(gamification_only)) -> Principal:
     return no_user_context(principal)
 
 _IDEMPOTENCY_RE = re.compile(r"^[A-Za-z0-9._:\-]{8,128}$")

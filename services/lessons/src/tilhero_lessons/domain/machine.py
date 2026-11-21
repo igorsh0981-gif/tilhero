@@ -11,6 +11,7 @@ PAUSE_EXPIRY_HOURS и ready дольше READY_EXPIRY_HOURS → cancelled (ле�
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +24,8 @@ from tilhero_lessons.settings import Settings
 TERMINAL = frozenset({"completed", "failed", "cancelled"})
 ACTIVE = frozenset({"ready", "in_progress", "paused"})
 ALLOWED: dict[str, frozenset[str]] = {
-    "ready": frozenset({"in_progress", "cancelled", "failed"}),
+    # ready → completed — только сессия дуэли, закрытая по сроку набора (close_deadline)
+    "ready": frozenset({"in_progress", "cancelled", "failed", "completed"}),
     "in_progress": frozenset({"paused", "completed", "cancelled", "failed"}),
     "paused": frozenset({"in_progress", "completed", "cancelled", "failed"}),
 }
@@ -69,10 +71,13 @@ async def start(db: AsyncSession, s: Session, now: datetime) -> None:
     await _record(db, s, "in_progress", "started", now)
     s.started_at = now
     s.last_activity_at = now
-    await emit(db, STARTED, {
+    payload = {
         "session_id": str(s.session_id), "user_id": str(s.user_id), "kind": s.kind, "pair_id": s.pair_id,
         "lesson_id": s.lesson_id, "scenario_id": s.scenario_id, "asset_id": s.asset_id, "ai_mode": s.ai_mode,
-        "started_at": iso(now)}, producer=PRODUCER)
+        "started_at": iso(now)}
+    if s.kind == "duel":  # спринт 7
+        payload["duel_id"] = str(s.duel_id)
+    await emit(db, STARTED, payload, producer=PRODUCER)
 
 
 async def pause(db: AsyncSession, s: Session, now: datetime, settings: Settings, *, reason: str = "pause") -> None:
@@ -97,6 +102,16 @@ async def finish(db: AsyncSession, s: Session, now: datetime, settings: Settings
     await emit_completed(db, s)
 
 
+async def close_deadline(db: AsyncSession, s: Session, now: datetime, settings: Settings) -> None:
+    """Сессия дуэли закрыта по сроку набора или итогу дуэли (спринт 7): completed со счётом по отвеченному."""
+    accrue(s, now, settings)
+    await _record(db, s, "completed", "deadline", now)
+    s.finished_at = now
+    s.paused_at = None
+    s.minutes = minutes_of(s)
+    await emit_completed(db, s)
+
+
 async def terminate(db: AsyncSession, s: Session, to: str, reason: str, now: datetime, settings: Settings,
                     *, fail_reason: str | None = None) -> None:
     """cancelled (cancel | expired) или failed (fail | content_unpublished): minutes — по факту."""
@@ -112,7 +127,7 @@ async def terminate(db: AsyncSession, s: Session, to: str, reason: str, now: dat
 
 async def emit_completed(db: AsyncSession, s: Session) -> None:
     passed = s.evaluation.get("passed") if isinstance(s.evaluation, dict) else None
-    await emit(db, COMPLETED, {
+    payload: dict[str, Any] = {
         "session_id": str(s.session_id), "user_id": str(s.user_id), "kind": s.kind, "pair_id": s.pair_id,
         "lesson_id": s.lesson_id, "scenario_id": s.scenario_id, "asset_id": s.asset_id, "status": s.status,
         "outcome": s.outcome if s.status == "completed" else None, "minutes": s.minutes,
@@ -120,13 +135,19 @@ async def emit_completed(db: AsyncSession, s: Session) -> None:
         "local_date": None,
         "evaluation_id": str(s.evaluation_id) if s.evaluation_id else None,
         "passed": passed if isinstance(passed, bool) else None,
-        "practice_only": s.practice_only, "finished_at": iso(s.finished_at)}, producer=PRODUCER)
+        "practice_only": s.practice_only, "finished_at": iso(s.finished_at)}
+    if s.kind == "duel":  # спринт 7 (§3.1): счёт по ключам — в gamification; в assessment не идёт
+        score = (s.summary or {}).get("score") if s.status == "completed" else None
+        payload.update({"duel_id": str(s.duel_id), "practice_only": True, "evaluation_id": None, "passed": None,
+                        "score": {"correct": int(score["correct"]), "total": int(score["total"])}
+                        if isinstance(score, dict) else None})
+    await emit(db, COMPLETED, payload, producer=PRODUCER)
 
 
 async def housekeep(db: AsyncSession, s: Session, now: datetime, settings: Settings) -> str | None:
     """Ленивая обработка бездействия незавершённой сессии: авто-пауза (с момента последнего действия) и истечение
     (cancelled/expired). → 'auto_pause' | 'expired' | None."""
-    if s.status not in ACTIVE:
+    if s.status not in ACTIVE or s.kind == "duel":  # дуэль: срок — по набору (duels.close_if_due / tick)
         return None
     happened: str | None = None
     if s.status == "in_progress" and s.last_activity_at is not None \
@@ -147,6 +168,8 @@ async def housekeep(db: AsyncSession, s: Session, now: datetime, settings: Setti
 
 
 def expires_at(s: Session, settings: Settings) -> datetime | None:
+    if s.kind == "duel":  # срок сессии дуэли — срок набора (DuelView.play_deadline), пауза не истекает
+        return None
     if s.status == "paused" and s.paused_at is not None:
         return s.paused_at + timedelta(hours=settings.pause_expiry_hours)
     if s.status == "ready":

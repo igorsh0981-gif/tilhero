@@ -6,8 +6,9 @@
 (откат); удалить можно только черновик не под канарейкой. Роль сервиса не может снять триггер (DDL — у владельца).
 `usage` — только метаданные вызова (без текстов запроса и ответа); вызов оценки произношения (спринт 5) — та же
 таблица: агент `pronunciation_coach`, провайдер `whisper | azure_speech | fake_speech`, длительность аудио
-`audio_ms` (самого аудио нет нигде). `models` — LLM (цена за 1 млн токенов) и речь (цена часа аудио
-`audio_usd_per_hour`).
+`audio_ms` (самого аудио нет нигде); распознавание голосового хода парной комнаты (спринт 7) — агент
+`cooperative_lesson_coach`, `session_kind pair`, `session_id = room_id`, провайдер `whisper | fake_speech`, 0 $.
+`models` — LLM (цена за 1 млн токенов) и речь (цена часа аудио `audio_usd_per_hour`).
 """
 
 from __future__ import annotations
@@ -51,7 +52,8 @@ REASONS_SQL = ("'ai_disabled', 'not_configured', 'budget_exceeded', 'cost_limit'
 INSUFFICIENT_SQL = "'not_recognized', 'low_confidence', 'incomplete'"
 PROVIDERS_SQL = "'anthropic', 'fake', 'whisper', 'azure_speech', 'fake_speech'"
 SPEECH_PROVIDERS_SQL = "'whisper', 'azure_speech', 'fake_speech'"
-SESSION_KINDS_SQL = "'lesson', 'scenario', 'media', 'review', 'reading', 'memory', 'golden'"
+# спринт 7: + duel (для полноты — ИИ в дуэли не вызывается), pair (коуч и распознавание голоса парной комнаты)
+SESSION_KINDS_SQL = "'lesson', 'scenario', 'media', 'review', 'reading', 'duel', 'memory', 'pair', 'golden'"
 USAGE_STATUS_REASON_SQL = (
     f"(status = 'pending' AND reason IS NULL) "
     f"OR (status = 'ok' AND (reason IS NULL OR reason IN ({INSUFFICIENT_SQL}))) "
@@ -260,7 +262,7 @@ class TestRunRow(Base):
 
 class BudgetRow(Base):
     """Бюджет ИИ (singleton, id = 1): аварийная остановка, потолок месяца, лимит ученика в день и урока; подлимит
-    оценки произношения в месяц внутри потолка (спринт 5, миграция 0005)."""
+    оценки произношения в месяц внутри потолка (спринт 5, миграция 0005); потолок парной комнаты (спринт 7, 0008)."""
 
     __tablename__ = "budget"
     __table_args__ = (
@@ -271,6 +273,7 @@ class BudgetRow(Base):
         CheckConstraint("alert_percent BETWEEN 1 AND 100", name="ck_budget_alert"),
         CheckConstraint("speech_monthly_cap_usd >= 0 AND speech_monthly_cap_usd <= monthly_cap_usd",
                         name="ck_budget_speech"),
+        CheckConstraint("room_cap_usd >= 0 AND room_cap_usd <= monthly_cap_usd", name="ck_budget_room"),
     )
 
     id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
@@ -279,6 +282,8 @@ class BudgetRow(Base):
     learner_daily_cap_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
     lesson_cap_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
     speech_monthly_cap_usd: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="5.00")
+    # спринт 7 (миграция 0008): потолок вызовов коуча на одну парную комнату (сумма usage по session_id = room_id)
+    room_cap_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False, server_default="0.1000")
     alert_percent: Mapped[int] = mapped_column(Integer, nullable=False)
     updated_by: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())

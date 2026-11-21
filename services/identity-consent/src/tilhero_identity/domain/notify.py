@@ -1,7 +1,9 @@
 """Настройки уведомлений ученика: категории (явное включение), тихие часы, выключатель.
 
-Категории (bff.ts NotificationCategories): `reminders`, `missed`, `social`, `support`, `product`. По умолчанию включена
-только `support` (служебные ответы поддержки); остальные — только явным включением пользователя (APP-ONB-03).
+Категории (bff.ts NotificationCategories): `reminders`, `missed`, `social`, `support`, `product`, `game` (спринт 7:
+игра и лиги — значки, рост героя, спасённая серия, итоги лиги, дуэли). По умолчанию включены `support` (служебные
+ответы поддержки) и `game` (INTERNAL_API спринта 7 §5: выключенная — уведомления остаются в центре без Telegram);
+остальные — только явным включением пользователя (APP-ONB-03).
 Тихие часы по умолчанию 22:00–08:00 (интервал может переходить через полночь), `null` — выключены.
 """
 
@@ -11,8 +13,8 @@ import re
 from collections.abc import Iterable
 from datetime import time
 
-CATEGORIES: tuple[str, ...] = ("reminders", "missed", "social", "support", "product")
-DEFAULT_CATEGORIES: tuple[str, ...] = ("support",)
+CATEGORIES: tuple[str, ...] = ("reminders", "missed", "social", "support", "product", "game")
+DEFAULT_CATEGORIES: tuple[str, ...] = ("support", "game")
 DEFAULT_QUIET_START = time(22, 0)
 DEFAULT_QUIET_END = time(8, 0)
 

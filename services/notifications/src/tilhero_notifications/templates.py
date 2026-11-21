@@ -32,7 +32,7 @@ from datetime import date, datetime
 from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from tilhero_notifications.domain.texts import RENDERED_LIMITS, TextError, substitute
 
@@ -732,6 +732,463 @@ def _pin_reset_scheduled(lang: Lang, p: PinResetScheduledParams, ctx: Context) -
     return Rendered("Ota-ona kodini tiklash soʻraldi", "", OPEN[lang], "route_profile", html=text)
 
 
+# ---------------------------------------------------------------- социальное (спринт 7, INTERNAL_API §5)
+#
+# Заявки в друзья, дуэли, лиги, парные уроки, рефералы, модерация. Ник — из события (публичное имя сообщества,
+# 3–20 букв, цифр и `_`; null → «Друг», детям — «Член семьи»); имён, Telegram и возраста в текстах нет; ответы и
+# ошибки другого ученика — никогда (в итоге дуэли — только свой результат). Детям 6–13 — только центр детского
+# профиля (`kid_in_app_only`, как спринт 6), тексты `*.kid` — родителю, с именем ребёнка, без сравнений и мест.
+# Санкции и обжалования — категория `service` (решения о доступе не выключаются настройкой категорий) и не
+# редактируются в админке (`staff_editable=False`: admin.ts TemplateInfo.category не допускает service).
+
+FRIENDS_ROUTE = "route_friends"
+LEAGUES_ROUTE = "route_leagues"
+REFERRALS_ROUTE = "route_referrals"
+FRIENDS_BUTTON = {"ru": "Открыть друзей", "uz": "Doʻstlarni ochish"}
+DUEL_BUTTON = {"ru": "Открыть дуэль", "uz": "Duelni ochish"}
+LEAGUES_BUTTON = {"ru": "Открыть лиги", "uz": "Ligalarni ochish"}
+ROOM_BUTTON = {"ru": "Открыть комнату", "uz": "Xonani ochish"}
+REFERRALS_BUTTON = {"ru": "Мои приглашения", "uz": "Taklifnomalarim"}
+FRIEND_NAME = {"ru": "Друг", "uz": "Doʻst"}
+FAMILY_MEMBER = {"ru": "Член семьи", "uz": "Oila aʼzosi"}
+NICKNAME_PATTERN = r"^[^\W]{3,20}$"
+Nickname = Annotated[str, Field(pattern=NICKNAME_PATTERN)]
+_NICKNAME = TypeAdapter(Nickname)
+
+
+def valid_nickname(value: object) -> str | None:
+    """Ник из события → для текста: только 3–20 букв, цифр и `_` (как social); иначе None (→ «Друг»). Та же
+    проверка, что у параметров шаблона, — неподходящий ник не делает запись failed."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return _NICKNAME.validate_python(value.strip())
+    except ValidationError:
+        return None
+
+
+def _nick(lang: Lang, value: str | None, *, kid: bool = False) -> str:
+    return value or (FAMILY_MEMBER if kid else FRIEND_NAME)[lang]
+
+
+def _when(value: datetime, ctx: Context) -> str:
+    return _local(value, ctx.timezone).strftime("%d.%m %H:%M")
+
+
+def _kid_title(lang: Lang, ctx: Context, ru: str, uz: str) -> str:
+    """Заголовок детского варианта — родителю, с именем ребёнка («Мадина: …»)."""
+    return f"{ctx.learner_name or KID_NAME[lang]}: {ru if lang == 'ru' else uz}"
+
+
+class FriendRequestParams(Params):
+    request_id: uuid.UUID
+    nickname: Nickname | None = None
+
+
+def _friend_request_values(lang: Lang, p: FriendRequestParams, ctx: Context) -> dict[str, str]:
+    return {"nickname": _nick(lang, p.nickname)}
+
+
+def _friend_request(lang: Lang, p: FriendRequestParams, ctx: Context) -> Rendered:
+    nick = _nick(lang, p.nickname)
+    if lang == "ru":
+        return Rendered("Новая заявка в друзья", f"{nick} хочет добавить вас в друзья в TilHero.",
+                        FRIENDS_BUTTON[lang], FRIENDS_ROUTE)
+    return Rendered("Doʻstlikka yangi soʻrov", f"{nick} sizni TilHeroʼda doʻstlarga qoʻshmoqchi.",
+                    FRIENDS_BUTTON[lang], FRIENDS_ROUTE)
+
+
+class FriendAcceptedParams(Params):
+    nickname: Nickname | None = None
+
+
+def _friend_accepted_values(lang: Lang, p: FriendAcceptedParams, ctx: Context) -> dict[str, str]:
+    return {"nickname": _nick(lang, p.nickname)}
+
+
+def _friend_accepted(lang: Lang, p: FriendAcceptedParams, ctx: Context) -> Rendered:
+    nick = _nick(lang, p.nickname)
+    if lang == "ru":
+        return Rendered("Заявка принята", f"{nick} теперь ваш друг в TilHero.", FRIENDS_BUTTON[lang], FRIENDS_ROUTE)
+    return Rendered("Soʻrov qabul qilindi", f"{nick} endi TilHeroʼdagi doʻstingiz.", FRIENDS_BUTTON[lang],
+                    FRIENDS_ROUTE)
+
+
+class DuelChallengedParams(Params):
+    duel_id: uuid.UUID
+    nickname: Nickname | None = None
+    accept_deadline: AwareDatetime
+
+
+def _duel_challenged_values(lang: Lang, p: DuelChallengedParams, ctx: Context) -> dict[str, str]:
+    return {"nickname": _nick(lang, p.nickname), "deadline": _when(p.accept_deadline, ctx)}
+
+
+def _duel_challenged_kid_values(lang: Lang, p: DuelChallengedParams, ctx: Context) -> dict[str, str]:
+    return {"learner_name": ctx.learner_name or KID_NAME[lang], "nickname": _nick(lang, p.nickname, kid=True)}
+
+
+def _duel_challenged(lang: Lang, p: DuelChallengedParams, ctx: Context) -> Rendered:
+    v = _duel_challenged_values(lang, p, ctx)
+    route = f"duel_{p.duel_id}"
+    if lang == "ru":
+        return Rendered("Вызов на дуэль", f"{v['nickname']} вызывает вас на дуэль: 10 заданий. Принять вызов можно "
+                        f"до {v['deadline']}.", DUEL_BUTTON[lang], route)
+    return Rendered("Duelga chaqiruv", f"{v['nickname']} sizni duelga chaqirmoqda: 10 ta topshiriq. Chaqiruvni "
+                    f"{v['deadline']} gacha qabul qilish mumkin.", DUEL_BUTTON[lang], route)
+
+
+def _duel_challenged_kid(lang: Lang, p: DuelChallengedParams, ctx: Context) -> Rendered:
+    nick, route = _nick(lang, p.nickname, kid=True), f"duel_{p.duel_id}"
+    if lang == "ru":
+        return Rendered(_kid_title(lang, ctx, "вызов на дуэль", ""),
+                        f"{nick} зовёт на дуэль из 10 заданий — можно сыграть вместе.", DUEL_BUTTON[lang], route)
+    return Rendered(_kid_title(lang, ctx, "", "duelga chaqiruv"),
+                    f"{nick} 10 ta topshiriqli duelga chaqirmoqda — birga oʻynash mumkin.", DUEL_BUTTON[lang], route)
+
+
+DuelOutcome = Literal["win", "loss", "draw", "technical_win", "technical_loss"]
+DUEL_RESULTS: dict[str, dict[str, str]] = {
+    "win": {"ru": "Победа!", "uz": "Gʻalaba!"},
+    "loss": {"ru": "В этот раз победил соперник.", "uz": "Bu safar raqib gʻolib boʻldi."},
+    "draw": {"ru": "Ничья!", "uz": "Durang!"},
+    "technical_win": {"ru": "Соперник не успел сыграть — победа ваша.",
+                      "uz": "Raqib oʻynashga ulgurmadi — gʻalaba sizniki."},
+    "technical_loss": {"ru": "Время дуэли вышло: вы не успели сыграть.",
+                       "uz": "Duel vaqti tugadi: siz oʻynashga ulgurmadingiz."},
+}
+
+
+class DuelFinishedParams(Params):
+    """Итог дуэли получателю: свой исход и свой результат (чужие ответы и счёт соперника в текст не идут)."""
+
+    duel_id: uuid.UUID
+    outcome: DuelOutcome
+    result_version: Annotated[int, Field(ge=1)]
+    correct: Annotated[int, Field(ge=0, le=50)] | None = None
+    total: Annotated[int, Field(ge=1, le=50)] | None = None
+
+
+def _duel_finished_values(lang: Lang, p: DuelFinishedParams, ctx: Context) -> dict[str, str]:
+    score = ""
+    if p.correct is not None and p.total is not None:
+        score = (f"Ваш результат: {p.correct} из {p.total}." if lang == "ru"
+                 else f"Natijangiz: {p.total} tadan {p.correct} ta.")
+    return {"duel_result": DUEL_RESULTS[p.outcome][lang], "score": score}
+
+
+def _duel_finished(lang: Lang, p: DuelFinishedParams, ctx: Context) -> Rendered:
+    v, route = _duel_finished_values(lang, p, ctx), f"duel_{p.duel_id}"
+    revised = p.result_version > 1
+    if lang == "ru":
+        title = "Итог дуэли пересмотрен" if revised else "Дуэль завершена"
+        return Rendered(title, " ".join(x for x in (v["duel_result"], v["score"]) if x), DUEL_BUTTON[lang], route)
+    title = "Duel natijasi qayta koʻrib chiqildi" if revised else "Duel yakunlandi"
+    return Rendered(title, " ".join(x for x in (v["duel_result"], v["score"]) if x), DUEL_BUTTON[lang], route)
+
+
+def _duel_finished_kid_values(lang: Lang, p: DuelFinishedParams, ctx: Context) -> dict[str, str]:
+    return {"learner_name": ctx.learner_name or KID_NAME[lang]}
+
+
+def _duel_finished_kid(lang: Lang, p: DuelFinishedParams, ctx: Context) -> Rendered:
+    """Родителю, без сравнений: ни победителя, ни счёта (дети — внутри семьи, CONVENTIONS §8)."""
+    route = f"duel_{p.duel_id}"
+    if lang == "ru":
+        return Rendered(_kid_title(lang, ctx, "дуэль завершена", ""),
+                        "Дуэль закончилась — посмотрите вместе, какие задания получились.", DUEL_BUTTON[lang], route)
+    return Rendered(_kid_title(lang, ctx, "", "duel yakunlandi"),
+                    "Duel tugadi — qaysi topshiriqlar chiqqanini birga koʻring.", DUEL_BUTTON[lang], route)
+
+
+class LeagueClosedParams(Params):
+    week: date
+    place: Annotated[int, Field(ge=1, le=100)]
+    xp: Annotated[int, Field(ge=0)]
+    prize_til: Annotated[int, Field(ge=0, le=10_000)]
+
+
+def _league_values(lang: Lang, p: LeagueClosedParams, ctx: Context) -> dict[str, str]:
+    prize = ""
+    if p.prize_til > 0:
+        prize = f"Приз: {p.prize_til} тилов." if lang == "ru" else f"Sovrin: {p.prize_til} til."
+    return {"place": str(p.place), "xp": str(p.xp), "prize": prize}
+
+
+def _league_closed(lang: Lang, p: LeagueClosedParams, ctx: Context) -> Rendered:
+    v = _league_values(lang, p, ctx)
+    if lang == "ru":
+        body = f"Вы заняли {v['place']} место в группе, {v['xp']} XP за неделю."
+        return Rendered("Итоги недели в лиге", f"{body} {v['prize']}".strip(), LEAGUES_BUTTON[lang], LEAGUES_ROUTE)
+    body = f"Siz guruhda {v['place']}-oʻrinni egalladingiz, hafta davomida {v['xp']} XP."
+    return Rendered("Ligada hafta yakunlari", f"{body} {v['prize']}".strip(), LEAGUES_BUTTON[lang], LEAGUES_ROUTE)
+
+
+class PairInvitedParams(Params):
+    room_id: uuid.UUID
+    nickname: Nickname | None = None
+    start_at: AwareDatetime
+    scheduled: bool  # запланированная комната (start_at в будущем), иначе — «сейчас»
+
+
+def _pair_start(lang: Lang, p: PairInvitedParams, ctx: Context) -> str:
+    if not p.scheduled:
+        return "Начало — сейчас." if lang == "ru" else "Hozir boshlanadi."
+    return f"Начало — {_when(p.start_at, ctx)}." if lang == "ru" else f"Boshlanishi — {_when(p.start_at, ctx)}."
+
+
+def _pair_invited_values(lang: Lang, p: PairInvitedParams, ctx: Context) -> dict[str, str]:
+    return {"nickname": _nick(lang, p.nickname), "start": _pair_start(lang, p, ctx)}
+
+
+def _pair_invited_kid_values(lang: Lang, p: PairInvitedParams, ctx: Context) -> dict[str, str]:
+    return {"learner_name": ctx.learner_name or KID_NAME[lang], "nickname": _nick(lang, p.nickname, kid=True),
+            "start": _pair_start(lang, p, ctx)}
+
+
+def _pair_invited(lang: Lang, p: PairInvitedParams, ctx: Context) -> Rendered:
+    v, route = _pair_invited_values(lang, p, ctx), f"room_{p.room_id}"
+    if lang == "ru":
+        return Rendered("Приглашение на парный урок", f"{v['nickname']} зовёт вас на парный урок английского. "
+                        f"{v['start']}", ROOM_BUTTON[lang], route)
+    return Rendered("Juftlik darsiga taklif", f"{v['nickname']} sizni ingliz tili juftlik darsiga taklif qilmoqda. "
+                    f"{v['start']}", ROOM_BUTTON[lang], route)
+
+
+def _pair_invited_kid(lang: Lang, p: PairInvitedParams, ctx: Context) -> Rendered:
+    v, route = _pair_invited_kid_values(lang, p, ctx), f"room_{p.room_id}"
+    if lang == "ru":
+        return Rendered(_kid_title(lang, ctx, "приглашение на парный урок", ""),
+                        f"{v['nickname']} зовёт на парный урок — можно позаниматься вместе. {v['start']}",
+                        ROOM_BUTTON[lang], route)
+    return Rendered(_kid_title(lang, ctx, "", "juftlik darsiga taklif"),
+                    f"{v['nickname']} juftlik darsiga taklif qilmoqda — birga shugʻullanish mumkin. {v['start']}",
+                    ROOM_BUTTON[lang], route)
+
+
+class RoomParams(Params):
+    room_id: uuid.UUID
+
+
+def _kid_name_values(lang: Lang, p: Params, ctx: Context) -> dict[str, str]:
+    return {"learner_name": ctx.learner_name or KID_NAME[lang]}
+
+
+def _pair_starting(lang: Lang, p: RoomParams, ctx: Context) -> Rendered:
+    route = f"room_{p.room_id}"
+    if lang == "ru":
+        return Rendered("Парный урок через 5 минут", "Скоро начало — заходите в комнату вовремя.",
+                        ROOM_BUTTON[lang], route)
+    return Rendered("Juftlik darsi 5 daqiqadan keyin", "Tez orada boshlanadi — xonaga oʻz vaqtida kiring.",
+                    ROOM_BUTTON[lang], route)
+
+
+def _pair_starting_kid(lang: Lang, p: RoomParams, ctx: Context) -> Rendered:
+    route = f"room_{p.room_id}"
+    if lang == "ru":
+        return Rendered(_kid_title(lang, ctx, "парный урок через 5 минут", ""),
+                        "Скоро начало — помогите зайти в комнату.", ROOM_BUTTON[lang], route)
+    return Rendered(_kid_title(lang, ctx, "", "juftlik darsi 5 daqiqadan keyin"),
+                    "Tez orada boshlanadi — xonaga kirishga yordam bering.", ROOM_BUTTON[lang], route)
+
+
+def _pair_stopped(lang: Lang, p: RoomParams, ctx: Context) -> Rendered:
+    route = f"room_{p.room_id}"
+    if lang == "ru":
+        return Rendered("Парный урок остановлен", "Администратор остановил комнату. Отчёт по сделанному — "
+                        "в приложении.", ROOM_BUTTON[lang], route)
+    return Rendered("Juftlik darsi toʻxtatildi", "Administrator xonani toʻxtatdi. Bajarilganlar boʻyicha hisobot — "
+                    "ilovada.", ROOM_BUTTON[lang], route)
+
+
+def _pair_stopped_kid(lang: Lang, p: RoomParams, ctx: Context) -> Rendered:
+    route = f"room_{p.room_id}"
+    if lang == "ru":
+        return Rendered(_kid_title(lang, ctx, "парный урок остановлен", ""),
+                        "Комнату остановил администратор. Сделанное сохранено — посмотрите вместе.",
+                        ROOM_BUTTON[lang], route)
+    return Rendered(_kid_title(lang, ctx, "", "juftlik darsi toʻxtatildi"),
+                    "Xonani administrator toʻxtatdi. Bajarilganlar saqlandi — birga koʻring.", ROOM_BUTTON[lang], route)
+
+
+class ReferralQualifiedParams(Params):
+    referral_id: uuid.UUID
+    freeze: Annotated[int, Field(ge=0, le=10)]
+    til: Annotated[int, Field(ge=0, le=10_000)]
+
+
+def _reward(lang: Lang, p: ReferralQualifiedParams) -> str:
+    parts: list[str] = []
+    if p.freeze:
+        parts.append(f"{p.freeze} {_plural_ru(p.freeze, 'заморозка', 'заморозки', 'заморозок')}" if lang == "ru"
+                     else f"{p.freeze} ta muzlatish")
+    if p.til:
+        parts.append(f"{p.til} {_plural_ru(p.til, 'тил', 'тила', 'тилов')}" if lang == "ru" else f"{p.til} til")
+    if not parts:
+        return "без награды" if lang == "ru" else "mukofotsiz"
+    return (" и " if lang == "ru" else " va ").join(parts)
+
+
+def _referral_qualified_values(lang: Lang, p: ReferralQualifiedParams, ctx: Context) -> dict[str, str]:
+    return {"reward": _reward(lang, p)}
+
+
+def _referral_qualified(lang: Lang, p: ReferralQualifiedParams, ctx: Context) -> Rendered:
+    rewarded = bool(p.freeze or p.til)
+    if lang == "ru":
+        body = "Приглашённый вами друг выполнил условия. " + (
+            f"Награда: {_reward(lang, p)}." if rewarded else "Спасибо, что зовёте друзей!")
+        return Rendered("Приглашение засчитано", body, REFERRALS_BUTTON[lang], REFERRALS_ROUTE)
+    body = "Siz taklif qilgan doʻstingiz shartlarni bajardi. " + (
+        f"Mukofot: {_reward(lang, p)}." if rewarded else "Doʻstlaringizni taklif qilganingiz uchun rahmat!")
+    return Rendered("Taklif hisobga olindi", body, REFERRALS_BUTTON[lang], REFERRALS_ROUTE)
+
+
+ReferralRejectCode = Literal["not_new_user", "family_member", "window_expired", "review_rejected", "monthly_cap"]
+# публичные причины отказа (bff.ts), без правил антифрода
+REFERRAL_REASONS: dict[str, dict[str, str]] = {
+    "not_new_user": {"ru": "Приглашённый уже пользовался TilHero.", "uz": "Taklif qilingan kishi TilHeroʼdan "
+                                                                         "avval foydalangan."},
+    "family_member": {"ru": "Члены семьи не засчитываются как приглашения.",
+                      "uz": "Oila aʼzolari taklif sifatida hisobga olinmaydi."},
+    "window_expired": {"ru": "Срок выполнения условий истёк.", "uz": "Shartlarni bajarish muddati tugadi."},
+    "review_rejected": {"ru": "Приглашение не прошло проверку.", "uz": "Taklif tekshiruvdan oʻtmadi."},
+    "monthly_cap": {"ru": "В этом месяце уже засчитано максимальное число приглашений.",
+                    "uz": "Bu oyda hisobga olinadigan takliflar soni chegarasiga yetildi."},
+}
+
+
+class ReferralRejectedParams(Params):
+    referral_id: uuid.UUID
+    reject_code: ReferralRejectCode
+
+
+def _referral_rejected_values(lang: Lang, p: ReferralRejectedParams, ctx: Context) -> dict[str, str]:
+    return {"reason": REFERRAL_REASONS[p.reject_code][lang]}
+
+
+def _referral_rejected(lang: Lang, p: ReferralRejectedParams, ctx: Context) -> Rendered:
+    reason = REFERRAL_REASONS[p.reject_code][lang]
+    if lang == "ru":
+        return Rendered("Приглашение не засчитано", reason, REFERRALS_BUTTON[lang], REFERRALS_ROUTE)
+    return Rendered("Taklif hisobga olinmadi", reason, REFERRALS_BUTTON[lang], REFERRALS_ROUTE)
+
+
+SanctionKind = Literal["warning", "social_ban", "nickname_reset"]
+
+
+class SanctionParams(Params):
+    """Санкция применена (основание в событие не входит — ученик читает его в разделе «Друзья»)."""
+
+    sanction_id: uuid.UUID
+    kind: SanctionKind
+    until: AwareDatetime | None = None
+
+
+def _sanction_text(lang: Lang, p: SanctionParams, ctx: Context) -> tuple[str, str]:
+    until = _when(p.until, ctx) if p.until is not None else None
+    if lang == "ru":
+        if p.kind == "warning":
+            return ("Предупреждение", "Вы получили предупреждение за нарушение правил общения. Подробности и "
+                    "обжалование — в разделе «Друзья».")
+        if p.kind == "nickname_reset":
+            return ("Ник сброшен", "Ваш ник сброшен за нарушение правил. Задайте новый в разделе «Друзья».")
+        term = f"до {until}" if until else "бессрочно"
+        return ("Социальные функции ограничены", f"Заявки в друзья, дуэли, парные уроки и общая лига недоступны "
+                f"{term}. Учёба продолжается как обычно. Решение можно обжаловать в разделе «Друзья».")
+    if p.kind == "warning":
+        return ("Ogohlantirish", "Muloqot qoidalarini buzganingiz uchun ogohlantirish oldingiz. Batafsil va "
+                "eʼtiroz — «Doʻstlar» boʻlimida.")
+    if p.kind == "nickname_reset":
+        return ("Taxallus bekor qilindi", "Taxallusingiz qoidalar buzilgani uchun bekor qilindi. «Doʻstlar» "
+                "boʻlimida yangisini kiriting.")
+    term = f"{until} gacha" if until else "muddatsiz"
+    return ("Ijtimoiy funksiyalar cheklandi", f"Doʻstlikka soʻrovlar, duellar, juftlik darslari va umumiy liga "
+            f"{term} mavjud emas. Oʻqish odatdagidek davom etadi. Qarorga «Doʻstlar» boʻlimida eʼtiroz bildirish "
+            "mumkin.")
+
+
+def _sanction_applied(lang: Lang, p: SanctionParams, ctx: Context) -> Rendered:
+    title, body = _sanction_text(lang, p, ctx)
+    return Rendered(title, body, FRIENDS_BUTTON[lang], FRIENDS_ROUTE)
+
+
+def _sanction_applied_kid(lang: Lang, p: SanctionParams, ctx: Context) -> Rendered:
+    if lang == "ru":
+        return Rendered(_kid_title(lang, ctx, "правила общения", ""),
+                        "Мы напомнили о правилах общения в TilHero. Подробности — в разделе «Друзья».",
+                        FRIENDS_BUTTON[lang], FRIENDS_ROUTE)
+    return Rendered(_kid_title(lang, ctx, "", "muloqot qoidalari"),
+                    "TilHeroʼdagi muloqot qoidalarini eslatdik. Batafsil — «Doʻstlar» boʻlimida.",
+                    FRIENDS_BUTTON[lang], FRIENDS_ROUTE)
+
+
+class SanctionAppealParams(Params):
+    appeal_id: uuid.UUID
+    decision: Literal["upheld", "overturned"]
+
+
+def _sanction_appeal_decided(lang: Lang, p: SanctionAppealParams, ctx: Context) -> Rendered:
+    if lang == "ru":
+        if p.decision == "overturned":
+            return Rendered("Обжалование удовлетворено", "Мы пересмотрели решение и сняли ограничение.",
+                            FRIENDS_BUTTON[lang], FRIENDS_ROUTE)
+        return Rendered("Обжалование рассмотрено", "Мы проверили обжалование: решение остаётся в силе.",
+                        FRIENDS_BUTTON[lang], FRIENDS_ROUTE)
+    if p.decision == "overturned":
+        return Rendered("Eʼtiroz qanoatlantirildi", "Qarorni qayta koʻrib chiqdik va cheklovni olib tashladik.",
+                        FRIENDS_BUTTON[lang], FRIENDS_ROUTE)
+    return Rendered("Eʼtiroz koʻrib chiqildi", "Eʼtirozingizni tekshirdik: qaror oʻz kuchida qoladi.",
+                    FRIENDS_BUTTON[lang], FRIENDS_ROUTE)
+
+
+def _sanction_appeal_decided_kid(lang: Lang, p: SanctionAppealParams, ctx: Context) -> Rendered:
+    if lang == "ru":
+        return Rendered(_kid_title(lang, ctx, "обжалование рассмотрено", ""),
+                        "Решение по обжалованию — в разделе «Друзья».", FRIENDS_BUTTON[lang], FRIENDS_ROUTE)
+    return Rendered(_kid_title(lang, ctx, "", "eʼtiroz koʻrib chiqildi"),
+                    "Eʼtiroz boʻyicha qaror — «Doʻstlar» boʻlimida.", FRIENDS_BUTTON[lang], FRIENDS_ROUTE)
+
+
+COMPLAINT_RESULTS: dict[str, dict[str, str]] = {
+    "action_taken": {"ru": "меры приняты", "uz": "choralar koʻrildi"},
+    "dismissed": {"ru": "нарушений не найдено", "uz": "qoidabuzarlik topilmadi"},
+}
+
+
+class ComplaintParams(Params):
+    """Жалоба рассмотрена — жалобщику, без подробностей (что за меры и против кого — не сообщается)."""
+
+    case_id: uuid.UUID
+    outcome: Literal["action_taken", "dismissed"]
+
+
+def _complaint_values(lang: Lang, p: ComplaintParams, ctx: Context) -> dict[str, str]:
+    return {"result": COMPLAINT_RESULTS[p.outcome][lang]}
+
+
+def _complaint_kid_values(lang: Lang, p: ComplaintParams, ctx: Context) -> dict[str, str]:
+    return {"learner_name": ctx.learner_name or KID_NAME[lang], **_complaint_values(lang, p, ctx)}
+
+
+def _complaint_resolved(lang: Lang, p: ComplaintParams, ctx: Context) -> Rendered:
+    result = COMPLAINT_RESULTS[p.outcome][lang]
+    if lang == "ru":
+        return Rendered("Жалоба рассмотрена", f"Спасибо, что сообщили! Жалоба проверена: {result}.", OPEN[lang],
+                        None)
+    return Rendered("Shikoyat koʻrib chiqildi", f"Xabar berganingiz uchun rahmat! Shikoyat tekshirildi: {result}.",
+                    OPEN[lang], None)
+
+
+def _complaint_resolved_kid(lang: Lang, p: ComplaintParams, ctx: Context) -> Rendered:
+    result = COMPLAINT_RESULTS[p.outcome][lang]
+    if lang == "ru":
+        return Rendered(_kid_title(lang, ctx, "жалоба рассмотрена", ""),
+                        f"Спасибо, что сообщили! Жалоба проверена: {result}.", OPEN[lang], None)
+    return Rendered(_kid_title(lang, ctx, "", "shikoyat koʻrib chiqildi"),
+                    f"Xabar berganingiz uchun rahmat! Shikoyat tekshirildi: {result}.", OPEN[lang], None)
+
+
 # ---------------------------------------------------------------- плейсхолдеры версий (спринт 2)
 
 # name → (описание RU, описание EN) — для TemplateInfo.placeholders
@@ -792,6 +1249,27 @@ PLACEHOLDER_DESCRIPTIONS: dict[str, tuple[str, str]] = {
         "“grew” in Russian with the hero's grammatical gender (UZ — “oʻsdi”)",
     ),
     "stage": ("Название новой ступени героя, например «Малыш»", "Name of the hero's new stage, e.g. “Baby”"),
+    # спринт 7 — социальное
+    "nickname": (
+        "Ник в сообществе TilHero; если не задан — «Друг» (детям — «Член семьи»)",
+        "Community nickname; “Friend” if not set (“Family member” for children)",
+    ),
+    "deadline": ("До какого времени принять вызов, ДД.ММ ЧЧ:ММ по поясу ученика",
+                 "Challenge acceptance deadline, DD.MM HH:MM in the learner's time zone"),
+    "duel_result": ("Исход дуэли для получателя, например «Победа!» или «Ничья!»",
+                    "Duel outcome for the recipient, e.g. “Victory!” or “Draw!”"),
+    "score": ("Свой результат, например «Ваш результат: 7 из 10.» (пусто — не играл)",
+              "Own score, e.g. “Your result: 7 of 10.” (empty if not played)"),
+    "place": ("Место в группе лиги, число", "Place in the league group, a number"),
+    "xp": ("XP за неделю, число", "XP earned this week, a number"),
+    "prize": ("Приз, например «Приз: 50 тилов.» (пусто — без приза)", "Prize, e.g. “Prize: 50 tils.” (empty — none)"),
+    "start": ("Начало урока: «Начало — сейчас.» или «Начало — 22.11 18:00.»",
+              "Lesson start: “Starts now.” or “Starts at 22.11 18:00.”"),
+    "reward": ("Награда за приглашение, например «2 заморозки»", "Referral reward, e.g. “2 streak freezes”"),
+    "reason": ("Публичная причина, почему приглашение не засчитано (без правил антифрода)",
+               "Public reason why the referral did not count (no anti-fraud rules)"),
+    "result": ("Итог проверки жалобы: «меры приняты» или «нарушений не найдено»",
+               "Complaint review result: “action taken” or “no violation found”"),
 }
 KID_NAME = {"ru": "Ваш ребёнок", "uz": "Farzandingiz"}
 INVITER_NAME = {"ru": "Ваш знакомый", "uz": "Tanishingiz"}
@@ -870,9 +1348,9 @@ class TextOverride:
 # ---------------------------------------------------------------- реестр
 
 Category = Literal["reminders", "missed", "social", "support", "product", "service", "game"]
-# Категории, известные публичным контрактам (bff.ts InboxItem.category, admin.ts TemplateInfo.category): game
-# (спринт 6) пока показывается как reminders — её выключатель тоже reminders (Settings.game_category_gate)
-PUBLIC_CATEGORY: dict[str, str] = {"game": "reminders"}
+# Категория записи → категория публичных контрактов (bff.ts InboxItem.category, admin.ts TemplateInfo.category).
+# Спринт 7: game — полноценная категория контрактов и настроек (в спринте 6 показывалась как reminders) — замен нет
+PUBLIC_CATEGORY: dict[str, str] = {}
 
 
 def public_category(category: str) -> str:
@@ -898,6 +1376,9 @@ class TemplateSpec:
     direct_only: bool = False
     # Спринт 6: детям 6–13 — только центр детского профиля (опекуну «в сводке», без сообщения в Telegram)
     kid_in_app_only: bool = False
+    # Спринт 7: шаблон виден и правится в админке (санкции и обжалования — категория service, только тексты кода:
+    # admin.ts TemplateInfo.category не допускает service)
+    staff_editable: bool = True
     # Спринт 2 — версии сотрудников: описание (RU, EN), плейсхолдеры и их значения на языке ученика, образец
     # параметров для текстов по умолчанию и предпросмотра
     description: tuple[str, str] = ("", "")
@@ -907,7 +1388,7 @@ class TemplateSpec:
 
     @property
     def editable(self) -> bool:
-        return not (self.direct_only or self.transactional)
+        return self.staff_editable and not (self.direct_only or self.transactional)
 
     @property
     def kid(self) -> bool:
@@ -1190,6 +1671,147 @@ TEMPLATES: dict[str, TemplateSpec] = {
                          "The child's hero grew — to the parent, in-app only"),
             placeholder_names=("learner_name", "hero", "grew", "stage"), placeholders=_hero_kid_values,
             sample={"hero_code": "pet_0", "stage": 2},
+        ),
+        # ---------------------------------------------------------------- спринт 7: социальное
+        TemplateSpec(
+            "friend_request", "social", FriendRequestParams, _friend_request, kid_in_app_only=True,
+            description=("Новая заявка в друзья — получателю (ник отправителя)",
+                         "New friend request — to the recipient (sender's nickname)"),
+            placeholder_names=("nickname",), placeholders=_friend_request_values,
+            sample={"request_id": _SAMPLE_ID, "nickname": "Alisher_7"},
+        ),
+        TemplateSpec(
+            "friend_accepted", "social", FriendAcceptedParams, _friend_accepted, kid_in_app_only=True,
+            description=("Заявка в друзья принята — отправителю заявки", "Friend request accepted — to the requester"),
+            placeholder_names=("nickname",), placeholders=_friend_accepted_values,
+            sample={"nickname": "Madina_uz"},
+        ),
+        TemplateSpec(
+            "duel_challenged", "game", DuelChallengedParams, _duel_challenged, kid_variant="duel_challenged.kid",
+            kid_in_app_only=True,
+            description=("Вызов на дуэль — сопернику (ник вызывающего, срок принятия)",
+                         "Duel challenge — to the opponent (challenger's nickname, acceptance deadline)"),
+            placeholder_names=("nickname", "deadline"), placeholders=_duel_challenged_values,
+            sample={"duel_id": _SAMPLE_ID, "nickname": "Alisher_7", "accept_deadline": "2026-11-22T13:00:00Z"},
+        ),
+        TemplateSpec(
+            "duel_challenged.kid", "game", DuelChallengedParams, _duel_challenged_kid, kid_in_app_only=True,
+            description=("Вызов на дуэль от члена семьи — родителю в центре детского профиля",
+                         "Duel challenge from a family member — to the parent, in-app only"),
+            placeholder_names=("learner_name", "nickname"), placeholders=_duel_challenged_kid_values,
+            sample={"duel_id": _SAMPLE_ID, "nickname": None, "accept_deadline": "2026-11-22T13:00:00Z"},
+        ),
+        TemplateSpec(
+            "duel_finished", "game", DuelFinishedParams, _duel_finished, kid_variant="duel_finished.kid",
+            kid_in_app_only=True,
+            description=("Итог дуэли — каждому участнику: свой исход и свой результат (переоценка — новое сообщение)",
+                         "Duel result — to each participant: own outcome and score (re-evaluation — a new message)"),
+            placeholder_names=("duel_result", "score"), placeholders=_duel_finished_values,
+            sample={"duel_id": _SAMPLE_ID, "outcome": "win", "result_version": 1, "correct": 8, "total": 10},
+        ),
+        TemplateSpec(
+            "duel_finished.kid", "game", DuelFinishedParams, _duel_finished_kid, kid_in_app_only=True,
+            description=("Дуэль ребёнка завершена — родителю, без победителя и счёта",
+                         "Child's duel finished — to the parent, without winner or score"),
+            placeholder_names=("learner_name",), placeholders=_duel_finished_kid_values,
+            sample={"duel_id": _SAMPLE_ID, "outcome": "draw", "result_version": 1, "correct": 6, "total": 10},
+        ),
+        TemplateSpec(
+            "league_closed", "game", LeagueClosedParams, _league_closed, kid_in_app_only=True,
+            description=("Итоги недели общей лиги — участнику: место, XP и приз",
+                         "Weekly general league results — to a participant: place, XP and prize"),
+            placeholder_names=("place", "xp", "prize"), placeholders=_league_values,
+            sample={"week": "2026-11-16", "place": 2, "xp": 640, "prize_til": 30},
+        ),
+        TemplateSpec(
+            "pair_invited", "social", PairInvitedParams, _pair_invited, kid_variant="pair_invited.kid",
+            kid_in_app_only=True,
+            description=("Приглашение на парный урок — приглашённому (ник, начало)",
+                         "Pair lesson invitation — to the invitee (nickname, start)"),
+            placeholder_names=("nickname", "start"), placeholders=_pair_invited_values,
+            sample={"room_id": _SAMPLE_ID, "nickname": "Alisher_7", "start_at": "2026-11-22T13:00:00Z",
+                    "scheduled": True},
+        ),
+        TemplateSpec(
+            "pair_invited.kid", "social", PairInvitedParams, _pair_invited_kid, kid_in_app_only=True,
+            description=("Приглашение ребёнка на парный урок от члена семьи — родителю в центре",
+                         "Pair lesson invitation for the child from a family member — to the parent, in-app only"),
+            placeholder_names=("learner_name", "nickname", "start"), placeholders=_pair_invited_kid_values,
+            sample={"room_id": _SAMPLE_ID, "nickname": None, "start_at": "2026-11-22T13:00:00Z",
+                    "scheduled": False},
+        ),
+        TemplateSpec(
+            "pair_starting", "social", RoomParams, _pair_starting, kid_variant="pair_starting.kid",
+            kid_in_app_only=True,
+            description=("Запланированный парный урок начнётся через 5 минут — обоим участникам",
+                         "A scheduled pair lesson starts in 5 minutes — to both participants"),
+            sample={"room_id": _SAMPLE_ID},
+        ),
+        TemplateSpec(
+            "pair_starting.kid", "social", RoomParams, _pair_starting_kid, kid_in_app_only=True,
+            description=("Парный урок ребёнка через 5 минут — родителю в центре",
+                         "Child's pair lesson in 5 minutes — to the parent, in-app only"),
+            placeholder_names=("learner_name",), placeholders=_kid_name_values, sample={"room_id": _SAMPLE_ID},
+        ),
+        TemplateSpec(
+            "pair_stopped", "social", RoomParams, _pair_stopped, kid_variant="pair_stopped.kid",
+            kid_in_app_only=True,
+            description=("Администратор остановил парную комнату — участникам",
+                         "Staff stopped the pair room — to the participants"),
+            sample={"room_id": _SAMPLE_ID},
+        ),
+        TemplateSpec(
+            "pair_stopped.kid", "social", RoomParams, _pair_stopped_kid, kid_in_app_only=True,
+            description=("Комнату ребёнка остановил администратор — родителю в центре",
+                         "The child's pair room was stopped — to the parent, in-app only"),
+            placeholder_names=("learner_name",), placeholders=_kid_name_values, sample={"room_id": _SAMPLE_ID},
+        ),
+        TemplateSpec(
+            "referral_qualified", "social", ReferralQualifiedParams, _referral_qualified, kid_in_app_only=True,
+            description=("Приглашение друга засчитано — пригласившему (награда)",
+                         "Referral counted — to the inviter (reward)"),
+            placeholder_names=("reward",), placeholders=_referral_qualified_values,
+            sample={"referral_id": _SAMPLE_ID, "freeze": 2, "til": 0},
+        ),
+        TemplateSpec(
+            "referral_rejected", "social", ReferralRejectedParams, _referral_rejected, kid_in_app_only=True,
+            description=("Приглашение не засчитано — пригласившему (публичная причина)",
+                         "Referral not counted — to the inviter (public reason)"),
+            placeholder_names=("reason",), placeholders=_referral_rejected_values,
+            sample={"referral_id": _SAMPLE_ID, "reject_code": "window_expired"},
+        ),
+        TemplateSpec(
+            "complaint_resolved", "social", ComplaintParams, _complaint_resolved, kid_variant="complaint_resolved.kid",
+            kid_in_app_only=True,
+            description=("Жалоба рассмотрена — жалобщику, без подробностей",
+                         "Complaint reviewed — to the reporter, without details"),
+            placeholder_names=("result",), placeholders=_complaint_values,
+            sample={"case_id": _SAMPLE_ID, "outcome": "action_taken"},
+        ),
+        TemplateSpec(
+            "complaint_resolved.kid", "social", ComplaintParams, _complaint_resolved_kid, kid_in_app_only=True,
+            description=("Жалоба ребёнка рассмотрена — родителю в центре",
+                         "The child's complaint reviewed — to the parent, in-app only"),
+            placeholder_names=("learner_name", "result"), placeholders=_complaint_kid_values,
+            sample={"case_id": _SAMPLE_ID, "outcome": "dismissed"},
+        ),
+        TemplateSpec(
+            "sanction_applied", "service", SanctionParams, _sanction_applied, kid_variant="sanction_applied.kid",
+            kid_in_app_only=True, staff_editable=False,
+            sample={"sanction_id": _SAMPLE_ID, "kind": "social_ban", "until": "2026-11-28T13:00:00Z"},
+        ),
+        TemplateSpec(
+            "sanction_applied.kid", "service", SanctionParams, _sanction_applied_kid, kid_in_app_only=True,
+            staff_editable=False, sample={"sanction_id": _SAMPLE_ID, "kind": "warning", "until": None},
+        ),
+        TemplateSpec(
+            "sanction_appeal_decided", "service", SanctionAppealParams, _sanction_appeal_decided,
+            kid_variant="sanction_appeal_decided.kid", kid_in_app_only=True, staff_editable=False,
+            sample={"appeal_id": _SAMPLE_ID, "decision": "overturned"},
+        ),
+        TemplateSpec(
+            "sanction_appeal_decided.kid", "service", SanctionAppealParams, _sanction_appeal_decided_kid,
+            kid_in_app_only=True, staff_editable=False, sample={"appeal_id": _SAMPLE_ID, "decision": "upheld"},
         ),
         TemplateSpec(
             "release_note.published", "product", ReleaseNoteParams, _release_note,

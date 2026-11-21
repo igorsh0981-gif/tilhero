@@ -24,7 +24,16 @@ from tilhero_common.app import Runtime
 from tilhero_common.http_client import UpstreamError
 from tilhero_notifications import store
 from tilhero_notifications.delivery import DeliveryInfo, get_delivery, get_public
-from tilhero_notifications.domain.policy import KID_BANDS, Item, Rules, decide, limit_applies, local_day, zone
+from tilhero_notifications.domain.policy import (
+    KID_BANDS,
+    Item,
+    Rules,
+    decide,
+    is_invite,
+    limit_applies,
+    local_day,
+    zone,
+)
 from tilhero_notifications.domain.texts import TextError
 from tilhero_notifications.models import Campaign
 from tilhero_notifications.settings import Settings
@@ -300,13 +309,24 @@ class Dispatcher:
                 assert decision.at is not None
                 await store.mark_deferred(session, c, at=decision.at, reason=decision.reason or "deferred", now=now)
                 return "scheduled"
-            # 5. лимит местных суток (reminders + missed + social + game); сама запись (повтор) не считается
+            # 5. лимит местных суток (reminders + missed + social + game); сама запись (повтор) не считается.
+            # Приглашения (pair_invited, pair_starting, duel_challenged) — вне общего лимита (решение владельца,
+            # спринт 7), со своим: invite_daily_limit на получателя и invite_per_sender_limit от одного отправителя
             if limit_applies(c.category):
                 day = local_day(now, zone(delivery.timezone, s.default_timezone))
-                used = await store.count_limit(session, c.user_id, day, exclude=c.notification_id)
-                if used >= s.daily_limit:
-                    await store.mark_final(session, c, status="in_app_only", reason="daily_limit", now=now)
-                    return "in_app_only"
+                if is_invite(c.template):
+                    used = await store.count_invites(session, c.user_id, day, exclude=c.notification_id)
+                    from_sender = (await store.count_invites(session, c.user_id, day, exclude=c.notification_id,
+                                                             sender=c.subject_user_id)
+                                   if c.subject_user_id is not None and c.template != "pair_starting" else 0)
+                    if used >= s.invite_daily_limit or from_sender >= s.invite_per_sender_limit:
+                        await store.mark_final(session, c, status="in_app_only", reason="invite_limit", now=now)
+                        return "in_app_only"
+                else:
+                    used = await store.count_limit(session, c.user_id, day, exclude=c.notification_id)
+                    if used >= s.daily_limit:
+                        await store.mark_final(session, c, status="in_app_only", reason="daily_limit", now=now)
+                        return "in_app_only"
                 await store.reserve_limit(session, c.notification_id, day)
 
         body = {

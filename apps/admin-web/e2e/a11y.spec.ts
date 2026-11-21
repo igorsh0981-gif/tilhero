@@ -5,6 +5,7 @@ import { LEARNER } from "./fixtures/data";
 import { SID } from "./fixtures/ai-data";
 import { CID, GID } from "./fixtures/memory-data";
 import { EVENT_ID } from "./fixtures/game-data";
+import { CASE, DUEL, GROUP, REFERRAL, ROOM } from "./fixtures/social-data";
 
 async function unnamedControls(page: Page): Promise<string[]> {
   return page.evaluate(() => {
@@ -82,6 +83,23 @@ const SCREENS: Array<[string, string]> = [
   ["#/events", "events"],
   [`#/events/${EVENT_ID.kidsReading}`, "ev-card"],
   ["#/events/new", "ev-card"],
+  // sprint 7
+  ["#/friends", "fr-lookup"],
+  [`#/friends/${LEARNER.anya}`, "fr-card"],
+  ["#/moderation", "mod-cases"],
+  [`#/moderation/cases/${CASE.nick}`, "mc-case"],
+  ["#/moderation/sanctions", "mod-sanctions"],
+  ["#/moderation/appeals", "mod-appeals"],
+  ["#/referrals", "ref-queue"],
+  [`#/referrals/review/${REFERRAL.velocity}`, "rr"],
+  ["#/referrals/campaigns", "rc"],
+  ["#/referrals/stats", "ref-stats"],
+  ["#/leagues", "lg-week"],
+  [`#/leagues/groups/${GROUP.heldPrev}`, "lg-group"],
+  ["#/leagues/duels", "lg-duels"],
+  [`#/leagues/duels/${DUEL.won}`, "dl-duel"],
+  ["#/pair_rooms", "pair-rooms"],
+  [`#/pair_rooms/${ROOM.live}`, "pr-room"],
 ];
 
 for (const [hash, id] of SCREENS) {
@@ -113,6 +131,25 @@ test("keyboard: Tab reaches the menu with a visible focus ring; Enter opens a se
   await page.getByTestId("news-tab-whatsnew").focus();
   await page.keyboard.press("ArrowRight");
   await expect(page.getByTestId("news-tab-templates")).toHaveAttribute("aria-selected", "true");
+});
+
+test("sprint 7: the decision of a case is keyboard operable — radios by arrows, the term field, the step-up dialog traps focus", async ({ page }) => {
+  await openAs(page, "ops@tilhero.local", `#/moderation/cases/${CASE.nick}`);
+  const f = page.getByTestId("mc-resolve");
+  await f.getByTestId("mc-action-warning").focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(f.getByTestId("mc-action-social_ban")).toBeChecked();
+  await expect(f.getByTestId("mc-days")).toBeVisible();
+  await f.getByTestId("mc-days").fill("20");
+  await f.getByTestId("mc-basis").fill("Оскорбительный ник, повторные жалобы");
+  await f.getByTestId("mc-submit").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("stepup")).toBeVisible();
+  for (let n = 0; n < 9; n++) await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => document.activeElement?.closest("[data-dialog]")?.getAttribute("data-testid"))).toBe("stepup");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("stepup")).toHaveCount(0);
+  await expect(f).toContainText("Действие отменено: код не подтверждён");
 });
 
 test("dialogs trap focus and close with Escape", async ({ page }) => {

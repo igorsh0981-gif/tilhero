@@ -294,6 +294,9 @@ const CARD_PROPS = {
         social: C.bool,
         support: C.bool,
         product: C.bool,
+        // спринт 7: категория game (лиги, дуэли, значки) — по умолчанию включена (INTERNAL_API спринта 7 §5); проекция
+        // user-admin, ещё не знающая категорию, её не присылает → true (значение по умолчанию, а не «нет данных»)
+        game: C.fallback(C.bool, true),
       }),
     }),
   ),
@@ -660,7 +663,12 @@ export const RELEASE_NOTE_STATS: Codec<ReleaseNoteStats> = C.obj<ReleaseNoteStat
 
 const TEMPLATE_TEXT: Codec<TemplateText> = C.obj<TemplateText>({ title: C.str(80), body: C.str(1000), button: C.nullable(C.str(32)) });
 export const TEMPLATE_TEXTS: Codec<TemplateTexts> = C.obj<TemplateTexts>({ ru: TEMPLATE_TEXT, uz: TEMPLATE_TEXT });
-const NOTIF_CATEGORY = C.oneOf(["reminders", "missed", "social", "support", "product"] as const);
+/** Категория шаблона (TemplateInfo.category — без service); спринт 7 — + game. Сверка с admin.ts при компиляции. */
+const NOTIF_CATEGORIES = ["reminders", "missed", "social", "support", "product", "game"] as const satisfies readonly TemplateInfo["category"][];
+type MissingNotifCategories = Exclude<TemplateInfo["category"], (typeof NOTIF_CATEGORIES)[number]>;
+const _notifCategoriesListed: [MissingNotifCategories] extends [never] ? true : MissingNotifCategories = true;
+void _notifCategoriesListed;
+const NOTIF_CATEGORY = C.oneOf(NOTIF_CATEGORIES);
 const PLACEHOLDER: Codec<TemplatePlaceholder> = C.obj<TemplatePlaceholder>({
   name: C.id(/^[a-z][a-z0-9_]{0,39}$/, 40),
   description: RU_EN,

@@ -91,7 +91,7 @@ async def test_full_lifecycle_of_child_profile_from_events(env) -> None:
     assert r.consent["basis"] == "guardian" and r.consent["purposes"] == ["terms", "privacy"]
     assert r.consent["revoked_at"] is not None and r.consent["policy_version"] == "1.0"
     assert r.notifications == {"enabled": True, "categories": {"reminders": True, "missed": False, "social": False,
-                                                               "support": True, "product": False}}
+                                                               "support": True, "product": False, "game": False}}
     assert r.security == {"pin_enabled": False, "pin_reset_pending": True}
     assert r.goal == "travel" and r.reminders_enabled and not r.onboarding_completed
     assert r.plan["schedule"] == {"preset": "three_per_week", "days": [1, 3, 5], "preferred_time": "07:30",

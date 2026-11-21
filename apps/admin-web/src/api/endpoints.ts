@@ -1,4 +1,27 @@
 import type {
+  AdminCase,
+  AdminCaseRow,
+  AdminDuel,
+  AdminDuelRow,
+  AdminLeagueGroup,
+  AdminLeagueWeek,
+  AdminPairRoom,
+  AdminPairRoomRow,
+  AdminReferral,
+  AdminReferralRow,
+  AdminSanction,
+  AdminSanctionAppeal,
+  AdminSocialCard,
+  CaseResolveRequest,
+  CaseStatus,
+  DuelReevaluateRequest,
+  LeagueReevaluateRequest,
+  ReferralCampaignDraft,
+  ReferralCampaignStats,
+  ReferralCampaignSummary,
+  ReferralCampaignVersion,
+  ReferralRejectRequest,
+  SanctionAppealDecision,
   AdminGameEvent,
   AdminGameImage,
   AdminHero,
@@ -126,7 +149,7 @@ import type {
 import type { Ticket as ClientTicket } from "@tilhero/contracts/bff";
 import type { Band, ContentKind, GlossaryReviewStatus, GlossarySource, MediaRequestStatus, ScenarioTestRun, VersionStatus } from "@tilhero/contracts/content";
 import type { SessionKind } from "@tilhero/contracts/ai";
-import type { GameCurrency } from "@tilhero/contracts/bff";
+import type { DuelStatus, GameCurrency, PairRoomStatus, ReferralStatus, SanctionAppealStatus } from "@tilhero/contracts/bff";
 import { api } from "./client";
 
 export type { SlaPolicies, SlaPolicy, SupportStats };
@@ -379,7 +402,7 @@ export const Diagnostics = {
 /** admin.ts AgentDetail (row + versions) and AgentVersionView (version + names; `updated_at` — the If-Match of PATCH) */
 export type { AgentDetail, AgentVersionView };
 export type AgentCardView = AgentDetail;
-export type BudgetInput = Pick<AiBudget, "monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "speech_monthly_cap_usd" | "alert_percent">;
+export type BudgetInput = Pick<AiBudget, "monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "speech_monthly_cap_usd" | "room_cap_usd" | "alert_percent">;
 
 export const Ai = {
   agents: (background = false) => api.get<{ items: AgentRow[] }>("/ai/agents", { background }),
@@ -543,4 +566,73 @@ export const Game = {
     api.post<AdminLedgerOperation>(`/game/wallets/${enc(userId)}/ledger/${enc(opId)}/reverse`, { reason }, { idempotencyKey }),
   refund: (userId: string, purchaseId: string, reason: string, idempotencyKey: string) =>
     api.post<{ operations: AdminLedgerOperation[] }>(`/game/wallets/${enc(userId)}/purchases/${enc(purchaseId)}/refund`, { reason }, { idempotencyKey }),
+};
+
+/* ---------------------------------------------------------------- sprint 7: «Сообщество» (admin.ts «Социальное») */
+
+/**
+ * «Друзья и жалобы» (social.read): the social card of a learner — profile, counters, request statuses, cases and
+ * sanctions; never correspondence, answers or the other side of a request.
+ */
+export const Social = {
+  card: (userId: string) => api.get<AdminSocialCard>(`/social/users/${enc(userId)}`),
+};
+
+/**
+ * «Модерация» (moderation.manage): the queue of cases (the subject of the complaint, no correspondence), the decision
+ * (a ban > 7 days or for ever — step-up), sanctions and their revocation, appeals. Every command — audit and a basis /
+ * reason / note of 10..500 characters; the same Idempotency-Key is kept for the step-up repeat.
+ */
+export const Moderation = {
+  cases: (status: CaseStatus, cursor?: string | null) => api.get<Page<AdminCaseRow>>("/moderation/cases", { query: { status, cursor, limit: 50 } }),
+  caseOf: (id: string) => api.get<AdminCase>(`/moderation/cases/${enc(id)}`),
+  resolve: (id: string, body: CaseResolveRequest, idempotencyKey: string) => api.post<AdminCase>(`/moderation/cases/${enc(id)}/resolve`, body, { idempotencyKey }),
+  sanctions: (f: { user_id?: string; active?: boolean | null; cursor?: string | null }) =>
+    api.get<Page<AdminSanction>>("/moderation/sanctions", { query: { user_id: f.user_id, active: f.active == null ? undefined : String(f.active), cursor: f.cursor, limit: 50 } }),
+  revoke: (id: string, reason: string, idempotencyKey: string) => api.post<AdminSanction>(`/moderation/sanctions/${enc(id)}/revoke`, { reason }, { idempotencyKey }),
+  appeals: (status: SanctionAppealStatus, cursor?: string | null) => api.get<Page<AdminSanctionAppeal>>("/moderation/appeals", { query: { status, cursor, limit: 50 } }),
+  decideAppeal: (id: string, body: SanctionAppealDecision, idempotencyKey: string) => api.post<AdminSanctionAppeal>(`/moderation/appeals/${enc(id)}/decide`, body, { idempotencyKey }),
+};
+
+/**
+ * «Реферальные кампании» (referral.read; commands — referral.manage): campaign versions (draft → validate → activate
+ * with step-up and a comment), the review queue (approve / reject with a note, one re-decision), statistics.
+ */
+export const Referrals = {
+  campaigns: () => api.get<{ items: ReferralCampaignSummary[] }>("/referrals/campaigns"),
+  campaign: (v: number) => api.get<ReferralCampaignVersion>(`/referrals/campaigns/${v}`),
+  /** If-Match: `updated_at` of the draft that was read (409 DRAFT_CONFLICT when someone saved in between) */
+  saveDraft: (body: ReferralCampaignDraft, ifMatch: string | null) => api.put<ReferralCampaignVersion>("/referrals/campaigns/draft", body, ifMatch ? { headers: { "If-Match": ifMatch } } : {}),
+  deleteDraft: () => api.del<void>("/referrals/campaigns/draft"),
+  validate: () => api.post<RulesValidation>("/referrals/campaigns/draft/validate"),
+  activate: (comment: string, idempotencyKey: string) => api.post<ReferralCampaignVersion>("/referrals/campaigns/draft/activate", { comment }, { idempotencyKey }),
+  stats: () => api.get<{ items: ReferralCampaignStats[] }>("/referrals/campaigns/stats"),
+  list: (status: ReferralStatus | "", cursor?: string | null) => api.get<Page<AdminReferralRow>>("/referrals", { query: { status, cursor, limit: 50 } }),
+  get: (id: string) => api.get<AdminReferral>(`/referrals/${enc(id)}`),
+  approve: (id: string, note: string, idempotencyKey: string) => api.post<AdminReferral>(`/referrals/${enc(id)}/approve`, { note }, { idempotencyKey }),
+  reject: (id: string, body: ReferralRejectRequest, idempotencyKey: string) => api.post<AdminReferral>(`/referrals/${enc(id)}/reject`, body, { idempotencyKey }),
+};
+
+/**
+ * «Лиги и дуэли» (league.read; commands — league.manage): weeks and groups, members, results as versions, anomalies,
+ * the release of held prizes, the re-evaluation of a group or a duel (step-up; the previous record is kept).
+ */
+export const Leagues = {
+  week: (week?: string | null) => api.get<AdminLeagueWeek>("/game/leagues", { query: { week } }),
+  group: (id: string) => api.get<AdminLeagueGroup>(`/game/leagues/${enc(id)}`),
+  reevaluate: (id: string, body: LeagueReevaluateRequest, idempotencyKey: string) => api.post<AdminLeagueGroup>(`/game/leagues/${enc(id)}/reevaluate`, body, { idempotencyKey }),
+  release: (id: string, reason: string, idempotencyKey: string) => api.post<AdminLeagueGroup>(`/game/leagues/${enc(id)}/release-prizes`, { reason }, { idempotencyKey }),
+  duels: (status: DuelStatus | "", cursor?: string | null) => api.get<Page<AdminDuelRow>>("/game/duels", { query: { status, cursor, limit: 50 } }),
+  duel: (id: string) => api.get<AdminDuel>(`/game/duels/${enc(id)}`),
+  reevaluateDuel: (id: string, body: DuelReevaluateRequest, idempotencyKey: string) => api.post<AdminDuel>(`/game/duels/${enc(id)}/reevaluate`, body, { idempotencyKey }),
+};
+
+/**
+ * «Парные комнаты» (room.read; stop — room.manage + step-up): rooms with participants, durations, the speaking seconds
+ * of each and the AI cost; the course of events without the texts of the replies and without assessments.
+ */
+export const PairRooms = {
+  list: (f: { status?: PairRoomStatus | ""; from?: string; to?: string; cursor?: string | null }) => api.get<Page<AdminPairRoomRow>>("/pair-rooms", { query: { status: f.status, from: f.from, to: f.to, cursor: f.cursor, limit: 50 } }),
+  get: (id: string) => api.get<AdminPairRoom>(`/pair-rooms/${enc(id)}`),
+  stop: (id: string, reason: string, idempotencyKey: string) => api.post<AdminPairRoom>(`/pair-rooms/${enc(id)}/stop`, { reason }, { idempotencyKey }),
 };

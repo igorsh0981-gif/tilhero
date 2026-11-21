@@ -30,7 +30,7 @@ Flag = Literal["ai_used", "ai_unavailable", "hints", "human_review", "appealed",
 async def list_sessions(
     date_from: datetime | None = Query(default=None, alias="from"),
     date_to: datetime | None = Query(default=None, alias="to"),
-    kind: Literal["lesson", "scenario", "media", "review", "reading"] | None = Query(default=None),
+    kind: Literal["lesson", "scenario", "media", "review", "reading", "duel"] | None = Query(default=None),
     status: Literal["ready", "in_progress", "paused", "completed", "failed", "cancelled"] | None = Query(default=None),
     outcome: Literal["success", "alt_success", "fail"] | None = Query(default=None),
     flag: Flag | None = Query(default=None),

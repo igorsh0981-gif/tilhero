@@ -17,6 +17,7 @@ import type {
   Page,
 } from "@tilhero/contracts/bff";
 import { learnersState, loadPlan } from "../account.js";
+import { expectShape } from "../check.js";
 import type { BffContext } from "../context.js";
 import {
   BEARER,
@@ -73,6 +74,12 @@ const inviteNotFound = schemaErrors([
 const learnerNotFound = schemaErrors([
   { context: "params", status: 404, code: "LEARNER_NOT_FOUND", message: "Профиль ученика не найден" },
 ]);
+
+/** Семья из social (спринт 7: + member_id каждого члена): ответ не по контракту — нет или не того формата member_id
+ *  (например, «сырой» UUID) — 503 UPSTREAM_UNAVAILABLE {service: social}, семья не собирается. */
+export function checkFamily(ctx: BffContext, f: unknown, what = "family"): Family {
+  return expectShape(ctx.log, "social", what, FamilySchema, f) as Family;
+}
 
 /** Токен ссылки согласия от identity (base64url) — без префикса gc_ укладывается в 64 символа start_param. */
 const GC_TOKEN_RE = /^[A-Za-z0-9_-]{16,61}$/;
@@ -433,7 +440,7 @@ export function familyRoutes(app: App, ctx: BffContext): void {
       const res = await social.post<InviteAcceptResult>(`/internal/v1/invites/${req.params.invite_id.toLowerCase()}/accept`, {
         subject: auth.accountId,
       });
-      return { invite_id: res.invite_id, kind: res.kind, family: res.family ? familyView(res.family, auth.learnerId) : null };
+      return { invite_id: res.invite_id, kind: res.kind, family: res.family ? familyView(checkFamily(ctx, res.family, "invite_accept.family"), auth.learnerId) : null };
     },
   );
 
@@ -465,7 +472,9 @@ export function familyRoutes(app: App, ctx: BffContext): void {
       schema: {
         tags: ["invites"],
         summary: "Моя семья (204 — семьи нет)",
-        description: "is_me — активный ученик (в детском профиле — ребёнок).",
+        description:
+          "is_me — активный ученик (в детском профиле — ребёнок). Спринт 7: member_id каждого члена семьи — по нему вызывают " +
+          "на дуэль и зовут в парный урок (детям — только так); user_id — только для управления семьёй.",
         security: BEARER,
         response: { 200: FamilySchema, 204: Type.Null({ description: "Семьи нет" }), ...errorResponses(401, 423) },
       },
@@ -474,7 +483,7 @@ export function familyRoutes(app: App, ctx: BffContext): void {
       const auth = authOf(req);
       const family = await orNull(social.get<Family>("/internal/v1/me/family", { subject: auth.accountId }), "FAMILY_NOT_FOUND");
       if (!family) return reply.code(204).send(null);
-      return familyView(family, auth.learnerId);
+      return familyView(checkFamily(ctx, family), auth.learnerId);
     },
   );
 }

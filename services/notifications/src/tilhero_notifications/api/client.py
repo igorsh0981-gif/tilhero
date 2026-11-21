@@ -37,7 +37,7 @@ def _horizon(rt: Runtime, now: datetime) -> datetime:
 def _item(n: Notification) -> InboxItem:
     return InboxItem(
         notification_id=n.notification_id,
-        category=public_category(n.category),  # type: ignore[arg-type]  # game (спринт 6) — как reminders
+        category=public_category(n.category),  # type: ignore[arg-type]  # спринт 7: game — категория bff.ts
         title=n.title or "",
         body=n.body or "",
         startapp=n.startapp,

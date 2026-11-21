@@ -19,7 +19,7 @@ import { ReadingStepView } from "../reading/ReadingStep";
  * is re-sent unchanged, the simplified mode is a neutral plaque. The same player runs scenario and media sessions and
  * the review of mistakes.
  */
-export function LessonPlayer({ sessionId }: { sessionId: string }) {
+export function LessonPlayer({ sessionId, duelId }: { sessionId: string; duelId?: string }) {
   const { bff, nav, session: app } = useApp();
   const { t, l, fmt, lang } = useI18n();
   const kid = app.learner.kind === "child";
@@ -50,13 +50,16 @@ export function LessonPlayer({ sessionId }: { sessionId: string }) {
   const strip = st.session ? stageStrip(st.session, step) : null;
   const stageName = (s: SessionStage | null) => (s ? t(`st.${s}` as MessageKey) : "");
   const isLesson = !st.session || st.session.kind === "lesson";
+  // sprint 7: the tasks of a duel — no hints, no AI, the time does not count; the end leads back to the duel
+  const duel = !!duelId || st.session?.kind === "duel";
 
   const exit = async () => {
     setMenu(false);
     if (st.session && isOpen(st.session) && st.phase !== "paused" && st.phase !== "closed") await api.pause();
     playerMarker.clear();
     nav.back();
-    if (strip?.current && st.phase !== "closed") showToast(t(isLesson ? "pl.exited" : "pl.exitedOther", { stage: stageName(strip.current) }));
+    if (duel) showToast(t("du.exited"));
+    else if (strip?.current && st.phase !== "closed") showToast(t(isLesson ? "pl.exited" : "pl.exitedOther", { stage: stageName(strip.current) }));
   };
   const pause = async () => {
     setMenu(false);
@@ -67,11 +70,19 @@ export function LessonPlayer({ sessionId }: { sessionId: string }) {
     if (!summary) return;
     playerMarker.clear();
     haptic.notify("success");
-    nav.replace({ name: "lessonSummary", sessionId, summary, fresh: true });
+    // the tasks of a duel: back to its card underneath (it re-reads the duel: waiting or the result)
+    if (duelId) nav.back();
+    else nav.replace({ name: "lessonSummary", sessionId, summary, fresh: true });
   };
 
   const top = (
     <>
+      {duel ? (
+        <div className="card notice" role="note" data-testid="pl-duel">
+          <Icon name="target" size={20} />
+          <p className="sub ink">{t(kid ? "du.playerNoteKid" : "du.playerNote")}</p>
+        </div>
+      ) : null}
       {/* AI off at the start (emergency stop, budget) — from the first step; gone in the roleplay — after the re-read */}
       {showsDegraded(st.session, step) ? (
         <div className="card notice" role="note" data-testid="pl-degraded">
@@ -101,11 +112,12 @@ export function LessonPlayer({ sessionId }: { sessionId: string }) {
           <Btn
             onClick={() => {
               playerMarker.clear();
-              nav.goTab("lessons");
+              if (duelId) nav.back();
+              else nav.goTab("lessons");
             }}
             data-testid="pl-to-lessons"
           >
-            {t("pl.toLessons")}
+            {duelId ? t("du.title") : t("pl.toLessons")}
           </Btn>
         </div>
       </main>
@@ -168,7 +180,7 @@ export function LessonPlayer({ sessionId }: { sessionId: string }) {
         body = <ReadingStepView key={step.step_id} {...p} step={step} />;
         break;
       case "done":
-        body = <DoneView key={step.step_id} {...p} step={step} onFinish={() => void finish()} />;
+        body = <DoneView key={step.step_id} {...p} step={step} onFinish={() => void finish()} duel={duel} />;
         break;
     }
   }

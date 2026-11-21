@@ -95,8 +95,18 @@ class IdempotencyReused(Exception):
 
 async def lock_user(session: AsyncSession, user_id: uuid.UUID) -> None:
     """Сериализация команд одного ученика (старт, шаг, пауза, завершение, tick, сага) до конца транзакции."""
-    obj = int.from_bytes(user_id.bytes[:4], "big", signed=True)
-    await session.execute(text("SELECT pg_advisory_xact_lock(:c, :o)"), {"c": _LOCK_CLASS, "o": obj})
+    await session.execute(text("SELECT pg_advisory_xact_lock(:c, :o)"), {"c": _LOCK_CLASS, "o": lock_key(user_id)})
+
+
+def lock_key(user_id: uuid.UUID) -> int:
+    return int.from_bytes(user_id.bytes[:4], "big", signed=True)
+
+
+async def lock_users(session: AsyncSession, *user_ids: uuid.UUID | None) -> None:
+    """Блокировки нескольких учеников в одном порядке (по ключу блокировки) — без взаимных ожиданий. Везде, где
+    нужны и ученики, и их строки (комнаты, наборы дуэлей, проекции), сначала берутся блокировки учеников."""
+    for uid in sorted({u for u in user_ids if u is not None}, key=lock_key):
+        await lock_user(session, uid)
 
 
 def iso(dt: datetime | None) -> str | None:

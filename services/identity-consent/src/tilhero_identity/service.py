@@ -145,6 +145,12 @@ def _learner_not_found() -> ApiError:
     return not_found("LEARNER_NOT_FOUND", "Профиль ученика не найден")
 
 
+def profile_projection(user: User) -> dict[str, str | None]:
+    """age_band и guardian_consent ученика — ровно как в user.profile.updated.v1; та же функция строит строку выгрузки
+    GET /internal/v1/export/profiles (export.py): начальная загрузка проекции не расходится с событием."""
+    return {"age_band": user.age_band, "guardian_consent": user.guardian_consent}
+
+
 def _guardian_consent_not_found() -> ApiError:
     return not_found("GUARDIAN_CONSENT_NOT_FOUND", "Ссылка согласия не найдена")
 
@@ -415,10 +421,9 @@ class IdentityService:
         await self._emit(session, EV_PROFILE_UPDATED, {
             "user_id": str(user.user_id),
             "changed_fields": changed_fields,
-            "age_band": user.age_band,
             "is_minor": is_minor(user.age_band),
             "locale": user.locale,
-            "guardian_consent": user.guardian_consent,
+            **profile_projection(user),
         })
 
     async def _notify_changed(self, session: AsyncSession, learner: User, recipient: User) -> None:

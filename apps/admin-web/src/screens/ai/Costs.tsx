@@ -454,6 +454,8 @@ const FIELDS: ReadonlyArray<{ k: keyof BudgetForm; unit: "usd" | "pct" }> = [
   { k: "alert_percent", unit: "pct" },
   // sprint 5: inside the monthly cap — on its own row (its label is long)
   { k: "speech_monthly_cap_usd", unit: "usd" },
+  // sprint 7: the coach of one pair room (cooperative_lesson_coach); exhausted — the room goes on by the scenario
+  { k: "room_cap_usd", unit: "usd" },
 ];
 
 function SettingsCard({ budget, error, onRetry, onSaved, onConflict, own }: { budget: AiBudget | null; error: unknown; onRetry: () => void; onSaved: (b: AiBudget) => void; onConflict: () => Promise<AiBudget>; own: boolean | null }) {
@@ -591,7 +593,7 @@ function SettingsCard({ budget, error, onRetry, onSaved, onConflict, own }: { bu
       {ask && (
         <ConfirmCommand
           title={t("csf.saveT")}
-          text={t("csf.saveM", { m: money(ask.monthly_cap_usd), d: money(ask.learner_daily_cap_usd), l: money(ask.lesson_cap_usd), s: money(ask.speech_monthly_cap_usd), a: ask.alert_percent })}
+          text={t("csf.saveM", { m: money(ask.monthly_cap_usd), d: money(ask.learner_daily_cap_usd), l: money(ask.lesson_cap_usd), s: money(ask.speech_monthly_cap_usd), r: money(ask.room_cap_usd), a: ask.alert_percent })}
           icon="gauge"
           ok={t("common.save")}
           testId="csf-dialog"

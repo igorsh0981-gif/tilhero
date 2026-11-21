@@ -5,10 +5,11 @@ export interface Route {
   id: string | null;
 }
 
-/** #/support/TCK-3081 → {page: "support", id: "TCK-3081"}. Hash routing keeps deep links without server routes. */
+/** #/support/TCK-3081 → {page: "support", id: "TCK-3081"}. Hash routing keeps deep links without server routes.
+ *  A page id is lower-case latin letters and «_» (sprint 7: «pair_rooms» = the experience-config menu id). */
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-  const page = (parts[0] ?? "").replace(/[^a-z]/g, "");
+  const page = (parts[0] ?? "").replace(/[^a-z_]/g, "");
   const raw = parts.slice(1).join("/");
   let id: string | null = null;
   if (raw) {

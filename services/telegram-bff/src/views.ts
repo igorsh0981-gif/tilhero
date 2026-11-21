@@ -83,9 +83,13 @@ export function consentView(c: ConsentState): ConsentState {
   };
 }
 
+/** Настройки уведомлений: категории — только true/false; `game` (спринт 7) по умолчанию включена — identity до спринта 7
+ *  поля не присылает → true (INTERNAL_API §5), явное false — false. */
 export function settingsView(s: NotificationSettings): NotificationSettings {
   const src = (s.categories ?? {}) as Partial<NotificationCategories>;
-  const categories = Object.fromEntries(NOTIFICATION_CATEGORY_KEYS.map((k) => [k, src[k] === true])) as unknown as NotificationCategories;
+  const categories = Object.fromEntries(
+    NOTIFICATION_CATEGORY_KEYS.map((k) => [k, k === "game" ? src[k] !== false : src[k] === true]),
+  ) as unknown as NotificationCategories;
   return {
     enabled: s.enabled,
     categories,
@@ -187,12 +191,14 @@ export function noteView(n: WhatsNewNote): WhatsNewNote {
   };
 }
 
-/** Семья: social знает только аккаунт (sub), «я» — активный ученик (в детском профиле — ребёнок). */
+/** Семья: social знает только аккаунт (sub), «я» — активный ученик (в детском профиле — ребёнок). member_id (спринт 7) —
+ *  из social как есть (формат сверяет routes/family.ts checkFamily до сборки; telegram-bff его не вычисляет). */
 export function familyView(f: Family, learnerId: string): Family {
   return {
     family_id: f.family_id,
     members: (Array.isArray(f.members) ? f.members : []).map((m) => ({
       user_id: m.user_id,
+      member_id: m.member_id,
       display_name: m.display_name,
       role: m.role,
       is_me: m.user_id === learnerId,

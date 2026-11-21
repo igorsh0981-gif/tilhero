@@ -99,6 +99,9 @@ AI_GATEWAY = os.environ.get("E2E_AI_GATEWAY", "http://127.0.0.1:8114")
 RESTORE_FILE = s1.E2E_DIR / "lessons-restore.json"
 PAIR = "ru-en"
 LLM_AGENTS = ("teaching_coach", "conversation_partner", "independent_evaluator")
+# спринт 7 (ai-gateway 0008): cooperative_lesson_coach — llm/active, версия 1 сида — черновик (публикует владелец
+# после золотых тестов; на стенде может быть уже опубликована); duel_host — code, referral_integrity_reviewer — rules
+LLM_ACTIVE = (*LLM_AGENTS, "cooperative_lesson_coach")
 LESSON_STAGES = ["retrieval", "explanation", "roleplay", "assessment", "summary"]
 MARK = "[e2e "  # маркер прогона в заметках версий агентов и причинах апелляций: «[e2e L1A2B]»
 # ключ провайдера в любом виде: sk-ant-…, sk-proj-… (граница слова — чтобы не ловить «task-», «desk-»)
@@ -608,7 +611,8 @@ def s_stand(c: s2.Ctx) -> None:
     check(not missing, f"маршруты спринта 4 не готовы (BFF): {missing}")
     for line in cleanup_leftovers():
         print(f"      уборка: {line}", flush=True)
-    # сид ai-gateway: 17 агентов, 3 LLM с опубликованной v1, ≥ 49 золотых кейсов; ИИ включён, провайдер — fake
+    # сид ai-gateway: 17 агентов, 4 LLM (3 спринта 4 с опубликованной версией + коуч парного урока спринта 7),
+    # ≥ 49 золотых кейсов; ИИ включён, провайдер — fake
     seed = pj("SELECT json_build_object('agents', (SELECT count(*) FROM ai_gateway.agents), 'llm', (SELECT "
               "json_agg(agent_id ORDER BY agent_id) FROM ai_gateway.agents WHERE implementation = 'llm' AND "
               "availability = 'active'), 'published', (SELECT json_object_agg(agent_id, published_version) FROM "
@@ -616,9 +620,11 @@ def s_stand(c: s2.Ctx) -> None:
               "json_object_agg(agent_id, n) FROM (SELECT agent_id, count(*) n FROM ai_gateway.golden_cases WHERE "
               "archived_at IS NULL GROUP BY agent_id) g), 'budget', (SELECT row_to_json(b) FROM ai_gateway.budget b), "
               "'fake', (SELECT row_to_json(m) FROM ai_gateway.models m WHERE model_id = 'fake'))")
-    check(seed["agents"] == 17 and sorted(seed["llm"] or []) == sorted(LLM_AGENTS)
-          and set(seed["published"] or {}) >= set(LLM_AGENTS), f"сид агентов: {seed['agents']} {seed['llm']} "
-          f"{seed['published']}")
+    coach = pj("SELECT coalesce(json_agg(status ORDER BY version), '[]') FROM ai_gateway.agent_versions WHERE "
+               "agent_id = 'cooperative_lesson_coach' AND version = 1") or []
+    check(seed["agents"] == 17 and sorted(seed["llm"] or []) == sorted(LLM_ACTIVE)
+          and set(seed["published"] or {}) >= set(LLM_AGENTS) and coach in (["draft"], ["published"]),
+          f"сид агентов: {seed['agents']} {seed['llm']} {seed['published']}; cooperative_lesson_coach v1: {coach}")
     golden = seed["golden"] or {}
     check(all(golden.get(a, 0) >= 10 for a in LLM_AGENTS) and sum(golden.values()) >= 49, f"золотые кейсы: {golden}")
     check(seed["budget"] and seed["budget"]["ai_enabled"] is True,
@@ -1582,7 +1588,7 @@ def s_agents(c: s2.Ctx) -> None:
     rows = {x["agent_id"]: x for x in expect(b.get("/admin/v1/ai/agents"), 200)["items"]}
     check(len(rows) == 17, f"реестр агентов: {len(rows)}")
     llm = sorted(k for k, x in rows.items() if x["implementation"] == "llm" and x["availability"] == "active")
-    check(llm == sorted(LLM_AGENTS) and rows["learning_orchestrator"]["implementation"] == "code"
+    check(llm == sorted(LLM_ACTIVE) and rows["learning_orchestrator"]["implementation"] == "code"
           and rows["safety_quality_gate"]["implementation"] == "rules"
           and all(x["planned_sprint"] for x in rows.values() if x["availability"] == "planned")
           and rows[agent]["free_text"] is True, f"типы агентов: llm {llm}")
@@ -1888,9 +1894,9 @@ def s_costs(c: s2.Ctx) -> None:
     bad = {k: d[k].get("service") for k in ("lessons", "ai") if not (d[k]["available"] and d[k]["data"])}
     check(not bad, f"блоки обзора недоступны: {bad}")
     ls, ai = d["lessons"]["data"], d["ai"]["data"]
-    # спринт 5: by_kind + reading (SessionKind)
+    # спринт 5: by_kind + reading (SessionKind); спринт 7 (ai.ts SessionKind): + duel — сессии заданий дуэли
     check(ls["started"] >= 5 and ls["completed"] >= 5 and set(ls["by_kind"]) == {"lesson", "scenario", "media",
-                                                                                   "review", "reading"}
+                                                                                   "review", "reading", "duel"}
           and ls["by_kind"]["lesson"] >= 3 and (ls["completion_pct"] is None or 0 <= ls["completion_pct"] <= 100)
           and ls["ai_degraded_pct"] is not None and ls["ai_degraded_pct"] > 0, f"блок lessons: {ls}")
     check(ai["calls"] > 0 and ai["monthly_cap_usd"] == budget["monthly_cap_usd"] and ai["unavailable"] >= 1,

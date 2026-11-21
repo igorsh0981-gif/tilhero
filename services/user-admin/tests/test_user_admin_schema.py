@@ -148,6 +148,43 @@ def test_migration_0002_search_text_matches_code() -> None:
         assert module.search_text(value) == search_text(value), value
 
 
+async def test_migration_0003_game_category() -> None:
+    """Спринт 7: категория уведомлений game в карточке (admin.ts) — 0003 включает её в спроецированных настройках (как
+    identity-consent 0005 у источника), строки без настроек не трогает; откат убирает ключ."""
+    schema = unique_schema("ua_m3")
+    await create_schema(schema)
+    try:
+        settings = Settings(env="test", internal_jwt_secret="t" * 40, reconcile_enabled=False,
+                            database_url=TEST_ADMIN_URL, db_schema=schema)
+        cfg = Config(str(Path(SERVICE_DIR) / "alembic.ini"))
+        cfg.set_main_option("script_location", str(Path(SERVICE_DIR) / "migrations"))
+        cfg.attributes["settings"] = settings
+        await asyncio.to_thread(command.upgrade, cfg, "0002")
+        with_settings, without, already = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        conn = await asyncpg.connect(TEST_ADMIN_URL)
+        try:
+            await conn.execute(f'SET search_path = "{schema}"')
+            insert = "INSERT INTO admin_learner_summary (user_id, created_at, notifications) VALUES ($1, now(), $2)"
+            await conn.execute(insert, with_settings, '{"enabled": true, "categories": {"support": true, '
+                                                      '"reminders": false}}')
+            await conn.execute(insert, without, None)
+            await conn.execute(insert, already, '{"enabled": false, "categories": {"support": true, "game": false}}')
+            await asyncio.to_thread(command.upgrade, cfg, "head")
+            rows = {r["user_id"]: r["n"] for r in await conn.fetch(
+                "SELECT user_id, notifications::text AS n FROM admin_learner_summary")}
+            assert '"game": true' in rows[with_settings] and rows[without] is None
+            assert '"game": false' in rows[already]  # значение источника не перетирается
+            await asyncio.to_thread(command.downgrade, cfg, "0002")
+            rows = {r["user_id"]: r["n"] for r in await conn.fetch(
+                "SELECT user_id, notifications::text AS n FROM admin_learner_summary")}
+            assert all("game" not in (n or "") for n in rows.values())
+            await asyncio.to_thread(command.upgrade, cfg, "head")
+        finally:
+            await conn.close()
+    finally:
+        await drop_schema(schema)
+
+
 async def test_migration_downgrade_and_upgrade_again() -> None:
     schema = unique_schema("ua_mig")
     await create_schema(schema)

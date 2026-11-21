@@ -15,16 +15,19 @@ from ls_testkit import (
     FakeAssessment,
     FakeCatalog,
     FakeDiagnostics,
+    FakeIdentity,
     FakePlan,
+    FakeSocial,
     assert_no_keys,
     correct_answer,
+    member_id,
     wrong_answer,
 )
 from sqlalchemy import text
 
 from tilhero_common.app import Runtime
 from tilhero_common.internal_auth import HEADER, Actor, issue_token
-from tilhero_common.messaging import Envelope, InMemoryBus
+from tilhero_common.messaging import Envelope, InMemoryBus, make_envelope
 from tilhero_common.testing import (
     TEST_ADMIN_URL,
     assert_event_conforms,
@@ -45,7 +48,9 @@ SCHEDULER_TOKEN = "s" * 40
 def make_settings(**kw: Any) -> Settings:
     base: dict[str, Any] = {"env": "test", "internal_jwt_secret": "t" * 40, "snapshot_revalidate_seconds": 0,
                             "published_cache_seconds": 0, "pairs_cache_ttl_seconds": 1,
-                            "scheduler_token": SCHEDULER_TOKEN}
+                            "scheduler_token": SCHEDULER_TOKEN,
+                            # long-poll в тестах — доли секунды (в проде ≤ 25 с)
+                            "pair_poll_seconds": 0.6, "pair_poll_interval_seconds": 0.05}
     base.update(kw)
     return Settings(**base)
 
@@ -70,7 +75,8 @@ def route(scenario_id: str, node_id: str, outcome: str) -> dict[str, Any] | None
 class Env:
     def __init__(self, settings: Settings, client: httpx.AsyncClient, runtime: Runtime, bus: InMemoryBus, app: Any,
                  catalog: FakeCatalog, ai: FakeAI, assessment: FakeAssessment, plan: FakePlan,
-                 diagnostics: FakeDiagnostics) -> None:
+                 diagnostics: FakeDiagnostics, social: FakeSocial | None = None,
+                 identity: FakeIdentity | None = None) -> None:
         self.settings = settings
         self.c = client
         self.runtime = runtime
@@ -81,6 +87,8 @@ class Env:
         self.assessment = assessment
         self.plan = plan
         self.diagnostics = diagnostics
+        self.social = social or FakeSocial()
+        self.identity = identity or FakeIdentity()
         self.now = T0
         app.state.clock = lambda: self.now
         self._seeds = itertools.count()
@@ -209,6 +217,129 @@ class Env:
         await self.play(user, s["session_id"], **policy)
         return s, await self.finish(user, s["session_id"])
 
+    # ---------- спринт 7: social, дуэли, парные комнаты
+    async def drain(self) -> None:
+        """Фоновые задачи комнат (оценка участников) и outbox."""
+        await self.app.state.room_hub.drain()
+        await self.flush()
+
+    async def publish(self, event_type: str, payload: dict[str, Any], producer: str) -> None:
+        await self.bus.publish(make_envelope(event_type, payload, producer=producer))
+        await self.flush()
+
+    def mid(self, user: uuid.UUID) -> str:
+        return member_id(user)
+
+    def friends(self, a: uuid.UUID, b: uuid.UUID) -> None:
+        self.social.know(a, b)
+        self.social.friends.add(frozenset((a, b)))
+
+    def family(self, *users: uuid.UUID) -> None:
+        self.social.know(*users)
+        self.social.families.append(set(users))
+
+    def kid(self, user: uuid.UUID) -> None:
+        self.child(user)
+        self.social.audience[user] = "kids"
+
+    async def nickname(self, user: uuid.UUID, nick: str | None) -> None:
+        await self.publish("social.profile.updated.v1", {
+            "user_id": str(user), "member_id": member_id(user), "nickname": nick, "game_profile_hidden": False,
+            "updated_at": self.now.isoformat()}, "social")
+
+    async def block(self, blocker: uuid.UUID, blocked: uuid.UUID, status: str = "added") -> None:
+        if status == "added":
+            self.social.blocks.add((blocker, blocked))
+        else:
+            self.social.blocks.discard((blocker, blocked))
+        await self.publish("social.block.changed.v1", {
+            "blocker_user_id": str(blocker), "blocked_user_id": str(blocked), "status": status,
+            "at": self.now.isoformat()}, "social")
+
+    async def ban(self, user: uuid.UUID, until: datetime | None, *, active: bool = True,
+                  sanction_id: uuid.UUID | None = None) -> uuid.UUID:
+        sid = sanction_id or uuid.uuid4()
+        await self.publish("social.sanction.changed.v1", {
+            "user_id": str(user), "sanction_id": str(sid), "kind": "social_ban",
+            "until": until.isoformat() if until else None, "active": active,
+            "change": "applied" if active else "revoked", "changed_at": self.now.isoformat()}, "social")
+        return sid
+
+    async def invite(self, a: uuid.UUID, b: uuid.UUID, *, scenario: str = "sc-cafe-coffee", start: str = "now",
+                     key: str | None = None, expect: int = 201, pair_id: str = "ru-en") -> dict[str, Any]:
+        r = await self.c.post("/internal/v1/me/pair-rooms", json={
+            "partner_member_id": member_id(b), "pair_id": pair_id, "scenario_id": scenario, "start": start},
+            headers={**self.h(a), "Idempotency-Key": key or f"inv-{uuid.uuid4()}"})
+        assert r.status_code == expect, r.text
+        assert_no_keys(r.json())
+        return r.json()
+
+    async def room(self, user: uuid.UUID, room_id: str, action: str, expect: int = 200, **kw: Any) -> Any:
+        r = await self.c.post(f"/internal/v1/me/pair-rooms/{room_id}/{action}", headers=self.h(user), **kw)
+        assert r.status_code == expect, r.text
+        if r.content:
+            assert_no_keys(r.json())
+            return r.json()
+        return None
+
+    async def state(self, user: uuid.UUID, room_id: str, after: int = 0, expect: int = 200,
+                    **params: Any) -> dict[str, Any]:
+        r = await self.c.get(f"/internal/v1/me/pair-rooms/{room_id}/state", params={"after_seq": after, **params},
+                             headers=self.h(user))
+        assert r.status_code == expect, r.text
+        assert_no_keys(r.json())
+        return r.json()
+
+    async def turn(self, user: uuid.UUID, room_id: str, body: dict[str, Any], *, key: str | None = None,
+                   expect: int = 200) -> dict[str, Any]:
+        r = await self.c.post(f"/internal/v1/me/pair-rooms/{room_id}/turns", json=body,
+                              headers={**self.h(user), "Idempotency-Key": key or f"turn-{uuid.uuid4()}"})
+        assert r.status_code == expect, r.text
+        assert_no_keys(r.json())
+        return r.json()
+
+    async def beat(self, room_id: str, *users: uuid.UUID) -> None:
+        for u in users:
+            await self.room(u, room_id, "heartbeat", expect=204)
+
+    async def pass_time(self, room_id: str, seconds: int, *users: uuid.UUID, step: int = 20) -> None:
+        """Время идёт, участники присылают heartbeat (реже 30 с — offline)."""
+        left = seconds
+        while left > 0:
+            dt = min(step, left)
+            self.now += timedelta(seconds=dt)
+            left -= dt
+            await self.beat(room_id, *users)
+
+    async def started_room(self, a: uuid.UUID, b: uuid.UUID, **kw: Any) -> str:
+        """Друзья 18+: приглашение → принятие → оба вошли (in_progress)."""
+        if not self.social.same_family(a, b):
+            self.friends(a, b)
+        room = await self.invite(a, b, **kw)
+        await self.room(b, room["room_id"], "accept")
+        await self.room(a, room["room_id"], "join")
+        st = await self.room(b, room["room_id"], "join")
+        assert st["status"] == "in_progress", st
+        return str(room["room_id"])
+
+    async def duel_set(self, a: uuid.UUID, b: uuid.UUID, *, duel_id: uuid.UUID | None = None,
+                       band: str = "A0-A1", expect: int = 201, issuer: str = "gamification",
+                       **extra: Any) -> dict[str, Any]:
+        r = await self.c.post("/internal/v1/duel-sets", json={
+            "duel_id": str(duel_id or uuid.uuid4()), "pair_id": "ru-en", "level_band": band,
+            "user_ids": [str(a), str(b)], **extra},
+            headers=internal_headers(self.settings, issuer=issuer, audience="lessons"))
+        assert r.status_code == expect, r.text
+        return dict(r.json())
+
+    async def duel_session(self, user: uuid.UUID, duel_id: str, *, key: str | None = None,
+                           expect: int = 201) -> dict[str, Any]:
+        r = await self.c.post("/internal/v1/me/duel-sessions", json={"duel_id": duel_id},
+                              headers={**self.h(user), "Idempotency-Key": key or f"duel-{uuid.uuid4()}"})
+        assert r.status_code == expect, r.text
+        assert_no_keys(r.json())
+        return dict(r.json())
+
 
 @pytest.fixture
 async def env():
@@ -223,15 +354,19 @@ async def env():
     assessment = FakeAssessment(catalog)
     plan = FakePlan(catalog)
     diagnostics = FakeDiagnostics()
+    social = FakeSocial()
+    identity = FakeIdentity()
     app = build_app(settings, runtime, transports={
         "catalog": httpx.MockTransport(catalog.handler), "ai-gateway": httpx.MockTransport(ai.handler),
         "assessment": httpx.MockTransport(assessment.handler), "learning-plan": httpx.MockTransport(plan.handler),
-        "diagnostics": httpx.MockTransport(diagnostics.handler)})
+        "diagnostics": httpx.MockTransport(diagnostics.handler), "social": httpx.MockTransport(social.handler),
+        "identity-consent": httpx.MockTransport(identity.handler)})
     async with app.router.lifespan_context(app):
         client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://lessons")
-        e = Env(settings, client, runtime, bus, app, catalog, ai, assessment, plan, diagnostics)
+        e = Env(settings, client, runtime, bus, app, catalog, ai, assessment, plan, diagnostics, social, identity)
         await e.flush()
         yield e
+        await app.state.room_hub.drain()
         await client.aclose()
     await drop_schema(schema)
 

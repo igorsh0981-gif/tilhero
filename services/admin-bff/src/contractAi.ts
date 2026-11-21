@@ -439,6 +439,8 @@ export const AI_BUDGET: Codec<AiBudget> = C.obj<AiBudget>({
   lesson_cap_usd: C.num(0, 1000),
   // спринт 5 (решение владельца): подлимит оценки произношения внутри monthly_cap_usd, по умолчанию 5
   speech_monthly_cap_usd: C.num(0, 100_000),
+  // спринт 7: потолок вызовов коуча на одну парную комнату (по умолчанию 0.10), 0..monthly_cap_usd
+  room_cap_usd: C.num(0, 100_000),
   alert_percent: C.int(1, 100),
   updated_at: C.time,
 });
@@ -743,7 +745,8 @@ const LESSON_STATS_PROPS = {
   completed: COUNT,
   completion_pct: C.nullable(PCT),
   median_minutes: C.nullable(C.num(0, 1e6)),
-  by_kind: C.obj<LessonStats["by_kind"]>({ lesson: COUNT, scenario: COUNT, media: COUNT, review: COUNT, reading: COUNT }),
+  // спринт 7: + duel (сессии заданий дуэли)
+  by_kind: C.obj<LessonStats["by_kind"]>({ lesson: COUNT, scenario: COUNT, media: COUNT, review: COUNT, reading: COUNT, duel: COUNT }),
   ai_degraded_pct: C.nullable(PCT),
 };
 export const LESSON_STATS_DOMAIN: Codec<LessonStatsDomain> = C.obj<LessonStatsDomain>({

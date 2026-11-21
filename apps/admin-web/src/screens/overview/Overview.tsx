@@ -2,11 +2,12 @@
  * «Обзор» (dashboard.read): the independent blocks of GET /admin/v1/dashboard — learners (user-admin), support,
  * «Что нового» (experience-config), campaigns (notifications) and, since sprint 3, content (catalog: versions under
  * review, media rights expiring in ≤ 14 days with links, suspended media, new learners' requests) and diagnostics
- * (sessions, levels, not_assessed). A block whose source is down answers available=false and shows its own notice;
+ * (sessions, levels, not_assessed), sprint 7 — the community (friend requests, duels, pair rooms, moderation, referrals
+ * under review). A block whose source is down answers available=false and shows its own notice;
  * the others keep working (admin.ts Dashboard, always 200; a block missing in an older admin-bff counts as down).
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { AiUsageSummary, ContentSummary, Dashboard, DashboardBlock, DashboardCampaigns, DashboardLearners, DashboardWhatsNew, DiagnosticStats, GameStats, LessonStats, MemoryStats, SupportStats } from "@tilhero/contracts/admin";
+import type { AiUsageSummary, ContentSummary, Dashboard, DashboardBlock, DashboardCampaigns, DashboardLearners, DashboardWhatsNew, DiagnosticStats, GameStats, LessonStats, MemoryStats, SocialStats, SupportStats } from "@tilhero/contracts/admin";
 import type { ContentKind } from "@tilhero/contracts/content";
 import { DashboardApi, type Period } from "../../api/endpoints";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -20,7 +21,7 @@ import { budgetLevel, usd } from "../ai/model";
 import { zoneDateTime } from "../game/model";
 
 const PERIODS: readonly Period[] = ["today", "7d", "30d"];
-type BlockKey = "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai" | "memory" | "game";
+type BlockKey = "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai" | "memory" | "game" | "social";
 const SESSION_KINDS = ["lesson", "scenario", "media", "review", "reading"] as const;
 const OFF = (service: string) => ({ available: false, data: null, service });
 const DX_AREAS = ["vocabulary", "grammar", "reading", "listening"] as const;
@@ -108,6 +109,10 @@ export function Overview() {
             <Block<GameStats> k="game" icon="trophy" block={data.game ?? OFF("gamification")} empty={(x) => x.earned_xp === 0 && x.earned_til === 0 && x.freezes_used === 0 && x.quests_completed === 0 && !x.active_event}>
               {(x) => <GameBody x={x} asked={period} />}
             </Block>
+            {/* sprint 7: the community (social; duels — gamification, rooms — lessons: null when those are down) */}
+            <Block<SocialStats> k="social" icon="userPlus" block={data.social ?? OFF("social")} empty={(x) => x.friend_requests + x.friendships_added + (x.duels_finished ?? 0) + (x.pair_rooms_finished ?? 0) + x.referrals_in_review + x.cases_opened + x.cases_open === 0}>
+              {(x) => <SocialBody x={x} period={periodLabel} />}
+            </Block>
           </div>
         </>
       )}
@@ -185,6 +190,12 @@ function Attention({ d }: { d: Dashboard }) {
   // sprint 5: the queue of AI translations waiting for a methodist (the course dictionary)
   const mem = d.memory?.available ? d.memory.data : null;
   if (mem && mem.ai_glosses_pending != null) rows.push({ id: "glosses", label: t("att.glosses"), n: mem.ai_glosses_pending, go: () => navigate("content", "glossary/queue"), show: can("content.read") });
+  // sprint 7: open moderation cases and referrals held for an operator
+  const soc = d.social?.available ? d.social.data : null;
+  if (soc) {
+    rows.push({ id: "cases", label: t("att.cases"), n: soc.cases_open, go: () => navigate("moderation", "cases"), show: can("moderation.manage") });
+    rows.push({ id: "referrals", label: t("att.referrals"), n: soc.referrals_in_review, go: () => navigate("referrals", "review"), show: can("referral.read") });
+  }
   const live = rows.filter((r) => r.n > 0);
   if (!live.length) return null;
   return (
@@ -607,6 +618,42 @@ function GameBody({ x, asked }: { x: GameStats; asked: Period }) {
         <div className="acts">
           <Btn size="sm" icon="trophy" label={t("dgm.open")} onClick={() => navigate("game", "overview")} testId="dgm-open" />
           <Btn size="sm" icon="calendar" label={t("dgm.events")} onClick={() => navigate("events")} testId="dgm-events" />
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------- sprint 7: the community */
+
+/** Counters of the period and the queues now; a duel or room counter of a source that did not answer — «нет данных». */
+function SocialBody({ x, period }: { x: SocialStats; period: string }) {
+  const { t, fmt } = useI18n();
+  const { can } = useSession();
+  const { navigate } = useNav();
+  const opt = (n: number | null, testId: string) => (n == null ? <span className="muted" data-testid={`${testId}-na`}>{t("dmem.noData")}</span> : fmt.num(n));
+  return (
+    <>
+      <Row k={t("dsoc.requests", { p: period })} v={fmt.num(x.friend_requests)} testId="dsoc-requests" />
+      <Row k={t("dsoc.friendships", { p: period })} v={fmt.num(x.friendships_added)} testId="dsoc-friendships" />
+      <Row k={t("dsoc.duels", { p: period })} v={opt(x.duels_finished, "dsoc-duels")} testId="dsoc-duels" />
+      <Row k={t("dsoc.rooms", { p: period })} v={opt(x.pair_rooms_finished, "dsoc-rooms")} testId="dsoc-rooms" />
+      <Row k={t("dsoc.casesOpened", { p: period })} v={fmt.num(x.cases_opened)} testId="dsoc-cases-opened" />
+      <Row
+        k={t("dsoc.casesOpen")}
+        testId="dsoc-cases-open"
+        v={can("moderation.manage") && x.cases_open ? <button type="button" className="tr" onClick={() => navigate("moderation", "cases")} data-testid="dsoc-cases-link">{fmt.num(x.cases_open)}</button> : fmt.num(x.cases_open)}
+      />
+      <Row
+        k={t("dsoc.referrals")}
+        testId="dsoc-referrals"
+        v={can("referral.read") && x.referrals_in_review ? <button type="button" className="tr" onClick={() => navigate("referrals", "review")} data-testid="dsoc-referrals-link">{fmt.num(x.referrals_in_review)}</button> : fmt.num(x.referrals_in_review)}
+      />
+      <p className="xs muted">{t("dsoc.note")}</p>
+      {(can("league.read") || can("room.read")) && (
+        <div className="acts">
+          {can("league.read") && <Btn size="sm" icon="podium" label={t("dsoc.leagues")} onClick={() => navigate("leagues")} testId="dsoc-leagues" />}
+          {can("room.read") && <Btn size="sm" icon="mic" label={t("dsoc.rooms2")} onClick={() => navigate("pair_rooms")} testId="dsoc-rooms-open" />}
         </div>
       )}
     </>

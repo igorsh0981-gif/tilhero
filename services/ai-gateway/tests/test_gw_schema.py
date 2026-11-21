@@ -1,8 +1,9 @@
 """Модели = миграции; миграции под ролью-владельцем, сервис — под своей ролью без DDL; неизменяемость версий на уровне
 БД (триггер); реальный сид автора инструкций (migrations/seed) загружается миграцией 0002 как опубликованный v1,
 накладка 0003 (migrations/seed/0003) публикует independent_evaluator v2 и детский золотой кейс, накладка 0004
-(migrations/seed/0004) создаёт черновик teaching_coach v2 с gloss_word и кейсы gloss_word, а стенд (fake +
-AI_ALLOW_FAKE_TEST_PUBLISH) при старте публикует его по прогону золотых тестов на fake; реестр и модели речи
+(migrations/seed/0004) создаёт черновик teaching_coach v2 с gloss_word и кейсы gloss_word, накладка 0008
+(migrations/seed/0008, спринт 7) — черновик cooperative_lesson_coach v1 и 8 обязательных кейсов, а стенд (fake +
+AI_ALLOW_FAKE_TEST_PUBLISH) при старте публикует черновики по прогону золотых тестов на fake; реестр и модели речи
 спринта 5; откат и повторный подъём миграций, повторная загрузка без изменений."""
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ TABLES = ("agents", "models", "agent_versions", "agent_rollout", "golden_cases",
 REAL_SEED = Path(SERVICE_DIR) / "migrations" / "seed"
 OVERLAY_0003 = REAL_SEED / "0003"
 OVERLAY_0004 = REAL_SEED / "0004"
+OVERLAY_0008 = REAL_SEED / "0008"
 
 
 def _pg(url: str) -> str:
@@ -91,10 +93,13 @@ async def test_reference_data_seeded(roles_env) -> None:
     assert [a["agent_id"] for a in agents] == sorted(AGENT_IDS) and len(agents) == 17
     by_id = {a["agent_id"]: a for a in agents}
     assert {a for a, r in by_id.items() if r["implementation"] == "llm" and r["availability"] == "active"} == {
-        "teaching_coach", "conversation_partner", "independent_evaluator"}
+        "teaching_coach", "conversation_partner", "independent_evaluator", "cooperative_lesson_coach"}
     assert {a for a, r in by_id.items() if r["implementation"] == "code"} == {
         "learning_orchestrator", "curriculum_planner", "diagnostic_assessor", "spaced_repetition_coach",
-        "pronunciation_coach", "gameplay_director"}
+        "pronunciation_coach", "gameplay_director", "duel_host"}
+    # спринт 7 (0008): ведущий дуэли — код lessons, проверка рефералов — правила social
+    assert (by_id["duel_host"]["implemented_in"], by_id["referral_integrity_reviewer"]["implemented_in"]) == (
+        "lessons", "social")
     # спринт 6 (0007): игровой режиссёр — правила кодом в gamification, модель не вызывается
     assert (by_id["gameplay_director"]["availability"], by_id["gameplay_director"]["implemented_in"],
             by_id["gameplay_director"]["planned_sprint"], by_id["gameplay_director"]["free_text"]) == (
@@ -103,10 +108,11 @@ async def test_reference_data_seeded(roles_env) -> None:
             by_id["pronunciation_coach"]["availability"], by_id["pronunciation_coach"]["implemented_in"],
             by_id["pronunciation_coach"]["free_text"], by_id["evening_review_coach"]["availability"]) == (
         "active", "memory", "active", "ai-gateway", False, "planned")
-    assert {a for a, r in by_id.items() if r["implementation"] == "rules"} == {"safety_quality_gate", "error_analyst"}
+    assert {a for a, r in by_id.items() if r["implementation"] == "rules"} == {
+        "safety_quality_gate", "error_analyst", "referral_integrity_reviewer"}
     assert all(r["planned_sprint"] for r in agents if r["availability"] == "planned")
     assert {a for a, r in by_id.items() if r["free_text"] and r["availability"] == "active"} == {
-        "conversation_partner", "independent_evaluator"}
+        "conversation_partner", "independent_evaluator", "cooperative_lesson_coach"}
     for row in agents:
         title, purpose = json.loads(row["title"]), json.loads(row["purpose"])
         assert set(title) == set(purpose) == {"ru", "uz"} and all(title.values()) and all(purpose.values())
@@ -121,8 +127,8 @@ async def test_reference_data_seeded(roles_env) -> None:
         "whisper-base-en": ("0.0000", "0.0000", "whisper", "0.0000")}
     budget = (await _fetch(roles.runtime_url, roles.schema, "SELECT * FROM budget"))[0]
     assert (budget["ai_enabled"], str(budget["monthly_cap_usd"]), str(budget["learner_daily_cap_usd"]),
-            str(budget["lesson_cap_usd"]), budget["alert_percent"], str(budget["speech_monthly_cap_usd"])) == (
-        True, "20.00", "0.0500", "0.0300", 80, "5.00")
+            str(budget["lesson_cap_usd"]), budget["alert_percent"], str(budget["speech_monthly_cap_usd"]),
+            str(budget["room_cap_usd"])) == (True, "20.00", "0.0500", "0.0300", 80, "5.00", "0.1000")
     rollouts = await _fetch(roles.runtime_url, roles.schema, "SELECT agent_id FROM agent_rollout")
     assert {r["agent_id"] for r in rollouts} == set(LLM_AGENT_IDS)
     assert len(AGENTS) == 17
@@ -132,15 +138,21 @@ async def test_real_seed_published_with_audit(roles_env) -> None:
     """Сид автора инструкций: 3 версии v1 автора seed (0002), затем накладка 0003 — independent_evaluator v2 (те же
     тексты, новые параметры вызова) и кейс ie-19-kids-refused; v1 оценщика → archived; аудит ai.version_published;
     накладка 0004 — черновик teaching_coach v2 (публикация — после золотых тестов) и 8 кейсов gloss_word (6
-    обязательных), аудит ai.version_created."""
+    обязательных), аудит ai.version_created; накладка 0008 (спринт 7) — черновик cooperative_lesson_coach v1 и 8
+    обязательных кейсов (молчащий, монополизация, чужой транскрипт, ребёнок, переподключение, грубость, уход от темы,
+    оценка без вклада), аудит ai.version_created."""
     _, roles = roles_env
     seed, overlay, overlay4 = load_seed_dir(REAL_SEED), load_seed_dir(OVERLAY_0003), load_seed_dir(OVERLAY_0004)
+    overlay8 = load_seed_dir(OVERLAY_0008)
     assert set(seed.versions) == {"teaching_coach", "conversation_partner", "independent_evaluator"}
     assert set(overlay.versions) == {"independent_evaluator"} and set(overlay4.versions) == {"teaching_coach"}
+    assert set(overlay8.versions) == {"cooperative_lesson_coach"}
+    assert len(overlay8.cases) == 8 and all(c["mandatory"] for c in overlay8.cases)
     gloss = [c for c in overlay4.cases if c["input"]["context"].get("request") == "gloss_word"]
     assert len(gloss) == len(overlay4.cases) >= 6 and sum(c["mandatory"] for c in gloss) >= 6
     per_agent = Counter(c["agent_id"] for c in [*seed.cases, *overlay.cases, *overlay4.cases])
     assert all(n >= 10 for n in per_agent.values()) and len(per_agent) == 3  # ≥ 10 кейсов на агента (PLAN G)
+    per_agent["cooperative_lesson_coach"] = len(overlay8.cases)
     rows = await _fetch(roles.runtime_url, roles.schema,
                         "SELECT agent_id, version, status, author_id, published_by, body_hash, max_output_tokens, "
                         "max_cost_usd, timeout_ms, instructions, rules, output_schema FROM agent_versions")
@@ -149,7 +161,11 @@ async def test_real_seed_published_with_audit(roles_env) -> None:
                 ("teaching_coach", 2, "draft", SEED_ACTOR_ID, None),
                 ("conversation_partner", 1, "published", SEED_ACTOR_ID, SEED_ACTOR_ID),
                 ("independent_evaluator", 1, "archived", SEED_ACTOR_ID, SEED_ACTOR_ID),
-                ("independent_evaluator", 2, "published", SEED_ACTOR_ID, SEED_ACTOR_ID)])
+                ("independent_evaluator", 2, "published", SEED_ACTOR_ID, SEED_ACTOR_ID),
+                ("cooperative_lesson_coach", 1, "draft", SEED_ACTOR_ID, None)])
+    coach = next(r for r in rows if r["agent_id"] == "cooperative_lesson_coach")
+    assert (coach["max_output_tokens"], str(coach["max_cost_usd"]), coach["timeout_ms"]) == (900, "0.006000", 12000)
+    assert json.loads(coach["output_schema"])["properties"]["next_speaker"]["enum"] == ["A", "B", "both", None]
     tc2 = next(r for r in rows if (r["agent_id"], r["version"]) == ("teaching_coach", 2))
     assert (tc2["max_output_tokens"], str(tc2["max_cost_usd"]), tc2["timeout_ms"]) == (400, "0.005000", 8000)
     assert json.loads(tc2["output_schema"])["anyOf"]  # объединённая схема: v1 + gloss_word
@@ -169,7 +185,7 @@ async def test_real_seed_published_with_audit(roles_env) -> None:
                                                                      for r in cases}
     outbox = [Envelope.model_validate(json.loads(r["envelope"])) for r in
               await _fetch(roles.runtime_url, roles.schema, "SELECT envelope FROM outbox")]
-    assert len(outbox) == 5
+    assert len(outbox) == 6
     for e in outbox:
         assert_event_conforms(e)
         assert (e.event_type, e.producer, e.payload["actor_type"], e.payload["actor_id"]) == (
@@ -177,7 +193,8 @@ async def test_real_seed_published_with_audit(roles_env) -> None:
     published = [e for e in outbox if e.payload["action"] == "ai.version_published"]
     assert sorted(e.payload["after"]["published_version"] for e in published) == [1, 1, 1, 2]
     created = [e.payload for e in outbox if e.payload["action"] == "ai.version_created"]
-    assert [(c["object_id"], c["after"]["status"]) for c in created] == [("teaching_coach@2", "draft")]
+    assert sorted((c["object_id"], c["after"]["status"]) for c in created) == [
+        ("cooperative_lesson_coach@1", "draft"), ("teaching_coach@2", "draft")]
 
 
 async def test_real_seed_serves_fake_stand_and_golden_runs(roles_env) -> None:
@@ -188,22 +205,28 @@ async def test_real_seed_serves_fake_stand_and_golden_runs(roles_env) -> None:
     settings, roles = roles_env
     app = build_app(settings, Runtime(settings, bus=InMemoryBus()))
     seed, overlay, overlay4 = load_seed_dir(REAL_SEED), load_seed_dir(OVERLAY_0003), load_seed_dir(OVERLAY_0004)
-    published = {"teaching_coach": 2, "conversation_partner": 1, "independent_evaluator": 2}
+    overlay8 = load_seed_dir(OVERLAY_0008)
+    published = {"teaching_coach": 2, "conversation_partner": 1, "independent_evaluator": 2,
+                 "cooperative_lesson_coach": 1}
     async with app.router.lifespan_context(app), httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://ai-gateway") as c:
         rows = await _fetch(roles.runtime_url, roles.schema, "SELECT version, status, published_by FROM "
                                                              "agent_versions WHERE agent_id = 'teaching_coach'")
         assert sorted((r["version"], r["status"], r["published_by"]) for r in rows) == [
             (1, "archived", SEED_ACTOR_ID), (2, "published", SEED_ACTOR_ID)]
-        stand_run = await _fetch(roles.runtime_url, roles.schema, "SELECT provider, passed_mandatory, started_by "
-                                                                  "FROM test_runs WHERE agent_id = 'teaching_coach'")
-        assert [(r["provider"], r["passed_mandatory"], r["started_by"]) for r in stand_run] == [
-            ("fake", True, SEED_ACTOR_ID)]
-        for case in [*seed.cases, *overlay.cases, *overlay4.cases]:
+        stand_run = await _fetch(roles.runtime_url, roles.schema, "SELECT agent_id, provider, passed_mandatory, "
+                                                                  "started_by FROM test_runs")
+        assert sorted((r["agent_id"], r["provider"], r["passed_mandatory"], r["started_by"]) for r in stand_run) == [
+            ("cooperative_lesson_coach", "fake", True, SEED_ACTOR_ID), ("teaching_coach", "fake", True, SEED_ACTOR_ID)]
+        coach = await _fetch(roles.runtime_url, roles.schema, "SELECT version, status FROM agent_versions "
+                                                              "WHERE agent_id = 'cooperative_lesson_coach'")
+        assert [(r["version"], r["status"]) for r in coach] == [(1, "published")]
+        for case in [*seed.cases, *overlay.cases, *overlay4.cases, *overlay8.cases]:
             ctx = case["input"]["context"]
             gloss = ctx.get("request") == "gloss_word"
-            body = {"request_id": str(uuid.uuid4()), "session_id": str(uuid.uuid4()),
-                    "session_kind": "memory" if gloss else "lesson",
+            pair = case["agent_id"] == "cooperative_lesson_coach"
+            body = {"request_id": str(uuid.uuid4()), "session_id": ctx["room_id"] if pair else str(uuid.uuid4()),
+                    "session_kind": "memory" if gloss else "pair" if pair else "lesson",
                     "user_id": str(uuid.uuid4()), "audience": case["input"]["audience"],
                     "locale": ctx.get("explain_locale", "ru"), "context": ctx}
             caller = "memory" if gloss else "lessons"
@@ -236,6 +259,8 @@ async def test_real_seed_serves_fake_stand_and_golden_runs(roles_env) -> None:
                 gloss = {x["case_id"]: x for x in run["results"] if x["case_id"].startswith("tc-gloss-")}
                 assert len(gloss) == len(overlay4.cases) and all(x["passed"] for x in gloss.values()), gloss
                 assert gloss["tc-gloss-kids-ok"]["mandatory"]
+            if agent_id == "cooperative_lesson_coach":  # 8 обязательных кейсов накладки 0008, ребёнок — отказ
+                assert len(run["results"]) == 8 and all(x["passed"] and x["mandatory"] for x in run["results"])
 
 
 async def test_seed_migration_is_reversible_and_idempotent(roles_env) -> None:
@@ -282,7 +307,8 @@ async def test_seed_migration_is_reversible_and_idempotent(roles_env) -> None:
     assert await count("SELECT count(*) AS n FROM agent_rollout WHERE published_version IS NOT NULL") == 0
     await migrate(SERVICE_DIR, owner)
     seed, overlay, overlay4 = load_seed_dir(REAL_SEED), load_seed_dir(OVERLAY_0003), load_seed_dir(OVERLAY_0004)
-    assert await count("SELECT count(*) AS n FROM agent_versions") == 5
+    overlay8 = load_seed_dir(OVERLAY_0008)
+    assert await count("SELECT count(*) AS n FROM agent_versions") == 6
     engine = make_engine(roles.owner_url, roles.schema, pool_size=1)
     try:
         async with engine.begin() as conn:
@@ -295,6 +321,11 @@ async def test_seed_migration_is_reversible_and_idempotent(roles_env) -> None:
                 lambda sync: apply_seed_drafts(sync, overlay4, datetime(2026, 11, 20, tzinfo=UTC)))
             assert counts == {"drafted": 0, "skipped": 1, "blocked": 0, "cases_written": 0,
                               "cases_skipped": len(overlay4.cases)}
+            # повтор накладки 0008: черновик коуча уже записан сидом — без изменений
+            counts = await conn.run_sync(
+                lambda sync: apply_seed_drafts(sync, overlay8, datetime(2026, 11, 21, tzinfo=UTC)))
+            assert counts == {"drafted": 0, "skipped": 1, "blocked": 0, "cases_written": 0,
+                              "cases_skipped": len(overlay8.cases)}
     finally:
         await engine.dispose()
     # полный откат схемы и повторный подъём

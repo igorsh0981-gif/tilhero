@@ -21,6 +21,9 @@ export const EXTRA_REDACT_PATHS = [
   "req.body.answer",
   // спринт 5: «в словарь»
   "req.body.text_en",
+  // спринт 7: ник, жалоба
+  "req.body.nickname",
+  "req.body.comment",
 ];
 
 /** Ключи, значения которых никогда не пишутся в лог (сравнение без учёта регистра). */
@@ -74,6 +77,16 @@ export const SENSITIVE_KEYS = new Set([
   "reference_text",
   "speech_text",
   "example_gap",
+  // спринт 7: ник и код друга, основание санкции, подсказки коуча, реплики и отчёт парного урока
+  "nickname",
+  "invitee_nickname",
+  "friend_code",
+  "basis",
+  "prompt",
+  "prompt_gloss",
+  "my_role_brief",
+  "lines",
+  "tips",
 ]);
 
 const CENSOR = "[redacted]";

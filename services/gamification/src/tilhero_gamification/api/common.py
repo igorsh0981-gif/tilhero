@@ -149,9 +149,10 @@ def require_any(principal: Principal, *permissions: str) -> Actor:
 
 
 async def staff_idempotent(db: AsyncSession, actor: Actor, scope: str, key: str, body: Any,
-                           run: Callable[[], Awaitable[tuple[int, dict[str, Any]]]]) -> JSONResponse:
+                           run: Callable[[], Awaitable[tuple[int, dict[str, Any]]]], at: datetime) -> JSONResponse:
     """Idempotency-Key команды сотрудника: повтор того же сотрудника с тем же ключом — тот же ответ без новой
-    записи и аудита; тот же ключ с другим телом — 422 IDEMPOTENCY_KEY_REUSED."""
+    записи и аудита; тот же ключ с другим телом — 422 IDEMPOTENCY_KEY_REUSED. Время записи — часы сервиса (at): по
+    ним же tick чистит ключи старше IDEMPOTENCY_DAYS."""
     h = request_hash(body)
     await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"), {"k": f"gam:{scope}:{actor.id}:{key}"})
     prior = await db.get(Idempotency, (scope, actor.id[:80], key))
@@ -161,7 +162,7 @@ async def staff_idempotent(db: AsyncSession, actor: Actor, scope: str, key: str,
         return JSONResponse(prior.response, status_code=200)
     status, out = await run()
     db.add(Idempotency(scope=scope, actor=actor.id[:80], key=key, request_hash=h, status_code=status, response=out,
-                       created_at=await db.scalar(select(func.now()))))
+                       created_at=at))
     return JSONResponse(out, status_code=status)
 
 

@@ -179,7 +179,7 @@ async def test_deletion_from_other_producer_is_ignored(env, caplog) -> None:
     fam = (await env.c.get("/internal/v1/me/family", headers=env.h(guest))).json()
     assert [m["display_name"] for m in fam["members"]] == ["Владелец", "Гость"]
     assert env.bus.dlq == []
-    warned = [r for r in caplog.records if r.getMessage() == "deletion request from unexpected producer ignored"]
+    warned = [r for r in caplog.records if r.getMessage() == "event from unexpected producer ignored"]
     assert len(warned) == 3 and all(str(owner) not in str(r.__dict__) for r in warned)
     await env.bus.publish(deletion(owner, rid))
     assert len(await env.events("user.domain.deleted.v1")) == 1

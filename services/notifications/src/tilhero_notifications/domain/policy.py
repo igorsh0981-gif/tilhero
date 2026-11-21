@@ -14,10 +14,11 @@
 22:00 следующего дня) → in_app_only; нет адресата Telegram → in_app_only; пропуск ждёт `not_before`
 (слот следующего дня). Отложенное до момента позже `stale_after` сразу уходит только в центр.
 
-Спринт 6 (INTERNAL_API спринта 6 §3) — категория `game` (заморозка серии, значок, ступень героя):
-- выключатель категории — общий (шаг 1), но пока `game` нет в настройках ученика (bff.ts NotificationCategories,
-  identity-consent), она включается выключателем `reminders`: `Rules.category_gates` (настройка
-  GAME_CATEGORY_GATE, `reminders` | `game`);
+Спринт 6 (INTERNAL_API спринта 6 §3) — категория `game` (заморозка серии, значок, ступень героя; спринт 7 — ещё
+дуэли и итоги лиги):
+- выключатель категории — общий (шаг 1); `Rules.category_gates` (настройка GAME_CATEGORY_GATE, `game` | `reminders`):
+  спринт 7 — собственный выключатель `game` настроек ученика (по умолчанию включён), `reminders` — поведение спринта
+  6, пока game не было в настройках;
 - выключатель выключен — запись остаётся в центре без Telegram (`Rules.center_when_disabled`), а не пропадает;
 - входит в лимит дня (частота — общая);
 - дети 6–13: опекуну только в сводке — запись в центре детского профиля (in_app_only, reason `kid_summary`),
@@ -115,8 +116,19 @@ def local_day(now: datetime, tz: ZoneInfo) -> date:
     return now.astimezone(tz).date()
 
 
+# Решение владельца (спринт 7): приглашения — вне общего дневного лимита; у них свой лимит против спама
+# (settings.invite_daily_limit на получателя, settings.invite_per_sender_limit от одного отправителя; pair_starting —
+# напоминание о принятом уроке, отправитель не учитывается).
+INVITE_TEMPLATES: frozenset[str] = frozenset({"pair_invited", "pair_starting", "duel_challenged"})
+SENDER_COUNTED_INVITES: frozenset[str] = frozenset({"pair_invited", "duel_challenged"})
+
+
 def limit_applies(category: str) -> bool:
     return category in LIMITED
+
+
+def is_invite(template: str) -> bool:
+    return template in INVITE_TEMPLATES
 
 
 def quiet_hours_end(now: datetime, start: str, end: str, tz: ZoneInfo) -> datetime | None:

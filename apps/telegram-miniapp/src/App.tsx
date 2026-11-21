@@ -63,6 +63,14 @@ import { GameHistoryScreen } from "./screens/game/History";
 import { GameSettingsScreen } from "./screens/game/GameSettings";
 import { HeroesScreen } from "./screens/game/HeroPicker";
 import { ShopScreen } from "./screens/game/Shop";
+import { DuelReviewScreen, DuelScreen, DuelsScreen } from "./screens/social/Duels";
+import { FriendsScreen } from "./screens/social/Friends";
+import { LeagueHistoryScreen, LeaguesScreen } from "./screens/social/Leagues";
+import { BlockedScreen, SanctionsScreen } from "./screens/social/Moderation";
+import { PairInviteScreen, PairRoomsScreen } from "./screens/social/Pair";
+import { PairReportScreen } from "./screens/social/PairReport";
+import { PairRoomScreen } from "./screens/social/PairRoom";
+import { ReferralsScreen } from "./screens/social/Referrals";
 
 type Phase =
   | { kind: "boot" }
@@ -159,11 +167,16 @@ export function App({ boot, client: injected }: { boot: BootMode; client?: Parti
           return showOverlay({ kind: "guardian", token: link.token });
         case "ticket":
         case "route":
+        case "duel":
+        case "room":
           if (needsOnboarding(link) && !onboardedRef.current) {
             pending.current = link;
             return;
           }
           if (link.kind === "route") return nav.route(link.route);
+          // sprint 7: a duel (a challenge, the result) and a pair lesson (the invitation, the room, the report)
+          if (link.kind === "duel") return flag(configRef.current, "game") ? nav.push({ name: "duel", id: link.id }) : nav.route("home");
+          if (link.kind === "room") return nav.push({ name: "pairRoom", id: link.id });
           nav.goTab("profile");
           return nav.push({ name: "support", number: link.number });
       }
@@ -541,7 +554,7 @@ function PushedScreen({ p }: { p: Pushed }) {
     case "lessonCard":
       return <LessonCardScreen key={p.id} id={p.id} />;
     case "player":
-      return <LessonPlayer key={p.sessionId} sessionId={p.sessionId} />;
+      return <LessonPlayer key={p.sessionId} sessionId={p.sessionId} duelId={p.duelId} />;
     case "lessonSummary":
       return <LessonSummaryScreen key={p.sessionId} sessionId={p.sessionId} initial={p.summary} fresh={!!p.fresh} />;
     case "appeal":
@@ -567,5 +580,32 @@ function PushedScreen({ p }: { p: Pushed }) {
       return <BadgesScreen />;
     case "gameSettings":
       return <GameSettingsScreen />;
+    // sprint 7: social
+    case "friends":
+      return <FriendsScreen />;
+    case "blocked":
+      return <BlockedScreen />;
+    case "sanctions":
+      return <SanctionsScreen />;
+    case "leagues":
+      return <LeaguesScreen initial={p.tab} />;
+    case "leagueHistory":
+      return <LeagueHistoryScreen />;
+    case "duels":
+      return <DuelsScreen />;
+    case "duel":
+      return <DuelScreen key={p.id} id={p.id} />;
+    case "duelReview":
+      return <DuelReviewScreen key={p.sessionId} sessionId={p.sessionId} duelId={p.duelId} />;
+    case "pairRooms":
+      return <PairRoomsScreen />;
+    case "pairInvite":
+      return <PairInviteScreen partner={p.partner} partnerLabel={p.partnerLabel} />;
+    case "pairRoom":
+      return <PairRoomScreen key={p.id} id={p.id} />;
+    case "pairReport":
+      return <PairReportScreen key={p.id} id={p.id} />;
+    case "referrals":
+      return <ReferralsScreen />;
   }
 }

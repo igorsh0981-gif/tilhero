@@ -196,6 +196,50 @@ async def test_bus_writers_append_hash_chain_exactly_once(env) -> None:
                              "last_seq": chain[-1]["seq"], "broken_at_seq": None}
 
 
+# спринт 7: социальный контур — те же издатели (social, gamification, lessons), новые действия; без переписки, ответов
+# и ПДн ученика — коды, статусы, сроки и причина сотрудника
+SPRINT7_RECORDS: list[tuple[str, dict[str, Any]]] = [
+    ("social", record(actor_id=str(uuid.uuid4()), actor_role="support", action="moderation.sanction_applied",
+                      object_type="moderation_case", object_id=str(uuid.uuid4()), before={"status": "open"},
+                      after={"status": "resolved", "sanction": "social_ban", "days": 14, "step_up": True},
+                      reason="Повторные оскорбления в приглашениях, жалобы двух учеников")),
+    ("social", record(actor_id=str(uuid.uuid4()), actor_role="operations", action="referral.rejected",
+                      object_type="referral", object_id=str(uuid.uuid4()), before={"status": "review"},
+                      after={"status": "rejected", "reject_code": "self_invite"},
+                      reason="Один и тот же человек с двух аккаунтов по фактам проверки")),
+    ("social", record(actor_id=str(uuid.uuid4()), actor_role="operations", action="referral.campaign_activated",
+                      object_type="referral_campaign", object_id="spring-2027", before={"status": "draft"},
+                      after={"status": "active", "version": 2}, reason="Весенняя кампания по плану маркетинга")),
+    ("gamification", record(actor_id=str(uuid.uuid4()), actor_role="operations", action="league.reevaluated",
+                            object_type="league_group", object_id=str(uuid.uuid4()),
+                            before={"place": 2, "xp": 340}, after={"place": 1, "xp": 360, "supersedes": 1},
+                            reason="Спор дуэли: ответ засчитан после проверки ключа")),
+    ("lessons", record(actor_id=str(uuid.uuid4()), actor_role="operations", action="pair_room.stopped",
+                       object_type="pair_room", object_id=str(uuid.uuid4()), before={"status": "active"},
+                       after={"status": "ended", "end_reason": "staff_stop"},
+                       reason="Жалоба участника во время урока, остановка до разбора")),
+]
+
+
+async def test_sprint7_social_records_accepted(env) -> None:
+    """Спринт 7 (INTERNAL_API §6: издатели без изменений): записи модерации, рефералов, лиг и парных комнат от social,
+    gamification и lessons попадают в журнал ровно один раз, цепочка цела."""
+    assert {producer for producer, _ in SPRINT7_RECORDS} <= AUDIT_EVENT_PRODUCERS
+    for producer, rec in SPRINT7_RECORDS:
+        ev = make_envelope("admin.audit.recorded.v1", rec, producer=producer)
+        assert_event_conforms(ev)
+        await env.bus.publish(ev)
+        await env.handler("audit.admin_records")(ev)  # повторная доставка — inbox
+    items = sorted(await env.records(), key=lambda i: i["seq"])
+    assert [(i["source"], i["action"], i["object_type"]) for i in items] == [
+        (producer, rec["action"], rec["object_type"]) for producer, rec in SPRINT7_RECORDS]
+    assert all(i["before"] == rec["before"] and i["after"] == rec["after"] and i["reason"] == rec["reason"]
+               for i, (_, rec) in zip(items, SPRINT7_RECORDS, strict=True))
+    verify = await env.c.get("/admin/v1/audit/verify", headers=env.read_headers())
+    assert verify.json()["valid"] is True and verify.json()["checked"] == len(SPRINT7_RECORDS)
+    assert env.bus.dlq == []
+
+
 async def test_events_from_unknown_producers_are_ignored(env) -> None:
     for producer in ("telegram-bff", "telegram-bot-gateway", "admin-bff", "user-admin", "watch", "news",
                      "provider-gateway"):

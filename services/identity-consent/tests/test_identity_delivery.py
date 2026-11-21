@@ -32,7 +32,7 @@ async def test_delivery_for_account(env) -> None:
         "age_band": "18+",
         "is_minor": False,
         "notifications_enabled": True,
-        "categories": ["reminders", "social", "support"],
+        "categories": ["reminders", "social", "support", "game"],
         "quiet_hours": {"start": "23:00", "end": "07:00"},
         "timezone": "Europe/Moscow",
         "status": "ACTIVE",
@@ -73,7 +73,7 @@ async def test_delivery_for_child_goes_to_guardian(env) -> None:
         "age_band": "6-9",
         "is_minor": True,
         "notifications_enabled": True,
-        "categories": ["reminders", "missed", "support"],
+        "categories": ["reminders", "missed", "support", "game"],
         "quiet_hours": {"start": "20:00", "end": "08:00"},
         "timezone": "Asia/Samarkand",
         "status": "ACTIVE",
@@ -105,7 +105,7 @@ async def test_public_profile(env) -> None:
     tg = 4_545_454_545
     guardian = await env.adult(telegram_user_id=tg, username="secret_handle", first_name="Анна", last_name="Тест")
     child = await env.child(guardian, "Мадина", "10-13")
-    for caller in ("social", "notifications"):
+    for caller in ("social", "notifications", "lessons"):  # lessons — согласие на голос в уроке вдвоём (спринт 7)
         r = await env.call("GET", f"/internal/v1/users/{guardian}/public", None, issuer=caller)
         assert r.status_code == 200
         assert r.json() == {"user_id": guardian, "display_name": "Анна Тест", "kind": "account", "age_band": "18+",

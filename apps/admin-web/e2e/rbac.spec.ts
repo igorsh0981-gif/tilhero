@@ -25,10 +25,12 @@ test("communications: «news» with the three tabs; the 15 menu ids and groups o
   await expect(page.getByTestId("news-tab-campaigns")).toBeVisible();
 });
 
-test("super admin: 15 sections + «memory» (sprint 5) in 5 groups; the game sections are live (sprint 6), so are content and languages (sprint 3)", async ({ page }) => {
+test("super admin: 15 sections + «memory» (sprint 5) + «Сообщество» (sprint 7) in 6 groups; the game sections are live (sprint 6), so are content and languages (sprint 3)", async ({ page }) => {
   await openAs(page, "admin@tilhero.local");
-  expect(await menu(page)).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit"]);
-  await expect(page.locator(".sn-group")).toHaveCount(5);
+  // the five sections of sprint 7 are not in the admin config 1.0.0: they follow its sections, in their own group
+  expect(await menu(page)).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit", "friends", "moderation", "referrals", "leagues", "pair_rooms"]);
+  await expect(page.locator(".sn-group")).toHaveCount(6);
+  await expect(page.locator('.sn-group[data-group="social"] [data-nav]')).toHaveCount(5);
   await expect(page.locator(".sn-tag")).toHaveCount(0);
   await page.locator('[data-nav="heroes"]').click();
   await expect(page.getByTestId("heroes")).toBeVisible();
@@ -75,6 +77,8 @@ test("the admin theme from experience-config is applied without a build; its fai
 
 test("experience-config down → the built-in menu and theme", async ({ page }) => {
   await openAs(page, "admin@tilhero.local", "#/overview", { adminConfigDown: true });
-  expect(await menu(page)).toHaveLength(16);
+  // the built-in order: «Сообщество» after the game
+  expect(await menu(page)).toHaveLength(21);
+  expect((await menu(page)).slice(10, 15)).toEqual(["friends", "moderation", "referrals", "leagues", "pair_rooms"]);
   await expect(page.locator("html")).not.toHaveAttribute("style", /--pen/);
 });

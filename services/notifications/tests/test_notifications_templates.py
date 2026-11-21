@@ -38,9 +38,27 @@ PARAMS: dict[str, dict] = {
     "hero_stage_reached": {"hero_code": "human_0", "stage": 2},
     "pin.reset_code": {"code": "482913", "ttl_minutes": 10},
     "pin.reset_scheduled": {"effective_at": "2026-11-19T05:30:00.000Z"},
+    # спринт 7 — социальное
+    "friend_request": {"request_id": INVITE, "nickname": "Alisher_7"},
+    "friend_accepted": {"nickname": None},
+    "duel_challenged": {"duel_id": INVITE, "nickname": "Ali_07", "accept_deadline": "2026-11-22T13:00:00Z"},
+    "duel_finished": {"duel_id": INVITE, "outcome": "loss", "result_version": 2, "correct": 6, "total": 10},
+    "league_closed": {"week": "2026-11-16", "place": 3, "xp": 520, "prize_til": 20},
+    "pair_invited": {"room_id": INVITE, "nickname": "Madina", "start_at": "2026-11-22T13:00:00Z", "scheduled": True},
+    "pair_starting": {"room_id": INVITE},
+    "pair_stopped": {"room_id": INVITE},
+    "referral_qualified": {"referral_id": INVITE, "freeze": 2, "til": 15},
+    "referral_rejected": {"referral_id": INVITE, "reject_code": "monthly_cap"},
+    "sanction_applied": {"sanction_id": INVITE, "kind": "social_ban", "until": None},
+    "sanction_appeal_decided": {"appeal_id": INVITE, "decision": "upheld"},
+    "complaint_resolved": {"case_id": INVITE, "outcome": "dismissed"},
 }
-for base in ("lesson.reminder", "lesson.missed", "lesson.comeback", "appeal_decided", "reviews_due", "streak_frozen",
-             "badge_earned", "hero_stage_reached"):
+KID_BASES = ("lesson.reminder", "lesson.missed", "lesson.comeback", "appeal_decided", "reviews_due", "streak_frozen",
+             "badge_earned", "hero_stage_reached",
+             # спринт 7: только то, что доступно детям 6–13 (семья), и решения модерации
+             "duel_challenged", "duel_finished", "pair_invited", "pair_starting", "pair_stopped", "sanction_applied",
+             "sanction_appeal_decided", "complaint_resolved")
+for base in KID_BASES:
     PARAMS[base + ".kid"] = PARAMS[base]
 
 # Детям и о детях — без давления: ни «потери серии», ни «провала» (CONVENTIONS §8). Список — в коде: им же
@@ -63,14 +81,25 @@ STARTAPP = {
     "streak_frozen": "route_home",
     "badge_earned": "route_progress",
     "hero_stage_reached": "route_home",
+    "friend_request": "route_friends",
+    "friend_accepted": "route_friends",
+    "duel_challenged": f"duel_{INVITE}",
+    "duel_finished": f"duel_{INVITE}",
+    "league_closed": "route_leagues",
+    "pair_invited": f"room_{INVITE}",
+    "pair_starting": f"room_{INVITE}",
+    "pair_stopped": f"room_{INVITE}",
+    "referral_qualified": "route_referrals",
+    "referral_rejected": "route_referrals",
+    "sanction_applied": "route_friends",
+    "sanction_appeal_decided": "route_friends",
+    "complaint_resolved": None,  # §5: без ссылки
 }
 
 
 def test_every_template_has_params_fixture() -> None:
     assert set(PARAMS) == set(TEMPLATES)
-    assert KID_TEMPLATES == {"lesson.reminder.kid", "lesson.missed.kid", "lesson.comeback.kid",
-                             "appeal_decided.kid", "reviews_due.kid", "streak_frozen.kid", "badge_earned.kid",
-                             "hero_stage_reached.kid"}
+    assert KID_TEMPLATES == {f"{base}.kid" for base in KID_BASES}
 
 
 @pytest.mark.parametrize("name", sorted(TEMPLATES))
@@ -84,8 +113,12 @@ def test_renders_both_languages(name: str, locale: str) -> None:
     if not name.startswith("pin."):
         assert text == f"<b>{r.title}</b>\n{r.body}"
         base = name.removesuffix(".kid")
-        assert r.startapp == STARTAPP[base] and r.buttons() == [[{"text": r.button, "startapp": r.startapp}]]
-        assert re.fullmatch(r"[A-Za-z0-9_-]{1,64}", r.startapp)
+        assert r.startapp == STARTAPP[base]
+        if r.startapp is None:
+            assert r.buttons() == []
+        else:
+            assert r.buttons() == [[{"text": r.button, "startapp": r.startapp}]]
+            assert re.fullmatch(r"[A-Za-z0-9_-]{1,64}", r.startapp)
     if locale == "uz":
         assert not re.search(r"[А-Яа-яЁё]", text.replace("Мадина", "").replace("Алишер", "")), text
     else:
@@ -187,7 +220,18 @@ def test_registry_flags() -> None:
     assert not TEMPLATES["invite.declined"].gated
     categories = {s.category for s in TEMPLATES.values()}
     assert categories == {"reminders", "missed", "social", "support", "product", "service", "game"}
-    # спринт 6: детям — только центр у шаблонов игры, и только у них
+    # спринт 6: детям — только центр у шаблонов игры; спринт 7 — и у всех социальных
+    sprint7 = {"friend_request", "friend_accepted", "duel_challenged", "duel_finished", "league_closed",
+               "pair_invited", "pair_starting", "pair_stopped", "referral_qualified", "referral_rejected",
+               "sanction_applied", "sanction_appeal_decided", "complaint_resolved"}
     assert {n for n, s in TEMPLATES.items() if s.kid_in_app_only} == {
         "streak_frozen", "streak_frozen.kid", "badge_earned", "badge_earned.kid", "hero_stage_reached",
-        "hero_stage_reached.kid"}
+        "hero_stage_reached.kid", *sprint7, *(f"{n}.kid" for n in sprint7 if f"{n}.kid" in TEMPLATES)}
+    # спринт 7: категории §5; санкции и обжалования — service (не выключаются) и не редактируются в админке
+    assert {n: TEMPLATES[n].category for n in sprint7} == {
+        "friend_request": "social", "friend_accepted": "social", "duel_challenged": "game", "duel_finished": "game",
+        "league_closed": "game", "pair_invited": "social", "pair_starting": "social", "pair_stopped": "social",
+        "referral_qualified": "social", "referral_rejected": "social", "sanction_applied": "service",
+        "sanction_appeal_decided": "service", "complaint_resolved": "social"}
+    assert {n for n, s in TEMPLATES.items() if not s.staff_editable} == {
+        "sanction_applied", "sanction_applied.kid", "sanction_appeal_decided", "sanction_appeal_decided.kid"}

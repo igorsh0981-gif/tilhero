@@ -16,6 +16,7 @@ from tilhero_ai_gateway.domain import stand
 from tilhero_ai_gateway.domain.invoke import Deps
 from tilhero_ai_gateway.domain.provider_status import ProviderStatus
 from tilhero_ai_gateway.domain.speech import ATTEMPT_TIMEOUT_S
+from tilhero_ai_gateway.domain.transcribe import make_transcriber
 from tilhero_ai_gateway.domain.versions import fail_stale_runs
 from tilhero_ai_gateway.providers import Provider, make_provider
 from tilhero_ai_gateway.providers.speech import TTS, SpeechProvider, make_speech_provider
@@ -33,11 +34,13 @@ def build_app(settings: Settings | None = None, runtime: Runtime | None = None, 
     settings = settings or get_settings()
     runtime = runtime or Runtime(settings)
     ai = provider or make_provider(settings, transport)
-    if settings.speech_provider == "whisper" and settings.tts_url:
-        # релиз 5.1: распознавание — сервис tts; повторы и таймаут попытки — в domain/speech.py (не в клиенте)
+    if settings.speech_provider != "fake" and settings.tts_url:
+        # релиз 5.1: распознавание — сервис tts; повторы и таймаут попытки — в domain/speech.py (не в клиенте).
+        # Спринт 7: голосовой ход парной комнаты распознаёт tts при любом провайдере оценки (Azure — только оценка)
         runtime.register_client(TTS, settings.tts_url, timeout=ATTEMPT_TIMEOUT_S + 1, retries=0,
                                 transport=speech_transport)
     speech_provider = speech or make_speech_provider(settings, speech_transport, runtime)
+    transcriber = make_transcriber(settings, runtime)
 
     def configure(rt: Runtime) -> None:
         rt.add_consumer(CONSUMER_USER_DELETED, [DELETION_REQUESTED], deletion_handler(rt))
@@ -75,6 +78,7 @@ def build_app(settings: Settings | None = None, runtime: Runtime | None = None, 
     app.add_middleware(SpeechBodyMiddleware)
     app.state.provider = ai
     app.state.speech = speech_provider
+    app.state.transcriber = transcriber
     return app
 
 

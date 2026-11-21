@@ -63,7 +63,7 @@ export class AiStore {
 
   constructor(private readonly sc: AiScenario = {}) {
     this.spent = sc.spentUsd ?? 12.4;
-    this.budget = { ai_enabled: !sc.aiOff, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80, updated_at: iso(-6 * DAY) };
+    this.budget = { ai_enabled: !sc.aiOff, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, room_cap_usd: 0.1, alert_percent: 80, updated_at: iso(-6 * DAY) };
     const whisper = (sc.speechProvider ?? "whisper") === "whisper";
     const speech: AiProviderStatus["speech"] = whisper
       ? sc.noSpeechKey
@@ -265,7 +265,7 @@ export class AiStore {
       completed: 51 * m,
       completion_pct: 79.7,
       median_minutes: 18,
-      by_kind: { lesson: 40 * m, scenario: 14 * m, media: 8 * m, review: 2 * m, reading: 5 * m },
+      by_kind: { lesson: 40 * m, scenario: 14 * m, media: 8 * m, review: 2 * m, reading: 5 * m, duel: 0 },
       ai_degraded_pct: this.budget.ai_enabled ? 6.3 : 100,
       appeals_open: this.appeals.filter((a) => a.status === "new" || a.status === "in_review").length,
       human_review_open: Object.values(this.evals).filter((ch) => ch.length && ch[ch.length - 1]!.requires_human_review).length,
@@ -522,9 +522,12 @@ export class AiStore {
       const sp = body.speech_monthly_cap_usd === undefined ? this.budget.speech_monthly_cap_usd : n("speech_monthly_cap_usd");
       if (!(mo > 0) || !(dl > 0 && dl <= mo) || !(ls > 0 && ls <= dl) || !(Number.isInteger(al) && al >= 1 && al <= 100)) return bad("monthly_cap_usd").then(() => true);
       if (!(sp >= 0 && sp <= mo)) return bad("speech_monthly_cap_usd").then(() => true);
+      // sprint 7: the coach of one pair room 0..monthly_cap_usd (absent — kept as it is)
+      const rc = body.room_cap_usd === undefined ? this.budget.room_cap_usd : n("room_cap_usd");
+      if (!(rc >= 0 && rc <= mo)) return bad("room_cap_usd").then(() => true);
       // ai-gateway: the updated_at that was read — someone saved in between → 409 BUDGET_CONFLICT {updated_at}
       if (body.updated_at !== undefined && body.updated_at !== this.budget.updated_at) return fail(409, "BUDGET_CONFLICT", { updated_at: this.budget.updated_at });
-      Object.assign(this.budget, { monthly_cap_usd: mo, learner_daily_cap_usd: dl, lesson_cap_usd: ls, speech_monthly_cap_usd: sp, alert_percent: al, updated_at: iso(0) });
+      Object.assign(this.budget, { monthly_cap_usd: mo, learner_daily_cap_usd: dl, lesson_cap_usd: ls, speech_monthly_cap_usd: sp, room_cap_usd: rc, alert_percent: al, updated_at: iso(0) });
       audit("ai.budget_updated", "budget", reason);
       return done(200, this.budget);
     }

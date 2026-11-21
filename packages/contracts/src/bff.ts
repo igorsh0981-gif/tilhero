@@ -1711,7 +1711,7 @@ export interface ComplaintResult {
 }
 
 /** warning — предупреждение; social_ban — запрет социальных действий на 1–30 дней или бессрочно; nickname_reset —
- *  ник сброшен модератором (задать новый можно сразу) */
+ *  ник сброшен модератором: сброшенный ник запрещён всем, новый можно задать через 7 дней */
 export type SanctionKind = "warning" | "social_ban" | "nickname_reset";
 export type SanctionAppealStatus = "open" | "upheld" | "overturned";
 
@@ -1769,6 +1769,12 @@ export interface ReferralReward {
   til: number;
 }
 
+/** Исход начисления (ack gamification): rewarded — награда кампании начислена; legacy — награда была выдана раньше по
+ *  правилу спринта 6 (status rewarded, reward null — без повторного «вы получили»); inviter_capped — награда
+ *  пригласившему не начислена из-за месячного лимита (status capped, reject_code monthly_cap — показывать как «лимит
+ *  месяца») */
+export type ReferralRewardOutcome = "rewarded" | "legacy" | "inviter_capped";
+
 export interface ReferralView {
   referral_id: string;
   /** ник приглашённого; null — не задан или ученик удалён */
@@ -1785,9 +1791,16 @@ export interface ReferralView {
     /** до какого момента нужно выполнить условия */
     window_ends_at: string;
   };
-  /** награда пригласившему: начислена (rewarded) или начисляется (qualified); иначе null */
+  /** награда пригласившему по кампании: начислена (rewarded) или начисляется (qualified); иначе null (в т. ч. награда
+   *  по правилу спринта 6 — reward_outcome legacy) */
   reward: ReferralReward | null;
+  /** исход начисления; null — gamification ещё не подтвердила (до rewarded / capped по её лимиту) */
+  reward_outcome: ReferralRewardOutcome | null;
+  /** причина отказа; у перенесённого из прежней программы и истёкшего (legacy, status expired) — null: показывать
+   *  «Приглашение по прежней программе», а не «окно истекло» */
   reject_code: ReferralRejectCode | null;
+  /** приглашение по прежней программе (принято до спринта 7, условия и сроки — переходные) */
+  legacy: boolean;
   accepted_at: string;
 }
 

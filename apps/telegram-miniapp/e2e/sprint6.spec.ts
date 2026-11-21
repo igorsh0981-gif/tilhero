@@ -558,7 +558,7 @@ test.describe("настройки мотивации", () => {
     await expect(page.getByTestId("row-shop")).toContainText("85 тилов");
     await page.getByTestId("row-game-settings").click();
     await expect(page.getByTestId("game-settings")).toBeVisible();
-    await expect(page.getByTestId("gs-learning")).toContainText("Рейтингов и сравнений с другими нет");
+    await expect(page.getByTestId("gs-learning")).toContainText("Общая лига недели — только по желанию");
     await expect(page.getByTestId("gs-auto-freeze")).toBeChecked();
     await page.getByTestId("gs-auto-freeze").uncheck();
     await expect(page.getByTestId("toast")).toHaveText("Сохранено");

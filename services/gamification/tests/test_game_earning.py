@@ -39,7 +39,7 @@ async def test_lesson_kinds_amounts_and_rules_version(env: Env, user: uuid.UUID)
     assert by_reason(ops, "media") == {"xp": 10, "til": 3}
     assert by_reason(ops, "reading") == {"xp": 10, "til": 3}
     assert {op.reason for op in ops} == {"lesson", "scenario", "media", "reading"}  # review и cancelled — без наград
-    assert all(op.rules_version == 1 and op.multiplier == Decimal("1") and not op.capped for op in ops)
+    assert all(op.rules_version == 2 and op.multiplier == Decimal("1") and not op.capped for op in ops)
     w = await env.wallet(user)
     assert w["xp"] == 75 and w["til"] == 17
     rows = await env.sql("SELECT source_session_id FROM ledger WHERE user_id = :u AND reason = 'lesson' "
@@ -134,14 +134,16 @@ async def test_activation_and_rollback_keep_posted_operations(env: Env, user: uu
 
     v2 = await env.activate(richer)
     await env.lesson(user)
+    # откат на версию 1 (до спринта 7): разделы league / duel / pair_lesson берутся из активной версии
     rollback = await env.adm("POST", "rules/1/rollback", {"comment": "откат на первую версию"})
     v3 = rollback["version"]
     assert rollback["based_on"] == 1 and rollback["status"] == "active" and rollback["diff"] == []
+    assert rollback["payload"]["duel"] == {"win": 30, "draw": 15, "participation": 10, "daily_cap": 3}
     await env.lesson(user)
     ops = [(op.currency, op.amount, op.rules_version) for op in await env.ops(user) if op.reason == "lesson"]
-    assert ops == [("xp", 20, 1), ("til", 5, 1), ("xp", 40, v2), ("til", 6, v2), ("xp", 20, v3), ("til", 5, v3)]
+    assert ops == [("xp", 20, 2), ("til", 5, 2), ("xp", 40, v2), ("til", 6, v2), ("xp", 20, v3), ("til", 5, v3)]
     statuses = {v["version"]: v["status"] for v in (await env.adm("GET", "rules"))["items"]}
-    assert statuses == {1: "archived", v2: "archived", v3: "active"}
+    assert statuses == {1: "archived", 2: "archived", v2: "archived", v3: "active"}
     [ev2, ev3] = await env.events("game.rules.activated.v1")
     assert ev2.payload["version"] == v2 and ev3.payload == {**ev3.payload, "version": v3, "based_on": 1}
 

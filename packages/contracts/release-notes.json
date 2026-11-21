@@ -78,6 +78,16 @@
       "key": "s6-heroes",
       "width": 1200,
       "height": 675
+    },
+    {
+      "key": "s7-social",
+      "width": 1200,
+      "height": 675
+    },
+    {
+      "key": "s7-family",
+      "width": 1200,
+      "height": 675
     }
   ],
   "limits": {

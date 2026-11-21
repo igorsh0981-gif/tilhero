@@ -47,7 +47,8 @@ PREVIEW = ("GET", f"/internal/v1/guardian-consents/{TOKEN}", None)
 ALL_BFF = [*ME_ENDPOINTS, LOGIN, POLICY, PREVIEW]
 DEFAULT_SETTINGS = {
     "enabled": False,
-    "categories": {"reminders": False, "missed": False, "social": False, "support": True, "product": False},
+    "categories": {"reminders": False, "missed": False, "social": False, "support": True, "product": False,
+                   "game": True},  # спринт 7: game включена по умолчанию
     "quiet_hours": {"start": "22:00", "end": "08:00"},
     "timezone": "Asia/Tashkent",
 }
@@ -211,7 +212,8 @@ async def test_settings_patch_categories_quiet_hours_and_events(env) -> None:
     assert r.json()["user"]["locale"] == "uz"
     assert r.json()["settings"] == {
         "enabled": False,
-        "categories": {"reminders": True, "missed": True, "social": False, "support": True, "product": False},
+        "categories": {"reminders": True, "missed": True, "social": False, "support": True, "product": False,
+                       "game": True},
         "quiet_hours": {"start": "23:00", "end": "07:30"},
         "timezone": "Europe/Istanbul",
     }
@@ -221,7 +223,7 @@ async def test_settings_patch_categories_quiet_hours_and_events(env) -> None:
     s = r.json()["settings"]
     assert s["enabled"] is True and s["timezone"] == "Europe/Istanbul"
     assert s["categories"] == {"reminders": True, "missed": False, "social": False, "support": True,
-                               "product": False}
+                               "product": False, "game": True}
     assert r.json()["user"]["locale"] == "uz"
     # явный null выключает тихие часы
     r = await env.call("PATCH", "/internal/v1/me/settings", uid, {"notifications": {"quiet_hours": None}})
@@ -232,10 +234,10 @@ async def test_settings_patch_categories_quiet_hours_and_events(env) -> None:
 
     events = await env.events("user.notification_settings.changed.v1", uid)
     assert [(e.payload["enabled"], e.payload["categories"]) for e in events] == [
-        (False, ["reminders", "missed", "support"]),
+        (False, ["reminders", "missed", "support", "game"]),
         # enabled — итоговая доставка: согласия нет, но выключатель включён пользователем
-        (True, ["reminders", "support"]),
-        (True, ["reminders", "support"]),
+        (True, ["reminders", "support", "game"]),
+        (True, ["reminders", "support", "game"]),
     ]
     [profile] = await env.events("user.profile.updated.v1", uid)
     assert profile.payload == {"user_id": uid, "changed_fields": ["locale"], "age_band": None, "is_minor": False,

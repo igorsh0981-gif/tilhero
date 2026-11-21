@@ -41,7 +41,8 @@ USERS_UPDATED_AT = literal_column("users.updated_at", TS)  # прежнее зн
 
 # SQL-фрагменты CHECK — общие для моделей и миграции 0001 (сверка schema_drift сравнивает имена ограничений)
 AGE_BANDS_SQL = "('6-9','10-13','14-17','18+')"
-CATEGORIES_SQL = "ARRAY['reminders','missed','social','support','product']::text[]"
+# спринт 7 (миграция 0005): + game
+CATEGORIES_SQL = "ARRAY['reminders','missed','social','support','product','game']::text[]"
 
 # Аудитория рассылок (миграция 0004, audience.py): частичные индексы — база отбора. Запрос аудитории повторяет эти
 # предикаты буквально (константы в SQL, не параметры), чтобы планировщик мог использовать индексы и в общем плане.
@@ -98,7 +99,7 @@ class User(Base):
     guardian_consent: Mapped[str] = mapped_column(String(16), nullable=False, server_default="not_required")
     notifications_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     notify_categories: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), nullable=False, server_default=text("'{support}'::text[]")
+        ARRAY(Text), nullable=False, server_default=text("'{support,game}'::text[]")
     )
     quiet_hours_start: Mapped[time | None] = mapped_column(Time, server_default=text("'22:00'"))
     quiet_hours_end: Mapped[time | None] = mapped_column(Time, server_default=text("'08:00'"))

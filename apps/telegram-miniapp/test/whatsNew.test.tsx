@@ -48,7 +48,8 @@ describe("«Что нового» cards (AT-11)", () => {
   it("release 6.1: every illustration of the catalogue is a 16:9 file of this build, the key shape is the catalogue's", () => {
     const cat = catalogue as { illustrations: Array<{ key: string; width: number; height: number }>; limits: { illustration_pattern: string } };
     expect(ILLUSTRATION_RE.source).toBe(cat.limits.illustration_pattern);
-    expect(cat.illustrations.map((i) => i.key)).toEqual(["welcome", "s6-heroes"]);
+    // sprint 7: s7-social (adults) and s7-family (children: the family together, no podium)
+    expect(cat.illustrations.map((i) => i.key)).toEqual(["welcome", "s6-heroes", "s7-social", "s7-family"]);
     for (const i of cat.illustrations) {
       expect({ width: i.width, height: i.height }).toEqual(ILLUSTRATION_SIZE);
       const file = resolve(__dirname, `../public/whatsnew/${i.key}.webp`);

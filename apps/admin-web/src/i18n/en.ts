@@ -3,6 +3,7 @@ import { enContent } from "./en.content";
 import { enAi } from "./en.ai";
 import { enMemory } from "./en.memory";
 import { enGame } from "./en.game";
+import { enSocial } from "./en.social";
 
 /** EN dictionary — the same keys as ru.ts (test). Plurals: "one|other" with {n}. */
 export const en: Record<MessageKey, string> = {
@@ -10,6 +11,7 @@ export const en: Record<MessageKey, string> = {
   ...enAi,
   ...enMemory,
   ...enGame,
+  ...enSocial,
   /* account */
   "account.changePwd": "Change password",
   "account.idle": "Sign-out after {n} min of inactivity",

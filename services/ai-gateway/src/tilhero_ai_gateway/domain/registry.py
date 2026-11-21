@@ -15,7 +15,10 @@
 
 Таблица `agents` заполняется миграцией 0001 из `AGENTS`; изменения реестра после неё — миграциями (0004 переводит
 `spaced_repetition_coach` и `pronunciation_coach` в `code`/`active`, снимок прежних значений — `AGENTS_SPRINT4`;
-0007 — `gameplay_director` в `code`/`active`, снимок — `AGENTS_SPRINT5`).
+0007 — `gameplay_director` в `code`/`active`, снимок — `AGENTS_SPRINT5`; 0008 (спринт 7, INTERNAL_API §4) —
+`cooperative_lesson_coach` в `llm`/`active` (версия 1 — черновик сида, публикует владелец после золотых тестов),
+`duel_host` в `code`/`active` (lessons: набор дуэли кодом), `referral_integrity_reviewer` в `rules`/`active` (social:
+квалификация реферала правилами), снимок — `AGENTS_SPRINT6`).
 """
 
 from __future__ import annotations
@@ -41,7 +44,7 @@ AGENT_IDS: Final[tuple[str, ...]] = (
     "media_lesson_designer",
     "language_pathway_advisor",
 )
-ACTIVE_LLM: Final = ("teaching_coach", "conversation_partner", "independent_evaluator")
+ACTIVE_LLM: Final = ("teaching_coach", "conversation_partner", "independent_evaluator", "cooperative_lesson_coach")
 
 
 def _a(agent_id: str, title: tuple[str, str], purpose: tuple[str, str], owner_role: str, implementation: str,
@@ -93,8 +96,9 @@ AGENTS: Final[tuple[dict[str, Any], ...]] = (
         "Agentlar javobining sxemasi va xavfsizlik qoidalarini tekshiradi"),
        "platform", "rules", implemented_in="ai-gateway"),
     _a("cooperative_lesson_coach", ("Парный урок", "Juftlik darsi"),
-       ("Два независимых вклада и отчёта в паре", "Juftlikda ikki mustaqil hissa va hisobot"),
-       "methodist", "llm", "planned", 7, free_text=True),
+       ("Ведёт парный урок: роли A и B, ходы по очереди, у каждого свой вклад и отчёт",
+        "Juftlik darsini olib boradi: A va B rollari, navbatma-navbat javoblar, har kimning oʻz hissasi va hisoboti"),
+       "methodist", "llm", free_text=True),
     _a("gameplay_director", ("Игровой режиссёр", "Oʻyin rejissyori"),
        ("Правила игры кодом: XP и тилы за подтверждённые действия, задания дня, значки, ступени героя; на оценку "
         "языка не влияет",
@@ -102,11 +106,15 @@ AGENTS: Final[tuple[dict[str, Any], ...]] = (
         "qahramon bosqichlari; til bahosiga taʼsir qilmaydi"),
        "methodist", "code", implemented_in="gamification"),
     _a("duel_host", ("Ведущий дуэли", "Duel boshlovchisi"),
-       ("Равные по сложности игровые вопросы", "Murakkabligi teng oʻyin savollari"),
-       "methodist", "llm", "planned", 7),
+       ("Один набор из 10 закрытых заданий для обоих: равная сложность, ключи проверяет сервер; на оценку языка "
+        "не влияет",
+        "Ikkalasi uchun 10 ta yopiq topshiriqdan iborat bitta toʻplam: teng murakkablik, kalitlarni server tekshiradi; "
+        "til bahosiga taʼsir qilmaydi"),
+       "methodist", "code", implemented_in="lessons"),
     _a("referral_integrity_reviewer", ("Проверка рефералов", "Referallarni tekshirish"),
-       ("Сигналы мошенничества; награды не списывает", "Firibgarlik signallari; mukofotlarni yechmaydi"),
-       "operations", "llm", "planned", 7),
+       ("Правила кампании и флаги риска: засчитать, удержать на проверку или отклонить; награды не начисляет",
+        "Kampaniya qoidalari va xavf belgilari: hisoblash, tekshiruvga qoldirish yoki rad etish; mukofot bermaydi"),
+       "operations", "rules", implemented_in="social"),
     _a("media_lesson_designer", ("Дизайнер медиауроков", "Media dars dizayneri"),
        ("Упражнения только по разрешённым материалам", "Faqat ruxsat etilgan materiallar boʻyicha mashqlar"),
        "methodist", "llm", "planned", 5),
@@ -137,6 +145,23 @@ AGENTS_SPRINT5: Final[tuple[dict[str, Any], ...]] = (
        "methodist", "llm", "planned", 6),
 )
 SPRINT6_CODE_AGENTS: Final = ("gameplay_director",)
+
+# Снимок строк реестра до миграции 0008 (спринт 7: cooperative_lesson_coach — llm/active, duel_host — code/lessons,
+# referral_integrity_reviewer — rules/social; откат возвращает строки спринта 6 и пустую маршрутизацию версий)
+AGENTS_SPRINT6: Final[tuple[dict[str, Any], ...]] = (
+    _a("cooperative_lesson_coach", ("Парный урок", "Juftlik darsi"),
+       ("Два независимых вклада и отчёта в паре", "Juftlikda ikki mustaqil hissa va hisobot"),
+       "methodist", "llm", "planned", 7, free_text=True),
+    _a("duel_host", ("Ведущий дуэли", "Duel boshlovchisi"),
+       ("Равные по сложности игровые вопросы", "Murakkabligi teng oʻyin savollari"),
+       "methodist", "llm", "planned", 7),
+    _a("referral_integrity_reviewer", ("Проверка рефералов", "Referallarni tekshirish"),
+       ("Сигналы мошенничества; награды не списывает", "Firibgarlik signallari; mukofotlarni yechmaydi"),
+       "operations", "llm", "planned", 7),
+)
+SPRINT7_AGENTS: Final = ("cooperative_lesson_coach", "duel_host", "referral_integrity_reviewer")
+# агенты спринта 7, переставшие быть LLM: их пустая маршрутизация версий удаляется (0008), откат её возвращает
+SPRINT7_NOT_LLM: Final = ("duel_host", "referral_integrity_reviewer")
 
 # Модели и цены по умолчанию (PLAN «Модели по умолчанию», прайс Anthropic на 19.11.2026), $ за 1 млн токенов
 MODELS: Final[tuple[dict[str, Any], ...]] = (
@@ -171,3 +196,5 @@ BUDGET_DEFAULTS: Final[dict[str, Any]] = {
     "ai_enabled": True, "monthly_cap_usd": "20.00", "learner_daily_cap_usd": "0.0500", "lesson_cap_usd": "0.0300",
     "alert_percent": 80,
 }
+# Спринт 7 (INTERNAL_API §4): потолок вызовов коуча на одну парную комнату, $ (миграция 0008; 0..monthly_cap_usd)
+ROOM_CAP_DEFAULT: Final = "0.1000"

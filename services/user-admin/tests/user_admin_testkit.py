@@ -75,7 +75,7 @@ def snapshot(user_id: uuid.UUID | str | None = None, *, n: int = 0, updated_at: 
                     "revoked_at": None, "basis": "guardian" if child else "self"},
         "security": {"pin_enabled": False, "pin_reset_pending": False},
         "notifications": {"enabled": True, "categories": {"reminders": True, "missed": True, "social": False,
-                                                           "support": True, "product": False}},
+                                                           "support": True, "product": False, "game": True}},
         # поля других доменов (identity их может прислать) read-модель не берёт из снимка
         "children_count": 99, "open_tickets": 99, "goal": "exam",
     }

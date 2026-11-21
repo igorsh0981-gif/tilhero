@@ -11,11 +11,11 @@ import { Bar } from "../../ui/shell";
 import { zoneLabel } from "../schedule/parts";
 
 type Editable = Exclude<keyof NotificationCategories, "support">;
-const CATS: readonly Editable[] = ["reminders", "missed", "social", "product"];
+const CATS: readonly Editable[] = ["reminders", "missed", "social", "game", "product"];
 
 /**
  * Profile → «Уведомления» (APP-SUP-03, AT-13): the Telegram master switch, categories and quiet hours are applied on
- * the server. Support replies are always delivered; the in-app notification center works even with everything off.
+ * the server. Sprint 7: the category «Игра и лиги» (game — badges, the hero, results of the league and duels). Support replies are always delivered; the in-app notification center works even with everything off.
  */
 export function NotifSettings() {
   const { bff, nav, syncProfile, setPlan, session } = useApp();

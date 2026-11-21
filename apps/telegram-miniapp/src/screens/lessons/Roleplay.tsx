@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { errorText } from "../../api/errors";
+import { prefersReducedMotion } from "../../domain/game";
 import { canTypeFreeText, chatBubbles, learnerLine, TEXT_MAX, type Bubble, type RoleplayStep } from "../../domain/lessons";
 import { useI18n } from "../../i18n";
 import { useDelayedFlag } from "../../state/hooks";
@@ -38,7 +39,7 @@ export function RoleplayView({ api, step, kid, top, error, cast }: StepProps<Rol
   const value = text.trim();
 
   useEffect(() => {
-    end.current?.scrollIntoView?.({ block: "end", behavior: "smooth" });
+    end.current?.scrollIntoView?.({ block: "end", behavior: prefersReducedMotion() ? "auto" : "smooth" });
   }, [bubbles.length, step.step_id]);
   // a successful send clears the field; a lost one keeps it (the same text is re-sent)
   const prevPhase = useRef(api.st.phase);

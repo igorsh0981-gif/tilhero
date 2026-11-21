@@ -128,27 +128,29 @@ async def test_m1_success_resets_and_enroll_shares_counter(env: Env, root: Perso
 # ---------------------------------------------------------------- M2
 
 async def test_m2_role_with_sensitive_permission_becomes_privileged(env: Env, root: Person, root2: Person) -> None:
-    sup = await env.onboard(root.actor, new_email("sup"), "support")
+    # спринт 7: support уже привилегированна (moderation.manage со step-up) — образец непривилегированной роли —
+    # analyst
+    sup = await env.onboard(root.actor, new_email("sup"), "analyst")
     assert sup.secret is None
     sv = sup.principal["session_version"]
-    upd = await env.c.put("/admin/v1/roles/support",
+    upd = await env.c.put("/admin/v1/roles/analyst",
                           json={"permissions": ["dashboard.read", "users.read", "support.read", "support.reply",
                                                 "users.sensitive.read"], "reason": "Раскрытие ID для поддержки"},
                           headers=env.h(root.actor))
     assert upd.status_code == 202
     assert (await env.approve(root2.actor, upd.json()["approval"]["approval_id"])).status_code == 200
     roles = {r["code"]: r for r in (await env.c.get("/admin/v1/roles", headers=env.h(root.actor))).json()["items"]}
-    assert roles["support"]["privileged"] is True
-    assert (await env.sql("SELECT privileged FROM roles WHERE code = 'support'"))[0][0] is True
+    assert roles["analyst"]["privileged"] is True
+    assert (await env.sql("SELECT privileged FROM roles WHERE code = 'analyst'"))[0][0] is True
     # сессии сотрудников роли отозваны, при входе — обязательное подключение MFA
     p = (await env.principal(sup.staff_id)).json()
     assert p["session_version"] == sv + 1
     assert (await env.login(sup.email, sup.password)).json()["next"] == "mfa_enroll"
     # назначение такой роли — four-eyes
-    c = await env.create_staff(root.actor, new_email("sup2"), "support")
+    c = await env.create_staff(root.actor, new_email("sup2"), "analyst")
     assert c.json()["approval"]["kind"] == "staff.create_privileged" and c.json()["approval"]["status"] == "PENDING"
-    an = await env.onboard(root.actor, new_email("an"), "analyst")
-    g = await env.patch(root.actor, an.staff_id, {"role": "support", "reason": "Перевод"})
+    an = await env.onboard(root.actor, new_email("an"), "auditor")
+    g = await env.patch(root.actor, an.staff_id, {"role": "analyst", "reason": "Перевод"})
     assert g.status_code == 202 and g.json()["approval"]["kind"] == "staff.role_grant"
 
 
@@ -200,7 +202,7 @@ async def test_minor5_approval_of_inactive_author_not_applicable(env: Env, root:
                                                      "reason": "Учётки"}, headers=env.h(root.actor))
     aid2 = (await env.c.get("/admin/v1/approvals?status=PENDING", headers=env.h(root.actor))).json()["items"][0]
     assert (await env.approve(root2.actor, aid2["approval_id"])).status_code == 200
-    aud = await env.onboard(root.actor, new_email("aud"), "support")
+    aud = await env.onboard(root.actor, new_email("aud"), "analyst")
     await env.sql("UPDATE staff SET role = 'auditor' WHERE staff_id = :i RETURNING staff_id", i=aud.staff_id)
     aud = await env.refresh(aud)
     ro = await env.create_staff(aud.actor, new_email("ro"), "read_only")

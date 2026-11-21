@@ -7,40 +7,42 @@
 (aievent) без режима AD/LDAP, AI-уровней доступа и прав спринтов 4–9 aievent.
 
 ## Роли и права
-Каталог — зеркало `admin.ts` (`Permission` — 38 прав, `RoleCode` — 10 ролей, `PRIVILEGED_ROLES`), матрица по умолчанию —
+Каталог — зеркало `admin.ts` (`Permission` — 46 прав, `RoleCode` — 10 ролей, `PRIVILEGED_ROLES`), матрица по умолчанию —
 `docs/sprint2/PLAN.md` §«Роли и права» + §«Права и роли» `docs/sprint3/PLAN.md`, `docs/sprint4/PLAN.md`,
-`docs/sprint5/PLAN.md` и `docs/sprint6/PLAN.md`, сид — миграции `0001`, `0003`, `0004`, `0005` и `0006` (0003–0006
-добавляют права к действующей матрице, ничего не затирая); дальше матрица меняется только через four-eyes. Названия
-RU/EN хранятся у ролей (новых ролей в спринтах 5–6 нет); подписи прав — в admin-web.
+`docs/sprint5/PLAN.md`, `docs/sprint6/PLAN.md` и §«Права» `docs/sprint7/PLAN.md`, сид — миграции `0001`, `0003`–`0007`
+(0003–0007 добавляют права к действующей матрице, ничего не затирая); дальше матрица меняется только через four-eyes.
+Названия RU/EN хранятся у ролей (новых ролей в спринтах 5–7 нет); подписи прав — в admin-web.
 
 | Роль | Права | MFA |
 |---|---|---|
-| super_admin | все 38 | обязательна |
-| operations | dashboard.read, users.read, support.read, audit.read, config.read, config.edit, config.publish, content.read, ai.read, qa.read, costs.read, costs.manage, memory.read, memory.manage, game.read, game.manage, game.publish, wallet.adjust | обязательна |
+| super_admin | все 46 | обязательна |
+| operations | dashboard.read, users.read, support.read, audit.read, config.read, config.edit, config.publish, content.read, ai.read, qa.read, costs.read, costs.manage, memory.read, memory.manage, game.read, game.manage, game.publish, wallet.adjust, social.read, moderation.manage, referral.read, referral.manage, league.read, league.manage, room.read, room.manage | обязательна |
 | communications | dashboard.read, whatsnew.manage, whatsnew.publish, notif.templates.manage, notif.campaigns.manage, notif.campaigns.send | обязательна |
-| support | dashboard.read, users.read, support.read, support.reply, game.read | по желанию |
+| support | dashboard.read, users.read, support.read, support.reply, game.read, social.read, moderation.manage, referral.read, room.read | обязательна (moderation.manage, с спринта 7) |
 | methodist | dashboard.read, users.read, content.read, content.edit, content.review, content.publish, ai.read, ai.manage, ai.publish, qa.read, qa.transcripts, qa.review, memory.read, glossary.manage, game.read | обязательна (content.publish, ai.publish, qa.review) |
-| content_manager (Контент-менеджер) | dashboard.read, content.read, content.edit, media.rights, glossary.manage, game.read, game.manage | обязательна (media.rights) |
+| content_manager (Контент-менеджер) | dashboard.read, content.read, content.edit, media.rights, glossary.manage, game.read, game.manage, league.read | обязательна (media.rights) |
 | qa_analyst (QA-аналитик) | dashboard.read, content.read, ai.read, qa.read, qa.transcripts, memory.read | по желанию |
-| analyst | dashboard.read, users.read, content.read, ai.read, qa.read, costs.read, memory.read, game.read | по желанию |
-| auditor | dashboard.read, audit.read, content.read, ai.read, qa.read, costs.read, memory.read, game.read | по желанию |
+| analyst | dashboard.read, users.read, content.read, ai.read, qa.read, costs.read, memory.read, game.read, social.read, referral.read, league.read, room.read | по желанию |
+| auditor | dashboard.read, audit.read, content.read, ai.read, qa.read, costs.read, memory.read, game.read, social.read, referral.read, league.read, room.read | по желанию |
 | read_only | dashboard.read | по желанию |
 
 `users.sensitive.read`, `staff.manage`, `roles.manage`, `support.manage`, `lang.manage` — только super_admin. Роль
 привилегированна (MFA обязательна, назначение — four-eyes), если она из `PRIVILEGED_ROLES` **или** содержит хотя бы одно
 из прав, чьи команды требуют step-up: `users.sensitive.read, staff.manage, roles.manage, config.publish,
 whatsnew.publish, notif.templates.manage, notif.campaigns.send`, (спринт 3) `content.publish, media.rights,
-lang.manage`, (спринт 4) `ai.publish, qa.review, costs.manage`, (спринт 5) `memory.manage` и (спринт 6) `game.publish,
-wallet.adjust` (без MFA повторный TOTP невозможен; `glossary.manage`, `game.manage` — без step-up, `memory.read`,
-`game.read` — чтение). `wallet.adjust` — только operations и super_admin. Поэтому methodist и
-content_manager — привилегированные, хотя `PRIVILEGED_ROLES` admin.ts их не перечисляет (`Role.privileged` в API — по
+lang.manage`, (спринт 4) `ai.publish, qa.review, costs.manage`, (спринт 5) `memory.manage`, (спринт 6) `game.publish,
+wallet.adjust` и (спринт 7) `moderation.manage, referral.manage, league.manage, room.manage` (без MFA повторный TOTP невозможен; `glossary.manage`, `game.manage` — без step-up, `memory.read`,
+`game.read`, `social.read`, `referral.read`, `league.read`, `room.read` — чтение). `wallet.adjust`, `referral.manage`,
+`league.manage`, `room.manage` — только operations и super_admin. Поэтому methodist, content_manager и (с спринта 7)
+support — привилегированные, хотя `PRIVILEGED_ROLES` admin.ts их не перечисляет (`Role.privileged` в API — по
 составу прав); qa_analyst (чтение и реплики с причиной, `qa.transcripts` — без step-up) — нет. При применении заявки на
 матрицу `roles.privileged` пересчитывается; если роль стала привилегированной — сессии её сотрудников отзываются (при
 входе — подключение MFA). Миграции 0003 и 0004 делают то же (0003 — methodist; 0004 — роль, ставшая привилегированной
 по ai.publish/qa.review/costs.manage, например methodist, у которого content.publish сняли через four-eyes); 0005 —
 то же для memory.manage (по матрице его получают только operations и super_admin — уже привилегированные); 0006 — то же
-для game.publish и wallet.adjust (тоже только operations и super_admin).
-Сверка с контрактом — `tests/test_aid_contract.py` (admin.ts и PLAN.md спринтов 2–6 разбираются регулярками).
+для game.publish и wallet.adjust (тоже только operations и super_admin); 0007 — support получает moderation.manage и
+становится привилегированной: сессии её сотрудников отзываются, при входе — подключение TOTP.
+Сверка с контрактом — `tests/test_aid_contract.py` (admin.ts и PLAN.md спринтов 2–7 разбираются регулярками).
 
 ## API
 Все вызовы — только от `admin-bff` (внутренний JWT EdDSA; иной издатель → 403 `CALLER_NOT_ALLOWED`).
@@ -143,7 +145,9 @@ qa_analyst → read_only с отзывом сессий, PENDING-заявки с
 `memory.read`, `memory.manage` (step-up), `glossary.manage` по матрице PLAN спринта 5, новых ролей нет, тот же пересчёт
 привилегированности и отзыв сессий (откат: права удаляются, PENDING-заявки с ними → REJECTED, пересчёт); `0006`
 (спринт 6) — права `game.read`, `game.manage`, `game.publish` (step-up), `wallet.adjust` (step-up) по матрице PLAN
-спринта 6, новых ролей нет, тот же пересчёт и отзыв сессий, тот же откат.
+спринта 6, новых ролей нет, тот же пересчёт и отзыв сессий, тот же откат; `0007` (спринт 7) — права `social.read`,
+`moderation.manage`, `referral.read|manage`, `league.read|manage`, `room.read|manage` (`*.manage` — step-up) по матрице
+PLAN спринта 7, новых ролей нет; support становится привилегированной (отзыв сессий), тот же откат.
 Все изменения учёток/ролей/заявок сериализуются `pg_advisory_xact_lock`. Redis: счётчики попыток
 (`{ns}:login:*` по HMAC email, `{ns}:mfa:*` по staff_id), challenge (`{ns}:ch:<sha256>` — сам challenge не хранится),
 idempotency создания сотрудника (без временного пароля).

@@ -3,11 +3,16 @@
 Валидатор возвращает ошибки `[{path, code}]`:
 - структурные (`required`, `unknown_key`, `type`) — черновик с ними не сохраняется (422 RULES_INVALID);
 - смысловые (`range`, `not_increasing`, `first_not_zero`, `length`, `cap_below_reward`, `pattern`, `duplicate`,
-  `enum`, `empty`, `too_few_templates`) — показываются проверкой, активация с ними невозможна.
+  `enum`, `empty`, `too_few_templates`, `order`) — показываются проверкой, активация с ними невозможна.
+
+Спринт 7 (INTERNAL_API §2.5): разделы `league`, `duel`, `pair_lesson` обязательны в черновике (версии до миграции
+0002 их не содержат — код берёт значения по умолчанию, откат на такую версию дополняет их разделами активной).
+`bonuses.referral_*` больше не используются (награды за реферал задаёт кампания social), поля остаются.
 """
 
 from __future__ import annotations
 
+import copy
 import re
 from dataclasses import dataclass
 from itertools import pairwise
@@ -40,7 +45,19 @@ SCHEMA: Final[dict[str, Any]] = {
     "bonuses": {"registration_freeze": "int", "referral_freeze": "int", "referral_monthly_cap": "int"},
     "quests": {"per_day": "int", "all_done_bonus": _AMOUNT, "templates": [_TEMPLATE]},
     "badges": {"streak": ["int"], "skills": ["int"], "reviews_cards": ["int"], "readings": ["int"]},
+    # спринт 7
+    "league": {"prizes": ["int"], "group_size": ["int"], "anomaly": {"median_factor": "int", "min_xp": "int"}},
+    "duel": {"win": "int", "draw": "int", "participation": "int", "daily_cap": "int"},
+    "pair_lesson": {"xp": "int", "min_turns": "int", "daily_cap": "int"},
 }
+SOCIAL_SECTIONS: Final = ("league", "duel", "pair_lesson")
+SOCIAL_DEFAULTS: Final[dict[str, Any]] = {
+    "league": {"prizes": [50, 30, 20], "group_size": [20, 30], "anomaly": {"median_factor": 5, "min_xp": 1500}},
+    "duel": {"win": 30, "draw": 15, "participation": 10, "daily_cap": 3},
+    "pair_lesson": {"xp": 25, "min_turns": 1, "daily_cap": 3},
+}
+# участников в группе общей лиги — не больше: событие game.league.closed.v1 несёт до 50 строк
+MAX_GROUP_SIZE: Final = 50
 
 Issue = dict[str, str]
 
@@ -85,6 +102,47 @@ class Rules:
     @property
     def badges(self) -> dict[str, list[int]]:
         return {k: [int(x) for x in v] for k, v in self.payload["badges"].items()}
+
+    def _social(self, key: str) -> dict[str, Any]:
+        value = self.payload.get(key)
+        return dict(value) if isinstance(value, dict) else dict(SOCIAL_DEFAULTS[key])
+
+    @property
+    def league_prizes(self) -> list[int]:
+        return [int(x) for x in self._social("league").get("prizes", SOCIAL_DEFAULTS["league"]["prizes"])]
+
+    @property
+    def league_group_size(self) -> tuple[int, int]:
+        size = list(self._social("league").get("group_size") or SOCIAL_DEFAULTS["league"]["group_size"])
+        if len(size) != 2:
+            size = list(SOCIAL_DEFAULTS["league"]["group_size"])
+        hi = max(1, min(int(size[1]), MAX_GROUP_SIZE))
+        return max(1, min(int(size[0]), hi)), hi
+
+    @property
+    def league_anomaly(self) -> tuple[int, int]:
+        a = dict(self._social("league").get("anomaly") or SOCIAL_DEFAULTS["league"]["anomaly"])
+        return int(a.get("median_factor", 5)), int(a.get("min_xp", 1500))
+
+    @property
+    def duel(self) -> dict[str, int]:
+        return {k: int(v) for k, v in {**SOCIAL_DEFAULTS["duel"], **self._social("duel")}.items()}
+
+    @property
+    def pair_lesson(self) -> dict[str, int]:
+        """XP за вклад, минимум ходов ученика, не больше daily_cap награждаемых парных уроков в день."""
+        return {k: int(v) for k, v in {**SOCIAL_DEFAULTS["pair_lesson"], **self._social("pair_lesson")}.items()}
+
+
+def with_social_sections(payload: dict[str, Any], source: dict[str, Any] | None) -> dict[str, Any]:
+    """Версия до спринта 7 (без league / duel / pair_lesson) — дополнить разделами source (активной версии), иначе
+    значениями по умолчанию. Остальное не меняется."""
+    out = copy.deepcopy(payload)
+    for key in SOCIAL_SECTIONS:
+        if key not in out:
+            value = (source or {}).get(key)
+            out[key] = copy.deepcopy(value if isinstance(value, dict) else SOCIAL_DEFAULTS[key])
+    return out
 
 
 async def active_rules(session: AsyncSession) -> Rules:
@@ -232,11 +290,45 @@ def validate(payload: Any) -> list[Issue]:
             out.append({"path": f"quests.templates.{aud}", "code": "too_few_templates"})
     for family in ("streak", "skills", "reviews_cards", "readings"):
         _increasing(out, f"badges.{family}", payload["badges"][family], first_zero=False, length=(0, 10), lo=1)
+    _validate_social(out, payload)
     if not out:
         for cur, key in (("xp", "xp_per_day"), ("til", "til_per_day")):
             if payload["caps"][key] < max_single_reward(payload, cur):
                 out.append({"path": f"caps.{key}", "code": "cap_below_reward"})
     return out
+
+
+def _validate_social(out: list[Issue], payload: dict[str, Any]) -> None:
+    """league: призы 0..10000 по местам (1..10 мест, не растут к нижним местам); размер группы [min, max], 2 ≤ min ≤
+    max ≤ 50; аномалия — множитель медианы 1..100, порог XP 0..1 000 000. duel: XP 0..10000, победа ≥ ничья ≥
+    участие, дневной лимит 0..50. pair_lesson: XP 0..10000, минимум ходов 1..50, награждаемых уроков в день 0..20."""
+    league = payload["league"]
+    prizes = league["prizes"]
+    if not 1 <= len(prizes) <= 10:
+        out.append({"path": "league.prizes", "code": "length"})
+    for i, v in enumerate(prizes):
+        _range(out, f"league.prizes[{i}]", v, 0, 10_000)
+    if any(b > a for a, b in pairwise(prizes)):
+        out.append({"path": "league.prizes", "code": "order"})
+    size = league["group_size"]
+    if len(size) != 2:
+        out.append({"path": "league.group_size", "code": "length"})
+    else:
+        _range(out, "league.group_size[0]", size[0], 2, MAX_GROUP_SIZE)
+        _range(out, "league.group_size[1]", size[1], 2, MAX_GROUP_SIZE)
+        if size[0] > size[1]:
+            out.append({"path": "league.group_size", "code": "order"})
+    _range(out, "league.anomaly.median_factor", league["anomaly"]["median_factor"], 1, 100)
+    _range(out, "league.anomaly.min_xp", league["anomaly"]["min_xp"], 0, 1_000_000)
+    duel = payload["duel"]
+    for key in ("win", "draw", "participation"):
+        _range(out, f"duel.{key}", duel[key], 0, 10_000)
+    if not duel["win"] >= duel["draw"] >= duel["participation"]:
+        out.append({"path": "duel", "code": "order"})
+    _range(out, "duel.daily_cap", duel["daily_cap"], 0, 50)
+    _range(out, "pair_lesson.xp", payload["pair_lesson"]["xp"], 0, 10_000)
+    _range(out, "pair_lesson.min_turns", payload["pair_lesson"]["min_turns"], 1, 50)
+    _range(out, "pair_lesson.daily_cap", payload["pair_lesson"]["daily_cap"], 0, 20)
 
 
 def structural(errors: list[Issue]) -> list[Issue]:
@@ -252,6 +344,14 @@ def _reward_leaves(payload: dict[str, Any]) -> dict[str, int]:
                     out[f"earn.{key}.{sub}"] = int(value[sub])
     for cur in ("xp", "til"):
         out[f"quests.all_done_bonus.{cur}"] = int(payload["quests"]["all_done_bonus"][cur])
+    for key in ("win", "draw", "participation"):
+        if isinstance(payload.get("duel"), dict) and key in payload["duel"]:
+            out[f"duel.{key}"] = int(payload["duel"][key])
+    if isinstance(payload.get("pair_lesson"), dict) and "xp" in payload["pair_lesson"]:
+        out["pair_lesson.xp"] = int(payload["pair_lesson"]["xp"])
+    if isinstance(payload.get("league"), dict):
+        for i, v in enumerate(payload["league"].get("prizes") or []):
+            out[f"league.prizes[{i}]"] = int(v)
     return out
 
 

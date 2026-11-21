@@ -99,7 +99,7 @@ async def test_guardian_grants_and_withdraws_child_voice_consent(env) -> None:
         REQUIRED, [*REQUIRED, VOICE], REQUIRED]
     # категории доставки от цели не зависят: событий настроек нет, доставка ребёнка прежняя
     assert await env.events("user.notification_settings.changed.v1", cid) == []
-    assert (await env.delivery(cid)).json()["categories"] == ["support"]
+    assert (await env.delivery(cid)).json()["categories"] == ["support", "game"]
     assert await env.events("consent.revoked.v1", cid) == []
 
 
@@ -225,9 +225,10 @@ async def test_account_voice_consent_adult_and_teen(env) -> None:
 
 async def test_public_callers_include_memory(env) -> None:
     _, cid = await family(env)
-    for caller in ("social", "notifications", "memory"):
+    # спринт 7: lessons — согласие на голос в уроке вдвоём
+    for caller in ("social", "notifications", "memory", "lessons"):
         assert (await env.public(cid, issuer=caller)).status_code == 200, caller
-    for caller in ("telegram-bff", "lessons", "learning-plan", "ai-gateway"):
+    for caller in ("telegram-bff", "learning-plan", "ai-gateway"):
         r = await env.public(cid, issuer=caller)
         assert (r.status_code, r.json()["code"]) == (403, "CALLER_NOT_ALLOWED"), caller
 

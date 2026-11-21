@@ -21,7 +21,9 @@ AUDIT_EVENT = "admin.audit.recorded.v1"
 # Писатели через шину: спринт 1 (INTERNAL_API §7) + спринт 2 — admin-identity (вход, сотрудники, роли, four-eyes;
 # docs/sprint2/INTERNAL_API.md §1: аудит auth.*, staff.*, role.*, approval.* через admin.audit.recorded.v1); спринты
 # 3–4 — контент, диагностика, уроки, оценки, ИИ; спринт 5 — memory (ручная правка карточки memory.card_adjusted;
-# словарь курса glossary.* пишет catalog); спринт 6 — gamification (правила, герои, магазин, события, кошельки: game.*).
+# словарь курса glossary.* пишет catalog); спринт 6 — gamification (правила, герои, магазин, события, кошельки: game.*);
+# спринт 7 — новых издателей нет (INTERNAL_API спринта 7 §6): social (дела модерации, санкции, обжалования, кампании и
+# решения по рефералам), gamification (лиги и дуэли, переоценка) и lessons (остановка парной комнаты) уже в списке.
 AUDIT_EVENT_PRODUCERS = frozenset({
     "identity-consent", "learning-plan", "social", "experience-config", "support", "notifications", "admin-identity",
     "catalog", "diagnostics", "lessons", "assessment", "ai-gateway", "memory", "gamification",

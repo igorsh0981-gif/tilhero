@@ -8,6 +8,10 @@
 `teaching_coach` (спринт 5) — два вида запроса с одним agent_id: `simpler_example | explain_again`
 (TeachingCoachContext → TeachingCoachOutput) и `gloss_word` (TeachingCoachGlossContext → TeachingCoachGlossOutput).
 Вид выбирается по `context.request`; контракт вывода — по виду запроса (схема версии v2 — объединённая, anyOf).
+
+Спринт 7 (INTERNAL_API §4): `cooperative_lesson_coach` — CooperativeCoachContext → CooperativeCoachOutput (участники
+только ролями A/B: ни user_id, ни ников, ни имён); распознавание голосового хода парной комнаты — SpeechTranscribeMeta
+→ SpeechTranscribeResult; `SessionKind` + `duel` (ИИ не вызывается — для полноты), `AiSessionKind` + `pair`.
 """
 
 from __future__ import annotations
@@ -30,9 +34,15 @@ AgentIdLit = Literal[
 ]
 Band = Literal["A0", "A1", "A2", "B1", "B2"]
 AudienceSegment = Literal["kids", "teens", "adults"]
-SessionKind = Literal["lesson", "scenario", "media", "review", "reading"]
-# ai.ts AiSessionKind = SessionKind | "memory" (перевод по тапу и произношение — вызывающий memory)
-AiSessionKind = Literal["lesson", "scenario", "media", "review", "reading", "memory"]
+# спринт 7: + duel — задания дуэли (ИИ не вызывается, вид — для полноты контракта)
+SessionKind = Literal["lesson", "scenario", "media", "review", "reading", "duel"]
+# ai.ts AiSessionKind = SessionKind | "memory" | "pair" (memory — перевод по тапу и произношение; pair — парная комната,
+# session_id = room_id, только cooperative_lesson_coach)
+AiSessionKind = Literal["lesson", "scenario", "media", "review", "reading", "duel", "memory", "pair"]
+PAIR_SESSION: Final = "pair"
+# виды сессии, в которых ИИ не вызывается (дуэль — закрытые задания по ключу без подсказок и ИИ)
+NO_AI_SESSION_KINDS: Final = frozenset({"duel"})
+COACH_AGENT: Final = "cooperative_lesson_coach"
 AgentImplementation = Literal["llm", "rules", "code"]
 AgentVersionStatus = Literal["draft", "published", "archived"]
 AgentUnavailableReason = Literal["ai_disabled", "not_configured", "budget_exceeded", "cost_limit", "provider_error",
@@ -294,17 +304,160 @@ class IndependentEvaluatorOutput(BaseModel):
     requires_human_review: bool
 
 
+# ---------------------------------------------------------------- cooperative_lesson_coach (спринт 7, скилл 11)
+
+CoachRole = Literal["A", "B"]
+CoachTrigger = Literal["start", "turn", "silence", "partner_offline", "partner_back", "wrap_up", "end"]
+COACH_TURNS_MAX: Final = 12  # последние ≤ 12 реплик комнаты (ai.ts)
+SafetyFlag = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,31}$")]
+
+
+class CoachScenario(BaseModel):
+    model_config = _IN
+    scenario_id: Id
+    title_en: Short
+    task_en: Line
+    level: Band
+    characters: list[Character] = Field(max_length=10)
+    completion_criteria_en: Line
+
+
+class CoachParticipant(BaseModel):
+    model_config = _IN
+    role: CoachRole
+    turns: int = Field(ge=0, le=500)
+    speaking_seconds: int = Field(ge=0, le=7200)
+    network: Literal["online", "offline"]
+    voice: bool
+
+
+class CoachRoles(BaseModel):
+    model_config = _IN
+    A: Annotated[str, Field(min_length=1, max_length=120)]
+    B: Annotated[str, Field(min_length=1, max_length=120)]
+
+
+class CoachTurn(BaseModel):
+    model_config = _IN
+    turn_id: Id
+    speaker: Literal["A", "B", "coach"]
+    text: RawText
+    mode: Literal["text", "voice", "choice"] | None
+
+
+class CooperativeCoachContext(BaseModel):
+    """Вход коуча парного урока (ai.ts CooperativeCoachContext). Участники — только роли A/B; роли уникальны;
+    реплики — последние ≤ 12, turn_id уникальны, реплика участника — от роли, которая есть в комнате."""
+
+    model_config = _IN
+    room_id: uuid.UUID
+    pair_id: Id
+    scenario: CoachScenario
+    mode: Literal["free", "choices"]
+    trigger: CoachTrigger
+    participants: list[CoachParticipant] = Field(min_length=1, max_length=2)
+    roles: CoachRoles | None
+    team_goal_en: Annotated[str, Field(min_length=1, max_length=200)] | None
+    team_goal_progress: float = Field(ge=0, le=1)
+    turns: list[CoachTurn] = Field(max_length=COACH_TURNS_MAX)
+    remaining_minutes: float = Field(ge=0, le=120)
+    safety_flags: list[SafetyFlag] = Field(max_length=10)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> CooperativeCoachContext:
+        roles = [p.role for p in self.participants]
+        if len(set(roles)) != len(roles):
+            raise ValueError("роли участников должны быть уникальны")
+        ids = [t.turn_id for t in self.turns]
+        if len(set(ids)) != len(ids):
+            raise ValueError("turn_id реплик должны быть уникальны")
+        if any(t.speaker != "coach" and t.speaker not in roles for t in self.turns):
+            raise ValueError("реплика участника — только от роли, которая есть в комнате")
+        return self
+
+
+class CoachGloss(BaseModel):
+    model_config = _OUT
+    ru: str = Field(min_length=1, max_length=300)
+    uz: str = Field(min_length=1, max_length=300)
+
+
+class CoachOption(BaseModel):
+    model_config = _OUT
+    choice_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
+    text_en: str = Field(min_length=1, max_length=160)
+
+
+class CoachRolesOut(BaseModel):
+    model_config = _OUT
+    A: str = Field(min_length=1, max_length=120)
+    B: str = Field(min_length=1, max_length=120)
+
+
+class CoachEvidence(BaseModel):
+    model_config = _OUT
+    role: CoachRole
+    turn_id: str = Field(min_length=1, max_length=64)
+    skill_id: str | None = Field(max_length=64)
+    assist_used: bool
+
+
+class CoachLocalized(BaseModel):
+    model_config = _OUT
+    ru: str = Field(min_length=1, max_length=200)
+    uz: str = Field(min_length=1, max_length=200)
+
+
+class CoachTipText(BaseModel):
+    model_config = _OUT
+    ru: str = Field(min_length=1, max_length=160)
+    uz: str = Field(min_length=1, max_length=160)
+
+
+class CoachTip(BaseModel):
+    model_config = _OUT
+    role: CoachRole
+    text: CoachTipText
+
+
+class CoachReport(BaseModel):
+    model_config = _OUT
+    team_summary: CoachLocalized
+    tips: list[CoachTip] = Field(max_length=6)
+
+
+class CooperativeCoachOutput(BaseModel):
+    """Вывод коуча (ai.ts CooperativeCoachOutput) — строго; согласованность полей со статусом и триггером проверяет
+    safety_quality_gate (domain/safety.py)."""
+
+    model_config = _OUT
+    room_id: str = Field(min_length=1, max_length=64)
+    status: Literal["in_progress", "paused", "fallback_text", "finished"]
+    next_speaker: Literal["A", "B", "both"] | None
+    prompt: str = Field(min_length=1, max_length=300)
+    prompt_gloss: CoachGloss | None
+    options: list[CoachOption] | None = Field(max_length=3)
+    roles: CoachRolesOut | None
+    team_goal_en: str | None = Field(min_length=1, max_length=200)
+    team_goal_progress: float = Field(ge=0, le=1)
+    individual_evidence: list[CoachEvidence] = Field(max_length=24)
+    escalation: Literal["safety", "abuse"] | None
+    report: CoachReport | None
+
+
 # ---------------------------------------------------------------- реестр контрактов по агенту
 
 CONTEXT_MODELS: Final[dict[str, type[BaseModel]]] = {
     "conversation_partner": ConversationPartnerContext,
     "teaching_coach": TeachingCoachContext,
     "independent_evaluator": IndependentEvaluatorContext,
+    "cooperative_lesson_coach": CooperativeCoachContext,
 }
 OUTPUT_MODELS: Final[dict[str, type[BaseModel]]] = {
     "conversation_partner": ConversationPartnerOutput,
     "teaching_coach": TeachingCoachOutput,
     "independent_evaluator": IndependentEvaluatorOutput,
+    "cooperative_lesson_coach": CooperativeCoachOutput,
 }
 # Вид запроса агента с несколькими контрактами (agent_id, context.request) → контекст и вывод
 REQUEST_MODELS: Final[dict[tuple[str, str], tuple[type[BaseModel], type[BaseModel]]]] = {
@@ -437,6 +590,41 @@ class AiStatus(BaseModel):
     model_config = _OUT
     ai_available: bool
     speech_available: bool
+
+
+# ---------------------------------------------------------------- speech:transcribe (спринт 7, ai.ts)
+
+TRANSCRIBE_TEXT_MAX: Final = 600
+TRANSCRIBE_WORDS_MAX: Final = 120
+
+
+class SpeechTranscribeMeta(BaseModel):
+    """Заголовок X-Speech-Meta = base64url(JSON) голосового хода парной комнаты (вызывающий — только lessons)."""
+
+    model_config = _IN
+    request_id: uuid.UUID
+    user_id: uuid.UUID
+    room_id: uuid.UUID
+    audience: AudienceSegment
+    language: Literal["en-US"]
+
+
+class TranscribeWord(BaseModel):
+    model_config = _OUT
+    word: str = Field(min_length=1, max_length=60)
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+
+
+class SpeechTranscribeResult(BaseModel):
+    """Ответ POST /internal/v1/speech:transcribe (ai.ts SpeechTranscribeResult) — проверяется перед отдачей."""
+
+    model_config = _OUT
+    text: str = Field(max_length=TRANSCRIBE_TEXT_MAX)
+    words: list[TranscribeWord] = Field(max_length=TRANSCRIBE_WORDS_MAX)
+    duration_ms: int = Field(ge=0)
+    provider: Literal["whisper", "fake_speech"]
+    latency_ms: int = Field(ge=0)
 
 
 # ---------------------------------------------------------------- тело версии (ai.ts AgentVersion, AgentVersionPatch)

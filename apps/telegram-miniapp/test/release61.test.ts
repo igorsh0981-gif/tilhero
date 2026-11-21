@@ -37,12 +37,15 @@ describe("release 6.1 routes", () => {
   });
 
   it("the game switched off (flag game) — routes into the game lead Home, the rest stay", () => {
-    expect([...GAME_ROUTES]).toEqual(["heroes", "shop", "badges", "game_history", "game_settings"]);
+    // sprint 7: the leagues of the week and duels live in gamification too
+    expect([...GAME_ROUTES]).toEqual(["heroes", "shop", "badges", "game_history", "game_settings", "leagues", "duels"]);
     for (const r of GAME_ROUTES) {
       expect(routeAllowed(r, false)).toBe("home");
       expect(routeAllowed(r, true)).toBe(r);
     }
     expect(routeAllowed("dictionary", false)).toBe("dictionary");
     expect(routeAllowed("reading", false)).toBe("reading");
+    expect(routeAllowed("friends", false)).toBe("friends");
+    expect(routeAllowed("referrals", false)).toBe("referrals");
   });
 });

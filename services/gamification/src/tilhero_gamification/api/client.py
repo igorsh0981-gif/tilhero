@@ -19,8 +19,10 @@ from tilhero_gamification.api.common import (
     idempotency_key,
     learner_read,
     learner_turn,
+    now,
+    settings_of,
 )
-from tilhero_gamification.domain import assets, heroes, quests, shop, views
+from tilhero_gamification.domain import assets, heroes, leagues, quests, shop, views
 from tilhero_gamification.schemas import EquipmentIn, PurchaseIn, SelectHeroIn, SettingsPatch
 
 router = APIRouter(prefix="/internal/v1/game", tags=["learner"])
@@ -142,13 +144,20 @@ async def get_settings(request: Request, ref: LearnerRef = Depends(current_learn
         return views.settings_view(turn)
 
 
-@router.patch("/settings", responses=_AUTH)
+@router.patch("/settings", responses={
+    **_AUTH, 403: {"description": "KIDS_NOT_ALLOWED | SOCIAL_RESTRICTED {until} (league_opt_in)"},
+    409: {"description": "NICKNAME_REQUIRED (league_opt_in)"}})
 async def patch_settings(body: SettingsPatch, request: Request, ref: LearnerRef = Depends(current_learner),
                          rt: Runtime = Depends(get_runtime)) -> dict[str, Any]:
-    """Partial<GameSettings> → GameSettings."""
+    """Partial<GameSettings> → GameSettings. league_opt_in (спринт 7): включение — проверки и группа текущей недели;
+    выключение — неделя доигрывается без строки в рейтинге."""
+    changes = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    opt_in = changes.pop("league_opt_in", None)
     async with rt.transaction() as db:
         turn = await learner_turn(db, request, ref)
-        views.apply_settings(turn, {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None})
+        views.apply_settings(turn, changes)
+        if opt_in is not None:
+            await leagues.set_opt_in(db, settings_of(request), turn, bool(opt_in), now(request))
         return views.settings_view(turn)
 
 

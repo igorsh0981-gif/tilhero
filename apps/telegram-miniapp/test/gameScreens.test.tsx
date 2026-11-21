@@ -85,7 +85,7 @@ const TODAY: TodayPlan = {
   ],
 };
 
-const SETTINGS: GameSettings = { auto_freeze: true, quests_hidden: false, celebrations: "full", game_notifications: true };
+const SETTINGS: GameSettings = { auto_freeze: true, quests_hidden: false, celebrations: "full", game_notifications: true, league_opt_in: false };
 const SHA = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
 const img = (id: string) => ({ asset_id: id, url: `/v1/game/assets/${id}/${SHA}`, width: 300, height: 460 });
 
