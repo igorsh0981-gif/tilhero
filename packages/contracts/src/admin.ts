@@ -714,7 +714,9 @@ export type ReleaseNoteAudience = "new" | "existing" | "all";
 export type ReleaseNoteRoute =
   | "home" | "lessons" | "review" | "progress" | "profile" | "schedule" | "notifications" | "family" | "support" | "news"
   // спринт 3
-  | "diagnostics" | "plan" | "skills" | "scenarios" | "media" | "media_requests" | "languages";
+  | "diagnostics" | "plan" | "skills" | "scenarios" | "media" | "media_requests" | "languages"
+  // релиз 6.1: игра — герои, магазин, значки, история, настройки; словарь и чтение
+  | "heroes" | "shop" | "badges" | "game_history" | "game_settings" | "dictionary" | "reading";
 export type ReleaseNoteIcon =
   | "spark" | "hero" | "calendar" | "clock" | "bell" | "book" | "chat" | "mic" | "star" | "flame" | "users" | "gift"
   | "shield" | "globe" | "trophy" | "news";
@@ -727,7 +729,10 @@ export interface ReleaseNoteSegments {
 
 /** Тексты RU и UZ обязательны оба (пустой перевод → 422 RELEASE_NOTE_TRANSLATION_MISSING {missing: string[]} —
  *  пути полей, например "items[1].text.uz"). Заголовок ≤ 80, пункт: заголовок ≤ 80, текст ≤ 200; пунктов 1..6;
- *  slug ^[0-9A-Za-z][0-9A-Za-z.-]{0,31}$. Простой текст без управляющих символов. */
+ *  slug ^[0-9A-Za-z][0-9A-Za-z.-]{0,31}$. Простой текст без управляющих символов.
+ *  illustration (релиз 6.1) — ключ из списка `illustrations` каталога release-notes.json (картинка 16:9 сверху первой
+ *  карточки в Mini App) или null; ключ не из каталога → 422 VALIDATION_ERROR. На входе необязателен (клиенты до 6.1):
+ *  при создании нет — null, при правке черновика нет — не меняется. */
 export interface ReleaseNoteContent {
   slug: string;
   title: Localized;
@@ -739,6 +744,7 @@ export interface ReleaseNoteContent {
   }>;
   audience: ReleaseNoteAudience;
   segments: ReleaseNoteSegments;
+  illustration: string | null;
 }
 
 export interface StaffReleaseNote extends ReleaseNoteContent {
@@ -784,6 +790,8 @@ export interface ReleaseNoteStats {
  *  Публикация: ученики аудитории видят заметку при следующем входе в Mini App один раз (отметки на сервере);
  *  у учеников с согласием product_news и включённой категорией product — ещё и сообщение в Telegram
  *  (шаблон release_note.published, детским профилям — никогда).
+ *  Заметка каждого релиза публикуется миграцией experience-config при выкладке (published_by "system:release");
+ *  сотрудник может снять её с показа (archive).
  *  Предпросмотр — на клиенте (admin-web, рамка телефона, язык RU/UZ, светлая и тёмная тема Mini App).
  */
 export interface ReleaseNotePublishInput {

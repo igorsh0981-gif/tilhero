@@ -25,17 +25,14 @@ SEEN = "/internal/v1/release-notes/seen"
 FEED = "/internal/v1/release-notes/feed"
 WELCOME, DRAFT = "welcome-1", "2026.11"
 CATALOG = Path(__file__).resolve().parents[3] / "packages" / "contracts" / "release-notes.json"
-NOTE_KEYS = {"release_note_id", "slug", "title", "items", "audience", "published_at"}
+WHATSNEW_DIR = Path(__file__).resolve().parents[3] / "apps" / "telegram-miniapp" / "public" / "whatsnew"
+NOTE_KEYS = {"release_note_id", "slug", "title", "items", "audience", "illustration", "published_at"}
+RELEASE_6 = ("s6-heroes", "s6-heroes-kids")  # заметки релиза 6.1 (миграция 0007), опубликованы при выкладке
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 
 
 def iso(dt: datetime) -> str:
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
-
-def long_ago() -> str:
-    """Ученик завершил онбординг до публикаций теста."""
-    return iso(datetime.now(UTC) - timedelta(days=1))
 
 
 def note(slug: str = "2026.12", **over: Any) -> dict[str, Any]:
@@ -83,6 +80,12 @@ async def staff_note(env, slug: str) -> dict:
     return next(n for n in items if n["slug"] == slug and n["status"] != "archived")
 
 
+async def any_note(env, slug: str) -> dict:
+    """Последняя заметка с меткой — в любом статусе (и архивная)."""
+    items = (await env.c.get(BASE, params={"limit": 100}, headers=env.h(WN_EDITOR))).json()["items"]
+    return next(n for n in items if n["slug"] == slug)
+
+
 async def feed(env, lang: str = "ru", age: str = "adults", **params: Any):
     return await env.c.get(FEED, params={"lang": lang, "age": age, **params}, headers=env.learner(uuid.uuid4()))
 
@@ -117,19 +120,46 @@ def test_catalog_matches_contract() -> None:
     # Literal-типы схемы совпадают с каталогом
     assert rn.Route.__args__ == rn.ROUTES and rn.IconName.__args__ == rn.ICONS  # type: ignore[attr-defined]
     assert rn.Audience.__args__ == rn.AUDIENCES  # type: ignore[attr-defined]
+    # релиз 6.1: иллюстрации — ключ, размер; файл лежит в Mini App и действительно такого размера (16:9)
+    assert {i["key"]: (i["width"], i["height"]) for i in cat["illustrations"]} == rn.ILLUSTRATIONS
+    assert rn.Illustration.__args__ == tuple(rn.ILLUSTRATIONS)  # type: ignore[attr-defined]
+    assert lim["illustration_pattern"] == rn.ILLUSTRATION_PATTERN
+    for key, (width, height) in rn.ILLUSTRATIONS.items():
+        assert re.fullmatch(rn.ILLUSTRATION_PATTERN, key), key
+        assert width * 9 == height * 16, key
+        assert webp_size(WHATSNEW_DIR / f"{key}.webp") == (width, height), key
+    assert {"heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading"} <= set(rn.ROUTES)
 
 
-async def test_seed_welcome_published_and_draft(env) -> None:
-    welcome, draft = await staff_note(env, WELCOME), await staff_note(env, DRAFT)
+def webp_size(path: Path) -> tuple[int, int]:
+    """Ширина и высота WebP по заголовку (VP8 / VP8L / VP8X) — без зависимостей."""
+    head = path.read_bytes()[:30]
+    assert head[:4] == b"RIFF" and head[8:12] == b"WEBP", path
+    chunk = head[12:16]
+    if chunk == b"VP8 ":
+        return int.from_bytes(head[26:28], "little") & 0x3FFF, int.from_bytes(head[28:30], "little") & 0x3FFF
+    if chunk == b"VP8L":
+        bits = int.from_bytes(head[21:25], "little")
+        return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+    assert chunk == b"VP8X", chunk
+    return int.from_bytes(head[24:27], "little") + 1, int.from_bytes(head[27:30], "little") + 1
+
+
+async def test_seed_welcome_published_and_draft_archived_by_release(env) -> None:
+    welcome, draft = await staff_note(env, WELCOME), await any_note(env, DRAFT)
     assert (welcome["status"], welcome["audience"], welcome["segments"]) == ("published", "new", {})
     assert welcome["published_by"] == "system:seed" and welcome["published_at"].endswith("Z")
+    assert welcome["illustration"] == "welcome"  # релиз 6.1 (миграция 0007)
     assert [(i["icon"], i["link"]) for i in welcome["items"]] == [
         ("hero", "progress"), ("clock", "lessons"), ("book", "review"), ("calendar", "schedule"), ("users", "family")]
     assert welcome["title"] == {"ru": "Добро пожаловать в TilHero", "uz": "TilHero’ga xush kelibsiz"}
-    assert (draft["status"], draft["audience"], draft["published_at"]) == ("draft", "existing", None)
+    # черновик 2026.11 устарел — релиз 6.1 архивировал его (содержание покрыто приветствием и s6-heroes)
+    assert (draft["status"], draft["audience"], draft["published_at"]) == ("archived", "existing", None)
+    assert draft["archived_by"] == "system:release" and draft["archived_at"].endswith("Z")
     for n in (welcome, draft):
         # содержимое сида проходит ту же проверку, что и заметка из админки, переводы полные
-        content = rn.NoteContent.model_validate({k: n[k] for k in ("slug", "title", "items", "audience")})
+        content = rn.NoteContent.model_validate(
+            {k: n[k] for k in ("slug", "title", "items", "audience", "illustration")})
         assert rn.dump_content(content)["items"] == n["items"]
         assert rn.missing_translations(n["title"], n["items"]) == []
         uz = [n["title"]["uz"], *(i[p]["uz"] for i in n["items"] for p in ("title", "text"))]
@@ -139,9 +169,9 @@ async def test_seed_welcome_published_and_draft(env) -> None:
             assert pressure not in ru
     # туристический сид «Бот турист» не перенесён
     all_slugs = [n["slug"] for n in (await env.c.get(BASE, headers=env.h(WN_EDITOR))).json()["items"]]
-    assert sorted(all_slugs) == sorted([WELCOME, DRAFT])
-    # черновик не виден ученикам; лента — только welcome-1
-    assert [n["slug"] for n in (await feed(env)).json()["items"]] == [WELCOME]
+    assert sorted(all_slugs) == sorted([WELCOME, DRAFT, *RELEASE_6])
+    # архив не виден ученикам; лента взрослого — заметка релиза 6.1 и welcome-1
+    assert [n["slug"] for n in (await feed(env)).json()["items"]] == ["s6-heroes", WELCOME]
 
 
 # ---------------------------------------------------------------- AT-11: for-me и seen
@@ -154,7 +184,7 @@ async def test_welcome_after_first_registration_then_nothing(env) -> None:
     body = r.json()
     assert body["mode"] == "welcome" and [n["slug"] for n in body["notes"]] == [WELCOME]
     n = body["notes"][0]
-    assert set(n) == NOTE_KEYS and n["audience"] == "new"
+    assert set(n) == NOTE_KEYS and n["audience"] == "new" and n["illustration"] == "welcome"
     assert n["title"] == "Добро пожаловать в TilHero"
     assert [i["title"] for i in n["items"]] == [
         "Герой растёт вместе с вами", "Урок — 20 минут", "Повторения в нужный момент", "Ваш график и напоминания",
@@ -183,7 +213,7 @@ async def test_updates_on_each_next_login(env) -> None:
     user = uuid.uuid4()
     welcome = await staff_note(env, WELCOME)
     await env.seen(user, [welcome["release_note_id"]])
-    onboarded = long_ago()
+    onboarded = env.onboarded()
     assert await ids_for_me(env, user, onboarded_at=onboarded) == ("none", [])
     a = await published(env, "2026.12", audience="existing")
     b = await published(env, "2026.12b", audience="all")
@@ -206,7 +236,7 @@ async def test_welcome_adds_latest_all_and_is_limited_to_five(env) -> None:
     await published(env, "all-2", audience="all")
     await published(env, "existing-1", audience="existing")
     user = uuid.uuid4()
-    assert await ids_for_me(env, user, onboarded_at=long_ago()) == ("welcome", ["all-2", WELCOME])
+    assert await ids_for_me(env, user, onboarded_at=env.onboarded()) == ("welcome", ["all-2", WELCOME])
     for k in range(5):
         await published(env, f"welcome-x{k}", audience="new")
     mode, slugs = await ids_for_me(env, uuid.uuid4())
@@ -215,7 +245,7 @@ async def test_welcome_adds_latest_all_and_is_limited_to_five(env) -> None:
     # увидел знакомство — дальше режим updates, новые заметки new ему не показываются
     seen_user = uuid.uuid4()
     await env.seen(seen_user, [(await staff_note(env, WELCOME))["release_note_id"]])
-    mode, slugs = await ids_for_me(env, seen_user, onboarded_at=long_ago())
+    mode, slugs = await ids_for_me(env, seen_user, onboarded_at=env.onboarded())
     assert mode == "updates" and not any(s.startswith("welcome") for s in slugs)
     assert slugs == ["existing-1", "all-2", "all-1"]
 
@@ -230,7 +260,7 @@ async def test_segments_language_and_age(env) -> None:
     async def updates(lang: str, age: str) -> list[str]:
         user = uuid.uuid4()
         await env.seen(user, [welcome, teens_new])
-        mode, slugs = await ids_for_me(env, user, onboarded_at=long_ago(), lang=lang, age=age)
+        mode, slugs = await ids_for_me(env, user, onboarded_at=env.onboarded(), lang=lang, age=age)
         return slugs if mode == "updates" else []
 
     assert await updates("uz", "kids") == ["kids-uz"]
@@ -241,9 +271,10 @@ async def test_segments_language_and_age(env) -> None:
     assert await ids_for_me(env, uuid.uuid4(), age="teens") == ("welcome", ["teens-new", WELCOME])
     assert await ids_for_me(env, uuid.uuid4(), age="adults") == ("welcome", [WELCOME])
     # лента — тоже по сегменту
-    assert [n["slug"] for n in (await feed(env, "uz", "kids")).json()["items"]] == ["kids-uz", WELCOME]
+    assert [n["slug"] for n in (await feed(env, "uz", "kids")).json()["items"]] == [
+        "kids-uz", "s6-heroes-kids", WELCOME]
     assert [n["slug"] for n in (await feed(env, "ru", "teens")).json()["items"]] == [
-        "teens-new", "teens-adults", WELCOME]
+        "teens-new", "teens-adults", "s6-heroes", WELCOME]
     staff = await staff_note(env, "teens-adults")
     assert staff["segments"] == {"age": ["teens", "adults"]}  # без повторов, в порядке каталога
 
@@ -260,9 +291,9 @@ async def test_seen_ignores_unknown_and_drafts_and_isolates_learners(env) -> Non
     assert [str(x) for x in rows] == [welcome]  # черновик и неизвестный id не записаны
     # опубликованный позже черновик — для Алисы новый
     assert (await publish(env, draft)).status_code == 201
-    assert await ids_for_me(env, alice, onboarded_at=long_ago()) == ("updates", ["2026.12"])
+    assert await ids_for_me(env, alice, onboarded_at=env.onboarded()) == ("updates", ["2026.12"])
     # отметки Алисы не влияют на Боба (ученик — только из sub токена)
-    assert await ids_for_me(env, bob, onboarded_at=long_ago()) == ("welcome", ["2026.12", WELCOME])
+    assert await ids_for_me(env, bob, onboarded_at=env.onboarded()) == ("welcome", ["2026.12", WELCOME])
 
 
 async def test_learner_api_validation_and_auth(env) -> None:
@@ -304,7 +335,7 @@ async def test_feed_pagination(env) -> None:
     assert first["items"][0]["title"] == "Декабрь 2026" and first["items"][0]["items"][0]["link"] == "lessons"
     second = (await feed(env, limit=2, cursor=first["next_cursor"])).json()
     third = (await feed(env, limit=2, cursor=second["next_cursor"])).json()
-    assert [n["slug"] for n in second["items"] + third["items"]] == ["2027.02", "2027.01", WELCOME]
+    assert [n["slug"] for n in second["items"] + third["items"]] == ["2027.02", "2027.01", "s6-heroes", WELCOME]
     assert third["next_cursor"] is None
     uz = (await feed(env, "uz", limit=1)).json()["items"][0]
     assert uz["title"] == "2026-yil dekabr" and uz["items"][0]["text"] == "Darsdan keyin besh daqiqa jonli nutq."
@@ -377,15 +408,17 @@ async def test_lifecycle_create_edit_publish_archive_with_events(env) -> None:
     assert audits(env, "release_note.archive")[0].payload["reason"] == "Опечатка в тексте"
 
 
-async def test_seed_draft_can_be_published_for_existing_learners(env) -> None:
-    draft = await staff_note(env, DRAFT)
+async def test_seed_draft_archived_by_release_is_not_published(env) -> None:
+    """Черновик сида 2026.11 архивирован релизом 6.1: опубликовать его нельзя, ученики его не видят, метка свободна."""
+    draft = await any_note(env, DRAFT)
     pub = await publish(env, draft, reason="Релиз ноября")
-    assert pub.status_code == 201
+    assert pub.status_code == 409 and pub.json()["code"] == "RELEASE_NOTE_NOT_DRAFT"
     user = uuid.uuid4()
     await env.seen(user, [(await staff_note(env, WELCOME))["release_note_id"]])
-    assert await ids_for_me(env, user, onboarded_at=long_ago()) == ("updates", [DRAFT])
-    # новичку (знакомство ещё не видел) — только welcome: 2026.11 адресована existing
-    assert await ids_for_me(env, uuid.uuid4()) == ("welcome", [WELCOME])
+    assert await ids_for_me(env, user, onboarded_at="2026-11-18T07:00:00Z") == ("updates", ["s6-heroes"])
+    assert DRAFT not in [n["slug"] for n in (await feed(env)).json()["items"]]
+    again = await create(env, note(DRAFT))  # архив метку не занимает
+    assert again["status"] == "draft" and again["release_note_id"] != draft["release_note_id"]
 
 
 async def test_translation_required(env) -> None:
@@ -516,8 +549,10 @@ async def test_slug_unique_among_active(env) -> None:
     await create(env)
     dup = await env.c.post(BASE, json=note(), headers=env.h(WN_EDITOR))
     assert dup.status_code == 409 and dup.json()["code"] == "RELEASE_NOTE_SLUG_EXISTS"
-    for slug in (DRAFT, WELCOME):
+    for slug in (WELCOME, *RELEASE_6):
         assert (await env.c.post(BASE, json=note(slug=slug), headers=env.h(WN_EDITOR))).status_code == 409
+    # 2026.11 в архиве (релиз 6.1) — метка свободна
+    assert (await env.c.post(BASE, json=note(slug=DRAFT), headers=env.h(WN_EDITOR))).status_code == 201
 
 
 async def test_staff_permissions_and_callers(env) -> None:
@@ -566,13 +601,15 @@ async def test_staff_permissions_and_callers(env) -> None:
     missing_arc = await env.c.post(f"{BASE}/{uuid.uuid4()}/archive", json={"reason": "нет"},
                                    headers=env.h(WN_PUBLISHER))
     assert missing_arc.status_code == 404 and missing_arc.json()["code"] == "RELEASE_NOTE_NOT_FOUND"
+    await create(env, note("x2"))
     drafts = await env.c.get(BASE, params={"status": "draft"}, headers=env.h(WN_EDITOR))
-    assert {i["status"] for i in drafts.json()["items"]} == {"draft"}
+    assert [i["status"] for i in drafts.json()["items"]] == ["draft"]
     assert (await env.c.get(BASE, params={"status": "deleted"}, headers=env.h(WN_EDITOR))).status_code == 422
-    page1 = (await env.c.get(BASE, params={"limit": 2}, headers=env.h(WN_EDITOR))).json()
-    page2 = (await env.c.get(BASE, params={"limit": 2, "cursor": page1["next_cursor"]},
+    # 6 заметок: welcome-1, 2026.11 (архив), s6-heroes, s6-heroes-kids, опубликованная n и черновик x2
+    page1 = (await env.c.get(BASE, params={"limit": 4}, headers=env.h(WN_EDITOR))).json()
+    page2 = (await env.c.get(BASE, params={"limit": 4, "cursor": page1["next_cursor"]},
                              headers=env.h(WN_EDITOR))).json()
-    assert len(page1["items"]) == 2 and len(page2["items"]) == 1 and page2["next_cursor"] is None
+    assert len(page1["items"]) == 4 and len(page2["items"]) == 2 and page2["next_cursor"] is None
     bad = await env.c.get(BASE, params={"cursor": "@@"}, headers=env.h(WN_EDITOR))
     assert bad.status_code == 400 and bad.json()["code"] == "INVALID_CURSOR"
 
@@ -634,7 +671,7 @@ async def test_views_total_in_list_and_card_without_n_plus_1(env) -> None:
         event.remove(engine.sync_engine, "before_cursor_execute", count_sql)
     views = {i["slug"]: (i["status"], i["views_total"]) for i in page["items"]}
     assert views == {WELCOME: ("published", 4), "2026.12": ("published", 3), "2027.01": ("draft", 0),
-                     DRAFT: ("draft", 0)}
+                     DRAFT: ("archived", 0), "s6-heroes": ("published", 0), "s6-heroes-kids": ("published", 0)}
     # одна выборка заметок + один GROUP BY по отметкам, не запрос на каждую заметку
     assert sum("release_note_views" in sql for sql in statements) == 1, statements
     card = (await env.c.get(f"{BASE}/{a['release_note_id']}", headers=env.h(WN_EDITOR))).json()
@@ -657,20 +694,20 @@ async def test_at18_publish_once_for_existing_learner_archive_and_stats(env) -> 
     learner = uuid.uuid4()
     await env.seen(learner, [(await staff_note(env, WELCOME))["release_note_id"]])  # знакомство уже видел
     n = await create(env, note("2026.12", audience="existing"), actor=WN_EDITOR)
-    assert await ids_for_me(env, learner, onboarded_at=long_ago(), lang="uz") == ("none", [])  # черновик не виден
+    assert await ids_for_me(env, learner, onboarded_at=env.onboarded(), lang="uz") == ("none", [])  # черновик не виден
     assert (await publish(env, n, actor=WN_PUBLISHER)).status_code == 201
-    r = await env.for_me(learner, onboarded_at=long_ago(), lang="uz", age="teens")
+    r = await env.for_me(learner, onboarded_at=env.onboarded(), lang="uz", age="teens")
     assert r.json()["mode"] == "updates" and [x["title"] for x in r.json()["notes"]] == ["2026-yil dekabr"]
     await seen_as(env, learner, [n["release_note_id"]], "uz", "teens")  # шторка закрыта
-    assert await ids_for_me(env, learner, onboarded_at=long_ago(), lang="uz", age="teens") == ("none", [])
+    assert await ids_for_me(env, learner, onboarded_at=env.onboarded(), lang="uz", age="teens") == ("none", [])
     st = (await stats(env, n["release_note_id"])).json()
     assert (st["views_total"], st["views_by_lang"], st["views_by_age"]) == (
         1, {"ru": 0, "uz": 1}, {"kids": 0, "teens": 1, "adults": 0})
     other = uuid.uuid4()
     await env.seen(other, [(await staff_note(env, WELCOME))["release_note_id"]])
-    assert await ids_for_me(env, other, onboarded_at=long_ago()) == ("updates", ["2026.12"])
+    assert await ids_for_me(env, other, onboarded_at=env.onboarded()) == ("updates", ["2026.12"])
     assert (await archive(env, n)).status_code == 201
-    assert await ids_for_me(env, other, onboarded_at=long_ago()) == ("none", [])
+    assert await ids_for_me(env, other, onboarded_at=env.onboarded()) == ("none", [])
     assert "2026.12" not in [x["slug"] for x in (await feed(env)).json()["items"]]
     assert (await stats(env, n["release_note_id"])).json()["views_total"] == 1
 
@@ -721,7 +758,7 @@ async def test_stats_not_found_draft_and_auth(env) -> None:
     missing = await stats(env, str(uuid.uuid4()))
     assert missing.status_code == 404 and missing.json()["code"] == "RELEASE_NOTE_NOT_FOUND"
     assert (await env.c.get(f"{BASE}/not-a-uuid/stats", headers=env.h(WN_EDITOR))).status_code == 422
-    draft = await staff_note(env, DRAFT)
+    draft = await create(env)
     r = await stats(env, draft["release_note_id"])
     assert r.status_code == 200 and r.json()["views_total"] == 0 and r.json()["first_view_at"] is None
     assert (await stats(env, draft["release_note_id"], actor=WN_PUBLISHER)).status_code == 200
@@ -752,25 +789,27 @@ async def test_summary_for_dashboard(env) -> None:
     path = f"{BASE}/summary"
     r = await env.c.get(path, headers=env.h(DASHBOARD))
     assert r.status_code == 200, r.text
-    welcome = await staff_note(env, WELCOME)
-    assert r.json() == {"published": 1, "drafts": 1, "latest": {
-        "release_note_id": welcome["release_note_id"], "slug": WELCOME, "title": "Добро пожаловать в TilHero",
-        "views_total": 0, "published_at": welcome["published_at"]}}
+    # после выкладки 6.1: welcome-1 и обе заметки релиза опубликованы, черновик сида — в архиве
+    kids = await staff_note(env, "s6-heroes-kids")  # вставлена последней — «последняя опубликованная»
+    assert r.json() == {"published": 3, "drafts": 0, "latest": {
+        "release_note_id": kids["release_note_id"], "slug": "s6-heroes-kids",
+        "title": "Новое в TilHero: герои, тилы и повторения", "views_total": 0, "published_at": kids["published_at"]}}
     a = await published(env, "2026.12", audience="all")
     await create(env, note("2027.01"))
     for _ in range(2):
         await seen_as(env, uuid.uuid4(), [a["release_note_id"]], "uz", "adults")
     s = (await env.c.get(path, headers=env.h(WN_PUBLISHER))).json()
-    assert (s["published"], s["drafts"]) == (2, 2)
+    assert (s["published"], s["drafts"]) == (4, 1)
     assert s["latest"]["slug"] == "2026.12" and s["latest"]["title"] == "Декабрь 2026"  # заголовок — RU
     assert s["latest"]["views_total"] == 2 and s["latest"]["published_at"] == a["published_at"]
     # снятая — не «последняя опубликованная» и не считается
     await archive(env, a)
     s = (await env.c.get(path, headers=env.h(DASHBOARD))).json()
-    assert (s["published"], s["drafts"]) == (1, 2) and s["latest"]["slug"] == WELCOME
-    await archive(env, welcome)
+    assert (s["published"], s["drafts"]) == (3, 1) and s["latest"]["slug"] == "s6-heroes-kids"
+    for slug in (WELCOME, *RELEASE_6):
+        await archive(env, await staff_note(env, slug))
     s = (await env.c.get(path, headers=env.h(DASHBOARD))).json()
-    assert s == {"published": 0, "drafts": 2, "latest": None}
+    assert s == {"published": 0, "drafts": 1, "latest": None}
 
 
 async def test_summary_auth(env) -> None:
@@ -835,8 +874,9 @@ async def _alembic(env, action: str, revision: str) -> None:
 
 
 async def test_migrations_down_and_up_again(env) -> None:
-    """0004 → 0003 (down): черновик сида удаляется, опубликованная welcome-1 остаётся (триггер); повторный upgrade не
-    падает на дубле (ON CONFLICT DO NOTHING). 0003 → 0002: таблицы «Что нового» снимаются целиком."""
+    """head → 0003 (down): 0007 удаляет заметки релиза 6.1 и возвращает черновик, 0004 удаляет черновик сида,
+    опубликованная welcome-1 остаётся (триггер); повторный upgrade не падает на дубле (ON CONFLICT DO NOTHING).
+    0003 → 0002: таблицы «Что нового» снимаются целиком."""
 
     async def count(sql: str, **params: str) -> int:
         async with env.runtime.transaction() as s:
@@ -845,14 +885,15 @@ async def test_migrations_down_and_up_again(env) -> None:
     await _alembic(env, "downgrade", "0003")
     assert await count("SELECT count(*) FROM release_notes WHERE status = 'draft'") == 0
     assert await count("SELECT count(*) FROM release_notes WHERE slug = 'welcome-1'") == 1
+    assert await count("SELECT count(*) FROM release_notes") == 1
     await _alembic(env, "upgrade", "head")
-    assert await count("SELECT count(*) FROM release_notes") == 2
+    assert await count("SELECT count(*) FROM release_notes") == 4  # welcome-1, 2026.11 (архив), s6-heroes, -kids
     await _alembic(env, "downgrade", "0002")
     assert await count("SELECT count(*) FROM information_schema.tables WHERE table_schema = :schema "
                        "AND table_name IN ('release_notes', 'release_note_views', 'deleted_users')",
                        schema=env.settings.db_schema) == 0
     await _alembic(env, "upgrade", "head")
-    assert [n["slug"] for n in (await feed(env)).json()["items"]] == [WELCOME]
+    assert [n["slug"] for n in (await feed(env)).json()["items"]] == ["s6-heroes", WELCOME]
 
 
 async def test_parallel_creates_with_same_slug_one_wins_other_409(env) -> None:
@@ -918,7 +959,7 @@ async def test_deletion_removes_views_and_acks(env) -> None:
     gone = await env.seen(user, [welcome])
     assert gone.status_code == 410 and gone.json()["code"] == "USER_DELETED"
     assert (await env.for_me(user)).json()["code"] == "USER_DELETED"
-    assert await ids_for_me(env, other, onboarded_at=long_ago()) == ("none", [])
+    assert await ids_for_me(env, other, onboarded_at=env.onboarded()) == ("none", [])
     # повтор рассылки сагой (тот же request_id, новый event_id) — снова ACK, без ошибок
     await env.bus.publish(deletion(user, ev.payload["request_id"], attempt=2))
     assert len(await acks(env)) == 2

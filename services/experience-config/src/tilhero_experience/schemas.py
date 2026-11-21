@@ -110,6 +110,7 @@ class WhatsNewNoteOut(BaseModel):
     title: str
     items: list[ReleaseNoteItemOut]
     audience: Literal["new", "existing", "all"]
+    illustration: str | None
     published_at: str
 
 

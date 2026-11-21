@@ -31,6 +31,8 @@ COPY tsconfig.base.json ./
 # типы API (import type) — единственный источник контракта admin-bff ↔ admin-web
 COPY packages/contracts packages/contracts
 COPY apps/admin-web apps/admin-web
+# иллюстрации «Что нового» (релиз 6.1): редактор берёт файлы сборки Mini App (import.meta.glob в news/catalog.ts)
+COPY apps/telegram-miniapp/public/whatsnew apps/telegram-miniapp/public/whatsnew
 # страховка: ни один секрет/токен/mock не попадает в production-бандл
 RUN npm run build -w @tilhero/admin-web \
     && ! grep -rqsE "\"csrf-|Correct-Horse|JBSWY3DPEHPK3PXP|MockBff" apps/admin-web/dist

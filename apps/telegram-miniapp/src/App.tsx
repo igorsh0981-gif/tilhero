@@ -10,8 +10,8 @@ import { hasWhatsNew } from "./domain/whatsNew";
 import { env } from "./env";
 import { resolveLang, useI18n } from "./i18n";
 import { AppProvider, useApp, type AppCtx } from "./state/app";
-import { useNav, type Pushed, type Tab } from "./state/nav";
-import { bindTelegramEnvironment, needsOnboarding, parseStartParam, setSpeechSource, syncNativeChrome, tgReady, type BootMode, type DeepLink } from "./tg";
+import { routeAllowed, useNav, type Nav, type Pushed, type Tab } from "./state/nav";
+import { bindTelegramEnvironment, needsOnboarding, parseStartParam, setSpeechSource, syncNativeChrome, tgReady, type AppRoute, type BootMode, type DeepLink } from "./tg";
 import { cx } from "./ui/kit";
 import { PopupHost, ToastHost } from "./ui/overlays";
 import { Bar, Tabs } from "./ui/shell";
@@ -105,9 +105,15 @@ export function App({ boot, client: injected }: { boot: BootMode; client?: Parti
   const wnChecked = useRef(new Set<string>());
   const firstDone = useRef(false);
   const started = useRef(false);
-  const nav = useNav();
+  const shellNav = useNav();
   const configRef = useRef<ExperienceConfig>(FALLBACK_CONFIG);
   configRef.current = config;
+  // a route (deep link, «Что нового», a notification, the news feed) into the game leads Home when the operator has
+  // switched the game off (flag `game`) — release 6.1
+  const nav = useMemo<Nav>(
+    () => ({ ...shellNav, route: (r: AppRoute) => shellNav.route(routeAllowed(r, flag(configRef.current, "game"))) }),
+    [shellNav],
+  );
   const langRef = useRef(i18n.lang);
   langRef.current = i18n.lang;
 

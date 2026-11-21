@@ -385,6 +385,7 @@ export function releaseNoteBody(p: Record<string, unknown> = {}) {
     ],
     audience: "existing",
     segments: { age: ["teens", "adults"], ui_lang: ["ru", "uz"] },
+    illustration: null,
     ...p,
   };
 }

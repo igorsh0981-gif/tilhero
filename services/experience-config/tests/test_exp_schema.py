@@ -78,7 +78,9 @@ async def test_models_match_migrations_and_runtime_role() -> None:
                 st = await c.get(f"/admin/v1/release-notes/{note_id}/stats", headers=wh)
                 assert st.status_code == 200 and st.json()["views_by_age"]["kids"] == 1, st.text
                 sm = await c.get("/admin/v1/release-notes/summary", headers=wh)
-                assert sm.status_code == 200 and sm.json()["latest"]["views_total"] == 1, sm.text
+                # опубликованы welcome-1 и обе заметки релиза 6.1 (последней вставлена детская)
+                assert sm.status_code == 200 and sm.json()["published"] == 3, sm.text
+                assert sm.json()["latest"]["slug"] == "s6-heroes-kids", sm.text
                 await bus.publish(make_envelope("user.deletion.requested.v1",
                                                 {"user_id": str(learner), "request_id": str(uuid.uuid4()),
                                                  "requested_at": "2026-11-18T09:00:00Z"},
@@ -97,7 +99,8 @@ async def test_models_match_migrations_and_runtime_role() -> None:
             async with runtime.transaction() as s:
                 assert (await s.execute(text("SELECT count(*) FROM release_note_views"))).scalar() == 0
                 assert (await s.execute(text("SELECT count(*) FROM deleted_users"))).scalar() == 1
-            # откат миграций под владельцем с опубликованной заметкой и повторный подъём (ON CONFLICT в 0004)
+            # откат миграций под владельцем с опубликованными заметками (0007 снимает триггер на время удаления
+            # заметок релиза — это может только владелец схемы) и повторный подъём (ON CONFLICT в 0004)
             from alembic import command
             from alembic.config import Config
 

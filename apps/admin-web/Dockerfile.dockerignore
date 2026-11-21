@@ -8,6 +8,8 @@
 !packages/contracts/src
 !services/telegram-bff/scripts/restore-workspace-manifests.mjs
 !apps/admin-web
+# релиз 6.1: иллюстрации «Что нового» — те же файлы, что у Mini App (выбор и предпросмотр в редакторе)
+!apps/telegram-miniapp/public/whatsnew
 
 **/node_modules
 **/dist

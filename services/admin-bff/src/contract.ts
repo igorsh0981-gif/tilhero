@@ -85,7 +85,7 @@ export function maskUsername(u: string): string {
   return u.length < 5 ? "•••" : `${u.slice(0, 2)}•••${u.slice(-2)}`;
 }
 import { ALL_PERMISSIONS, ROLE_CODES } from "./rbac.js";
-import { NOTE_ROUTES as NOTE_ROUTES_IN } from "./schemas.js";
+import { ILLUSTRATION_PATTERN, NOTE_ROUTES as NOTE_ROUTES_IN } from "./schemas.js";
 
 // ---------------------------------------------------------------- общие
 
@@ -630,6 +630,8 @@ export const RELEASE_NOTE: Codec<StaffReleaseNote> = C.obj<StaffReleaseNote>({
     "age",
     "ui_lang",
   ),
+  /** релиз 6.1: ключ иллюстрации каталога; домен до 6.1 (поля нет) → null; не тот формат → 503 */
+  illustration: C.nullable(C.id(new RegExp(ILLUSTRATION_PATTERN), 32)),
   status: C.oneOf<ReleaseNoteStatus>(["draft", "published", "archived"]),
   version: C.int(1),
   created_by: ID64,

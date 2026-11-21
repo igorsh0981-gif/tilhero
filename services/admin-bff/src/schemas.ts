@@ -94,7 +94,14 @@ export const NOTE_ROUTES = [
   "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
   // спринт 3
   "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
+  // релиз 6.1: игра, словарь, чтение
+  "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
 ] as const;
+/**
+ * Ключ иллюстрации заметки (релиз 6.1) — limits.illustration_pattern каталога release-notes.json. Список ключей
+ * (`illustrations`) проверяет experience-config (422 VALIDATION_ERROR), здесь — формат.
+ */
+export const ILLUSTRATION_PATTERN = "^[a-z0-9][a-z0-9-]{0,31}$";
 export const NOTE_ICONS = [
   "spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield", "globe", "trophy", "news",
 ] as const;
@@ -117,7 +124,9 @@ export const NOTE_PROPS = {
   items: arrayOf(NOTE_ITEM, 1, 6),
   audience: enumOf(["new", "existing", "all"]),
   segments: SEGMENTS,
+  illustration: nullable(str(1, 32, { pattern: ILLUSTRATION_PATTERN })),
 };
+/** illustration необязательна на входе (admin-web до 6.1): при создании нет — null, при правке — домен её не меняет. */
 const NOTE_REQUIRED = ["slug", "title", "items", "audience", "segments"];
 export const NOTE_BODY = obj(NOTE_PROPS, NOTE_REQUIRED);
 export const NOTE_UPDATE_BODY = obj({ ...NOTE_PROPS, expected_version: EXPECTED_VERSION }, [...NOTE_REQUIRED, "expected_version"]);

@@ -28,11 +28,28 @@ export const NOTE_ROUTES: readonly ReleaseNoteRoute[] = [
   "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
   // sprint 3: diagnostics, plan, skill map, scenarios, media library, song/film requests, «Мои языки»
   "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
+  // release 6.1: the game (heroes, shop, badges, history, settings), the dictionary, reading
+  "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
 ];
 export const NOTE_ICONS: readonly ReleaseNoteIcon[] = ["spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield", "globe", "trophy", "news"];
 export const AUDIENCES: readonly ReleaseNoteAudience[] = ["new", "existing", "all"];
 export const AGE_SEGMENTS: readonly AgeSegment[] = ["kids", "teens", "adults"];
 export const NOTE_LIMITS = { title: 80, itemTitle: 80, itemText: 200, itemsMin: 1, itemsMax: 6, clientMaxNotes: 5 } as const;
+
+/**
+ * Release 6.1: illustrations of the notes — the catalogue keys (`illustrations`, newest last) and the very files of the
+ * Mini App build (apps/telegram-miniapp/public/whatsnew/<key>.webp, 16:9, 1200×675), bundled into this build for the
+ * picker and the phone preview. A new release adds its key here, in the catalogue and in experience-config.
+ */
+export const NOTE_ILLUSTRATIONS: readonly string[] = ["welcome", "s6-heroes"];
+export const ILLUSTRATION_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+export const ILLUSTRATION_SIZE = { width: 1200, height: 675 } as const;
+const ILLUSTRATION_FILES = import.meta.glob<string>("../../../../telegram-miniapp/public/whatsnew/*.webp", { eager: true, query: "?url", import: "default" });
+/** key → URL of the bundled file (keys of the files present in the Mini App) */
+export const ILLUSTRATION_URLS: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(ILLUSTRATION_FILES).map(([path, url]) => [path.slice(path.lastIndexOf("/") + 1, -".webp".length), url]),
+);
+export const illustrationUrl = (key: string | null | undefined): string | null => (key && NOTE_ILLUSTRATIONS.includes(key) ? (ILLUSTRATION_URLS[key] ?? null) : null);
 export const SLUG = /^[0-9A-Za-z][0-9A-Za-z.-]{0,31}$/;
 /** C0/C1 control characters and bidi overrides (server: unicodedata Cc + U+202A..202E, U+2066..2069) */
 const CONTROL = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/;
@@ -58,7 +75,7 @@ export function nextSlug(taken: readonly string[], now = new Date()): string {
 }
 
 export function emptyNote(slug: string): NoteDraft {
-  return { slug, title: { ru: "", uz: "" }, items: [emptyItem()], audience: "existing", segments: {} };
+  return { slug, title: { ru: "", uz: "" }, items: [emptyItem()], audience: "existing", segments: {}, illustration: null };
 }
 
 export function noteContent(n: NoteDraft): NoteDraft {
@@ -68,6 +85,7 @@ export function noteContent(n: NoteDraft): NoteDraft {
     items: n.items.map((i) => ({ title: { ru: i.title.ru ?? "", uz: i.title.uz ?? "" }, text: { ru: i.text.ru ?? "", uz: i.text.uz ?? "" }, link: i.link ?? null, icon: i.icon ?? null })),
     audience: n.audience,
     segments: { ...(n.segments?.age?.length ? { age: [...n.segments.age] } : {}), ...(n.segments?.ui_lang?.length ? { ui_lang: [...n.segments.ui_lang] } : {}) },
+    illustration: n.illustration ?? null,
   };
 }
 
@@ -104,6 +122,7 @@ export function validateNote(raw: NoteDraft): Issues {
     if (it.link && !NOTE_ROUTES.includes(it.link)) out[`items[${k}].link`] = { reason: "invalid_format" };
     if (it.icon && !NOTE_ICONS.includes(it.icon)) out[`items[${k}].icon`] = { reason: "invalid_format" };
   });
+  if (d.illustration && !NOTE_ILLUSTRATIONS.includes(d.illustration)) out.illustration = { reason: "invalid_format" };
   return out;
 }
 

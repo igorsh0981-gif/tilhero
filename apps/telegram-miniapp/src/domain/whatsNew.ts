@@ -11,6 +11,25 @@ export interface WnCard {
   noteId: string;
   noteTitle: string;
   item: ReleaseNoteItem;
+  /** release 6.1: the illustration of the note — only on its first card */
+  art: WnArt | null;
+}
+
+/**
+ * Illustration of a note (release 6.1): a 16:9 picture on top of the note's first card, `/whatsnew/<key>.webp` of this
+ * build (packages/contracts/release-notes.json `illustrations`, every one 1200×675 — cross-checked by the tests). The
+ * key is checked against the catalogue pattern before it becomes a path; a missing file falls back to the card alone.
+ */
+export interface WnArt {
+  src: string;
+  width: number;
+  height: number;
+}
+export const ILLUSTRATION_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+export const ILLUSTRATION_SIZE = { width: 1200, height: 675 } as const;
+
+export function artOf(key: unknown): WnArt | null {
+  return typeof key === "string" && ILLUSTRATION_RE.test(key) ? { src: `/whatsnew/${key}.webp`, ...ILLUSTRATION_SIZE } : null;
 }
 
 /** client limits (packages/contracts/release-notes.json): ≤ 5 notes, ≤ 6 items each; the sheet shows ≤ 12 cards */
@@ -24,6 +43,8 @@ export function cardsOf(w: WhatsNew | null | undefined): WnCard[] {
   for (const note of w.notes.slice(0, MAX_NOTES)) {
     if (!note || typeof note.release_note_id !== "string") continue;
     const items = Array.isArray(note.items) ? note.items.slice(0, MAX_ITEMS) : [];
+    const art = artOf(note.illustration);
+    let first = true;
     items.forEach((item, i) => {
       if (!item || typeof item.title !== "string") return;
       out.push({
@@ -31,7 +52,9 @@ export function cardsOf(w: WhatsNew | null | undefined): WnCard[] {
         noteId: note.release_note_id,
         noteTitle: typeof note.title === "string" ? note.title : "",
         item: { ...item, link: isRoute(item.link) ? item.link : null },
+        art: first ? art : null,
       });
+      first = false;
     });
   }
   return out.slice(0, MAX_CARDS);

@@ -55,10 +55,12 @@ from tilhero_notifications.templates import CAMPAIGN_PLACEHOLDERS, CAMPAIGN_TEMP
 log = logging.getLogger("tilhero.notifications.campaigns")
 
 # Маршруты Mini App для кнопки (каталог packages/contracts/release-notes.json); спринт 3 — + диагностика, план,
-# карта навыков, сценарии, медиатека, заявки на песни/фильмы, «Мои языки»
+# карта навыков, сценарии, медиатека, заявки на песни/фильмы, «Мои языки»; релиз 6.1 — + игра (герои, магазин, значки,
+# история, настройки), словарь и чтение
 ROUTES = (
     "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
     "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
+    "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
 )
 UI_LANGS = ("ru", "uz")
 AGES = ("teens", "adults")
