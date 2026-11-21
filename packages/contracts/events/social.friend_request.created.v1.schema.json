@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "social.friend_request.created.v1.schema.json",
+  "title": "social.friend_request.created.v1",
+  "type": "object",
+  "required": [
+    "request_id",
+    "from_user_id",
+    "to_user_id",
+    "from_nickname",
+    "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "from_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "to_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "from_nickname": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 3,
+      "maxLength": 20
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

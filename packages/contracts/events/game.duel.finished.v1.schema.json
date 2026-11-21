@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "game.duel.finished.v1.schema.json",
+  "title": "game.duel.finished.v1",
+  "type": "object",
+  "required": [
+    "duel_id",
+    "challenger_user_id",
+    "opponent_user_id",
+    "status",
+    "result",
+    "technical",
+    "result_version",
+    "scores",
+    "finished_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "duel_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "challenger_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "opponent_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "finished",
+        "cancelled"
+      ]
+    },
+    "result": {
+      "type": "string",
+      "enum": [
+        "challenger",
+        "opponent",
+        "draw",
+        "none"
+      ]
+    },
+    "technical": {
+      "type": "boolean"
+    },
+    "result_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "challenger",
+        "opponent"
+      ],
+      "properties": {
+        "challenger": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "correct",
+                "total"
+              ],
+              "properties": {
+                "correct": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 50
+                },
+                "total": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opponent": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "correct",
+                "total"
+              ],
+              "properties": {
+                "correct": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 50
+                },
+                "total": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

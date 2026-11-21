@@ -109,7 +109,8 @@ export interface SessionResponse {
   consent: ConsentState;
   /** онбординг активного ученика завершён (план сохранён) */
   onboarding_completed: boolean;
-  /** start_param из initData, если был: inv_<token> | invite_<invite_id> | gc_<token> | ticket_TCK-NNNN | route_<route> */
+  /** start_param из initData, если был: inv_<token> | invite_<invite_id> | gc_<token> | ticket_TCK-NNNN | route_<route>;
+   *  спринт 7: duel_<duel_id> — карточка дуэли, room_<room_id> — парный урок */
   start_param: string | null;
 }
 
@@ -147,6 +148,9 @@ export interface NotificationCategories {
   support: boolean;
   /** новости продукта и «Что нового» */
   product: boolean;
+  /** спринт 7: игра и лиги — значки, рост героя, спасённая серия, итоги лиги, дуэли (по умолчанию включена;
+   *  выключена — уведомления остаются в центре без Telegram) */
+  game: boolean;
 }
 
 export interface NotificationSettings {
@@ -260,7 +264,8 @@ export interface ConsentRequest {
  *  Повторный POST /v1/profile/consent с другим набором необязательных целей — новая запись согласия (добавить или
  *  снять цель). Функции необязательных целей проверяются на сервере:
  *   - social — приглашения и семья (создать, принять приглашение): 403 CONSENT_REQUIRED {purpose: "social"};
- *     открыть и посмотреть приглашение можно после принятия terms и privacy;
+ *     открыть и посмотреть приглашение можно после принятия terms и privacy; спринт 7 — также друзья, заявки, общая
+ *     лига, дуэли и парные уроки (с членами семьи — тоже), жалобы;
  *   - product_news — сообщения категории product (новости в центре и в Telegram);
  *   - voice_recording — запись голоса: оценка произношения (спринт 5). Детскому профилю — только согласие опекуна
  *     (PUT /v1/learners/{id}/voice-consent), подростку — после согласия родителя.
@@ -345,14 +350,16 @@ export interface DirectoryItem {
 
 // ---------- Центр уведомлений (notifications) ----------
 
-export type NotificationCategory = "reminders" | "missed" | "social" | "support" | "product" | "service";
+/** game (спринт 7) — игра и лиги: значки, рост героя, спасённая серия, итоги лиги, дуэли */
+export type NotificationCategory = "reminders" | "missed" | "social" | "support" | "product" | "service" | "game";
 
 export interface InboxItem {
   notification_id: string;
   category: NotificationCategory;
   title: string; // на языке ученика
   body: string;
-  /** куда ведёт: invite_<invite_id> | ticket_TCK-NNNN | route_<route>; null — никуда */
+  /** куда ведёт: invite_<invite_id> | ticket_TCK-NNNN | route_<route> | duel_<duel_id> | room_<room_id> (спринт 7);
+   *  null — никуда */
   startapp: string | null;
   created_at: string;
   read_at: string | null;
@@ -423,7 +430,9 @@ export interface Family {
 export type ReleaseNoteRoute =
   | "home" | "lessons" | "review" | "progress" | "profile" | "schedule" | "notifications" | "family" | "support" | "news"
   // спринт 3 (release-notes.json)
-  | "diagnostics" | "plan" | "skills" | "scenarios" | "media" | "media_requests" | "languages";
+  | "diagnostics" | "plan" | "skills" | "scenarios" | "media" | "media_requests" | "languages"
+  // спринт 7: друзья (заявки, блокировки, санкции), лиги недели, дуэли, рефералы
+  | "friends" | "leagues" | "duels" | "referrals";
 export type ReleaseNoteIcon =
   | "spark" | "hero" | "calendar" | "clock" | "bell" | "book" | "chat" | "mic" | "star" | "flame" | "users" | "gift"
   | "shield" | "globe" | "trophy" | "news";
@@ -1304,10 +1313,13 @@ export interface ReadingView {
 // =====================================================================================================================
 
 export type GameCurrency = "xp" | "til" | "freeze";
+/** спринт 7: duel — XP за дуэль; pair_lesson — XP за вклад в парный урок; league_prize — приз общей лиги (тилы);
+ *  referral_bonus — награда пригласившему по реферальной кампании; referral_welcome — приглашённому */
 export type GameReason =
   | "lesson" | "scenario" | "media" | "reading" | "review" | "skill_demonstrated" | "skill_retained"
   | "quest" | "quest_bonus" | "registration_bonus" | "referral_bonus" | "streak_freeze" | "shop" | "manual"
-  | "reversal" | "purchase";
+  | "reversal" | "purchase"
+  | "duel" | "pair_lesson" | "league_prize" | "referral_welcome";
 export type HeroLine = "robot" | "pet" | "human";
 export type HeroStage = 1 | 2 | 3;
 export type QuestKind =
@@ -1334,6 +1346,11 @@ export interface GameSettings {
   celebrations: "full" | "quiet";
   /** уведомления о значках и росте героя (о спасённой серии приходят всегда) */
   game_notifications: boolean;
+  /** спринт 7: участие в общей лиге недели (14+, только ник; по умолчанию false). Включение: 409 NICKNAME_REQUIRED
+   *  (ник не задан); 403 SOCIAL_RESTRICTED {until}; 403 FRIENDS_NOT_ALLOWED {reason}; 403 CONSENT_REQUIRED
+   *  {purpose: "social"}; детскому профилю — 403 KIDS_NOT_ALLOWED. Выключение — всегда, со следующей недели группа
+   *  не назначается (текущая неделя доигрывается без строки ученика в рейтинге). */
+  league_opt_in: boolean;
 }
 
 export interface HeroStageView {
@@ -1435,14 +1452,15 @@ export interface SelectHeroRequest {
 /** GET /v1/game/quests → DailyQuests */
 
 export interface BadgeView {
-  code: string; // first_lesson, streak_7, skills_10, reviews_100, readings_10, skill_retained, first_freeze…
+  code: string; // first_lesson, streak_7, skills_10, reviews_100, readings_10, skill_retained, first_freeze, together_1…
   title: Localized;
   description: Localized;
   image: GameImage | null;
   earned_at: string | null;
-  /** основание (выдан) или прогресс (не выдан) */
-  basis: { metric: "lessons" | "streak" | "skills" | "skill_retained" | "reviews_cards" | "readings" | "freeze";
-    value: number; threshold: number };
+  /** основание (выдан) или прогресс (не выдан). together (спринт 7, значок together_1 «Вместе», APP-SOC-06) — парные
+   *  уроки с достигнутой общей целью и вкладом каждого участника */
+  basis: { metric: "lessons" | "streak" | "skills" | "skill_retained" | "reviews_cards" | "readings" | "freeze"
+    | "together"; value: number; threshold: number };
 }
 /** GET /v1/game/badges → BadgesResponse (выданные первыми) */
 export interface BadgesResponse {
@@ -1513,3 +1531,603 @@ export interface SessionRewards {
 }
 
 /** GET /v1/game/settings → GameSettings; PATCH /v1/game/settings (Partial<GameSettings>) → GameSettings */
+
+// =====================================================================================================================
+// Спринт 7 — социальное (APP-SOC-01…10, APP-REF-01…04)
+// Где что: профиль сообщества, друзья, блокировки, жалобы, санкции, рефералы — social (/v1/community, /v1/friends/*,
+// /v1/blocks, /v1/complaints, /v1/sanctions, /v1/referrals); лиги недели и дуэли — gamification (/v1/game/leagues*,
+// /v1/game/duels*); задания дуэли и парные комнаты — lessons (/v1/duel-sessions*, /v1/pair-rooms/*). Всё — у активного
+// ученика (lrn). Социальное не меняет учёбу: лиги и дуэли дают только игровые награды, учебное состояние меняет
+// независимый оценщик по индивидуальным доказательствам каждого ученика.
+// Приватность (APP-SOC-09): другой ученик виден только как member_id (непрозрачный стабильный идентификатор), ник,
+// герой, XP недели, место и разрешённые значки. user_id, имени, Telegram, возраста, ответов, ошибок и покупок других
+// учеников в API нет; чужой отчёт, реплики вне своей комнаты и ошибки не показываются.
+// Аудитории: дети 6–13 — без друзей, заявок, жалоб, блокировок и общей лиги; лига, дуэль и парный урок — только с
+// членами своей семьи, парный урок — только выбор реплик. Подросток 14–17 — социальное после согласия родителя.
+// Общие коды: 403 FRIENDS_NOT_ALLOWED {reason: "kids" | "guardian_consent"}; 403 CONSENT_REQUIRED {purpose: "social"};
+// 403 SOCIAL_RESTRICTED {until: string | null} — действует санкция social_ban (until null — бессрочно; уже идущие
+// дуэль и комната доигрываются); 403 BLOCKED — блокировка между учениками в любую сторону (кто заблокировал, не
+// раскрывается); 403 PARTNER_NOT_ALLOWED — не друг и не член семьи (детям — только семья); 403 KIDS_NOT_ALLOWED;
+// 404 MEMBER_NOT_FOUND — участника нет или он недоступен (неотличимо); 503 UPSTREAM_UNAVAILABLE {service} — social,
+// gamification или lessons недоступен (социальный блок скрыть, учёба работает); 503 GAME_UNAVAILABLE — как в спринте 6;
+// 422 IDEMPOTENCY_KEY_REUSED.
+// Ссылки (start_param, InboxItem.startapp): route_friends | route_leagues | route_duels | route_referrals;
+// duel_<duel_id> — карточка дуэли; room_<room_id> — парный урок (приглашение, комната, отчёт).
+// Лимиты (rate-limit-policies.json): tg.social.search 30/мин, tg.social.write 30/мин, tg.social.complaint 10/сутки,
+// tg.duel.write 20/мин, tg.room.write 60/мин, tg.room.poll 240/мин, tg.room.audio 30/10 мин; чтение /v1/game/* —
+// tg.game.read (спринт 6).
+// =====================================================================================================================
+
+/** Другой ученик в API ученика: `mb_` + 22 символа base64url (HMAC-SHA256 от user_id, INTERNAL_API §0). Стабилен,
+ *  не расшифровывается клиентом и telegram-bff. */
+export type MemberId = string;
+
+// ---------- Профиль сообщества (APP-SOC-01/02) ----------
+
+/** Почему друзья недоступны: kids — детский профиль 6–13 (только семья); guardian_consent — подросток без согласия
+ *  родителя; consent — не принята цель согласия social */
+export type FriendsUnavailableReason = "kids" | "guardian_consent" | "consent";
+
+export interface SocialRestrictions {
+  /** действует запрет социальных действий: заявки в друзья, вызовы на дуэль, приглашения в парный урок, общая лига */
+  social_ban: boolean;
+  /** конец запрета; null — запрета нет (social_ban=false) или он бессрочный (social_ban=true) */
+  social_ban_until: string | null;
+}
+
+/** GET /v1/community → CommunityProfile (создаётся при первом обращении; ник — null, код друга — новый) */
+export interface CommunityProfile {
+  member_id: MemberId;
+  /** null — ник не задан: дружить можно (по коду), в общую лигу нельзя */
+  nickname: string | null;
+  /** TH-XXXX-XXXX (алфавит без 0/O/1/I); виден только владельцу */
+  friend_code: string;
+  /** скрыт игровой профиль: ученика нет в лигах друзей и семьи (себе виден), в общей лиге не участвует */
+  game_profile_hidden: boolean;
+  restrictions: SocialRestrictions;
+  /** когда можно сменить ник (раз в 7 дней; первый ник — сразу); null — можно сейчас */
+  nickname_change_available_at: string | null;
+  /** друзья и заявки доступны (детям — нет: лиги, дуэли и парные уроки только с семьёй) */
+  friends_available: boolean;
+  friends_unavailable_reason: FriendsUnavailableReason | null;
+}
+
+/** PUT /v1/community/nickname NicknameRequest → CommunityProfile. 409 NICKNAME_TAKEN (без учёта регистра);
+ *  422 NICKNAME_INVALID {reason: "length" | "chars" | "forbidden"}; 429 NICKNAME_COOLDOWN {until}. Тот же ник — 200
+ *  без смены. */
+export interface NicknameRequest {
+  nickname: string; // 3..20: буквы RU/UZ/EN, цифры, «_»
+}
+/** POST /v1/community/friend-code/rotate → CommunityProfile: новый код, прежний сразу перестаёт находиться.
+ *  429 FRIEND_CODE_LIMIT {until} — не чаще 3 раз в сутки.
+ *  PATCH /v1/community CommunityPatch → CommunityProfile. */
+export interface CommunityPatch {
+  game_profile_hidden?: boolean;
+}
+
+// ---------- Поиск, заявки, друзья, блокировки (APP-SOC-01/02) ----------
+
+/** none — не друзья; request_out / request_in — есть pending-заявка от меня / ко мне; self — это я */
+export type MemberRelation = "none" | "friend" | "request_out" | "request_in" | "self";
+
+/** GET /v1/friends/search?q= → MemberSearchResult: 0 или 1 карточка. q — точный код друга (TH-…, без учёта дефисов и
+ *  регистра) или точный ник (без учёта регистра), 3..20 знаков. Не находятся: заблокированные в любую сторону, дети
+ *  6–13, ученики, которым друзья недоступны. Ничего не найдено — 200 {items: []}. Лимит tg.social.search. */
+export interface MemberCard {
+  member_id: MemberId;
+  nickname: string | null;
+  relation: MemberRelation;
+  /** pending-заявка между нами (request_in / request_out) — принять или отозвать прямо из карточки; иначе null */
+  request_id: string | null;
+}
+export interface MemberSearchResult {
+  items: MemberCard[];
+}
+
+export type FriendRequestStatus = "pending" | "accepted" | "declined" | "cancelled" | "expired";
+
+/** POST /v1/friends/requests FriendRequestCreate (Idempotency-Key обязателен) → FriendRequestView (201). Встречная
+ *  pending-заявка — это принятие: 200, status accepted. 409 ALREADY_FRIENDS | REQUEST_EXISTS | FRIENDS_LIMIT
+ *  {limit: 200}; 429 REQUESTS_LIMIT (20 заявок в сутки); 403 BLOCKED | SOCIAL_RESTRICTED | FRIENDS_NOT_ALLOWED;
+ *  404 MEMBER_NOT_FOUND; себе — 422 VALIDATION_ERROR.
+ *  GET /v1/friends/requests?direction=in|out&cursor= → Page<FriendRequestView> — только pending, новые сверху.
+ *  POST /v1/friends/requests/{request_id}/accept | /decline (входящая) | /cancel (исходящая) → FriendRequestView;
+ *  повтор с тем же исходом — 200; иначе 409 REQUEST_STATE {status}; принять при 200 друзьях — 409 FRIENDS_LIMIT;
+ *  404 REQUEST_NOT_FOUND (чужая заявка неотличима). Заявка истекает через 30 дней (expired).
+ *  Приглашение Telegram kind friend (спринт 1) по-прежнему создаёт дружбу сразу при принятии. */
+export interface FriendRequestCreate {
+  member_id: MemberId;
+}
+export interface FriendRequestView {
+  request_id: string;
+  direction: "in" | "out";
+  member_id: MemberId;
+  nickname: string | null;
+  status: FriendRequestStatus;
+  created_at: string;
+  decided_at: string | null;
+}
+
+/** GET /v1/friends?cursor= → Page<FriendView> (по нику; без ника — в конце). Чужой код друга не показывается.
+ *  DELETE /v1/friends/{member_id} → 204 (повтор — 204; второй стороне без уведомления). */
+export interface FriendView {
+  member_id: MemberId;
+  /** null — ник не задан: показать «Друг» */
+  nickname: string | null;
+  since: string;
+}
+
+/** POST /v1/blocks BlockRequest → BlockView (201; повтор — 200). Блокировка односторонняя: удаляет дружбу, отменяет
+ *  pending-заявки, вызовы на дуэль и приглашения в парный урок между учениками в обе стороны, скрывает учеников друг
+ *  от друга в поиске и лигах друзей. Заблокированный не узнаёт о блокировке: его новые заявки, вызовы и приглашения —
+ *  403 BLOCKED. DELETE /v1/blocks/{member_id} → 204 (дружба не возвращается). GET /v1/blocks → BlocksResponse.
+ *  Детский профиль — 403 KIDS_NOT_ALLOWED. */
+export interface BlockRequest {
+  member_id: MemberId;
+}
+export interface BlockView {
+  member_id: MemberId;
+  nickname: string | null;
+  created_at: string;
+}
+export interface BlocksResponse {
+  items: BlockView[];
+}
+
+// ---------- Жалобы, санкции, обжалование (APP-SOC-10) ----------
+
+export type ComplaintSubjectKind = "user" | "nickname" | "friend_request" | "invite" | "duel" | "pair_room";
+export type ComplaintReason = "spam" | "abuse" | "inappropriate_nickname" | "cheating" | "other";
+
+/** POST /v1/complaints ComplaintRequest (Idempotency-Key обязателен) → ComplaintResult (201). Повтор на ту же цель
+ *  (member_id + subject_kind + subject_id) за 24 ч — 200 тот же case_id. 429 COMPLAINTS_LIMIT (10 в сутки; лимит
+ *  tg.social.complaint); 404 MEMBER_NOT_FOUND; детский профиль — 403 KIDS_NOT_ALLOWED. subject_id обязателен для
+ *  friend_request (request_id), invite (invite_id или room_id приглашения в парный урок), duel (duel_id), pair_room
+ *  (room_id); для user и nickname — null (иначе 422 VALIDATION_ERROR). block=true — сразу блокировка (как
+ *  POST /v1/blocks). Жалоба создаёт дело модерации: модератор видит только предмет жалобы, не переписку. Итог приходит
+ *  уведомлением complaint_resolved без подробностей. */
+export interface ComplaintRequest {
+  member_id: MemberId;
+  subject_kind: ComplaintSubjectKind;
+  subject_id: string | null;
+  reason: ComplaintReason;
+  comment?: string; // ≤ 500
+  block?: boolean;
+}
+export interface ComplaintResult {
+  case_id: string;
+  created_at: string;
+  /** блокировка поставлена (block=true) */
+  blocked: boolean;
+}
+
+/** warning — предупреждение; social_ban — запрет социальных действий на 1–30 дней или бессрочно; nickname_reset —
+ *  ник сброшен модератором (задать новый можно сразу) */
+export type SanctionKind = "warning" | "social_ban" | "nickname_reset";
+export type SanctionAppealStatus = "open" | "upheld" | "overturned";
+
+/** GET /v1/sanctions → SanctionsResponse: активные и прошлые санкции ученика (новые сверху).
+ *  POST /v1/sanctions/{sanction_id}/appeal SanctionAppealRequest (Idempotency-Key обязателен) → SanctionView (201).
+ *  Одно обжалование на санкцию: 409 APPEAL_EXISTS; снятая санкция — 409 SANCTION_STATE; 404 SANCTION_NOT_FOUND.
+ *  Решение приходит уведомлением appeal_decided; overturned снимает санкцию. */
+export interface SanctionView {
+  sanction_id: string;
+  kind: SanctionKind;
+  /** основание решения модератора (≤ 500) — пишется для ученика; кто решал, не показывается */
+  basis: string;
+  decided_at: string;
+  /** social_ban: конец запрета, null — бессрочно; warning и nickname_reset — null */
+  until: string | null;
+  active: boolean;
+  /** снята (модератором или по обжалованию) */
+  revoked_at: string | null;
+  appeal: SanctionAppealView | null;
+  can_appeal: boolean;
+}
+export interface SanctionAppealView {
+  appeal_id: string;
+  status: SanctionAppealStatus;
+  text: string;
+  created_at: string;
+  decided_at: string | null;
+  /** ответ модератора на обжалование (≤ 500) — пишется для ученика */
+  decision_note: string | null;
+}
+export interface SanctionAppealRequest {
+  text: string; // 10..1000
+}
+export interface SanctionsResponse {
+  items: SanctionView[];
+}
+
+// ---------- Рефералы (APP-REF-01…04) ----------
+// Реферальная ссылка — приглашение kind referral (POST /v1/invites, спринт 1). Засчитывается по активной кампании:
+// диагностика, ≥ min_lessons зачётных уроков (kind lesson) не меньше чем в min_days разных дней за window_days от
+// принятия. Подозрительное удерживается на проверке оператора. Правила антифрода ученику не раскрываются.
+
+/** invited → diagnostic_done → learning → review (проверка оператора) → qualified → rewarded; rejected, expired,
+ *  capped (лимит пригласившего в месяц) — без награды */
+export type ReferralStatus =
+  | "invited" | "diagnostic_done" | "learning" | "review" | "qualified" | "rewarded" | "rejected" | "expired"
+  | "capped";
+/** Публичные причины отказа (без правил антифрода): not_new_user — приглашённый уже занимался; family_member — член
+ *  семьи; window_expired — условия не выполнены вовремя; review_rejected — не прошёл проверку; monthly_cap — лимит
+ *  наград в месяц */
+export type ReferralRejectCode = "not_new_user" | "family_member" | "window_expired" | "review_rejected" | "monthly_cap";
+
+export interface ReferralReward {
+  freeze: number;
+  til: number;
+}
+
+export interface ReferralView {
+  referral_id: string;
+  /** ник приглашённого; null — не задан или ученик удалён */
+  invitee_nickname: string | null;
+  status: ReferralStatus;
+  progress: {
+    diagnostic: boolean;
+    diagnostic_required: boolean;
+    lessons: number;
+    lessons_required: number;
+    /** различные местные дни с зачётным уроком */
+    days: number;
+    days_required: number;
+    /** до какого момента нужно выполнить условия */
+    window_ends_at: string;
+  };
+  /** награда пригласившему: начислена (rewarded) или начисляется (qualified); иначе null */
+  reward: ReferralReward | null;
+  reject_code: ReferralRejectCode | null;
+  accepted_at: string;
+}
+
+/** Условия активной кампании, понятные ученику (пороги проверки не раскрываются) */
+export interface ReferralTerms {
+  campaign_version: number;
+  require_diagnostic: boolean;
+  min_lessons: number;
+  min_days: number;
+  window_days: number;
+  inviter_reward: ReferralReward;
+  invitee_reward: ReferralReward;
+  monthly_cap: number;
+}
+
+/** GET /v1/referrals?cursor= → ReferralsResponse (мои приглашённые, новые сверху). month — квалифицированные в текущем
+ *  календарном месяце (Asia/Tashkent) против лимита. Детский профиль — 403 KIDS_NOT_ALLOWED. */
+export interface ReferralsResponse extends Page<ReferralView> {
+  terms: ReferralTerms;
+  month: { qualified: number; cap: number };
+}
+
+// ---------- Лиги недели (APP-SOC-08/09, APP-GAME-07) ----------
+// Неделя — понедельник 00:00 … воскресенье 24:00 Asia/Tashkent. XP недели — XP за занятия, задания, дуэли и парные
+// уроки; ручные операции, призы и бонусы не считаются. Лига друзей и семейная — без призов; общая (14+, по желанию,
+// только ник) — группы 20–30 участников одной пары и полосы уровня, призы тилами за 1–3 места. Закрытие недели
+// атомарно, призы — один раз.
+
+/** Полоса уровня (по последней диагностике; без диагностики — A0-A1) */
+export type LeagueLevelBand = "A0-A1" | "A2" | "B1+";
+
+export interface MemberHero {
+  code: string;
+  stage: HeroStage;
+  image: GameImage;
+}
+
+export interface StandingRow {
+  member_id: MemberId;
+  /** общая лига — всегда ник; друзья и семья — ник или null (показать «Друг» / «Участник семьи») */
+  nickname: string | null;
+  /** null — герой не выбран */
+  hero: MemberHero | null;
+  xp: number;
+  place: number;
+  /** коды разрешённых значков (не связанные с ошибками), ≤ 3 */
+  badges: string[];
+  me: boolean;
+}
+
+export interface Standings {
+  /** ≤ 50 строк по месту (при равенстве XP — кто раньше набрал) */
+  rows: StandingRow[];
+  /** моя строка, если она не вошла в rows; иначе null */
+  me_row: StandingRow | null;
+  participants: number;
+  /** XP недели всех участников вместе — детям вместо мест («вместе набрали») */
+  total_xp: number;
+}
+
+/** Почему общая лига недоступна: kids — детский профиль; guardian_consent — подросток без согласия родителя; consent —
+ *  нет цели social; nickname_required — ник не задан; restricted — санкция social_ban; hidden — скрыт игровой профиль */
+export type GeneralLeagueUnavailableReason =
+  | "kids" | "guardian_consent" | "consent" | "nickname_required" | "restricted" | "hidden";
+
+export interface GeneralLeague {
+  /** GameSettings.league_opt_in */
+  opt_in: boolean;
+  available: boolean;
+  unavailable_reason: GeneralLeagueUnavailableReason | null;
+  pair_id: string | null;
+  level_band: LeagueLevelBand | null;
+  /** моя группа недели; null — не участвую (выключено, недоступно или группа назначится по tick) */
+  group: Standings | null;
+  /** тилы за 1, 2, 3 места (rules.league.prizes) */
+  prizes: number[];
+}
+
+/** GET /v1/game/leagues → LeaguesView. Скрытый игровой профиль: себя ученик видит, другие его — нет. */
+export interface LeaguesView {
+  week: string; // понедельник недели, YYYY-MM-DD
+  ends_at: string;
+  /** null — детскому профилю (друзей нет) */
+  friends: Standings | null;
+  /** null — семьи нет */
+  family: Standings | null;
+  general: GeneralLeague;
+}
+
+/** GET /v1/game/leagues/history?cursor= → Page<LeagueResult> — мои итоги общей лиги (новые сверху, по последней
+ *  версии итогов группы) */
+export interface LeagueResult {
+  week: string;
+  pair_id: string;
+  level_band: LeagueLevelBand;
+  place: number;
+  participants: number;
+  xp: number;
+  prize_til: number;
+  /** приз удержан до решения администратора (аномалия в группе) */
+  prize_held: boolean;
+  /** версия итогов (переоценка администратором — новая версия) */
+  version: number;
+  closed_at: string;
+}
+
+// ---------- Дуэли (APP-SOC-07) ----------
+// Асинхронная: вызов → принятие (24 ч) → оба проходят один набор из 10 закрытых заданий своей пары и полосы уровня
+// (48 ч после принятия) → результат по серверной оценке. Время ответа на результат не влияет. Ставок нет: XP за победу,
+// ничью и участие (не больше 3 наградных дуэлей в день). Только друзья 14+; детям — только внутри семьи.
+
+export type DuelStatus = "challenged" | "declined" | "expired" | "accepted" | "finished" | "cancelled";
+
+export interface DuelScore {
+  correct: number;
+  total: number;
+}
+
+export interface DuelResultView {
+  /** с моей стороны */
+  outcome: "win" | "loss" | "draw";
+  /** техническая: соперник не сыграл до дедлайна */
+  technical: boolean;
+  /** null — не сыграл */
+  my_score: DuelScore | null;
+  opponent_score: DuelScore | null;
+  /** моя награда XP (0 — исчерпан дневной лимит наградных дуэлей) */
+  xp: number;
+  /** версия результата (переоценка администратором — новая версия) */
+  version: number;
+}
+
+export interface DuelView {
+  duel_id: string;
+  status: DuelStatus;
+  role: "challenger" | "opponent";
+  opponent: { member_id: MemberId; nickname: string | null; hero: MemberHero | null };
+  pair_id: string;
+  level_band: LeagueLevelBand;
+  created_at: string;
+  accept_deadline: string;
+  /** после принятия: срок прохождения */
+  play_deadline: string | null;
+  /** моя сессия заданий (kind duel); null — ещё не начинал */
+  my_session: { session_id: string; status: SessionStatus } | null;
+  my_played: boolean;
+  /** соперник уже прошёл задания (без счёта) */
+  opponent_played: boolean;
+  /** я — соперник, status challenged */
+  can_accept: boolean;
+  /** status accepted, я не закончил, дедлайн не прошёл */
+  can_play: boolean;
+  /** только status finished: счёт обоих — только после завершения */
+  result: DuelResultView | null;
+  finished_at: string | null;
+}
+
+/** POST /v1/game/duels DuelChallengeRequest (Idempotency-Key обязателен) → DuelView (201). Проверки: друзья (14+) или
+ *  одна семья (с детьми), нет блокировки и санкций. 409 DUELS_LIMIT (≤ 3 активных вызова от ученика); 409 DUEL_EXISTS
+ *  {duel_id} (≤ 1 активной дуэли между парой учеников); 409 LEVELS_INCOMPATIBLE (полосы уровня различаются больше чем
+ *  на одну; при разнице в одну набор — по нижней); 403 BLOCKED | SOCIAL_RESTRICTED | PARTNER_NOT_ALLOWED |
+ *  FRIENDS_NOT_ALLOWED; 404 MEMBER_NOT_FOUND; себе — 422 VALIDATION_ERROR. pair_id по умолчанию — активная пара.
+ *  GET /v1/game/duels?status=active|finished&cursor= → Page<DuelView> (active — challenged и accepted).
+ *  GET /v1/game/duels/{duel_id} → DuelView; 404 DUEL_NOT_FOUND (чужая неотличима).
+ *  POST /v1/game/duels/{duel_id}/accept → DuelView (набор заданий выдаёт lessons синхронно; 503 DUEL_SET_UNAVAILABLE —
+ *  дуэль остаётся challenged, можно повторить); POST /v1/game/duels/{duel_id}/decline → DuelView. Повтор с тем же
+ *  исходом — 200; иначе 409 DUEL_STATE {status}. */
+export interface DuelChallengeRequest {
+  opponent_member_id: MemberId;
+  pair_id?: string;
+}
+
+/** POST /v1/duel-sessions DuelSessionRequest (Idempotency-Key обязателен) → LessonSession (201, kind "duel"; повтор —
+ *  200 та же сессия: одна на участника). Только участник принятой дуэли до play_deadline: 409 DUEL_CLOSED;
+ *  404 DUEL_NOT_FOUND. Дальше — общие маршруты сессий спринта 4: этапы assessment → summary; шаги — LessonStep type
+ *  "item" (graded_later=true, hint_available=false, без ИИ); POST /v1/sessions/{id}/steps/{step_id} → StepResult
+ *  (feedback=null; повтор того же шага — тот же результат); POST /v1/sessions/{id}/finish → LessonSummary (evaluation
+ *  null, skills [], can_review false: счёт — в DuelView после завершения дуэли). pause/resume — до дедлайна; cancel —
+ *  409 SESSION_STATE (незаконченная к дедлайну сессия закрывается, неотвеченные задания — неверные). Сессия дуэли не
+ *  участвует в правиле одной активной сессии: 409 SESSION_ACTIVE не возникает, /v1/sessions/active её не возвращает.
+ *  Учёбу не меняет: в независимую оценку не идёт. */
+export interface DuelSessionRequest {
+  duel_id: string;
+}
+/** GET /v1/duel-sessions/{session_id}/review → DuelReview — разбор своих ответов только после завершения дуэли;
+ *  раньше — 409 DUEL_NOT_FINISHED. Ответы соперника не показываются никогда. */
+export interface DuelReview {
+  session_id: string;
+  duel_id: string;
+  score: DuelScore;
+  items: Array<{ item_id: string; prompt_en: string; your_answer: string | null; correct_answer: string;
+                 correct: boolean }>;
+}
+
+// ---------- Парный урок (APP-SOC-03…06) ----------
+// Два ученика и ИИ-коуч (cooperative_lesson_coach) в сценарии каталога: роли A/B, ходы по очереди, у каждого своё время
+// речи, свои доказательства в независимую оценку и свой отчёт. 14+ — с другом; 6–13 — только с членом семьи и только
+// выбор реплик. Без ИИ (бюджет, аварийная остановка, недоступность) комната идёт по сценарию с выбором реплик. Голос —
+// по согласию на запись голоса. Минуты учитываются, но не списываются (спринт 8). Переподключение в течение 3 минут
+// продолжает ту же комнату без новой сессии и повторного учёта.
+
+export type PairRoomStatus =
+  | "invited" | "declined" | "expired" | "cancelled" | "waiting" | "in_progress" | "paused" | "finished"
+  | "abandoned" | "stopped";
+export type PairRole = "A" | "B";
+/** free — свободный текст или голос; choices — выбор реплик (дети, ИИ недоступен) */
+export type PairRoomMode = "free" | "choices";
+/** completed — сценарий завершён; participant_left — участник вышел и не вернулся за 3 минуты (оставшийся доиграл
+ *  или вышел); inactivity — 10 минут без активности; stopped — остановлена администратором */
+export type PairEndReason = "completed" | "participant_left" | "inactivity" | "stopped";
+export type PairRoomEventKind =
+  | "joined" | "left" | "offline" | "online" | "paused" | "resumed" | "roles" | "coach" | "turn" | "mode_changed"
+  | "finished" | "stopped";
+
+/** POST /v1/pair-rooms PairRoomInvite (Idempotency-Key обязателен) → PairRoomView (201). Проверки: друзья (14+) или одна
+ *  семья; блокировки и санкции; детям — только choices. 409 ROOM_LIMIT {room_id} (≤ 1 активной комнаты на ученика);
+ *  403 BLOCKED | SOCIAL_RESTRICTED | PARTNER_NOT_ALLOWED | FRIENDS_NOT_ALLOWED; 404 MEMBER_NOT_FOUND;
+ *  404 LESSON_NOT_AVAILABLE (сценарий не опубликован или не для аудитории); 409 PAIR_NOT_AVAILABLE; start в прошлом
+ *  или дальше 7 дней — 422 VALIDATION_ERROR. Без ответа: start now — 15 мин, запланированный — до start_at + 15 мин →
+ *  expired.
+ *  GET /v1/pair-rooms?status=active|finished&cursor= → Page<PairRoomView> (active — invited, waiting, in_progress,
+ *  paused: мои приглашения в обе стороны и комнаты). GET /v1/pair-rooms/{room_id} → PairRoomView; 404 ROOM_NOT_FOUND
+ *  (чужая неотличима).
+ *  POST /v1/pair-rooms/{room_id}/accept | /decline (приглашённый, invited) → PairRoomView;
+ *  POST /v1/pair-rooms/{room_id}/cancel (любой участник, invited или waiting) → PairRoomView (cancelled).
+ *  Повтор с тем же исходом — 200; иначе 409 ROOM_STATE {status}.
+ *  POST /v1/pair-rooms/{room_id}/join → PairRoomState (оба вошли → in_progress, коуч раздаёт роли и цель;
+ *  повторный вход и возврат ≤ 3 мин — та же комната); POST …/heartbeat → 204 (каждые 10 с; без него 30 с — offline,
+ *  в свой ход — paused); POST …/leave → PairRoomView. Неактивная комната — 409 ROOM_NOT_ACTIVE {status}. */
+export interface PairRoomInvite {
+  partner_member_id: MemberId;
+  pair_id: string;
+  scenario_id: string;
+  /** "now" или время ISO-8601 не дальше 7 дней вперёд */
+  start: string;
+}
+
+export interface PairRoomView {
+  room_id: string;
+  status: PairRoomStatus;
+  /** я пригласил или меня пригласили */
+  side: "inviter" | "invitee";
+  partner: { member_id: MemberId; nickname: string | null; hero: MemberHero | null };
+  pair_id: string;
+  scenario: { scenario_id: string; title: Localized; level: Band };
+  mode: PairRoomMode;
+  start_at: string;
+  /** ответить на приглашение до (invited); иначе null */
+  respond_until: string | null;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  end_reason: PairEndReason | null;
+  my_role: PairRole | null;
+  can_accept: boolean;
+  can_join: boolean;
+  /** мои минуты в комнате: учитываются, не списываются (спринт 8) */
+  minutes: number;
+  report_available: boolean;
+}
+
+export interface PairRoomEvent {
+  seq: number;
+  kind: PairRoomEventKind;
+  /** чей вход, выход, ход; null — коуч и система */
+  role: PairRole | null;
+  /** текст реплики (turn — ученика, coach — коуча, английский); видят только участники комнаты; иначе null */
+  text: string | null;
+  at: string;
+}
+
+/** GET /v1/pair-rooms/{room_id}/state?after_seq=N → PairRoomState — long-poll до 25 с: ответ сразу, если в ленте есть
+ *  события новее N или изменился статус; иначе по истечении ожидания с events []. Лимит tg.room.poll. */
+export interface PairRoomState {
+  room_id: string;
+  status: PairRoomStatus;
+  /** последний seq ленты — следующий запрос after_seq */
+  seq: number;
+  /** события после after_seq, ≤ 50 */
+  events: PairRoomEvent[];
+  mode: PairRoomMode;
+  my_role: PairRole | null;
+  /** моя роль в сцене от коуча (английский, ≤ 120) */
+  my_role_brief: string | null;
+  /** общая цель команды (английский, ≤ 200) */
+  team_goal: string | null;
+  team_goal_progress: number; // 0..1
+  next_speaker: PairRole | "both" | null;
+  /** подсказка коуча к текущему ходу (английский, ≤ 300) и её перевод на язык ученика */
+  prompt: string | null;
+  prompt_gloss: string | null;
+  /** варианты реплик для моего хода (choices), ≤ 3; иначе null */
+  options: Array<{ choice_id: string; text_en: string }> | null;
+  participants: Array<{ role: PairRole | null; me: boolean; network: "online" | "offline" }>;
+  /** ИИ недоступен — комната идёт по сценарию с выбором реплик */
+  ai_degraded: boolean;
+  /** можно ответить голосом (согласие на голос, распознавание доступно) */
+  voice_available: boolean;
+  my_speaking_seconds: number;
+}
+
+/** POST /v1/pair-rooms/{room_id}/turns PairTurnRequest (Idempotency-Key обязателен) → PairRoomState. Ровно одно поле:
+ *  text (≤ 300; детский профиль — 403 KIDS_NOT_ALLOWED), choice_id (из options) или audio_id. 409 NOT_YOUR_TURN;
+ *  409 ROOM_NOT_ACTIVE {status}; повтор ключа — тот же ответ, без второго хода. */
+export interface PairTurnRequest {
+  text?: string;
+  choice_id?: string;
+  audio_id?: string;
+}
+
+/** POST /v1/pair-rooms/{room_id}/audio — тело audio/wav (PCM 16 бит, моно, 16 000 Гц, 0,5..30 с, ≤ 1 000 000 байт)
+ *  → PairAudio. Аудио не хранится: распознанный текст показывается для подтверждения, ход — POST …/turns {audio_id}
+ *  (audio_id живёт 5 минут, один раз). Длительность записи идёт в speaking_seconds. 403 VOICE_CONSENT_REQUIRED {who:
+ *  "self" | "guardian"}; 422 AUDIO_INVALID {reason: format | too_short | too_long | too_large}; 503 SPEECH_UNAVAILABLE
+ *  (перейти на текст); 409 NOT_YOUR_TURN; лимит tg.room.audio. */
+export interface PairAudio {
+  audio_id: string;
+  text: string;
+  duration_ms: number;
+  expires_at: string;
+}
+
+/** GET /v1/pair-rooms/{room_id}/report → PairRoomReport — только свой (после завершения комнаты; раньше — 409
+ *  ROOM_STATE {status}). Чужие реплики, ошибки и оценка не показываются. */
+export interface PairRoomReport {
+  room_id: string;
+  scenario: { scenario_id: string; title: Localized };
+  status: PairRoomStatus;
+  end_reason: PairEndReason | null;
+  ended_at: string | null;
+  team: {
+    goal_reached: boolean;
+    progress: number; // 0..1
+    /** общая безопасная похвала команде */
+    summary: Localized | null;
+  };
+  me: {
+    role: PairRole | null;
+    /** false — «не участвовал»: без оценки и наград */
+    contributed: boolean;
+    turns: number;
+    speaking_seconds: number;
+    minutes: number;
+    /** мои реплики (английский) */
+    lines: Array<{ text: string; at: string }>;
+    skills: Array<{ skill_id: string; title: Localized }>;
+    /** 1–3 подсказки на языке ученика */
+    tips: Localized[];
+    /** моя оценка независимым оценщиком (GET /v1/evaluations/{id}); null — без вклада или ещё не готова */
+    evaluation_id: string | null;
+  };
+}

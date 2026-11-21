@@ -28,7 +28,8 @@
         "scenario",
         "media",
         "review",
-        "reading"
+        "reading",
+        "duel"
       ]
     },
     "pair_id": {
@@ -78,6 +79,17 @@
     "started_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "duel_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   }
 }

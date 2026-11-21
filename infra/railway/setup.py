@@ -5,7 +5,8 @@
 Что делает:
 1. Генерирует секреты: Ed25519-ключ внутреннего JWT на каждый сервис (+ общий список открытых ключей),
    SCHEDULER_TOKEN (n8n), SESSION_JWT_SECRET (BFF), INVITE_TOKEN_KEY (social), TELEGRAM_WEBHOOK_SECRET (бот),
-   USER_REF_SECRET (lessons: псевдоним ученика в «Контроле диалогов»), пароли ролей БД <svc> и <svc>_owner.
+   USER_REF_SECRET (lessons: псевдоним ученика в «Контроле диалогов»), MEMBER_ID_KEY (спринт 7: общий ключ social,
+   gamification и lessons — member_id ученика в социальном API), пароли ролей БД <svc> и <svc>_owner.
 2. Пишет в --out (каталог .dev/ в .gitignore — файлы НЕ коммитить):
    - <service>.env — переменные сервиса для вставки в Railway (Variables → Raw Editor);
    - db-passwords.sql — пароли ролей; выполнить ПОСЛЕ infra/db/bootstrap.sql под владельцем БД;
@@ -70,8 +71,9 @@ SERVICES: tuple[Service, ...] = (
     Service("catalog", 8110, "services/catalog/Dockerfile", "catalog"),
     Service("diagnostics", 8111, "services/diagnostics/Dockerfile", "diagnostics", calls=("catalog",)),
     # спринт 4 — урок 20 минут, независимая оценка, ИИ (ai-gateway — единственный, у кого ключ провайдера)
+    # спринт 7: + social (связь учеников, member_id → user_id), identity-consent (согласие на голос в парной комнате)
     Service("lessons", 8112, "services/lessons/Dockerfile", "lessons",
-            calls=("catalog", "ai-gateway", "assessment", "learning-plan", "diagnostics")),
+            calls=("catalog", "ai-gateway", "assessment", "learning-plan", "diagnostics", "social", "identity-consent")),
     Service("assessment", 8113, "services/assessment/Dockerfile", "assessment", calls=("catalog", "ai-gateway")),
     # релиз 5.1: оценка произношения — распознавание в tts (faster-whisper), ai-gateway сравнивает с эталоном
     Service("ai-gateway", 8114, "services/ai-gateway/Dockerfile", "ai_gateway", calls=("tts",)),
@@ -80,16 +82,18 @@ SERVICES: tuple[Service, ...] = (
     # спринт 5 — память и повторения (FSRS), перевод по тапу, проверки удержания, произношение (через ai-gateway)
     Service("memory", 8116, "services/memory/Dockerfile", "memory",
             calls=("catalog", "assessment", "ai-gateway", "identity-consent")),
-    # спринт 6 — игра и герои: реестр XP, тилов и заморозок, герои, задания, магазин (никого не вызывает — всё событиями)
-    Service("gamification", 8117, "services/gamification/Dockerfile", "gamification"),
+    # спринт 6 — игра и герои: реестр XP, тилов и заморозок, герои, задания, магазин (начисления — только событиями);
+    # спринт 7 — лиги и дуэли: social (связь учеников, member_id → user_id), lessons (набор заданий дуэли)
+    Service("gamification", 8117, "services/gamification/Dockerfile", "gamification", calls=("social", "lessons")),
     # спринт 2 — админка: admin-bff без публичного домена, admin-web проксирует /admin/v1/* на него (один origin)
     Service("admin-identity", 8120, "services/admin-identity/Dockerfile", "admin_identity"),
     Service("user-admin", 8121, "services/user-admin/Dockerfile", "user_admin",
             calls=("identity-consent", "learning-plan")),
+    # спринт 7: + social (друзья, модерация, реферальные кампании)
     Service("admin-bff", 8002, "services/admin-bff/Dockerfile", health="/health/ready",
             calls=("admin-identity", "user-admin", "identity-consent", "support", "audit", "experience-config",
                    "notifications", "catalog", "diagnostics", "ai-gateway", "lessons", "assessment", "memory",
-                   "gamification")),
+                   "gamification", "social")),
     Service("admin-web", 8080, "apps/admin-web/Dockerfile", public=True, health="/healthz"),
     Service("n8n", 5678, "infra/n8n/Dockerfile", health="/healthz",
             calls=("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment",
@@ -112,6 +116,9 @@ URL_VAR = {
     ("notifications", "telegram-bot-gateway"): "BOT_GATEWAY_URL",
 }
 BOT_INTERNAL_PORT = 8108
+# спринт 7: member_id = "mb_" + base64url(HMAC-SHA256(MEMBER_ID_KEY, user_id)[:16]) — одинаков в этих сервисах
+# (INTERNAL_API спринта 7 §0). Ключ не меняется: смена меняет все member_id (ссылки клиентов, проекции)
+MEMBER_ID_SERVICES = ("social", "gamification", "lessons")
 _USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,31}$")
 _APP_RE = re.compile(r"^[A-Za-z0-9_]{3,30}$")
 _EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[A-Za-z]{2,}$")
@@ -160,6 +167,8 @@ class Secrets:
     internal_hmac: str  # INTERNAL_JWT_SECRET — обязателен Python-сервисам в stage/prod (>= 32), отличен от session_jwt
     # USER_REF_SECRET (lessons): user_ref = HMAC-SHA256(user_id, секрет)[:8] — без секрета псевдоним не обратить
     user_ref: str
+    # MEMBER_ID_KEY (спринт 7): общий для MEMBER_ID_SERVICES, ≥ 32 символов, отличен от остальных секретов
+    member_key: str
 
     @classmethod
     def new(cls) -> Secrets:
@@ -167,7 +176,7 @@ class Secrets:
         return cls(seeds={n: os.urandom(32) for n in (*JWT_ISSUERS, *VERIFY_ONLY)},
                    passwords={r: secrets.token_hex(24) for r in roles},
                    scheduler=token(), session_jwt=token(48), invite_key=token(), webhook=secrets.token_hex(32),
-                   n8n_key=token(), internal_hmac=token(48), user_ref=token(),
+                   n8n_key=token(), internal_hmac=token(48), user_ref=token(), member_key=token(),
                    mfa_key=base64.b64encode(secrets.token_bytes(32)).decode(), admin_password=admin_password())
 
     def public_keys(self) -> str:
@@ -214,6 +223,8 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
         lines += [f"INVITE_TOKEN_KEY={sec.invite_key}", f"TELEGRAM_APP_LINK={app_link}"]
     if svc.name == "lessons":  # обязателен в stage/prod; смена секрета меняет все user_ref (старые ссылки QA)
         lines.append(f"USER_REF_SECRET={sec.user_ref}")
+    if svc.name in MEMBER_ID_SERVICES:  # спринт 7: один ключ на все три сервиса (member_id совпадает)
+        lines.append(f"MEMBER_ID_KEY={sec.member_key}")
     if svc.name == "telegram-bff":
         lines += [f"SESSION_JWT_SECRET={sec.session_jwt}", f"TELEGRAM_APP_LINK={app_link}",
                   "MINIAPP_ORIGIN=https://${{telegram-miniapp.RAILWAY_PUBLIC_DOMAIN}}",

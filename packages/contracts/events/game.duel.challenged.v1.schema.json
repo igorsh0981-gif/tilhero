@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "game.duel.challenged.v1.schema.json",
+  "title": "game.duel.challenged.v1",
+  "type": "object",
+  "required": [
+    "duel_id",
+    "challenger_user_id",
+    "opponent_user_id",
+    "challenger_nickname",
+    "pair_id",
+    "level_band",
+    "accept_deadline",
+    "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "duel_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "challenger_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "opponent_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "challenger_nickname": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 3,
+      "maxLength": 20
+    },
+    "pair_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "level_band": {
+      "type": "string",
+      "enum": [
+        "A0-A1",
+        "A2",
+        "B1+"
+      ]
+    },
+    "accept_deadline": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

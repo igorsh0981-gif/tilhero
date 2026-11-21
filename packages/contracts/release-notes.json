@@ -37,7 +37,11 @@
     "scenarios",
     "media",
     "media_requests",
-    "languages"
+    "languages",
+    "friends",
+    "leagues",
+    "duels",
+    "referrals"
   ],
   "icons": [
     "spark",

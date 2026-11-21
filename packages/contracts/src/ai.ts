@@ -43,19 +43,23 @@ export interface Agent {
   planned_sprint: number | null; // для planned
   /** принимает свободный текст ученика (детям — нет) */
   free_text: boolean;
-  /** где реализован, для code/rules: «lessons», «learning-plan», «diagnostics», «ai-gateway» */
+  /** где реализован, для code/rules: «lessons», «learning-plan», «diagnostics», «ai-gateway»; спринт 7 — duel_host
+   *  «lessons», referral_integrity_reviewer «social» */
   implemented_in: string | null;
 }
 
-/** Вид сессии lessons (спринт 5: + reading — текст для чтения в практике). */
-export type SessionKind = "lesson" | "scenario" | "media" | "review" | "reading";
+/** Вид сессии lessons (спринт 5: + reading — текст для чтения в практике; спринт 7: + duel — задания дуэли, без ИИ
+ *  и без независимой оценки). */
+export type SessionKind = "lesson" | "scenario" | "media" | "review" | "reading" | "duel";
 /** Вид сессии вызова агента: занятие lessons или memory (перевод по тапу, произношение; session_id — дневной
- *  уникальный идентификатор memory: uuid5(«memory-gloss», user_id:local_date)). */
-export type AiSessionKind = SessionKind | "memory";
+ *  уникальный идентификатор memory: uuid5(«memory-gloss», user_id:local_date)); спринт 7: pair — парная комната
+ *  (session_id = room_id; коуч cooperative_lesson_coach). */
+export type AiSessionKind = SessionKind | "memory" | "pair";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Вызов агента: POST /internal/v1/agents/{agent_id}/invoke (вызывающие lessons, assessment; memory — только
-// teaching_coach с gloss_word, а lessons и assessment gloss_word вызывать не могут — 403 CALLER_NOT_ALLOWED)
+// teaching_coach с gloss_word, а lessons и assessment gloss_word вызывать не могут — 403 CALLER_NOT_ALLOWED;
+// спринт 7: cooperative_lesson_coach — только lessons)
 // ---------------------------------------------------------------------------------------------------------------------
 
 export interface AgentInvokeRequest<C = AgentContext> {
@@ -197,10 +201,90 @@ export interface IndependentEvaluatorOutput {
   requires_human_review: boolean;
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// cooperative_lesson_coach (спринт 7, скилл 11) — ведущий парного урока: два ученика, роли A/B, ходы по очереди.
+// Вызывающий — только lessons; session_kind "pair", session_id = room_id, user_id — участник, чей ход (или
+// пригласивший при старте), audience — teens, если в комнате есть подросток, иначе adults. Комнаты с ребёнком 6–13
+// коуча не вызывают (сценарий с выбором реплик). Бюджет — AiBudget.room_cap_usd на комнату и месячный потолок;
+// дневной лимит ученика к вызовам коуча не применяется. Агент не меняет кошелёк, не выдаёт уровень и не принимает
+// приглашения; не раскрывает имя, контакты и реплики одного участника другому за пределами комнаты; не присваивает
+// ответ одного участника другому (lessons проверяет: turn_id из individual_evidence принадлежит этой роли). Участники —
+// только роли A/B: user_id, имён и ников во входе нет.
+// ---------------------------------------------------------------------------------------------------------------------
+
+export type CoachRole = "A" | "B";
+
+export interface CooperativeCoachContext {
+  room_id: string;
+  pair_id: string; // "ru-en"
+  scenario: {
+    scenario_id: string;
+    title_en: string;
+    task_en: string;
+    level: Band;
+    characters: Array<{ id: string; name: string; role_en: string }>;
+    completion_criteria_en: string;
+  };
+  /** free — свободный текст или голос; choices — коуч даёт ≤ 3 варианта реплики для хода */
+  mode: "free" | "choices";
+  /** что произошло: start — оба вошли (раздать роли и цель); turn — пришла реплика; silence — участник молчит больше
+   *  60 с в свой ход; partner_offline / partner_back — потеря и возврат связи; wrap_up — осталось ≤ 2 минут */
+  trigger: "start" | "turn" | "silence" | "partner_offline" | "partner_back" | "wrap_up";
+  participants: Array<{
+    role: CoachRole;
+    turns: number;
+    speaking_seconds: number;
+    network: "online" | "offline";
+    /** реплики голосом разрешены (согласие на голос) */
+    voice: boolean;
+  }>;
+  /** роли, выданные при старте (null — ещё не выданы) */
+  roles: { A: string; B: string } | null;
+  team_goal_en: string | null;
+  team_goal_progress: number; // 0..1, текущий
+  /** последние ≤ 12 реплик комнаты; turn_id — T{n} */
+  turns: Array<{ turn_id: string; speaker: CoachRole | "coach"; text: string; mode: "text" | "voice" | "choice" | null }>;
+  remaining_minutes: number;
+  /** сработавшие проверки безопасности по последней реплике (safety_quality_gate): abuse, personal_data, off_topic… */
+  safety_flags: string[];
+}
+
+export interface CooperativeCoachOutput {
+  /** in_progress — урок идёт; paused — ждём участника (offline); fallback_text — перейти на текст (голос недоступен);
+   *  finished — цель достигнута или время вышло */
+  status: "in_progress" | "paused" | "fallback_text" | "finished";
+  /** кто говорит следующим; both — общий ответ команды; null — никто (paused, finished) */
+  next_speaker: CoachRole | "both" | null;
+  /** реплика или вопрос коуча (английский, A1–B1, ≤ 300) */
+  prompt: string;
+  /** перевод подсказки на locale (≤ 300) или null */
+  prompt_gloss: string | null;
+  /** только mode choices: ≤ 3 варианта реплики для next_speaker (английский, ≤ 160 каждый); иначе null */
+  options: Array<{ choice_id: string; text_en: string }> | null;
+  /** при trigger start — роли (английский, ≤ 120 каждая) и цель (≤ 200); иначе null */
+  roles: { A: string; B: string } | null;
+  team_goal_en: string | null;
+  team_goal_progress: number; // 0..1, не убывает
+  /** доказательства по ролям для независимого оценщика: только реплики этой роли из turns */
+  individual_evidence: Array<{ role: CoachRole; turn_id: string; skill_id: string | null; assist_used: boolean }>;
+  /** safety — нарушение безопасности (lessons ставит паузу и предлагает жалобу); abuse — грубость участника */
+  escalation: "safety" | "abuse" | null;
+}
+
 export type AgentContext =
-  | ConversationPartnerContext | TeachingCoachContext | TeachingCoachGlossContext | IndependentEvaluatorContext;
+  | ConversationPartnerContext | TeachingCoachContext | TeachingCoachGlossContext | IndependentEvaluatorContext
+  | CooperativeCoachContext;
 export type AgentOutput =
-  | ConversationPartnerOutput | TeachingCoachOutput | TeachingCoachGlossOutput | IndependentEvaluatorOutput;
+  | ConversationPartnerOutput | TeachingCoachOutput | TeachingCoachGlossOutput | IndependentEvaluatorOutput
+  | CooperativeCoachOutput;
+
+// ---------------------------------------------------------------------------------------------------------------------
+// duel_host (спринт 7, скилл 13) — implementation "code", implemented_in "lessons": детерминированный набор из 10
+// закрытых заданий (sha256(duel_id)), сбалансированный по навыкам; ключи проверяет сервер; победителя определяет
+// gamification. referral_integrity_reviewer (скилл 14) — implementation "rules", implemented_in "social": условия
+// кампании и флаги риска → qualified | review | rejected; решение о награде — social и оператор. Входа и выхода через
+// ai-gateway у них нет: в реестре агентов — только карточка (availability active).
+// ---------------------------------------------------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------------------------------------------------
 // pronunciation_coach (спринт 5) — оценка произношения по акустике + советы правилами. Релиз 5.1 (решение владельца
@@ -352,6 +436,9 @@ export interface AiBudget {
    *  (≈ 3,8 ч аудио по $1,32/ч). Исчерпан — speech_available=false, «Произнести» скрыто; ИИ уроков и оценка не затронуты.
    *  0..monthly_cap_usd; повышение — costs.manage + step-up, как остальные лимиты. */
   speech_monthly_cap_usd: number;
+  /** спринт 7 (INTERNAL_API §4, ai_room_cap_usd): потолок вызовов коуча на одну парную комнату, по умолчанию 0.10;
+   *  0..monthly_cap_usd. Исчерпан — комната продолжается по сценарию с выбором реплик. */
+  room_cap_usd: number;
   alert_percent: number; // 80 — предупреждение на обзоре
   updated_at: string;
 }

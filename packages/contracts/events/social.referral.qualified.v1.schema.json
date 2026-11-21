@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "social.referral.qualified.v1.schema.json",
+  "title": "social.referral.qualified.v1",
+  "type": "object",
+  "required": [
+    "referral_id",
+    "inviter_user_id",
+    "invitee_user_id",
+    "campaign_version",
+    "inviter_reward",
+    "invitee_reward",
+    "qualified_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "referral_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "inviter_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "invitee_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "campaign_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "inviter_reward": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "freeze",
+        "til"
+      ],
+      "properties": {
+        "freeze": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "til": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "invitee_reward": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "freeze",
+        "til"
+      ],
+      "properties": {
+        "freeze": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "til": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "qualified_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

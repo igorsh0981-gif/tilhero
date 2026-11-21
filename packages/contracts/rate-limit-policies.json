@@ -146,6 +146,83 @@
       "description": "Картинки героев и предметов без авторизации (GET /v1/game/assets/*) — с одного IP в минуту (спринт 6)"
     },
     {
+      "policy": "tg.social.search",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 30,
+      "window_s": 60,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Поиск участника по коду друга или нику (GET /v1/friends/search) — на ученика в минуту (спринт 7)"
+    },
+    {
+      "policy": "tg.social.write",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 30,
+      "window_s": 60,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Социальные команды: ник, код, скрытие, заявки, блокировки, обжалование — на ученика в минуту (спринт 7)"
+    },
+    {
+      "policy": "tg.social.complaint",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 10,
+      "window_s": 86400,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Жалобы (POST /v1/complaints) — на ученика в сутки (спринт 7)"
+    },
+    {
+      "policy": "tg.duel.write",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 20,
+      "window_s": 60,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Дуэли: вызов, ответ, попытка (POST /v1/game/duels*, /v1/duel-sessions) — на ученика в минуту (спринт 7)"
+    },
+    {
+      "policy": "tg.room.write",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 60,
+      "window_s": 60,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Парный урок: приглашение, ответ, вход, выход, ходы (POST /v1/pair-rooms*) — на ученика в минуту (спринт 7)"
+    },
+    {
+      "policy": "tg.room.poll",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 240,
+      "window_s": 60,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Лента и присутствие парной комнаты (GET …/state, POST …/heartbeat) — на ученика в минуту (спринт 7)"
+    },
+    {
+      "policy": "tg.room.audio",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 30,
+      "window_s": 600,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Голосовой ход парного урока (POST /v1/pair-rooms/*/audio) — на ученика за 10 минут (спринт 7)"
+    },
+    {
       "policy": "adm.login_ip",
       "service": "admin-bff",
       "subject": "ip",

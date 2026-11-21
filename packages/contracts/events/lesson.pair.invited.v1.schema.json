@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lesson.pair.invited.v1.schema.json",
+  "title": "lesson.pair.invited.v1",
+  "type": "object",
+  "required": [
+    "room_id",
+    "inviter_user_id",
+    "invitee_user_id",
+    "inviter_nickname",
+    "pair_id",
+    "scenario_id",
+    "mode",
+    "start_at",
+    "invited_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "room_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "inviter_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "invitee_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "inviter_nickname": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 3,
+      "maxLength": 20
+    },
+    "pair_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "scenario_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "free",
+        "choices"
+      ]
+    },
+    "start_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "invited_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "social.referral.rejected.v1.schema.json",
+  "title": "social.referral.rejected.v1",
+  "type": "object",
+  "required": [
+    "referral_id",
+    "inviter_user_id",
+    "reject_code",
+    "rejected_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "referral_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "inviter_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reject_code": {
+      "type": "string",
+      "enum": [
+        "not_new_user",
+        "family_member",
+        "window_expired",
+        "review_rejected",
+        "monthly_cap"
+      ]
+    },
+    "rejected_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

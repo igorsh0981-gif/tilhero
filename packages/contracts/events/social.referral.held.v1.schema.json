@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "social.referral.held.v1.schema.json",
+  "title": "social.referral.held.v1",
+  "type": "object",
+  "required": [
+    "referral_id",
+    "held_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "referral_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "held_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
