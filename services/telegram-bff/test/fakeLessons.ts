@@ -6,6 +6,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { Appeal, EvaluationView, LessonCardDetail, LessonSession, LessonStep, LessonSummary, StepResult } from "@tilhero/contracts/bff";
+import type { DomainLessonSession } from "../src/routes/lessons.js";
 import type { Req } from "./helpers.js";
 
 const L = (ru: string) => ({ ru, uz: `${ru} (uz)` });
@@ -21,7 +22,7 @@ const KID_BANDS = new Set(["6-9", "10-13"]);
 type Step = LessonStep & Record<string, unknown>;
 
 interface Sess {
-  view: LessonSession;
+  view: DomainLessonSession;
   owner: string;
   steps: Step[];
   cursor: number;
@@ -139,7 +140,8 @@ export class FakeLessons {
 
   private newSession(owner: string, kind: LessonSession["kind"], kids: boolean, ref: { lesson_id?: string; scenario_id?: string; asset_id?: string }): Sess {
     const id = randomUUID();
-    const view: LessonSession & Record<string, unknown> = {
+    // lessons до спринта 8 (поток C) не отдаёт ai_locked / ai_minutes_left — BFF подставляет null
+    const view: DomainLessonSession & Record<string, unknown> = {
       session_id: id,
       kind,
       title: L(kind === "lesson" ? "В кафе: заказ напитков" : kind === "scenario" ? "Заказ в кафе" : kind === "media" ? "Кофе с собой" : "Повторение"),

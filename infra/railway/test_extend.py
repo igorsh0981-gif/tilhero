@@ -80,3 +80,39 @@ def test_extend_verify_only_service_touches_only_callers(tmp_path: Path) -> None
     url = {"TTS_URL": "http://${{tts.RAILWAY_PRIVATE_DOMAIN}}:8115"}
     assert upd == {"telegram-bff": url, "ai-gateway": url}  # релиз 5.1: ai-gateway — распознавание речи
     assert (out / "db-passwords.sql").read_text() == ""
+
+
+def test_extend_sprint8_billing_edge_web_pay(tmp_path: Path) -> None:
+    """Спринт 8: billing, payments-edge и web-pay одним запуском — общий PAYMENTS_EDGE_TOKEN; действующим сервисам —
+    BILLING_URL, открытый ключ billing и сопутствующие переменные (сайт оплаты у telegram-bff, пэйвол у lessons)."""
+    new = ("billing", "payments-edge", "web-pay")
+    sec = rs.Secrets.new()
+    env = tmp_path / "learning-plan.env"
+    env.write_text(f"SCHEDULER_TOKEN={sec.scheduler}\nINTERNAL_JWT_SECRET={sec.internal_hmac}\n")
+    pub = {n: rs.b64e(rs.public_raw(rs.private_from_seed(sec.seeds[n]))) for n in rs.JWT_ISSUERS if n != "billing"}
+    keys = tmp_path / "public-keys.json"
+    keys.write_text(json.dumps(pub))
+    out = tmp_path / "s8"
+    assert extend.main(["--env-from", str(env), "--public-keys", str(keys), "--out", str(out),
+                        "--only", ",".join(new)]) == 0
+    bill, edge = extend.env_of(out / "billing.env"), extend.env_of(out / "payments-edge.env")
+    assert bill["PAYMENTS_EDGE_TOKEN"] == edge["PAYMENTS_EDGE_TOKEN"] and len(edge["PAYMENTS_EDGE_TOKEN"]) >= 32
+    assert bill["SCHEDULER_TOKEN"] == sec.scheduler and bill["INTERNAL_JWT_SECRET"] == sec.internal_hmac
+    assert bill["PAYME_KEY"] == "${{shared.PAYME_KEY}}" and bill["PAYMENTS_ENABLED"] == "false"
+    for name in new:
+        assert "BOT_TOKEN" not in extend.env_of(out / f"{name}.env"), name
+    assert set(json.loads((out / "public-keys.json").read_text())) == set(rs.JWT_ISSUERS)
+    pw = (out / "db-passwords.sql").read_text()
+    assert "ALTER ROLE billing PASSWORD" in pw and "ALTER ROLE billing_owner PASSWORD" in pw
+    assert "'billing'" in (out / "bootstrap.sql").read_text()
+    upd = json.loads((out / "updates.json").read_text())
+    billing_url = "http://${{billing.RAILWAY_PRIVATE_DOMAIN}}:8118"
+    for caller in ("telegram-bff", "admin-bff", "lessons", "telegram-bot-gateway", "n8n"):
+        assert upd[caller]["BILLING_URL"] == billing_url, caller
+    assert upd["lessons"]["BILLING_ENFORCED"] == "false" and upd["lessons"]["BILLING_TIMEOUT_SECONDS"] == "2"
+    assert upd["telegram-bot-gateway"]["TELEGRAM_TEST_ENV"] == "false"
+    bff = upd["telegram-bff"]
+    assert bff["WEB_PAY_ENABLED"] == "false" and bff["TELEGRAM_OIDC_BASE"] == "https://oauth.telegram.org"
+    assert bff["TELEGRAM_LOGIN_CLIENT_SECRET"] == "${{shared.TELEGRAM_LOGIN_CLIENT_SECRET}}"  # noqa: S105 — ссылка
+    assert len(bff["WEB_SESSION_SECRET"]) >= 32 and "BOT_TOKEN" not in bff and "SESSION_JWT_SECRET" not in bff
+    assert "billing" in json.loads(upd["identity-consent"]["INTERNAL_JWT_PUBLIC_KEYS"])

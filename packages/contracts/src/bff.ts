@@ -862,6 +862,12 @@ export interface LessonSession {
   /** когда пауза истечёт (72 ч) и сессия будет отменена */
   expires_at: string | null;
   minutes: number;
+  /** спринт 8 (пэйвол, BILLING_ENFORCED): урок или сценарий 14+ идёт «вариантами» (ai_mode choices) не из-за сбоя ИИ, а
+   *  по тарифу — плашка «Уроки с ИИ — в подписке»; null — ИИ не закрыт тарифом (или пэйвол выключен) */
+  ai_locked: AiLock | null;
+  /** спринт 8: ИИ-минут осталось у аккаунта после удержания на это занятие («ИИ: осталось N мин»); null — занятие без
+   *  удержания (без ИИ, ребёнок 6–13, пэйвол выключен) */
+  ai_minutes_left: number | null;
 }
 
 // ---------- Шаги (GET /v1/sessions/{id}/current → LessonStep; авто-продолжение после паузы) ----------
@@ -1314,9 +1320,11 @@ export interface ReadingView {
 // Спринт 6 — игра и герои (APP-GAME-01…07, APP-PROG-01, APP-PROG-03)
 // Всё игровое — gamification через telegram-bff (/v1/game/*), у активного ученика (lrn). Игра не меняет уровень языка,
 // навыки, план и сроки повторения. XP и тилы начисляются сервером по событиям занятий — клиент их не задаёт.
-// Тилы за деньги — спринт 8: при нехватке тилов purchase_available=false, экран показывает «покупка тилов скоро».
+// Тилы за деньги — спринт 8 (раздел «Спринт 8»): purchase_available — можно купить пакет тилов за Stars (продажи
+// включены, право платить, есть пакет с ценой в Stars; детский профиль — false); иначе экран без кнопки покупки.
 // Общие коды: 503 GAME_UNAVAILABLE (игровой блок скрыть, учёба работает); 404 HERO_NOT_FOUND | ITEM_NOT_FOUND;
-// 409 HERO_NOT_AVAILABLE; 409 INSUFFICIENT_TILS {price, balance, missing, purchase_available: false};
+// 409 HERO_NOT_AVAILABLE; 409 INSUFFICIENT_TILS {price, balance, missing, purchase_available: boolean} (спринт 8 —
+// вычисляет telegram-bff, как GameSummary.purchase_available);
 // 409 ALREADY_OWNED; 409 FREEZE_STOCK_FULL {max}; 410 ITEM_NOT_AVAILABLE; 409 NOT_OWNED;
 // 422 IDEMPOTENCY_KEY_REUSED.
 // =====================================================================================================================
@@ -1434,8 +1442,9 @@ export interface GameSummary {
   events: ActiveGameEvent[];
   equipment: { background: ShopItemRef | null; frame: ShopItemRef | null };
   settings: GameSettings;
-  /** покупка тилов за деньги — спринт 8 */
-  purchase_available: false;
+  /** спринт 8: «Купить тилы» за Stars доступно — sales_enabled ∧ can_pay ∧ есть пакет тилов с ценой в Stars
+   *  (вычисляет telegram-bff по каталогу billing; детский профиль — false; billing недоступен — false) */
+  purchase_available: boolean;
 }
 
 export interface ShopItemRef {
@@ -2018,7 +2027,11 @@ export type PairRoomEventKind =
   | "finished" | "stopped";
 
 /** POST /v1/pair-rooms PairRoomInvite (Idempotency-Key обязателен) → PairRoomView (201). Проверки: друзья (14+) или одна
- *  семья; блокировки и санкции; детям — только choices. 409 ROOM_LIMIT {room_id} (≤ 1 активной комнаты на ученика);
+ *  семья; блокировки и санкции; детям — только choices. Спринт 8 (BILLING_ENFORCED): урок вдвоём 14+ без ребёнка в
+ *  комнате приглашает только подписчик с функцией pair_lessons — иначе 403 SUBSCRIPTION_REQUIRED {feature:
+ *  "pair_lessons", reason: SubscriptionRequiredReason}; billing недоступен — 503 BILLING_UNAVAILABLE; минуты — у
+ *  пригласившего один раз за комнату (по времени работы коуча); приглашённому подписка не нужна (В8); комната с
+ *  ребёнком бесплатна (В9). 409 ROOM_LIMIT {room_id} (≤ 1 активной комнаты на ученика);
  *  403 BLOCKED | SOCIAL_RESTRICTED | PARTNER_NOT_ALLOWED | FRIENDS_NOT_ALLOWED; 404 MEMBER_NOT_FOUND;
  *  404 LESSON_NOT_AVAILABLE (сценарий не опубликован или не для аудитории); 409 PAIR_NOT_AVAILABLE; start в прошлом
  *  или дальше 7 дней — 422 VALIDATION_ERROR. Без ответа: start now — 15 мин, запланированный — до start_at + 15 мин →
@@ -2155,4 +2168,203 @@ export interface PairRoomReport {
     /** моя оценка независимым оценщиком (GET /v1/evaluations/{id}); null — без вклада или ещё не готова */
     evaluation_id: string | null;
   };
+}
+
+// =====================================================================================================================
+// Спринт 8 — подписка и покупки за Telegram Stars в Mini App (APP-BILL-01…04, APP-LESS-01, APP-VOICE-06, APP-SOC-03/05,
+// APP-REF-03). Домен — billing через telegram-bff /v1/billing/* (канал miniapp: claim `chn` внутреннего токена).
+// В Mini App продаётся ТОЛЬКО за Telegram Stars (решение владельца В1): цены — целые звёзды (XTR), провайдер —
+// только "telegram_stars". Анти-стиринг: ни один ответ /v1/* не содержит сумм в сумах (тийинов), названий других
+// способов оплаты, адреса сайта оплаты или ссылок на него; покупки вне Mini App видны только как статус подписки и
+// минуты (GET /v1/billing/orders — только заказы Stars). Деньги — целые числа (ADR-0001).
+// Платит только владелец аккаунта в своём профиле (lrn = аккаунт): 18+ или 14–17 с согласием родителя. Детский
+// профиль цен и кнопок оплаты не видит (products: [], payer_required: true); ребёнку тилы покупает родитель из своего
+// профиля (beneficiary_id). Подписка и минуты — на аккаунт: пул общий у аккаунта и его детских профилей.
+// Подписка открывает уроки с ИИ (lesson, scenario в режиме full) и уроки вдвоём в пределах месячного лимита минут;
+// без подписки учёба работает (базовый курс, повторения, чтение, игра; урок — «варианты» с плашкой ai_locked).
+// Общие коды: 503 BILLING_UNAVAILABLE (покупки недоступны — учёба работает); 403 PAYER_REQUIRED (детский профиль,
+// возраст неизвестен) | GUARDIAN_CONSENT_REQUIRED (14–17 без согласия родителя) | BENEFICIARY_NOT_ALLOWED;
+// 409 PAYMENTS_DISABLED | PROVIDER_NOT_AVAILABLE; 422 PROVIDER_NOT_ALLOWED; 404 PRODUCT_NOT_FOUND | ORDER_NOT_FOUND;
+// 409 PRODUCT_NOT_AVAILABLE | OFFER_VERSION_MISMATCH {current} | FORFEIT_CONFIRMATION_REQUIRED {minutes_left,
+// days_left} | ACTIVE_PERIOD_EXISTS {ends_at} | STARS_SUBSCRIPTION_EXISTS | ORDER_STATE {status} | TRIAL_USED |
+// TRIAL_NOT_AVAILABLE; 404 STARS_SUBSCRIPTION_NOT_FOUND; 429 ORDERS_LIMIT; 503 STARS_UNAVAILABLE (ссылка на счёт
+// не получена — заказ pending, повторить чтение). Лимиты: tg.billing.read (GET), tg.billing.order (POST).
+// =====================================================================================================================
+
+/** Функции подписки: уроки с ИИ (lesson, scenario — режим full) и уроки вдвоём 14+ (ИИ-коуч). */
+export type BillingFeature = "ai_lessons" | "pair_lessons";
+export type BillingProductKind = "subscription" | "til_pack";
+/** subscription — нативная подписка Telegram Stars (30 дней, продлевает Telegram); one_time — разовый счёт Stars. */
+export type StarsMode = "one_time" | "subscription";
+/** Статус подписки аккаунта (вычисляется billing): none — не было; trial — пробный; active — оплаченный или выданный
+ *  период; expired — последний период закончился. */
+export type SubscriptionStatus = "none" | "trial" | "active" | "expired";
+export type BillingOrderStatus = "pending" | "paid" | "fulfilled" | "expired" | "cancelled" | "refunded";
+/** Подписка Stars: active — автопродление включено; canceled — выключено (пользователем в Telegram или кнопкой в Mini
+ *  App; оплаченный период живёт до конца); failed — продление не удалось (не хватило Stars); refunded — возврат;
+ *  ended — срок прошёл без продления. */
+export type StarsSubscriptionStatus = "active" | "canceled" | "failed" | "refunded" | "ended";
+/** Почему урок идёт без ИИ по тарифу: нет подписки; в тарифе нет функции; минуты кончились; billing недоступен. */
+export type AiLockReason = "no_subscription" | "feature_not_in_plan" | "minutes_exhausted" | "billing_unavailable";
+export interface AiLock {
+  reason: AiLockReason;
+}
+/** 403 SUBSCRIPTION_REQUIRED {feature, reason} — приглашение в урок вдвоём без подписки (details). */
+export type SubscriptionRequiredReason = "no_subscription" | "feature_not_in_plan" | "minutes_exhausted" | "kids";
+export interface SubscriptionRequiredDetails {
+  feature: BillingFeature;
+  reason: SubscriptionRequiredReason;
+}
+
+/** Цена в Mini App — только Stars. */
+export interface StarsPrice {
+  stars: number; // целые звёзды, 1..100 000 (подписка — ≤ 10 000)
+  mode: StarsMode;
+}
+
+/** Товар каталога для Mini App: показывается только товар с ценой в Stars. Что входит и срок — до оплаты. */
+export interface BillingProduct {
+  code: string; // ^[a-z0-9_]{2,40}$ — plus_30d, plus_90d, til_100, til_550, til_1200
+  kind: BillingProductKind;
+  title: Localized; // 1..60
+  description: Localized | null; // ≤ 300
+  /** подписка: дней периода, ИИ-минут на период, функции; пакет тилов — null / [] */
+  days: number | null;
+  minutes: number | null;
+  features: BillingFeature[];
+  /** пакет тилов: сколько тилов; подписка — null */
+  til: number | null;
+  price: StarsPrice;
+}
+
+/** GET /v1/billing/catalog → BillingCatalog (активная версия каталога, канал miniapp). Детский профиль — products: [],
+ *  payer_required: true, can_pay: false, trial: null. */
+export interface BillingCatalog {
+  /** PAYMENTS_ENABLED ∧ STARS_ENABLED: false — покупки временно недоступны (каталог виден, кнопки оплаты нет) */
+  sales_enabled: boolean;
+  /** включённые способы оплаты канала: в Mini App — ["telegram_stars"] или [] */
+  providers: Array<"telegram_stars">;
+  /** оферта на домене Mini App (без ссылок на оплату); version передаётся в заказ (offer_version) */
+  offer: { version: string; url: string };
+  /** пробный период: один раз на аккаунт, без оплаты; null — детский профиль */
+  trial: { available: boolean; days: number; minutes: number } | null;
+  products: BillingProduct[];
+  /** платить может только владелец аккаунта в своём профиле */
+  payer_required: boolean;
+  /** этот профиль может платить (18+ или 14–17 с согласием родителя) */
+  can_pay: boolean;
+  /** 14–17: нужно согласие родителя на оплату */
+  consent_required: boolean;
+}
+
+export interface SubscriptionPeriodView {
+  starts_at: string;
+  ends_at: string;
+  minutes_granted: number;
+  minutes_spent: number;
+  /** удержано на идущие занятия */
+  minutes_held: number;
+  /** доступно = выдано − потрачено − снято − удержано (≥ 0) */
+  minutes_left: number;
+  /** перерасход за счёт сервиса (ученику не выставляется) */
+  overage: number;
+}
+
+/** GET /v1/billing/subscription → SubscriptionView (аккаунт; детскому профилю — статус семьи без цен: «Подписка семьи
+ *  активна до …»). Источник периода (Stars, пробный, выдача поддержкой или покупка вне Mini App) на доступ не влияет и
+ *  не показывается. */
+export interface SubscriptionView {
+  status: SubscriptionStatus;
+  plan: { code: string; title: Localized } | null;
+  period: SubscriptionPeriodView | null;
+  /** запланированный следующий период (оплачен «после текущего»); даты — после активации */
+  next_period: { days: number; minutes_granted: number; starts_at: string | null } | null;
+  features: BillingFeature[];
+  /** до конца ≤ 3 дней, следующего периода нет и нет подписки Stars с автопродлением */
+  expiring: boolean;
+  minutes_exhausted: boolean;
+  payer_required: boolean;
+  can_pay: boolean;
+  trial_available: boolean;
+  sales_enabled: boolean;
+  /** нативная подписка Telegram Stars аккаунта (только у плательщика); null — нет */
+  stars_subscription: StarsSubscriptionView | null;
+}
+
+export interface StarsSubscriptionView {
+  status: StarsSubscriptionStatus;
+  /** автопродление включено (status active) */
+  auto_renew: boolean;
+  /** дата следующего списания / конца оплаченного периода (subscription_expiration_date) */
+  expires_at: string;
+  amount_stars: number;
+}
+
+/** История минут: grant — начислено (оплата, пробный, поддержка); debit — списано за занятие; expire — сгорело в
+ *  конце периода; revoke — отозвано (возврат); adjust — корректировка поддержкой (комментарий сотрудника не
+ *  показывается). */
+export type MinuteEntryKind = "grant" | "debit" | "expire" | "revoke" | "adjust";
+export type MinuteRefKind =
+  | "order" | "trial" | "grant" | "session" | "room" | "period" | "hold" | "refund" | "adjustment" | "deletion";
+/** GET /v1/billing/minutes?cursor= → Page<MinuteEntry> (новые сверху) */
+export interface MinuteEntry {
+  at: string;
+  kind: MinuteEntryKind;
+  /** со знаком: + начислено, − списано / сгорело / отозвано */
+  minutes: number;
+  ref_kind: MinuteRefKind;
+  /** чьё занятие: свой профиль или детский профиль аккаунта; null — не занятие (начисление, сгорание) */
+  learner: "self" | "child" | null;
+  period_id: string;
+}
+
+/** POST /v1/billing/trial (Idempotency-Key обязателен; плательщик) → SubscriptionView (201). 409 TRIAL_USED —
+ *  пробный уже был у аккаунта; 409 TRIAL_NOT_AVAILABLE — есть оплаченный период; 403 PAYER_REQUIRED |
+ *  GUARDIAN_CONSENT_REQUIRED. */
+
+/** POST /v1/billing/orders (Idempotency-Key обязателен) BillingOrderRequest → StarsOrder (201; тот же незавершённый
+ *  заказ — 200). Сумма — только из каталога на сервере. Подписка Stars (stars_mode subscription) начинается в момент
+ *  оплаты: при живой подписке Stars — 409 STARS_SUBSCRIPTION_EXISTS, при активном оплаченном периоде — 409
+ *  ACTIVE_PERIOD_EXISTS {ends_at}, пробный заменяется только с confirm_forfeit: true (иначе 409
+ *  FORFEIT_CONFIRMATION_REQUIRED {minutes_left, days_left}); start_mode не используется. Разовые товары («Плюс 90
+ *  дней»): start_mode обязателен; now при активном периоде — только с confirm_forfeit: true. Пакет тилов — себе или
+ *  детскому профилю своего аккаунта (beneficiary_id = user_id профиля), иначе 403 BENEFICIARY_NOT_ALLOWED.
+ *  Оплата: Telegram.WebApp.openInvoice(invoice_link) (только через src/tg/), после закрытия — опрос
+ *  GET /v1/billing/orders/{order_no} до 60 с (источник истины — billing, не статус openInvoice). */
+export interface BillingOrderRequest {
+  product_code: string;
+  provider: "telegram_stars";
+  start_mode?: "after_current" | "now";
+  confirm_forfeit?: boolean;
+  beneficiary_id?: string;
+  /** версия оферты из каталога, с которой согласился ученик; иначе 409 OFFER_VERSION_MISMATCH {current} */
+  offer_version: string;
+}
+
+/** Заказ Stars в Mini App. GET /v1/billing/orders?cursor= → Page<StarsOrder> — только заказы Stars (покупка и
+ *  продления подписки), заказов вне Mini App нет; GET /v1/billing/orders/{order_no} → StarsOrder (чужой или не Stars —
+ *  404 ORDER_NOT_FOUND); POST /v1/billing/orders/{order_no}/cancel → StarsOrder (только pending без платежа; иначе 409
+ *  ORDER_STATE {status}). */
+export interface StarsOrder {
+  order_no: number;
+  status: BillingOrderStatus;
+  /** renewal — автопродление подписки Stars (создан billing по платежу Telegram) */
+  channel: "miniapp" | "renewal";
+  product: { code: string; kind: BillingProductKind; title: Localized };
+  currency: "XTR";
+  amount_stars: number;
+  provider: "telegram_stars";
+  /** ссылка на счёт Stars (https://t.me/…) — пока заказ pending; null — ещё не получена (повторить чтение) или оплачен */
+  invoice_link: string | null;
+  expires_at: string;
+  created_at: string;
+  paid_at: string | null;
+  refund: { status: "awaiting_provider" | "completed" | "failed" } | null;
+}
+
+/** POST /v1/billing/stars-subscription StarsSubscriptionRequest (плательщик) → SubscriptionView: auto_renew false —
+ *  «Отключить автопродление» (оплаченный период живёт до конца), true — включить снова. Живой подписки Stars нет —
+ *  404 STARS_SUBSCRIPTION_NOT_FOUND; 503 STARS_UNAVAILABLE. */
+export interface StarsSubscriptionRequest {
+  auto_renew: boolean;
 }

@@ -36,6 +36,7 @@ import {
   DuelSessionParamsSchema,
   DuelSessionRequestSchema,
   IdempotencyHeadersSchema,
+  LessonSessionDomainSchema,
   LessonSessionSchema,
   PairAudioSchema,
   PairRoomInviteSchema,
@@ -213,7 +214,7 @@ export async function pairRoomsRoutes(app: App, ctx: BffContext): Promise<void> 
     async (req, reply) => {
       const key = idempotencyKey(req, true)!;
       const res = await call(authOf(req), DUEL_WRITE, "POST", `${ME}/duel-sessions`, { body: { duel_id: req.body.duel_id.toLowerCase() }, idempotencyKey: key }, req);
-      return reply.code(createdStatus(res.status)).send(sessionView(shape("duel_session", LessonSessionSchema, res.body), res.kids));
+      return reply.code(createdStatus(res.status)).send(sessionView(shape("duel_session", LessonSessionDomainSchema, res.body), res.kids));
     },
   );
 

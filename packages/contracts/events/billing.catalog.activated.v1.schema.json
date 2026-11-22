@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "billing.catalog.activated.v1.schema.json",
+  "title": "billing.catalog.activated.v1",
+  "type": "object",
+  "required": [
+    "version",
+    "activated_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "activated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

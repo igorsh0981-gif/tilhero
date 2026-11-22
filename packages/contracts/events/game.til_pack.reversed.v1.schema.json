@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "game.til_pack.reversed.v1.schema.json",
+  "title": "game.til_pack.reversed.v1",
+  "type": "object",
+  "required": [
+    "order_id",
+    "user_id",
+    "outcome",
+    "at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "order_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "reversed",
+        "tils_spent",
+        "user_deleted"
+      ]
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

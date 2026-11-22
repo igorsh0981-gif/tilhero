@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "billing.order.paid.v1.schema.json",
+  "title": "billing.order.paid.v1",
+  "type": "object",
+  "required": [
+    "order_id",
+    "order_no",
+    "account_id",
+    "beneficiary_user_id",
+    "channel",
+    "product_kind",
+    "product_code",
+    "product_title",
+    "currency",
+    "amount_tiyin",
+    "amount_stars",
+    "provider",
+    "period",
+    "paid_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "order_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "order_no": {
+      "type": "integer",
+      "minimum": 100001
+    },
+    "account_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "beneficiary_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "miniapp",
+        "web",
+        "renewal"
+      ]
+    },
+    "product_kind": {
+      "type": "string",
+      "enum": [
+        "subscription",
+        "til_pack"
+      ]
+    },
+    "product_code": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]{2,40}$"
+    },
+    "product_title": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ru",
+        "uz"
+      ],
+      "properties": {
+        "ru": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "uz": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        }
+      }
+    },
+    "currency": {
+      "type": "string",
+      "enum": [
+        "UZS",
+        "XTR"
+      ]
+    },
+    "amount_tiyin": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 100,
+      "maximum": 100000000000
+    },
+    "amount_stars": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "provider": {
+      "type": "string",
+      "enum": [
+        "telegram_stars",
+        "payme",
+        "click",
+        "uzum"
+      ]
+    },
+    "til": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "period": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "starts_at",
+            "ends_at"
+          ],
+          "properties": {
+            "starts_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "ends_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "paid_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "billing.stars_subscription.changed.v1.schema.json",
+  "title": "billing.stars_subscription.changed.v1",
+  "type": "object",
+  "required": [
+    "account_id",
+    "subscription_id",
+    "status",
+    "expires_at",
+    "changed_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "subscription_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "canceled",
+        "failed",
+        "refunded",
+        "ended"
+      ]
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "changed_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

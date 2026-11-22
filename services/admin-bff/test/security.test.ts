@@ -374,8 +374,8 @@ describe("реестр маршрутов", () => {
   it("права и роли admin-bff = каталог admin.ts; матрица по умолчанию — PLAN.md", () => {
     expect([...ALL_PERMISSIONS].sort()).toEqual([...PERMISSIONS].sort());
     expect([...ROLE_CODES]).toEqual([
-      "super_admin", "operations", "communications", "support", "methodist", "content_manager", "qa_analyst", "analyst", "auditor",
-      "read_only",
+      "super_admin", "operations", "communications", "support", "methodist", "content_manager", "qa_analyst", "finance", "analyst",
+      "auditor", "read_only",
     ]);
     expect(PRIVILEGED_ROLES).toEqual(["super_admin", "operations", "communications"]);
     expect([...DEFAULT_ROLE_MATRIX.operations].sort()).toEqual(
@@ -389,7 +389,14 @@ describe("реестр маршрутов", () => {
         "game.read", "game.manage", "game.publish", "wallet.adjust",
         // спринт 7
         "social.read", "moderation.manage", "referral.read", "referral.manage", "league.read", "league.manage", "room.read", "room.manage",
+        // спринт 8
+        "billing.read", "billing.manage", "billing.publish", "billing.approve", "billing.refund", "subscriptions.override",
       ].sort(),
+    );
+    // спринт 8 (PLAN спринта 8 «Права и роли»): finance — billing.* кроме subscriptions.override, costs.read, dashboard.read,
+    // users.read; заявка «четыре глаза» — support и operations, подтверждение — finance и operations (не тот же сотрудник)
+    expect([...DEFAULT_ROLE_MATRIX.finance].sort()).toEqual(
+      ["dashboard.read", "users.read", "costs.read", "billing.read", "billing.manage", "billing.publish", "billing.approve", "billing.refund"].sort(),
     );
     // спринт 3 (docs/sprint3/PLAN.md «Права и роли») + спринт 4 (docs/sprint4/PLAN.md «Права и роли»)
     expect([...DEFAULT_ROLE_MATRIX.methodist].sort()).toEqual(
@@ -436,6 +443,12 @@ describe("реестр маршрутов", () => {
     expect(holders("league.manage")).toEqual(["operations", "super_admin"]);
     expect(holders("room.read")).toEqual(["analyst", "auditor", "operations", "super_admin", "support"]);
     expect(holders("room.manage")).toEqual(["operations", "super_admin"]);
+    // спринт 8: деньги
+    expect(holders("billing.read")).toEqual(["analyst", "auditor", "finance", "operations", "super_admin", "support"]);
+    for (const p of ["billing.manage", "billing.publish", "billing.approve", "billing.refund"] as const) {
+      expect(holders(p), p).toEqual(["finance", "operations", "super_admin"]);
+    }
+    expect(holders("subscriptions.override")).toEqual(["operations", "super_admin", "support"]);
     expect(DEFAULT_ROLE_MATRIX.super_admin).toEqual(ALL_PERMISSIONS);
     for (const r of ROLE_CODES) expect(DEFAULT_ROLE_MATRIX[r].includes("lang.manage"), r).toBe(r === "super_admin");
     for (const r of ROLE_CODES) expect(DEFAULT_ROLE_MATRIX[r].includes("content.review"), r).toBe(r === "super_admin" || r === "methodist");
@@ -554,7 +567,7 @@ describe("actor-токен в домены", () => {
       id: staff.staff_id,
       role: "support",
       name: "Мария Оператор",
-      permissions: ["dashboard.read", "game.read", "moderation.manage", "referral.read", "room.read", "social.read", "support.read", "support.reply", "users.read"],
+      permissions: ["billing.read", "dashboard.read", "game.read", "moderation.manage", "referral.read", "room.read", "social.read", "subscriptions.override", "support.read", "support.reply", "users.read"],
     });
     // токен для другого домена не принимается этим доменом
     await expect(verifyInternalToken(token, INTERNAL_SECRET, "support")).rejects.toMatchObject({ code: "INTERNAL_TOKEN_INVALID" });
@@ -724,7 +737,7 @@ describe("имперсонация", () => {
     const me = res.json() as Me;
     expect(me.impersonating).toBe("support");
     expect(me.staff.role).toBe("super_admin");
-    expect(me.permissions).toEqual(["dashboard.read", "game.read", "moderation.manage", "referral.read", "room.read", "social.read", "support.read", "support.reply", "users.read"]);
+    expect(me.permissions).toEqual(["billing.read", "dashboard.read", "game.read", "moderation.manage", "referral.read", "room.read", "social.read", "subscriptions.override", "support.read", "support.reply", "users.read"]);
     const audit = h.fake.callsTo("audit", "POST", "/internal/v1/records")[0]!;
     expect(audit.body).toMatchObject({ action: "dev.impersonate", after: { impersonating: "support" } });
 
@@ -732,7 +745,7 @@ describe("имперсонация", () => {
     expect((await h.app.inject({ url: "/admin/v1/staff", headers: browser(s) })).statusCode).toBe(403);
     await h.app.inject({ url: "/admin/v1/learners", headers: browser(s) });
     const actor = h.fake.callsTo("userAdmin", "GET", "/admin/v1/learners").at(-1)!.actor!;
-    expect(actor).toEqual({ id: staff.staff_id, role: "super_admin", name: staff.display_name, permissions: ["dashboard.read", "game.read", "moderation.manage", "referral.read", "room.read", "social.read", "support.read", "support.reply", "users.read"] });
+    expect(actor).toEqual({ id: staff.staff_id, role: "super_admin", name: staff.display_name, permissions: ["billing.read", "dashboard.read", "game.read", "moderation.manage", "referral.read", "room.read", "social.read", "subscriptions.override", "support.read", "support.reply", "users.read"] });
 
     // проверка по роли при имперсонации тоже сужается: super_admin, примеривший support, не утверждает заявки
     await stepUp(h, s);

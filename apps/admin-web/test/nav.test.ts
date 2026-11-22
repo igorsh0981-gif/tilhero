@@ -25,6 +25,7 @@ const MATRIX: Record<RoleCode, Permission[]> = {
   methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish", "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "memory.read", "glossary.manage", "game.read"],
   content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage", "game.read", "game.manage"],
   qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts", "memory.read"],
+  finance: ["dashboard.read", "users.read", "costs.read", "billing.read", "billing.manage", "billing.publish", "billing.approve", "billing.refund"],
   analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
   auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
   read_only: ["dashboard.read"],

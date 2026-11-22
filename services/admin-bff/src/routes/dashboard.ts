@@ -31,7 +31,7 @@
  * Источник недоступен, ответил ошибкой (в т. ч. 403 по своему праву) или испорченными данными → блок
  * `{available: false, data: null, service}`; остальные блоки показываются. Нули вместо «нет данных» не подставляются.
  */
-import type { Dashboard, DashboardBlock, GameStats, LessonStats, MemoryStats, Period, SocialStats } from "@tilhero/contracts/admin";
+import type { Dashboard, DashboardBlock, GameStats, LessonStats, MemoryStats, MoneyStats, Period, SocialStats } from "@tilhero/contracts/admin";
 import type { Actor, AppError } from "@tilhero/ts-common";
 import { BadValue, C, type Codec } from "../codec.js";
 import { DASHBOARD_CAMPAIGNS, DASHBOARD_LEARNERS, DASHBOARD_WHATS_NEW, SUPPORT_STATS } from "../contract.js";
@@ -67,7 +67,7 @@ const SPECS = {
   ai: { domain: "aiGateway", codec: AI_USAGE_SUMMARY, path: "/admin/v1/ai/usage/summary", period: "month" },
   // спринт 5: + очередь переводов ИИ из catalog — loadMemory
   memory: { domain: "memory", codec: MEMORY_STATS, path: "/admin/v1/memory/stats", period: true },
-} as const satisfies Record<keyof Omit<Dashboard, "period" | "generated_at" | "game" | "social">, BlockSpec<unknown>>;
+} as const satisfies Record<keyof Omit<Dashboard, "period" | "generated_at" | "game" | "social" | "money">, BlockSpec<unknown>>;
 /** Вторая половина блока lessons — счётчики assessment. */
 const ASSESSMENT_SPEC: BlockSpec<typeof ASSESSMENT_STATS extends Codec<infer T> ? T : never> = {
   domain: "assessment",
@@ -78,10 +78,28 @@ const ASSESSMENT_SPEC: BlockSpec<typeof ASSESSMENT_STATS extends Codec<infer T> 
 
 type Blocks = typeof SPECS;
 type BlockName = keyof Blocks;
-export const BLOCKS = [...(Object.keys(SPECS) as BlockName[]), "game", "social"] as const;
+export const BLOCKS = [...(Object.keys(SPECS) as BlockName[]), "game", "social", "money"] as const;
 
 const block = <T>(data: Codec<T>): Codec<DashboardBlock<T>> =>
   C.obj<DashboardBlock<T>>({ available: C.bool, data: C.nullable(data as Codec<Exclude<T, undefined>>), service: C.str(64) }, "service");
+
+/** Спринт 8 — блок «Деньги»: billing reports/summary?period=day + доля потолка ИИ (admin.ts MoneyStats). */
+export const MONEY_STATS: Codec<MoneyStats> = C.obj<MoneyStats>({
+  period: C.oneOf<Period>(["today", "7d", "30d"]),
+  web_revenue_tiyin: C.int(),
+  stars_revenue_stars: C.int(),
+  orders_paid: C.int(),
+  refunds: C.int(),
+  active_subscriptions: C.int(),
+  trials_started: C.int(),
+  recon_open: C.int(),
+  ai_cap_used_pct: C.nullable(C.num(0, 1000)),
+});
+
+/** Спринт 8: источник блока «Деньги» (billing, BILLING_URL admin-bff) подключает поток F; до этого блок недоступен. */
+async function loadMoney(): Promise<DashboardBlock<MoneyStats>> {
+  return { available: false, data: null, service: "billing" };
+}
 
 export const DASHBOARD: Codec<Dashboard> = C.obj<Dashboard>({
   period: C.oneOf<Period>(["today", "7d", "30d"]),
@@ -97,6 +115,7 @@ export const DASHBOARD: Codec<Dashboard> = C.obj<Dashboard>({
   memory: block(MEMORY_STATS),
   game: block(GAME_STATS),
   social: block(SOCIAL_STATS),
+  money: block(MONEY_STATS),
 });
 
 async function load<T>(ctx: BffContext, actor: Actor, period: Period, spec: BlockSpec<T>): Promise<DashboardBlock<T>> {
@@ -228,7 +247,7 @@ export function dashboardRoutes(app: App, ctx: BffContext): void {
       const auth = staffOf(req);
       const period: Period = req.query.period ?? "today";
       const started = performance.now();
-      const [learners, support, whats_new, campaigns, content, diagnostics, lessons, ai, memory, game, social] = await Promise.all([
+      const [learners, support, whats_new, campaigns, content, diagnostics, lessons, ai, memory, game, social, money] = await Promise.all([
         load(ctx, auth.actor, period, SPECS.learners),
         load(ctx, auth.actor, period, SPECS.support),
         load(ctx, auth.actor, period, SPECS.whats_new),
@@ -240,8 +259,9 @@ export function dashboardRoutes(app: App, ctx: BffContext): void {
         loadMemory(ctx, auth.actor, period),
         loadGame(ctx, auth.actor, period),
         loadSocial(ctx, auth.actor, period),
+        loadMoney(),
       ]);
-      const blocks = [learners, support, whats_new, campaigns, content, diagnostics, lessons, ai, memory, game, social];
+      const blocks = [learners, support, whats_new, campaigns, content, diagnostics, lessons, ai, memory, game, social, money];
       const unavailable = blocks.filter((b) => !b.available).length;
       ctx.log.info({ dashboard_ms: Math.round(performance.now() - started), unavailable }, "dashboard assembled");
       return {
@@ -258,6 +278,7 @@ export function dashboardRoutes(app: App, ctx: BffContext): void {
         memory,
         game,
         social,
+        money,
       };
     },
   );

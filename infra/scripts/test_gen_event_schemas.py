@@ -44,3 +44,17 @@ def test_internal_keys_cover_every_service():
     services = {p.name for p in (root / "services").iterdir() if (p / "Dockerfile").exists()}
     services |= {"telegram-bot-gateway"}
     assert set(mod.SERVICES) == services
+
+
+def test_release_notes_planned_sprint8():
+    """Спринт 8, поток 0: заготовка «Что нового» релиза 8 в release-notes.json (planned) — ключи по формату каталога,
+    16:9 1200×675, ещё не в основных списках (их переносит поток I вместе с файлами и списками клиентов)."""
+    cat = json.loads((HERE.parents[1] / "packages" / "contracts" / "release-notes.json").read_text(encoding="utf-8"))
+    planned = cat["planned"]
+    assert planned["routes"] == ["subscription", "til_shop"]
+    assert [i["key"] for i in planned["illustrations"]] == ["s8-plus", "s8-plus-kids"]
+    for item in planned["illustrations"]:
+        assert re.fullmatch(cat["limits"]["illustration_pattern"], item["key"])
+        assert (item["width"], item["height"]) == (1200, 675)
+    assert not set(planned["routes"]) & set(cat["routes"])
+    assert not {i["key"] for i in planned["illustrations"]} & {i["key"] for i in cat["illustrations"]}

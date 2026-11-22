@@ -1,0 +1,84 @@
+# TilHero payments-edge (спринт 8, INTERNAL_API §4) — публичный Caddy ТОЛЬКО для колбэков Payme, Click, Uzum.
+# Заготовка потока 0; доводит, документирует (README) и проверяет (`caddy validate` в тесте сборки) поток B.
+# Без кода, БД и шины. TLS терминирует Railway edge — здесь только HTTP на {$PORT}. Https-адреса этого домена —
+# URL колбэков в кабинетах провайдеров (В13). Страниц для браузера нет: покупатель возвращается на сайт оплаты.
+# Env: PORT (8080), BILLING_URL — приватный адрес billing без пути (http://${{billing.RAILWAY_PRIVATE_DOMAIN}}:8118),
+#      PAYMENTS_EDGE_TOKEN — X-Edge-Token к billing (тот же у billing; генерирует infra/railway/setup.py).
+# Маршруты: /pay/payme (любой метод — billing ответит Payme -32300 на не-POST) → /provider/v1/payme;
+#           POST /pay/click/prepare|complete → /provider/v1/click/prepare|complete;
+#           POST /pay/uzum/check|create|confirm|reverse|status → /provider/v1/uzum/<op>; прочее — 404.
+# Входящий X-Edge-Token клиента заменяется своим; тело ≤ 64 КиБ; таймаут ответа billing 10 с. Access-лог не
+# включён: тела колбэков, подписи и учётные данные (Authorization Payme/Uzum) никуда не пишутся.
+{
+	admin off
+	persist_config off
+	auto_https off
+	servers {
+		# Снаружи сюда попадают только через Railway edge; с доверием Caddy ДОПИСЫВАЕТ адрес edge к X-Forwarded-For
+		# клиента (а не затирает его). billing берёт адрес клиента на фиксированной глубине справа (edge + этот
+		# Caddy), а не крайний левый (его подделывает клиент) — проверка CIDR провайдера (*_ALLOWED_CIDRS).
+		trusted_proxies static 0.0.0.0/0 ::/0
+		client_ip_headers X-Forwarded-For
+	}
+}
+
+:{$PORT:8080} {
+	request_body {
+		max_size 64KB
+	}
+	header -Server
+
+	handle /healthz {
+		header Cache-Control "no-store"
+		respond "ok" 200
+	}
+
+	@payme path /pay/payme
+	handle @payme {
+		rewrite * /provider/v1/payme
+		reverse_proxy {$BILLING_URL:http://billing.railway.internal:8118} {
+			header_up X-Edge-Token {$PAYMENTS_EDGE_TOKEN}
+			header_down -Server
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 10s
+			}
+		}
+	}
+
+	@click {
+		method POST
+		path_regexp click ^/pay/click/(prepare|complete)$
+	}
+	handle @click {
+		rewrite * /provider/v1/click/{re.click.1}
+		reverse_proxy {$BILLING_URL:http://billing.railway.internal:8118} {
+			header_up X-Edge-Token {$PAYMENTS_EDGE_TOKEN}
+			header_down -Server
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 10s
+			}
+		}
+	}
+
+	@uzum {
+		method POST
+		path_regexp uzum ^/pay/uzum/(check|create|confirm|reverse|status)$
+	}
+	handle @uzum {
+		rewrite * /provider/v1/uzum/{re.uzum.1}
+		reverse_proxy {$BILLING_URL:http://billing.railway.internal:8118} {
+			header_up X-Edge-Token {$PAYMENTS_EDGE_TOKEN}
+			header_down -Server
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 10s
+			}
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}

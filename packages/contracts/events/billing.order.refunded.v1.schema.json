@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "billing.order.refunded.v1.schema.json",
+  "title": "billing.order.refunded.v1",
+  "type": "object",
+  "required": [
+    "order_id",
+    "order_no",
+    "account_id",
+    "beneficiary_user_id",
+    "channel",
+    "product_kind",
+    "currency",
+    "amount_tiyin",
+    "amount_stars",
+    "refund_id",
+    "initiated_by",
+    "refunded_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "order_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "order_no": {
+      "type": "integer",
+      "minimum": 100001
+    },
+    "account_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "beneficiary_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "miniapp",
+        "web",
+        "renewal"
+      ]
+    },
+    "product_kind": {
+      "type": "string",
+      "enum": [
+        "subscription",
+        "til_pack"
+      ]
+    },
+    "currency": {
+      "type": "string",
+      "enum": [
+        "UZS",
+        "XTR"
+      ]
+    },
+    "amount_tiyin": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 100,
+      "maximum": 100000000000
+    },
+    "amount_stars": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "refund_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "initiated_by": {
+      "type": "string",
+      "enum": [
+        "staff",
+        "provider"
+      ]
+    },
+    "refunded_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

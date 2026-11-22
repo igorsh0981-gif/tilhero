@@ -276,6 +276,7 @@ describe("overview", () => {
       memory: { available: false, data: null, service: "memory" },
       game: { available: false, data: null, service: "gamification" },
       social: { available: false, data: null, service: "social" },
+      money: { available: false, data: null, service: "billing" },
     };
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);
     ui(<Overview />, ["dashboard.read"]);
@@ -300,6 +301,7 @@ describe("overview", () => {
       memory: { available: false, data: null, service: "memory" },
       game: { available: false, data: null, service: "gamification" },
       social: { available: false, data: null, service: "social" },
+      money: { available: false, data: null, service: "billing" },
     };
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);
     ui(<Overview />, ["dashboard.read"]);
@@ -336,6 +338,7 @@ describe("overview · sprint 4 blocks", () => {
     memory: { available: true, data: { period: "today", review_sessions: 84, learners_reviewing: 61, median_minutes: 6, d30_pass_pct: 78.9, avg_due_per_learner: 11.4, ai_glosses_pending: 3 } },
     game: { available: true, data: { period: "today", earned_xp: 1240, earned_til: 310, freezes_used: 4, quests_completed: 57, active_event: { title: { ru: "Неделя чтения", uz: "Oʻqish haftaligi" }, ends_at: "2026-11-23T19:00:00Z" } } },
     social: { available: false, data: null, service: "social" },
+      money: { available: false, data: null, service: "billing" },
   };
   it("lessons and ai blocks with their own «no data»; attention: budget threshold, AI off, appeals, manual reviews", async () => {
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: base } : undefined);

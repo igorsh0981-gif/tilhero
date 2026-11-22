@@ -32,6 +32,25 @@ export interface RateLimits {
 
 export type AppEnv = "dev" | "test" | "stage" | "prod";
 
+/** Спринт 8 — сайт оплаты вне Telegram (INTERNAL_API §3): маршруты /web/v1/* (src/web/, поток H). */
+export interface WebPayConfig {
+  /** WEB_PAY_ENABLED (false): false — маршруты /web/v1/* не регистрируются (404 NOT_FOUND). */
+  enabled: boolean;
+  /** WEB_PAY_ORIGIN — origin сайта оплаты (https в stage/prod; не origin Mini App): проверка Origin изменяющих запросов,
+   *  redirect_uri OIDC = {origin}/api/auth/callback, возврат после входа. */
+  origin: string;
+  /** TELEGRAM_LOGIN_CLIENT_ID — Client ID «Log In with Telegram» = ID бота (цифры; BotFather → Login Widget). */
+  clientId: string;
+  /** TELEGRAM_LOGIN_CLIENT_SECRET — секрет клиента из BotFather (вводит владелец; только у telegram-bff). В лог, ответы и
+   *  ошибки конфигурации не попадает. Токен бота для входа на сайт не используется. */
+  clientSecret: string;
+  /** TELEGRAM_OIDC_BASE (https://oauth.telegram.org): /auth, /token, /.well-known/jwks.json. Другое значение — только
+   *  dev/test (мок OIDC стенда). */
+  oidcBase: string;
+  /** WEB_SESSION_SECRET — подпись cookie-сессии __Host-wp_session (JWT; ≥ 32, отличен от SESSION_JWT_SECRET). */
+  sessionSecret: string;
+}
+
 export interface Config {
   nodeEnv: string;
   env: AppEnv;
@@ -126,6 +145,14 @@ export interface Config {
    *  маршруты /v1/game/* отвечают 503 GAME_UNAVAILABLE (Mini App скрывает игровой блок, учёба работает). Таймаут и
    *  повторы GET — общие UPSTREAM_TIMEOUT_MS / UPSTREAM_RETRIES. */
   gamificationUrl: string | undefined;
+  /** billing (8118, спринт 8): подписка, минуты, заказы Stars Mini App (/v1/billing/*, chn miniapp) и сайт оплаты
+   *  (/web/v1/*, chn web). Необязателен даже в stage/prod: без адреса маршруты отвечают 503 BILLING_UNAVAILABLE
+   *  (учёба работает). */
+  billingUrl: string | undefined;
+  /** Таймаут вызовов billing, мс (5000; INTERNAL_API §0.3), повторы GET — UPSTREAM_RETRIES. */
+  billingTimeoutMs: number;
+  /** Спринт 8: сайт оплаты (/web/v1/*). */
+  webPay: WebPayConfig;
 
   rateLimits: RateLimits;
   rateLimiting: RateLimiting;
@@ -152,6 +179,16 @@ export const DEV_DEFAULTS = {
   ASSESSMENT_URL: "http://127.0.0.1:8113",
   MEMORY_URL: "http://127.0.0.1:8116",
 } as const;
+
+/** Спринт 8 — dev-значения сайта оплаты: явно фиктивные, только локальный стенд; в stage/prod запрещены. */
+export const WEB_PAY_DEV_DEFAULTS = {
+  WEB_PAY_ORIGIN: "http://localhost:5175",
+  TELEGRAM_LOGIN_CLIENT_ID: "1000000001",
+  TELEGRAM_LOGIN_CLIENT_SECRET: "dev-telegram-login-client-secret-change-me",
+  WEB_SESSION_SECRET: "dev-web-session-secret-change-me-0123456789abcdef",
+} as const;
+/** Единственный допустимый в stage/prod адрес OIDC Telegram. */
+export const TELEGRAM_OIDC_BASE = "https://oauth.telegram.org";
 
 export class ConfigError extends Error {
   constructor(public readonly problems: string[]) {
@@ -330,6 +367,54 @@ export function loadConfig(env: Env = process.env): Config {
   // ---- tts (озвучка) и gamification (игра, спринт 6) — необязательны
   const ttsUrl = optionalUrl("TTS_URL");
   const gamificationUrl = optionalUrl("GAMIFICATION_URL");
+  // ---- спринт 8: billing — необязателен (без адреса /v1/billing/* и /web/v1/* отвечают 503 BILLING_UNAVAILABLE)
+  const billingUrl = optionalUrl("BILLING_URL");
+
+  // ---- спринт 8: сайт оплаты (INTERNAL_API §3). Выключен — значения не обязательны (заданные всё равно проверяются)
+  const webEnabledRaw = raw("WEB_PAY_ENABLED")?.toLowerCase();
+  if (webEnabledRaw !== undefined && !["true", "false", "1", "0"].includes(webEnabledRaw)) {
+    problems.push(`WEB_PAY_ENABLED=${JSON.stringify(webEnabledRaw)}: допустимо true|false`);
+  }
+  const webEnabled = webEnabledRaw === "true" || webEnabledRaw === "1";
+  /** Значение сайта оплаты: задано — оно; в dev/test — фиктивное dev-значение; в stage/prod при WEB_PAY_ENABLED=true
+   *  обязательно (выключенный сайт в stage/prod — пусто). */
+  const webValue = (name: keyof typeof WEB_PAY_DEV_DEFAULTS): string => {
+    const v = raw(name);
+    if (v !== undefined) {
+      if (isSecure && v === WEB_PAY_DEV_DEFAULTS[name]) problems.push(`${name}: dev-значение запрещено в stage/prod`);
+      return v;
+    }
+    if (!isSecure) return WEB_PAY_DEV_DEFAULTS[name];
+    if (webEnabled) problems.push(`${name} не задана (обязательна в stage/prod при WEB_PAY_ENABLED=true)`);
+    return "";
+  };
+  const webOrigin = webValue("WEB_PAY_ORIGIN").replace(/\/+$/, "");
+  if (webOrigin) {
+    try {
+      const u = new URL(webOrigin);
+      if (u.origin !== webOrigin) throw new Error("not an origin");
+      if (isSecure && u.protocol !== "https:") problems.push(`WEB_PAY_ORIGIN: ${webOrigin} — в stage/prod только https`);
+      if (miniappOrigins.includes(u.origin)) problems.push("WEB_PAY_ORIGIN: сайт оплаты не может совпадать с origin Mini App");
+    } catch {
+      problems.push(`WEB_PAY_ORIGIN: ${JSON.stringify(webOrigin)} — ожидается origin вида https://host[:port]`);
+    }
+  }
+  const clientId = webValue("TELEGRAM_LOGIN_CLIENT_ID");
+  if (clientId && !/^\d{5,20}$/.test(clientId)) problems.push("TELEGRAM_LOGIN_CLIENT_ID: ожидается ID бота (цифры)");
+  const clientSecret = webValue("TELEGRAM_LOGIN_CLIENT_SECRET");
+  if (clientSecret && clientSecret.length < 16) problems.push("TELEGRAM_LOGIN_CLIENT_SECRET: минимум 16 символов");
+  if (clientSecret && clientSecret === botToken) problems.push("TELEGRAM_LOGIN_CLIENT_SECRET не может совпадать с BOT_TOKEN");
+  const webSessionSecret = webValue("WEB_SESSION_SECRET");
+  if (webSessionSecret && webSessionSecret.length < 32) problems.push("WEB_SESSION_SECRET: минимум 32 символа");
+  if (webSessionSecret && (webSessionSecret === sessionJwtSecret || webSessionSecret === internalJwtSecret)) {
+    problems.push("WEB_SESSION_SECRET должен отличаться от SESSION_JWT_SECRET и INTERNAL_JWT_SECRET");
+  }
+  const oidcBase = (raw("TELEGRAM_OIDC_BASE") ?? TELEGRAM_OIDC_BASE).replace(/\/+$/, "");
+  if (isSecure && oidcBase !== TELEGRAM_OIDC_BASE) {
+    problems.push(`TELEGRAM_OIDC_BASE: в stage/prod только ${TELEGRAM_OIDC_BASE} (подмена — только dev/test)`);
+  } else if (!/^https?:\/\/[^/\s]+$/.test(oidcBase)) {
+    problems.push(`TELEGRAM_OIDC_BASE=${JSON.stringify(oidcBase)}: ожидается http(s)://host[:port]`);
+  }
 
   const rlEnabledRaw = raw("RATE_LIMITS_ENABLED")?.toLowerCase();
   if (rlEnabledRaw !== undefined && !["true", "false", "1", "0"].includes(rlEnabledRaw)) {
@@ -401,6 +486,9 @@ export function loadConfig(env: Env = process.env): Config {
     ttsUrl,
     ttsTimeoutMs: int("TTS_TIMEOUT_MS", 15_000, 1000, 60_000),
     gamificationUrl,
+    billingUrl,
+    billingTimeoutMs: int("BILLING_TIMEOUT_MS", 5000, 500, 30_000),
+    webPay: { enabled: webEnabled, origin: webOrigin, clientId, clientSecret, oidcBase, sessionSecret: webSessionSecret },
     rateLimits: {
       userPerMinute: int("RATE_LIMIT_USER_PER_MIN", 120, 1, 100_000),
       sessionPerIpPerMinute: int("RATE_LIMIT_SESSION_IP_PER_MIN", 10, 1, 100_000),

@@ -1,0 +1,20 @@
+# Используется BuildKit вместо корневого .dockerignore для apps/web-pay/Dockerfile.
+# Белый список: только то, что нужно для сборки статики сайта оплаты (без BFF, Python-сервисов, docs, тестов и e2e).
+*
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!packages/contracts/package.json
+!packages/contracts/src
+!services/telegram-bff/scripts/restore-workspace-manifests.mjs
+!apps/web-pay
+
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+apps/web-pay/test
+apps/web-pay/e2e
+apps/web-pay/test-results
+apps/web-pay/playwright-report
+apps/web-pay/blob-report

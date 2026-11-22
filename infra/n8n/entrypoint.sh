@@ -4,6 +4,8 @@
 # Workflow включается, только если задана переменная адреса из его HTTP-узла ($env.<X>_URL): адрес может появиться позже:
 # n8n, обновлённый раньше сервисов, стартует и не дёргает несуществующие
 # адреса (импорт выключает workflow; без адреса он остаётся выключенным до следующего старта с переменной).
+# Спринт 8: workflow с "active": false в репозитории (billing-tick, billing-reconcile до готовности billing)
+# импортируется, но не включается ни при каком адресе — включение = правка JSON на true и выкладка n8n.
 set -eu
 
 WORKFLOWS_DIR="${TILHERO_WORKFLOWS_DIR:-/workflows}"
@@ -24,6 +26,7 @@ for (const f of fs.readdirSync(dir).filter((n) => n.endsWith(".json")).sort()) {
   const urls = (wf.nodes || []).filter((n) => n.type === "n8n-nodes-base.httpRequest").map((n) => String(n.parameters.url || ""));
   const vars = [...new Set(urls.map((u) => (u.match(/\$env\.([A-Z][A-Z0-9_]*_URL)\b/) || [])[1]).filter(Boolean))];
   if (vars.length !== 1) { console.error(`${f}: ожидается один адрес $env.<X>_URL`); process.exit(1); }
+  if (wf.active === false) { console.error(`tilhero-n8n: workflow ${wf.id} (${f}) выключен в репозитории — не включается`); continue; }
   console.log(`${wf.id} ${vars[0]}`);
 }' "$WORKFLOWS_DIR")"
 

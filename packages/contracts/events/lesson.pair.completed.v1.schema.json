@@ -102,6 +102,37 @@
     "ended_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "billing": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "payer_user_id",
+            "hold_id",
+            "billable_minutes"
+          ],
+          "properties": {
+            "payer_user_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "hold_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "billable_minutes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 240
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   }
 }

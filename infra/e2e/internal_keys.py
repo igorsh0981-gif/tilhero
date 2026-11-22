@@ -42,6 +42,7 @@ ISSUERS = (
     "tts",  # релиз 4.1: озвучка (только проверяет токены telegram-bff; на стенде — fake-синтез без моделей)
     "memory",  # спринт 5: память и повторения (вызывает catalog, assessment, ai-gateway, identity-consent)
     "gamification",  # спринт 6: игра и герои (никого не вызывает; издатель событий game.*)
+    "billing",  # спринт 8: деньги (вызывает identity-consent, gamification, bot-gateway /stars/*; издатель billing.*)
 )
 
 

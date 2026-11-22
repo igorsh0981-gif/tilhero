@@ -436,6 +436,8 @@ export const AI_BUDGET: Codec<AiBudget> = C.obj<AiBudget>({
   ai_enabled: C.bool,
   monthly_cap_usd: C.num(0, 100_000),
   learner_daily_cap_usd: C.num(0, 1000),
+  // спринт 8 (В14): дневной лимит подписчика; ai-gateway до миграции 0009 (поток D) поля не отдаёт — 0,30 по умолчанию
+  paid_learner_daily_cap_usd: C.fallback(C.num(0, 1000), 0.3),
   lesson_cap_usd: C.num(0, 1000),
   // спринт 5 (решение владельца): подлимит оценки произношения внутри monthly_cap_usd, по умолчанию 5
   speech_monthly_cap_usd: C.num(0, 100_000),

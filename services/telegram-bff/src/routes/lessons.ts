@@ -52,6 +52,7 @@ import {
   LessonHistoryItemSchema,
   LessonHistoryPageSchema,
   LessonParamsSchema,
+  LessonSessionDomainSchema,
   LessonSessionSchema,
   LocaleQuerySchema,
   LessonStepSchema,
@@ -191,7 +192,12 @@ export async function lessonsCall(ctx: BffContext, auth: AccessClaims, req?: Loc
   };
 }
 
-export function sessionView(s: C.LessonSession, kids: boolean): C.LessonSession {
+/** Сессия домена lessons: поля пэйвола спринта 8 (ai_locked, ai_minutes_left) приходят от lessons после потока C —
+ *  до этого их нет, ответ Mini App — null. */
+export type DomainLessonSession = Omit<C.LessonSession, "ai_locked" | "ai_minutes_left"> &
+  Partial<Pick<C.LessonSession, "ai_locked" | "ai_minutes_left">>;
+
+export function sessionView(s: DomainLessonSession, kids: boolean): C.LessonSession {
   return {
     session_id: s.session_id,
     kind: s.kind,
@@ -210,6 +216,8 @@ export function sessionView(s: C.LessonSession, kids: boolean): C.LessonSession 
     finished_at: s.finished_at,
     expires_at: s.expires_at,
     minutes: s.minutes,
+    ai_locked: s.ai_locked ? { reason: s.ai_locked.reason } : null,
+    ai_minutes_left: s.ai_minutes_left ?? null,
   };
 }
 
@@ -303,7 +311,7 @@ export function lessonsRoutes(app: App, ctx: BffContext): void {
   const isGraded = async (sessionId: string, stepId: string): Promise<boolean> =>
     (await ctx.store(() => ctx.redis.exists(gradedKey(sessionId, stepId)))) === 1;
 
-  const sessionOf = (raw: unknown, kids: boolean, what = "lesson_session") => sessionView(expectShape(log, LESSONS, what, LessonSessionSchema, raw), kids);
+  const sessionOf = (raw: unknown, kids: boolean, what = "lesson_session") => sessionView(expectShape(log, LESSONS, what, LessonSessionDomainSchema, raw), kids);
 
   // ---------------------------------------------------------------- карточка урока (APP-LESS-01, AT-39)
   app.get(

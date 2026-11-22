@@ -41,6 +41,7 @@ jobs:
           - services/tts
           - services/memory
           - services/gamification
+          - services/billing
           - apps/telegram-bot-gateway
           - infra/n8n
           - infra/railway
@@ -114,6 +115,7 @@ jobs:
           - services/tts
           - services/memory
           - services/gamification
+          - services/billing
           - apps/telegram-bot-gateway
           - infra/n8n
           - infra/railway
@@ -137,7 +139,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        workspace: [packages/ts-common, services/telegram-bff, apps/telegram-miniapp, services/admin-bff, apps/admin-web]
+        workspace: [packages/ts-common, services/telegram-bff, apps/telegram-miniapp, services/admin-bff, apps/admin-web,
+                    apps/web-pay]
     services:
       redis:
         image: redis:7-alpine
@@ -196,11 +199,14 @@ jobs:
           - services/tts
           - services/memory
           - services/gamification
+          - services/billing
           - apps/telegram-bot-gateway
           - services/telegram-bff
           - apps/telegram-miniapp
           - services/admin-bff
           - apps/admin-web
+          - apps/web-pay
+          - apps/payments-edge
           - infra/n8n
     steps:
       - uses: actions/checkout@v4

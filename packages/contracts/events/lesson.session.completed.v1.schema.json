@@ -191,6 +191,29 @@
           "type": "null"
         }
       ]
+    },
+    "billable_minutes": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 240
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "billing_hold_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   }
 }

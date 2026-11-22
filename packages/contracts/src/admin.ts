@@ -34,6 +34,8 @@
  * переоценка; решение по апелляции. Спринт 5: ручная правка карточки памяти ученика. Спринт 6: активация и откат
  * правил игры, публикация героев, предметов и событий, ручные операции с кошельком. Спринт 7: санкция social_ban
  * больше 7 дней и бессрочная, активация реферальной кампании, переоценка лиги и дуэли, остановка парной комнаты.
+ * Спринт 8: активация и откат каталога тарифов, заявка на корректировку и решение по ней («четыре глаза»), возврат и
+ * его закрытие как неудачного, массовая выдача пробного, уровень деградации ИИ, бюджет ИИ.
  */
 
 import type {
@@ -41,15 +43,19 @@ import type {
   MediaRequestStatus, PartOfSpeech, ScenarioTestRun, VersionStatus, Localized as ContentLocalized, Band,
 } from "./content.js";
 import type {
+  BillingFeature, BillingOrderStatus, BillingProductKind, MinuteEntryKind, MinuteRefKind, StarsMode,
+  StarsSubscriptionStatus, SubscriptionStatus,
   GameAction, GameCurrency, GameReason, HeroLine, HeroStage, QuestKind, ShopItemKind,
   ComplaintReason, ComplaintSubjectKind, DuelScore, DuelStatus, FriendRequestStatus, LeagueLevelBand, PairEndReason,
   PairRole, PairRoomEventKind, PairRoomMode, PairRoomStatus, ReferralRejectCode, ReferralReward,
   ReferralRewardOutcome, ReferralStatus, SanctionAppealStatus, SanctionKind,
 } from "./bff.js";
 import type {
-  Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiModel, AiProviderStatus, ConfirmedError, GoldenCase,
-  RubricCriterionCode, SessionKind, TestRun, TestRunSummary,
+  Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiDegradation, AiDegradationUpdate, AiModel,
+  AiProviderStatus, AiUnitCosts, AiUnitCostsKind, ConfirmedError, DegradationEvent, DegradationLevel, DegradationMode,
+  GoldenCase, RubricCriterionCode, SessionKind, TestRun, TestRunSummary,
 } from "./ai.js";
+import type { WebProvider } from "./web.js";
 
 export interface ErrorBody {
   code: string;
@@ -127,7 +133,14 @@ export type Permission =
   | "league.read" // лиги недели (группы, итоги, аномалии) и дуэли
   | "league.manage" // переоценка лиги и дуэли (step-up), снятие удержания призов
   | "room.read" // мониторинг парных комнат — без реплик и оценок
-  | "room.manage"; // остановка парной комнаты (step-up, причина)
+  | "room.manage" // остановка парной комнаты (step-up, причина)
+  // спринт 8 — деньги (PLAN спринта 8 «Права и роли»)
+  | "billing.read" // каталог, заказы, платежи, подписка и минуты ученика, сверка, отчёты
+  | "billing.manage" // черновик каталога и проверка, курсы (USD и Stars), разбор сверки, ручной прогон
+  | "billing.publish" // активация и откат версии каталога, массовая выдача пробного (step-up)
+  | "billing.approve" // подтверждение или отклонение заявки «четыре глаза» другим сотрудником (step-up)
+  | "billing.refund" // возврат по заказу и закрытие возврата как неудачного (step-up, причина ≥ 10)
+  | "subscriptions.override"; // заявка на корректировку минут, выдачу или отзыв периода (step-up, причина ≥ 10)
 
 export const PERMISSIONS: readonly Permission[] = [
   "dashboard.read", "users.read", "users.sensitive.read", "support.read", "support.reply", "support.manage",
@@ -139,6 +152,7 @@ export const PERMISSIONS: readonly Permission[] = [
   "game.read", "game.manage", "game.publish", "wallet.adjust",
   "social.read", "moderation.manage", "referral.read", "referral.manage", "league.read", "league.manage", "room.read",
   "room.manage",
+  "billing.read", "billing.manage", "billing.publish", "billing.approve", "billing.refund", "subscriptions.override",
 ];
 
 export type RoleCode =
@@ -149,14 +163,15 @@ export type RoleCode =
   | "methodist" // курс, уроки, сценарии, рубрики: правка, проверка, публикация
   | "content_manager" // медиа, права и лицензии, заявки учеников
   | "qa_analyst" // контроль диалогов: журнал, оценки, реплики с причиной (спринт 4)
+  | "finance" // спринт 8: «Финансы» — billing.* кроме subscriptions.override, costs.read, dashboard.read, users.read
   | "analyst"
   | "auditor"
   | "read_only";
 
 /** Роли, для которых MFA (TOTP) обязательна; назначение такой роли — four-eyes. Базовый список спринта 2:
  * привилегированной также считается любая роль с правом, требующим step-up (спринт 3: methodist — content.publish,
- * content_manager — media.rights). Источник истины — `Role.privileged` из GET /admin/v1/roles; константа — запасной
- * вариант, пока роли не загружены. */
+ * content_manager — media.rights; спринт 8: finance — billing.publish, billing.approve, billing.refund). Источник истины —
+ * `Role.privileged` из GET /admin/v1/roles; константа — запасной вариант, пока роли не загружены. */
 export const PRIVILEGED_ROLES: readonly RoleCode[] = ["super_admin", "operations", "communications"];
 
 export interface Role {
@@ -345,6 +360,8 @@ export type GuardianConsent = "not_required" | "pending" | "granted" | "declined
 /** account — аккаунт Telegram (сам ученик 14+ или опекун); child — детский профиль 6–13 под опекуном. */
 export type LearnerKind = "account" | "child";
 export type LearnerStatus = "ACTIVE" | "DISABLED" | "DELETION_REQUESTED" | "DELETED";
+/** Спринт 8: тариф — paid, если у аккаунта активный период с функциями подписки (ученики аккаунта — одинаково). */
+export type LearnerTier = "free" | "paid";
 export type Goal = "work" | "career" | "travel" | "daily" | "study" | "exam";
 export type LevelSelf = "zero" | "beginner" | "some" | "confident";
 export type SchedulePreset = "daily" | "weekdays" | "three_per_week" | "custom";
@@ -360,6 +377,9 @@ export type ConsentPurpose = string;
 export interface AdminLearnerRow {
   user_id: string;
   kind: LearnerKind;
+  /** спринт 8 (ADM-USR-01): тариф ученика — проекция billing.access.changed.v1 в user-admin; null — событий ещё не было
+   *  (считать free). Фильтр списка — ?tier=free|paid. */
+  tier: LearnerTier | null;
   /** для child — аккаунт опекуна */
   guardian_user_id: string | null;
   display_name: string | null;
@@ -380,8 +400,9 @@ export interface AdminLearnerRow {
   last_activity_at: string | null;
 }
 
-/** GET /admin/v1/learners?q=&kind=&age_band=&status=&locale=&has_open_tickets=&cursor=&limit= → Page<AdminLearnerRow>.
- *  q: UUID ученика, @username, часть имени, TCK-номер обращения (→ его автор). */
+/** GET /admin/v1/learners?q=&kind=&age_band=&status=&locale=&has_open_tickets=&tier=&cursor=&limit= →
+ *  Page<AdminLearnerRow>. q: UUID ученика, @username, часть имени, TCK-номер обращения (→ его автор); tier (спринт 8) —
+ *  free | paid. */
 export interface AdminLearnerPlan {
   goal: Goal | null;
   level_self: LevelSelf | null;
@@ -495,6 +516,9 @@ export interface Dashboard {
   game: DashboardBlock<GameStats>;
   /** спринт 7: источник — social (дуэли — gamification, комнаты — lessons: при их недоступности поля null) */
   social: DashboardBlock<SocialStats>;
+  /** спринт 8: источник — billing reports/summary?period=day (+ доля потолка ИИ из ai-gateway; недоступен — null);
+   *  блок только при billing.read или dashboard.read */
+  money: DashboardBlock<MoneyStats>;
 }
 
 // =====================================================================================================================
@@ -1475,7 +1499,24 @@ export interface LessonStats {
   human_review_open: number;
 }
 
-export type { Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiModel, AiProviderStatus, GoldenCase, TestRun, TestRunSummary };
+// ---------- Контроль ИИ (спринт 8, ADM-AGENT-05 — деградация; INTERNAL_API §7) ----------
+/** GET /admin/v1/ai/degradation (costs.read) → AiDegradation (+ имена сотрудников смен уровня — DegradationEventRow);
+ *  PUT /admin/v1/ai/degradation AiDegradationUpdate (costs.manage, step-up; аудит ai.degradation_updated) →
+ *  AiDegradationView; 422 DEGRADATION_INVALID.
+ *  GET /admin/v1/ai/unit-costs?period=week|month (costs.read | dashboard.read) → AiUnitCosts — стоимость урока,
+ *  сценария и урока вдвоём, стоимость ИИ-минуты, доля деградированных занятий.
+ *  PUT /admin/v1/ai/budget — AiBudget-поля, в том числе paid_learner_daily_cap_usd (дневной лимит подписчика, 0,30). */
+export interface DegradationEventRow extends DegradationEvent {
+  actor_name: string | null;
+}
+export interface AiDegradationView extends Omit<AiDegradation, "events"> {
+  events: DegradationEventRow[];
+}
+
+export type {
+  Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiDegradation, AiDegradationUpdate, AiModel, AiProviderStatus,
+  AiUnitCosts, AiUnitCostsKind, DegradationEvent, DegradationLevel, DegradationMode, GoldenCase, TestRun, TestRunSummary,
+};
 
 // =====================================================================================================================
 // =====================================================================================================================
@@ -2389,4 +2430,585 @@ export interface SocialStats {
   cases_opened: number;
   /** открытых дел сейчас */
   cases_open: number;
+}
+
+// =====================================================================================================================
+// Деньги (спринт 8): ADM-MONEY-01…05, ADM-USR-04, ADM-USR-02 (вкладка «Тариф»), ADM-USR-01 (фильтр tier),
+// ADM-DASH-04 (финансовый обзор). Источник — billing через admin-bff /admin/v1/billing/* (→ /internal/v1/admin/
+// billing/*); обзор — /admin/v1/finance/overview (billing + ai-gateway). Каналы продаж разведены: Mini App — только
+// Telegram Stars (miniapp, renewal), сайт оплаты — только Payme, Click, Uzum (web).
+// Деньги — целые (ADR-0001): сумы — тийины (1 сум = 100 тийинов, UZS), Stars — целые звёзды (XTR); в заказе,
+// транзакции и возврате заполнено ровно одно из amount_tiyin / amount_stars. Курсы — целые: «тийинов за 1 USD» и
+// «тийинов за 1 Star» (оценка вознаграждения, вводят финансы); пересчёт — только в обзоре (целочисленно, half-up,
+// с пометкой «оценка»), комиссии провайдеров и магазинов приложений не учитываются.
+// Права: billing.read; billing.manage; billing.publish (step-up); subscriptions.override (step-up, причина ≥ 10);
+// billing.approve (step-up); billing.refund (step-up, причина ≥ 10). Ключи провайдеров в админке не показываются и не
+// вводятся — только «задан / не задан» (BillingProviderStatus.configured).
+// Коды: 422 CATALOG_INVALID {errors: [{path, code}]}; 409 CATALOG_NOT_VALIDATED | CATALOG_STATE | DRAFT_CONFLICT;
+// 404 CATALOG_DRAFT_NOT_FOUND | ORDER_NOT_FOUND | ACCOUNT_NOT_FOUND | ADJUSTMENT_NOT_FOUND | REFUND_NOT_FOUND |
+// RECON_ITEM_NOT_FOUND; 409 ADJUSTMENT_STATE | SELF_APPROVAL | BALANCE_NEGATIVE | REFUND_STATE | RECON_ITEM_STATE |
+// STARS_PAYER_UNKNOWN; 409 REFUND_NOT_ALLOWED {reason: provider_window | tils_spent | not_paid, til?, til_balance?};
+// 422 ADJUSTMENT_INVALID | FX_INVALID; 403 STEP_UP_REQUIRED; 503 UPSTREAM_UNAVAILABLE {service: billing}.
+// =====================================================================================================================
+
+export type BillingProvider = "telegram_stars" | "payme" | "click" | "uzum";
+export type BillingChannel = "miniapp" | "web" | "renewal";
+export type BillingCurrency = "UZS" | "XTR";
+/** Аудитории товара (получатель): дети 6–13, подростки 14–17, взрослые. */
+export type BillingAudience = "kids" | "teens" | "adults";
+
+// ---------- Тарифы и товары: каталог с версиями (ADM-MONEY-03) ----------
+
+/** Фискальные реквизиты позиции чека сайта (§1.9). В stage/prod обязательны у товара с price_tiyin в продаже, в
+ *  dev/test — предупреждение; для Stars не нужны. */
+export interface CatalogProductFiscal {
+  ikpu: string | null; // ИКПУ (SPIC), ^[0-9]{1,17}$
+  package_code: string | null; // ^[0-9]{1,20}$
+  units: number | null;
+  vat_percent: number | null; // 0..100
+  receipt_title: string | null; // 1..63
+}
+
+/** Товар каталога (payload версии, INTERNAL_API §1.2). Продаётся на сайте, если задана price_tiyin и есть providers;
+ *  в Mini App — если задана price_stars. Подписка: days 1..366, minutes 1..100 000, features непусты;
+ *  stars_mode subscription — только при days = 30 и price_stars ≤ 10 000 (Bot API). Пакет тилов: til 1..100 000,
+ *  stars_mode one_time. */
+export interface CatalogProduct {
+  code: string; // ^[a-z0-9_]{2,40}$, уникален
+  kind: BillingProductKind;
+  /** hidden — не продаётся (оплаченное живёт по снимку заказа) */
+  status: "on_sale" | "hidden";
+  sort: number;
+  title: Localized; // 1..60
+  description?: Localized; // ≤ 300
+  days?: number;
+  minutes?: number;
+  features?: BillingFeature[];
+  til?: number;
+  audiences: BillingAudience[];
+  /** цена сайта в тийинах (кратна 100: целые сумы), 100..10¹¹; null — на сайте не продаётся */
+  price_tiyin: number | null;
+  providers: WebProvider[];
+  /** цена Mini App в Stars, 1..100 000; null — в Mini App не продаётся (О1: пусто до решения финансов) */
+  price_stars: number | null;
+  stars_mode: StarsMode;
+  /** title счёта Stars RU/UZ, 1..32 */
+  stars_title: Localized | null;
+  fiscal: CatalogProductFiscal | null;
+}
+
+export interface CatalogPayload {
+  /** ИНН (9 цифр) или ПИНФЛ (14) комитента — в позициях чека сайта */
+  merchant: { tin: string | null };
+  /** оферта на домене Mini App (https, не сайт оплаты); version — в заказе */
+  offer: { version: string; url: string };
+  trial: { enabled: boolean; days: number; minutes: number; features: BillingFeature[] };
+  limits: {
+    min_start_minutes: number;
+    pair_min_minutes: number;
+    low_minutes_percent: number;
+    expiring_days: number;
+    order_ttl_minutes: number; // 60..2880
+    stars_order_ttl_minutes: number; // 10..1440
+    pending_orders_max: number;
+    hold_ttl_hours: number;
+  };
+  products: CatalogProduct[];
+}
+
+export type CatalogStatus = "draft" | "active" | "archived";
+export interface CatalogVersionSummary {
+  version: number;
+  status: CatalogStatus;
+  comment: string | null;
+  created_by: StaffRef;
+  created_at: string;
+  /** черновик проверен и не менялся после проверки */
+  validated: boolean;
+  activated_by: StaffRef | null;
+  activated_at: string | null;
+}
+export interface CatalogVersion extends CatalogVersionSummary {
+  payload: CatalogPayload;
+  /** отличия от активной версии */
+  diff: Array<{ path: string; from: unknown; to: unknown }>;
+  updated_at: string;
+}
+/** GET /admin/v1/billing/catalog (billing.read) → {items: CatalogVersionSummary[]}
+ *  GET /admin/v1/billing/catalog/{version} → CatalogVersion
+ *  PUT /admin/v1/billing/catalog/draft (billing.manage; If-Match: <updated_at> черновика, иначе 409 DRAFT_CONFLICT)
+ *    CatalogDraftRequest → CatalogVersion; DELETE /admin/v1/billing/catalog/draft (billing.manage) → 204
+ *  POST /admin/v1/billing/catalog/draft/validate (billing.manage) → CatalogValidation
+ *  POST /admin/v1/billing/catalog/draft/activate {comment} (billing.publish, step-up; черновик изменён после проверки —
+ *    409 CATALOG_NOT_VALIDATED) → CatalogVersion
+ *  POST /admin/v1/billing/catalog/{version}/rollback {comment} (billing.publish, step-up) → CatalogVersion (новая версия) */
+export interface CatalogDraftRequest {
+  payload: CatalogPayload;
+  comment: string | null; // ≤ 500
+}
+export interface CatalogValidation {
+  ok: boolean;
+  errors: Array<{ path: string; code: string }>;
+  warnings: Array<{ path: string; code: string }>;
+}
+export interface CatalogActivateRequest {
+  comment: string; // 10..500
+}
+
+// ---------- Заказы и платежи (ADM-MONEY-01, ADM-MONEY-04) ----------
+
+export interface AdminOrderRow {
+  order_id: string;
+  order_no: number;
+  status: BillingOrderStatus;
+  channel: BillingChannel;
+  provider: BillingProvider;
+  product_code: string;
+  product_kind: BillingProductKind;
+  product_title: Localized;
+  currency: BillingCurrency;
+  amount_tiyin: number | null;
+  amount_stars: number | null;
+  /** плательщик и получатель; null — обезличен после удаления аккаунта (В15) */
+  account_id: string | null;
+  beneficiary_id: string | null;
+  created_at: string;
+  expires_at: string;
+  paid_at: string | null;
+  fulfilled_at: string | null;
+  closed_at: string | null;
+}
+
+export type ProviderTxnState = "created" | "performed" | "cancelled" | "refunded";
+export interface AdminProviderTxn {
+  txn_id: string;
+  seq: number;
+  provider: BillingProvider;
+  provider_txn_id: string;
+  state: ProviderTxnState;
+  cancel_reason: string | null;
+  /** Payme reason как пришёл (1, 2, 3, 4, 5, 10) */
+  provider_reason: number | null;
+  amount_tiyin: number | null;
+  amount_stars: number | null;
+  provider_time: string | null;
+  created_at: string;
+  performed_at: string | null;
+  cancelled_at: string | null;
+}
+
+export interface AdminFiscalReceipt {
+  receipt_id: string;
+  txn_id: string;
+  kind: "sale" | "refund";
+  source: "payme_set_fiscal_data" | "click_ofd" | "uzum";
+  status: "pending" | "registered" | "failed";
+  fiscal_receipt_id: string | null;
+  terminal_id: string | null;
+  fiscal_sign: string | null;
+  qr_code_url: string | null; // https
+  status_code: number | null;
+  message: string | null;
+  attempts: number;
+  registered_at: string | null;
+  created_at: string;
+}
+
+export type RefundStatus = "awaiting_provider" | "completed" | "failed";
+export interface AdminRefund {
+  refund_id: string;
+  order_id: string;
+  order_no: number;
+  txn_id: string;
+  provider: BillingProvider;
+  amount_tiyin: number | null;
+  amount_stars: number | null;
+  status: RefundStatus;
+  /** staff — по решению сотрудника; provider — по инициативе провайдера (Payme/Uzum отмена, refunded_payment) */
+  initiated_by: "staff" | "provider";
+  /** provider_api — сразу (Stars refundStarPayment, Click reversal); provider_cabinet — в кабинете (Payme, Uzum) */
+  method: "provider_api" | "provider_cabinet";
+  reason: string | null;
+  requested_by: StaffRef | null;
+  requested_at: string;
+  completed_at: string | null;
+  failure_code: string | null;
+  /** пред-проверка возврата тилов (gamification by-order): сколько куплено и сколько на балансе */
+  tils_check: { til: number; til_balance: number; status: string } | null;
+  /** возврат в кабинете провайдера: что сделать сотруднику (сумма — тийины) */
+  instruction: { provider: BillingProvider; provider_txn_id: string; amount_tiyin: number | null } | null;
+}
+
+export interface AdminStarsSubscription {
+  subscription_id: string;
+  product_code: string;
+  status: StarsSubscriptionStatus;
+  amount_stars: number;
+  /** subscription_expiration_date последнего платежа */
+  expires_at: string;
+  renewals: number;
+  first_order_no: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Журнал вызовов провайдеров и bot-gateway — только метаданные (без тел, подписей, учётных данных, IP), 90 дней. */
+export interface AdminProviderCall {
+  call_id: number;
+  provider: string;
+  direction: "in" | "out";
+  method: string;
+  result_code: string;
+  latency_ms: number;
+  created_at: string;
+}
+
+/** GET /admin/v1/billing/orders?status=&channel=&provider=&product_kind=&from=&to=&order_no=&provider_txn_id=
+ *  &account_id=&cursor= (billing.read) → Page<AdminOrderRow>; GET /admin/v1/billing/orders/{order_id} → AdminOrderCard */
+export interface AdminOrderCard extends AdminOrderRow {
+  offer_version: string;
+  locale: UiLang;
+  start_mode: "after_current" | "now" | null;
+  stars_mode: StarsMode | null;
+  /** снимок товара на момент заказа (цена, дни, минуты, тилы, функции, названия, фискальные реквизиты) */
+  product_snapshot: Record<string, unknown>;
+  transactions: AdminProviderTxn[];
+  receipts: AdminFiscalReceipt[];
+  refunds: AdminRefund[];
+  stars_subscription: AdminStarsSubscription | null;
+  /** последние 50 вызовов по заказу */
+  provider_calls: AdminProviderCall[];
+  /** можно оформить возврат сейчас (paid/fulfilled, есть проведённая транзакция, нет живого возврата) */
+  can_refund: boolean;
+}
+
+/** POST /admin/v1/billing/orders/{order_id}/refunds RefundRequest (billing.refund, step-up, Idempotency-Key) →
+ *  AdminRefund (201): Stars и Click — сразу (completed | failed), Payme и Uzum — awaiting_provider с инструкцией.
+ *  409 REFUND_STATE | REFUND_NOT_ALLOWED {reason: provider_window | tils_spent {til, til_balance} | not_paid} |
+ *  STARS_PAYER_UNKNOWN. POST /admin/v1/billing/refunds/{refund_id}/fail RefundFailRequest (billing.refund, step-up) →
+ *  AdminRefund. GET /admin/v1/billing/refunds?status=&cursor= (billing.read) → Page<AdminRefund>. */
+export interface RefundRequest {
+  reason: string; // 10..500
+  /** вернуть деньги, даже если купленные тилы уже потрачены (пункт сверки tils_spent_on_refund) */
+  force?: boolean;
+}
+export interface RefundFailRequest {
+  note: string; // 10..500
+}
+
+// ---------- Ученик → вкладка «Тариф» (ADM-USR-02, ADM-MONEY-02) ----------
+
+export type BillingPeriodStatus = "scheduled" | "active" | "ended" | "superseded" | "revoked";
+export interface AdminBillingPeriod {
+  period_id: string;
+  product_code: string;
+  /** order — оплата; trial — пробный; grant — выдача сотрудником («четыре глаза») */
+  source: "order" | "trial" | "grant";
+  status: BillingPeriodStatus;
+  features: BillingFeature[];
+  minutes_granted: number;
+  days: number;
+  starts_at: string | null;
+  ends_at: string | null;
+  created_at: string;
+  closed_at: string | null;
+  close_reason: "ended" | "superseded" | "refund" | "staff" | "deletion" | null;
+  order_no: number | null;
+  /** остатки периода (итоги реестра) */
+  balance: { granted: number; spent: number; removed: number; held: number; overage: number; minutes_left: number } | null;
+}
+
+export interface AdminMinuteHold {
+  hold_id: string;
+  feature: BillingFeature;
+  ref_kind: "session" | "room";
+  ref_id: string;
+  learner_id: string | null;
+  minutes: number;
+  status: "active" | "settled" | "expired";
+  settled_minutes: number | null;
+  overage: number | null;
+  created_at: string;
+  expires_at: string;
+  settled_at: string | null;
+}
+
+/** GET /admin/v1/learners/{user_id}/billing (billing.read) → AdminBillingAccount — вкладка «Тариф» карточки ученика
+ *  (admin-bff: аккаунт ученика → billing GET /accounts/{account_id}; детский профиль — тариф аккаунта опекуна).
+ *  billing недоступен — 503 UPSTREAM_UNAVAILABLE {service: billing}, остальная карточка работает. */
+export interface AdminBillingAccount {
+  account_id: string;
+  status: SubscriptionStatus;
+  tier: LearnerTier;
+  features: BillingFeature[];
+  expiring: boolean;
+  minutes_exhausted: boolean;
+  trial_used: boolean;
+  current_period: AdminBillingPeriod | null;
+  /** последние 20 периодов (новые сверху), включая запланированные */
+  periods: AdminBillingPeriod[];
+  /** активные удержания минут (идущие занятия) */
+  holds: AdminMinuteHold[];
+  stars_subscription: AdminStarsSubscription | null;
+  pending_adjustments: number;
+}
+
+/** GET /admin/v1/billing/accounts/{account_id}/ledger?cursor= (billing.read) → Page<AdminLedgerEntry> — реестр минут
+ *  (только добавление; исправление — новой записью). */
+export interface AdminLedgerEntry {
+  entry_id: string;
+  seq: number;
+  period_id: string;
+  kind: MinuteEntryKind;
+  minutes: number;
+  overage: number;
+  learner_id: string | null;
+  ref_kind: MinuteRefKind;
+  ref_id: string;
+  /** system | learner | staff:<id> */
+  actor: string;
+  actor_name: string | null;
+  created_at: string;
+}
+
+// ---------- Корректировки «четыре глаза» (ADM-USR-04, ADM-MONEY-05) ----------
+
+export type AdjustmentKind = "minutes" | "grant_period" | "revoke_period";
+export type AdjustmentStatus = "pending" | "applied" | "rejected" | "expired" | "cancelled";
+
+/** POST /admin/v1/billing/accounts/{account_id}/adjustments AdjustmentRequest (subscriptions.override, step-up,
+ *  Idempotency-Key) → Adjustment (202, pending; истекает через 72 ч). minutes: ±N (−10 000..10 000, ≠ 0) к периоду
+ *  period_id (active | scheduled; отрицательная — не больше доступного, иначе 409 BALANCE_NEGATIVE); grant_period:
+ *  days 1..90 и minutes > 0; revoke_period: period_id (подписку Stars не отменяет). 422 ADJUSTMENT_INVALID.
+ *  GET /admin/v1/billing/adjustments?status=&cursor= (billing.read) → Page<Adjustment>
+ *  POST /admin/v1/billing/adjustments/{id}/approve {note?} | /reject {note ≥ 10} (billing.approve, step-up) →
+ *    Adjustment; автор — 409 SELF_APPROVAL; не pending — 409 ADJUSTMENT_STATE
+ *  POST /admin/v1/billing/adjustments/{id}/cancel (только автор) → Adjustment */
+export interface AdjustmentRequest {
+  kind: AdjustmentKind;
+  minutes?: number;
+  days?: number;
+  period_id?: string;
+  reason: string; // 10..500 — ученику не показывается
+}
+export interface AdjustmentDecisionRequest {
+  note?: string; // reject — обязательна, 10..500
+}
+export interface Adjustment {
+  adjustment_id: string;
+  account_id: string;
+  kind: AdjustmentKind;
+  minutes: number | null;
+  days: number | null;
+  period_id: string | null;
+  reason: string;
+  status: AdjustmentStatus;
+  requested_by: StaffRef;
+  requested_at: string;
+  decided_by: StaffRef | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  /** значения до и после применения (остаток минут, период) */
+  before_value: Record<string, unknown> | null;
+  after_value: Record<string, unknown> | null;
+  expires_at: string;
+  /** может ли текущий сотрудник подтвердить или отклонить (есть billing.approve и он не автор) */
+  can_decide: boolean;
+  /** может ли текущий сотрудник отозвать (автор, pending) */
+  can_cancel: boolean;
+}
+
+// ---------- Сверка (ADM-MONEY-04, AT-97) ----------
+
+export type ReconItemKind =
+  | "paid_not_fulfilled" | "stale_created" | "provider_mismatch" | "duplicate_payment" | "refund_without_request"
+  | "refund_stuck" | "fiscal_missing" | "tils_spent_on_refund" | "paid_after_deletion" | "payer_mismatch"
+  | "stars_unmatched" | "stars_subscription_desync" | "hold_expired" | "balance_drift" | "unmatched_settlement";
+export interface ReconItem {
+  item_id: string;
+  run_id: string | null;
+  kind: ReconItemKind;
+  provider: BillingProvider | null;
+  order_id: string | null;
+  order_no: number | null;
+  txn_id: string | null;
+  period_id: string | null;
+  /** подробности без ПДн, Telegram ID и секретов */
+  details: Record<string, unknown>;
+  status: "open" | "resolved" | "ignored";
+  created_at: string;
+  resolved_by: StaffRef | null;
+  resolved_at: string | null;
+  note: string | null;
+}
+export interface ReconRun {
+  run_id: string;
+  kind: "tick" | "daily" | "manual";
+  started_at: string;
+  finished_at: string | null;
+  checked: number;
+  found: number;
+  error: string | null;
+}
+/** GET /admin/v1/billing/reconciliation/items?status=&kind=&cursor= (billing.read) → Page<ReconItem>
+ *  POST /admin/v1/billing/reconciliation/runs (billing.manage) → ReconRun (ручной прогон)
+ *  POST /admin/v1/billing/reconciliation/items/{id}/resolve ReconResolveRequest (billing.manage; аудит) → ReconItem.
+ *  Денежные последствия — только возвратом или корректировкой. */
+export interface ReconResolveRequest {
+  status: "resolved" | "ignored";
+  note: string; // 10..500
+}
+
+// ---------- Отчёты, курсы, провайдеры (ADM-DASH-04, ADM-MONEY-01) ----------
+
+export interface BillingMinutesTotals {
+  granted: number;
+  spent: number;
+  expired: number;
+  revoked: number;
+  overage: number;
+}
+export interface FxRateRef {
+  usd_in_tiyin: number; // тийинов за 1 USD
+  valid_from: string; // YYYY-MM-DD
+}
+export interface StarRateRef {
+  star_in_tiyin: number; // оценка вознаграждения за 1 Star, тийинов
+  valid_from: string;
+}
+
+/** GET /admin/v1/billing/reports/summary?period=day|week|month (billing.read | dashboard.read) → BillingSummary.
+ *  Дни и месяц — Asia/Tashkent. Выручка сайта (сумы) и Mini App (Stars) — раздельно; est_net_tiyin — оценка по курсу
+ *  Star (null — курс не задан). */
+export interface BillingSummary {
+  period: "day" | "week" | "month";
+  from: string;
+  to: string;
+  web: {
+    revenue_tiyin: number;
+    refunds_tiyin: number;
+    net_tiyin: number;
+    orders_paid: number;
+    by_provider: Record<WebProvider, { orders: number; revenue_tiyin: number }>;
+  };
+  stars: {
+    revenue_stars: number;
+    refunds_stars: number;
+    net_stars: number;
+    orders_paid: number;
+    renewals: number;
+    est_net_tiyin: number | null;
+  };
+  by_product: Record<string, { orders: number; revenue_tiyin: number; revenue_stars: number }>;
+  active_subscriptions: number;
+  stars_subscriptions_live: number;
+  trials_started: number;
+  trials_converted: number;
+  conversion_pct: number | null;
+  minutes: BillingMinutesTotals;
+  fx: FxRateRef | null;
+  star_rate: StarRateRef | null;
+}
+
+/** GET /admin/v1/billing/reports/daily?from=&to= (≤ 92 дней; billing.read | dashboard.read) → {items: BillingDailyRow[]} */
+export interface BillingDailyRow {
+  date: string; // YYYY-MM-DD, Asia/Tashkent
+  web_revenue_tiyin: number;
+  web_refunds_tiyin: number;
+  stars_revenue_stars: number;
+  stars_refunds_stars: number;
+  orders_paid: number;
+  trials_started: number;
+  minutes_spent: number;
+}
+
+/** GET /admin/v1/billing/fx (billing.read) → {items: FxRate[]}; PUT /admin/v1/billing/fx FxRateRequest (billing.manage,
+ *  аудит fx_updated) → FxRate; 422 FX_INVALID. GET|PUT /admin/v1/billing/star-rate — то же для StarRate. */
+export interface FxRate extends FxRateRef {
+  set_by: StaffRef;
+  reason: string;
+  created_at: string;
+}
+export interface FxRateRequest {
+  usd_in_tiyin: number; // 100 000..100 000 000
+  valid_from: string;
+  reason: string; // 10..500
+}
+export interface StarRate extends StarRateRef {
+  set_by: StaffRef;
+  reason: string;
+  created_at: string;
+}
+export interface StarRateRequest {
+  star_in_tiyin: number; // 1..10 000 000
+  valid_from: string;
+  reason: string;
+}
+
+/** GET /admin/v1/billing/providers (billing.read) → {items: BillingProviderStatus[]} — включён ли провайдер и задан ли
+ *  ключ (сам ключ не показывается никогда); Stars — доступность bot-gateway. */
+export interface BillingProviderStatus {
+  provider: BillingProvider;
+  enabled: boolean;
+  configured: boolean;
+  last_callback_at: string | null;
+  last_error_code: string | null;
+}
+
+/** POST /admin/v1/billing/trials:grant-all TrialsGrantAllRequest (billing.publish, step-up; только при
+ *  TRIAL_ON_ENFORCEMENT=true) → TrialsGrantAllResult — разовая выдача пробного всем активным 14+ без пробного. */
+export interface TrialsGrantAllRequest {
+  reason: string; // 10..500
+}
+export interface TrialsGrantAllResult {
+  granted: number;
+  skipped: number;
+}
+
+// ---------- Финансовый обзор (ADM-DASH-04, AT-99) ----------
+
+/** GET /admin/v1/finance/overview?period=day|week|month (billing.read | dashboard.read) → FinanceOverview. Собирает
+ *  admin-bff: billing reports/summary + ai-gateway usage/summary и unit-costs. Все суммы — целые: тийины, Stars,
+ *  микродоллары (1 USD = 1 000 000). Пересчёт USD → тийины и Stars → тийины — по курсам финансов (half-up), Stars —
+ *  с пометкой «оценка»; комиссии провайдеров и магазинов приложений не учитываются. Источник недоступен — блок null. */
+export interface FinanceOverview {
+  period: "day" | "week" | "month";
+  from: string;
+  to: string;
+  generated_at: string;
+  revenue: Omit<BillingSummary, "period" | "from" | "to" | "fx" | "star_rate"> | null;
+  ai: {
+    spent_micro_usd: number;
+    /** по курсу USD; null — курс не задан */
+    spent_tiyin: number | null;
+    monthly_cap_micro_usd: number;
+    cap_used_pct: number;
+    /** стоимость ИИ-минуты (затраты на занятия с ИИ / списанные минуты) */
+    cost_per_minute_micro_usd: number | null;
+    cost_per_minute_tiyin: number | null;
+    /** прогноз затрат ИИ до конца месяца (UTC) */
+    forecast_month_micro_usd: number | null;
+    /** «нужный потолок» = минуты месяца × p95 стоимости минуты × 1,2 */
+    needed_cap_micro_usd: number | null;
+    level: DegradationLevel;
+  } | null;
+  /** маржа = выручка сайта нетто + оценка Stars нетто − затраты ИИ (тийины); estimated — есть оценка Stars */
+  margin: { net_tiyin: number; estimated: boolean } | null;
+  fx: FxRateRef | null;
+  star_rate: StarRateRef | null;
+}
+
+/** Блок главной админки (dashboard.read): деньги за сегодня (Asia/Tashkent) и очередь сверки. */
+export interface MoneyStats {
+  period: Period;
+  web_revenue_tiyin: number;
+  stars_revenue_stars: number;
+  orders_paid: number;
+  refunds: number;
+  active_subscriptions: number;
+  trials_started: number;
+  /** открытых пунктов сверки сейчас */
+  recon_open: number;
+  /** доля потолка ИИ месяца, 0–100; null — ai-gateway недоступен */
+  ai_cap_used_pct: number | null;
 }

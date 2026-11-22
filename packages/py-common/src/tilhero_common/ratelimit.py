@@ -156,6 +156,17 @@ POLICIES: dict[str, Policy] = {p.policy: p for p in (
        "Лента и присутствие парной комнаты (GET …/state, POST …/heartbeat) — на ученика в минуту (спринт 7)"),
     _p("tg.room.audio", "telegram-bff", "user", 30, 600, "open", None,
        "Голосовой ход парного урока (POST /v1/pair-rooms/*/audio) — на ученика за 10 минут (спринт 7)"),
+    _p("tg.billing.read", "telegram-bff", "user", 120, 60, "open", None,
+       "Подписка, минуты, каталог и заказы Stars в Mini App (GET /v1/billing/*) — на аккаунт в минуту (спринт 8)"),
+    _p("tg.billing.order", "telegram-bff", "user", 10, 600, "open", None,
+       "Команды оплаты Mini App: заказ, отмена, пробный период, автопродление (POST /v1/billing/*) — на аккаунт "
+       "за 10 минут (спринт 8)"),
+    _p("web.auth_ip", "telegram-bff", "ip", 20, 60, "closed", None,
+       "Сайт оплаты: вход через Telegram и выход (/web/v1/auth/*) — с одного IP в минуту (спринт 8)"),
+    _p("web.read", "telegram-bff", "user", 120, 60, "open", None,
+       "Сайт оплаты: профиль, тарифы, подписка, заказы (GET /web/v1/*) — на аккаунт в минуту (спринт 8)"),
+    _p("web.order", "telegram-bff", "user", 10, 600, "open", None,
+       "Сайт оплаты: заказ и отмена (POST /web/v1/orders*) — на аккаунт за 10 минут (спринт 8)"),
     _p("adm.login_ip", "admin-bff", "ip", 10, 60, "closed", "RATE_LIMIT_LOGIN_IP_PER_MIN",
        "Вход сотрудника (POST /admin/v1/auth/login) — с одного IP"),
     _p("adm.login_email", "admin-bff", "email", 5, 60, "closed", "RATE_LIMIT_LOGIN_EMAIL_PER_MIN",
@@ -174,6 +185,8 @@ POLICIES: dict[str, Policy] = {p.policy: p for p in (
        "Внутренние вызовы Python-сервисов — на пару (вызывающий, сервис): защита от зацикливания (новая)"),
     _p("gw.llm.user", "ai-gateway", "user", 40, 60, "open", None,
        "Потоковый LLM (ai-gateway, спринт 4) — на пользователя"),
+    _p("pay.callback_ip", "billing", "ip", 600, 60, "open", None,
+       "Колбэки Payme, Click, Uzum через payments-edge (/provider/v1/*) — с одного IP клиента в минуту (спринт 8)"),
 )}
 
 # Защитный минимум для политик fail: closed (вход, PIN, команды): не реже 1 запроса в минуту

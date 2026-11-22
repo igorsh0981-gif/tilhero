@@ -1,0 +1,4 @@
+# Используется BuildKit вместо корневого .dockerignore для apps/payments-edge/Dockerfile.
+# Белый список: только Caddyfile (без кода, секретов и прочих сервисов).
+*
+!apps/payments-edge/Caddyfile

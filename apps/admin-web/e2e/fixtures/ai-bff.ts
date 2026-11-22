@@ -63,7 +63,7 @@ export class AiStore {
 
   constructor(private readonly sc: AiScenario = {}) {
     this.spent = sc.spentUsd ?? 12.4;
-    this.budget = { ai_enabled: !sc.aiOff, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, room_cap_usd: 0.1, alert_percent: 80, updated_at: iso(-6 * DAY) };
+    this.budget = { ai_enabled: !sc.aiOff, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, room_cap_usd: 0.1, paid_learner_daily_cap_usd: 0.3, alert_percent: 80, updated_at: iso(-6 * DAY) };
     const whisper = (sc.speechProvider ?? "whisper") === "whisper";
     const speech: AiProviderStatus["speech"] = whisper
       ? sc.noSpeechKey

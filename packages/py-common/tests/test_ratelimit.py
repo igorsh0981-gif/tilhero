@@ -76,11 +76,12 @@ def test_policies_match_catalog() -> None:
         assert (p.service, p.subject, p.limit, p.window_s, p.burst, p.fail, p.env, p.description) == (
             c["service"], c["subject"], c["limit"], c["window_s"], c["burst"], c["fail"], c["env"], c["description"]
         ), name
-    # имена не пересекаются со служебными ключами rl:override:* / rl:policy:* / rl:salt:*
-    assert all("." in n and n.split(".")[0] in ("tg", "adm", "int", "gw") for n in catalog)
+    # имена не пересекаются со служебными ключами rl:override:* / rl:policy:* / rl:salt:*;
+    # спринт 8: web.* — сайт оплаты (telegram-bff /web/v1/*), pay.* — колбэки провайдеров (billing)
+    assert all("." in n and n.split(".")[0] in ("tg", "adm", "int", "gw", "web", "pay") for n in catalog)
     closed = {n for n, p in catalog.items() if p["fail"] == "closed"}
     assert closed == {"tg.session_ip", "tg.pin", "adm.login_ip", "adm.login_email", "adm.auth_step_ip", "adm.mfa",
-                      "adm.command", "adm.dlq"}
+                      "adm.command", "adm.dlq", "web.auth_ip"}
 
 
 async def test_gcra_vectors(redis: Redis, prefix: str, cleanup: None) -> None:

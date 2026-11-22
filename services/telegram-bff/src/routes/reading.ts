@@ -26,6 +26,7 @@ import {
   ContentIdParamsSchema,
   DEFAULT_PAIR,
   IdempotencyHeadersSchema,
+  LessonSessionDomainSchema,
   LessonSessionSchema,
   READING_RESULTS_MAX,
   ReadingCardDomainSchema,
@@ -162,7 +163,7 @@ export function readingRoutes(app: App, ctx: BffContext): void {
       const key = idempotencyKey(req, true)!;
       const { kids, ro } = await lessonsCall(ctx, auth, req);
       const res = await lessons.json("POST", `/internal/v1/readings/${enc(req.params.id)}/sessions`, { ...ro, idempotencyKey: key });
-      return reply.code(201).send(sessionView(expectShape(log, LESSONS, "reading_session", LessonSessionSchema, res), kids));
+      return reply.code(201).send(sessionView(expectShape(log, LESSONS, "reading_session", LessonSessionDomainSchema, res), kids));
     },
   );
 }

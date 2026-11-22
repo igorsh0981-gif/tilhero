@@ -13,7 +13,13 @@
 - `db-passwords.sql` — пароли ролей новых схем; `bootstrap.sql` — infra/db/bootstrap.sql + эти пароли (для db-bootstrap);
 - `public-keys.json` — новый INTERNAL_JWT_PUBLIC_KEYS (действующие ключи + новых сервисов);
 - `updates.json` — что выставить существующим сервисам: адреса новых сервисов (по `calls`), новые открытые ключи,
-  SCHEDULER_TOKEN новым запланированным сервисам.
+  SCHEDULER_TOKEN новым запланированным сервисам, сопутствующие переменные нового сервиса у действующих
+  (`setup.COMPANION_VARS`; спринт 8: billing — TELEGRAM_TEST_ENV у bot-gateway, BILLING_ENFORCED у lessons; web-pay —
+  WEB_PAY_*, TELEGRAM_LOGIN_*, TELEGRAM_OIDC_BASE и новый WEB_SESSION_SECRET у telegram-bff).
+
+Спринт 8 (billing, payments-edge, web-pay — одним запуском, чтобы PAYMENTS_EDGE_TOKEN совпал у billing и
+payments-edge): ключи провайдеров и секрет клиента «Log In with Telegram» — только ссылки `${{shared.<ИМЯ>}}`;
+ссылка на BOT_TOKEN у новых сервисов не появляется.
 """
 
 from __future__ import annotations
@@ -85,6 +91,10 @@ def main(argv: list[str] | None = None) -> int:
                  for line in rs.service_env(rs.by_name(name), sec, env="prod", app_link=a.app_link,
                                             bot_username=a.bot_username)]
         assert not any(line.startswith("ANTHROPIC_API_KEY=") and "${{shared." not in line for line in lines)
+        # спринт 8: ключи провайдеров — только ссылки на общие переменные; токен бота — только у двух сервисов
+        assert not any(line.split("=", 1)[0] in rs.BILLING_SHARED_SECRETS and "${{shared." not in line
+                       for line in lines)
+        assert name in rs.BOT_TOKEN_SERVICES or not any(line.startswith("BOT_TOKEN=") for line in lines)
         write(f"{name}.env", "\n".join(lines) + "\n")
 
     roles = [r for n in new if (schema := rs.by_name(n).schema) for r in (schema, f"{schema}_owner")]
@@ -99,6 +109,10 @@ def main(argv: list[str] | None = None) -> int:
         if svc.name in new:
             continue
         upd = {rs.url_var(svc.name, c): rs.private_url(c) for c in svc.calls if c in new}
+        companion = {var for n in new for var in rs.COMPANION_VARS.get(n, {}).get(svc.name, ())}
+        if companion:
+            env_lines = rs.service_env(svc, sec, env="prod", app_link=a.app_link, bot_username=a.bot_username)
+            upd |= {k: v for k, _, v in (line.partition("=") for line in env_lines) if k in companion}
         if new_issuers and svc.name in rs.JWT_ISSUERS:
             upd["INTERNAL_JWT_PUBLIC_KEYS"] = pub_json
         if upd:

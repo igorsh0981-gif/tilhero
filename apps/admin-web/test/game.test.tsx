@@ -700,6 +700,7 @@ describe("overview block «Игра»", () => {
     memory: off("memory"),
     game: { available: true, data: { period: "7d", earned_xp: 1240, earned_til: 310, freezes_used: 4, quests_completed: 57, active_event: { title: { ru: "Неделя чтения", uz: "Oʻqish haftaligi" }, ends_at: "2026-11-23T19:00:00Z" } } },
     social: off("social"),
+    money: off("billing"),
   };
   it("XP and tils, freezes, quests and the active event; the link needs game.read", async () => {
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);

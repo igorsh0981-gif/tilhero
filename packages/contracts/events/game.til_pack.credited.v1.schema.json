@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "game.til_pack.credited.v1.schema.json",
+  "title": "game.til_pack.credited.v1",
+  "type": "object",
+  "required": [
+    "order_id",
+    "user_id",
+    "til",
+    "op_id",
+    "outcome",
+    "credited_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "order_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "til": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "op_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "credited",
+        "user_deleted"
+      ]
+    },
+    "credited_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

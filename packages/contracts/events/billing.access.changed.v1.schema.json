@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "billing.access.changed.v1.schema.json",
+  "title": "billing.access.changed.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "account_id",
+    "tier",
+    "features",
+    "paid_until",
+    "changed_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "account_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tier": {
+      "type": "string",
+      "enum": [
+        "free",
+        "paid"
+      ]
+    },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "ai_lessons",
+          "pair_lessons"
+        ]
+      },
+      "maxItems": 2,
+      "uniqueItems": true
+    },
+    "paid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "changed_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

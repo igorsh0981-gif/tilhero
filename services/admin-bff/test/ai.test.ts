@@ -729,7 +729,8 @@ describe("затраты, модели и обзор", () => {
     expect(h.fake.calls.find((c) => c.service === "aiGateway" && c.path === "/admin/v1/ai/usage")!.query).toEqual({ session_id: SESSION_ID });
     expect(calls.body).not.toContain(LEARNER_USER_ID);
     expect(calls.body).not.toContain("request_id");
-    expect((await get(s, "/admin/v1/ai/budget")).json()).toEqual({ ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, room_cap_usd: 0.1, alert_percent: 80, updated_at: "2026-11-19T00:00:00Z" });
+    // спринт 8: paid_learner_daily_cap_usd — ai-gateway до миграции 0009 поля не отдаёт, admin-bff подставляет 0,30
+    expect((await get(s, "/admin/v1/ai/budget")).json()).toEqual({ ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, room_cap_usd: 0.1, paid_learner_daily_cap_usd: 0.3, alert_percent: 80, updated_at: "2026-11-19T00:00:00Z" });
   });
 
   it("дашборд: lessons = статистика lessons (period) + счётчики assessment; ai = сводка месяца; assessment недоступен → блок lessons недоступен", async () => {

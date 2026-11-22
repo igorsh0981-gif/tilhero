@@ -83,7 +83,9 @@ export type AgentUnavailableReason =
   | "cost_limit" // max_cost_usd версии на вызов: следующая попытка (и резервная модель) не помещается
   | "provider_error"
   | "timeout" // таймаут провайдера или дедлайн вызывающего
-  | "invalid_output"; // после повтора с ограничениями и резервной модели
+  | "invalid_output" // после повтора с ограничениями и резервной модели
+  // спринт 8: уровень деградации paid_only — ученик без подписки (tier free) не обслуживается (до провайдера, $0)
+  | "degraded";
 export type AgentRefusedReason = "kids_not_allowed" | "agent_not_active";
 
 export interface AgentInvokeResult<O = AgentOutput> {
@@ -371,6 +373,94 @@ export interface SpeechTranscribeResult {
 export interface AiStatus {
   ai_available: boolean; // нет аварийной остановки и провайдер LLM готов (лимиты не учитываются)
   speech_available: boolean; // нет аварийной остановки, ключ и регион Azure заданы, месячный потолок и подлимит речи не превышены
+  /** спринт 8: действующий уровень деградации (аварийная остановка — off) */
+  level: DegradationLevel;
+  /** ИИ доступен ученику без подписки (tier free): level normal | economy */
+  free_available: boolean;
+  /** ИИ доступен подписчику (tier paid): level normal | economy | paid_only — lessons при старте урока с подпиской */
+  paid_available: boolean;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Контроль ИИ (спринт 8, INTERNAL_API §7): бюджет по тарифу, уровни деградации, стоимость урока и минуты.
+// Тариф ученика — проекция billing.access.changed.v1 (learner_tiers): paid — tier paid и paid_until null или > now;
+// нет строки — free. Дневной лимит: free — AiBudget.learner_daily_cap_usd (0,05), paid — paid_learner_daily_cap_usd
+// (0,30). Уровни: аварийная остановка → off; mode manual → заданный; mode auto → по доле расхода месяца (с резервами):
+// < economy_at_percent — normal, < paid_only_at_percent — economy, < 100 % — paid_only, иначе off.
+//  - economy — попытки сразу резервной моделью версии (fallback_model_id);
+//  - paid_only — ученик free → unavailable: degraded до провайдера; paid — как economy;
+//  - off — ai_disabled (аварийная остановка) / budget_exceeded.
+// Золотые прогоны — только потолок месяца; произношение (Whisper, $0) — только off. Смена действующего уровня —
+// degradation_events + событие ai.degradation.changed.v1; ручная — ещё аудит ai.degradation_updated.
+// ---------------------------------------------------------------------------------------------------------------------
+
+export type DegradationLevel = "normal" | "economy" | "paid_only" | "off";
+export type DegradationMode = "auto" | "manual";
+export type DegradationReason = "threshold" | "manual" | "emergency_stop" | "month_reset";
+
+export interface DegradationEvent {
+  seq: number;
+  from: DegradationLevel;
+  to: DegradationLevel;
+  mode: DegradationMode;
+  reason: DegradationReason;
+  /** доля потолка месяца с резервами в момент смены, 0..1000 */
+  spent_percent: number;
+  /** staff_id сотрудника (manual); null — система */
+  actor: string | null;
+  at: string;
+}
+
+/** GET /admin/v1/ai/degradation (costs.read) → AiDegradation */
+export interface AiDegradation {
+  mode: DegradationMode;
+  /** уровень, заданный вручную (mode manual); в auto — null */
+  manual_level: DegradationLevel | null;
+  /** действующий уровень сейчас */
+  level: DegradationLevel;
+  economy_at_percent: number; // 1..100, по умолчанию 80
+  paid_only_at_percent: number; // economy_at_percent..100, по умолчанию 90
+  /** доля потолка текущего месяца (UTC) с резервами */
+  spent_percent: number;
+  month: string; // YYYY-MM, UTC
+  /** последние смены уровня (новые сверху, ≤ 20) */
+  events: DegradationEvent[];
+  updated_at: string;
+}
+
+/** PUT /admin/v1/ai/degradation (costs.manage, step-up) AiDegradationUpdate → AiDegradation; 1 ≤ economy_at_percent ≤
+ *  paid_only_at_percent ≤ 100, manual_level обязателен при mode manual — иначе 422 DEGRADATION_INVALID. */
+export interface AiDegradationUpdate {
+  mode: DegradationMode;
+  manual_level: DegradationLevel | null;
+  economy_at_percent: number;
+  paid_only_at_percent: number;
+  reason: string; // 10..500
+}
+
+/** Стоимость занятий одного вида за период. USD — строки с 6 знаками после точки ("0.012345"). */
+export interface AiUnitCostsKind {
+  sessions: number;
+  /** занятий, где ИИ работал (режим full, без деградации с начала) */
+  ai_sessions: number;
+  cost_usd: string;
+  cost_per_ai_session_p50_usd: string | null;
+  cost_per_ai_session_p95_usd: string | null;
+  /** списано ИИ-минут (billable_minutes занятий) */
+  billable_minutes: number;
+  /** стоимость ИИ-минуты: cost_usd / billable_minutes; null — минут нет */
+  cost_per_billable_minute_usd: string | null;
+}
+
+/** GET /admin/v1/ai/unit-costs?period=week|month (costs.read | dashboard.read) → AiUnitCosts. Источник — session_costs
+ *  (lesson.session.completed.v1, lesson.pair.completed.v1) и учёт вызовов ai-gateway. */
+export interface AiUnitCosts {
+  period: "week" | "month";
+  from: string;
+  to: string;
+  by_kind: { lesson: AiUnitCostsKind; scenario: AiUnitCostsKind; pair: AiUnitCostsKind };
+  /** доля занятий, ушедших в упрощённый режим из-за деградации, 0..100; null — занятий нет */
+  degraded_sessions_pct: number | null;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -481,6 +571,9 @@ export interface AiBudget {
   /** спринт 7 (INTERNAL_API §4, ai_room_cap_usd): потолок вызовов коуча на одну парную комнату, по умолчанию 0.10;
    *  0..monthly_cap_usd. Исчерпан — комната продолжается по сценарию с выбором реплик. */
   room_cap_usd: number;
+  /** спринт 8 (В14): дневной лимит ученика с подпиской (tier paid), по умолчанию 0.30; у free — learner_daily_cap_usd.
+   *  learner_daily_cap_usd ≤ paid_learner_daily_cap_usd ≤ monthly_cap_usd. */
+  paid_learner_daily_cap_usd: number;
   alert_percent: number; // 80 — предупреждение на обзоре
   updated_at: string;
 }

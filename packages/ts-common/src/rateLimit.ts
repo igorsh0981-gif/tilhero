@@ -65,6 +65,11 @@ export const RATE_LIMIT_POLICIES: readonly PolicySpec[] = [
   P("tg.room.write", "telegram-bff", "user", 60, 60, "open", null, "Парный урок: приглашение, ответ, вход, выход, ходы (POST /v1/pair-rooms*) — на ученика в минуту (спринт 7)"),
   P("tg.room.poll", "telegram-bff", "user", 240, 60, "open", null, "Лента и присутствие парной комнаты (GET …/state, POST …/heartbeat) — на ученика в минуту (спринт 7)"),
   P("tg.room.audio", "telegram-bff", "user", 30, 600, "open", null, "Голосовой ход парного урока (POST /v1/pair-rooms/*/audio) — на ученика за 10 минут (спринт 7)"),
+  P("tg.billing.read", "telegram-bff", "user", 120, 60, "open", null, "Подписка, минуты, каталог и заказы Stars в Mini App (GET /v1/billing/*) — на аккаунт в минуту (спринт 8)"),
+  P("tg.billing.order", "telegram-bff", "user", 10, 600, "open", null, "Команды оплаты Mini App: заказ, отмена, пробный период, автопродление (POST /v1/billing/*) — на аккаунт за 10 минут (спринт 8)"),
+  P("web.auth_ip", "telegram-bff", "ip", 20, 60, "closed", null, "Сайт оплаты: вход через Telegram и выход (/web/v1/auth/*) — с одного IP в минуту (спринт 8)"),
+  P("web.read", "telegram-bff", "user", 120, 60, "open", null, "Сайт оплаты: профиль, тарифы, подписка, заказы (GET /web/v1/*) — на аккаунт в минуту (спринт 8)"),
+  P("web.order", "telegram-bff", "user", 10, 600, "open", null, "Сайт оплаты: заказ и отмена (POST /web/v1/orders*) — на аккаунт за 10 минут (спринт 8)"),
   P("adm.login_ip", "admin-bff", "ip", 10, 60, "closed", "RATE_LIMIT_LOGIN_IP_PER_MIN", "Вход сотрудника (POST /admin/v1/auth/login) — с одного IP"),
   P("adm.login_email", "admin-bff", "email", 5, 60, "closed", "RATE_LIMIT_LOGIN_EMAIL_PER_MIN", "Вход сотрудника — на один e-mail (в ключе только хеш с суточной солью)"),
   P("adm.auth_step_ip", "admin-bff", "ip", 30, 60, "closed", "RATE_LIMIT_AUTH_STEP_IP_PER_MIN", "Шаги входа по challenge (MFA, enroll, пароль) — с одного IP"),
@@ -74,6 +79,7 @@ export const RATE_LIMIT_POLICIES: readonly PolicySpec[] = [
   P("adm.dlq", "admin-bff", "staff", 10, 60, "closed", null, "Команды DLQ и повтор удаления профиля (новая)"),
   P("int.caller", "*", "caller", 10000, 60, "open", null, "Внутренние вызовы Python-сервисов — на пару (вызывающий, сервис): защита от зацикливания (новая)"),
   P("gw.llm.user", "ai-gateway", "user", 40, 60, "open", null, "Потоковый LLM (ai-gateway, спринт 4) — на пользователя"),
+  P("pay.callback_ip", "billing", "ip", 600, 60, "open", null, "Колбэки Payme, Click, Uzum через payments-edge (/provider/v1/*) — с одного IP клиента в минуту (спринт 8)"),
 ];
 
 export const GCRA_LUA = `-- TilHero: единый лимитер запросов (спринт 9, INTERNAL_API §2.1) — GCRA на одном ключе субъекта.

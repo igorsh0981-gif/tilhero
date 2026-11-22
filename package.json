@@ -9,7 +9,8 @@
     "services/telegram-bff",
     "apps/telegram-miniapp",
     "services/admin-bff",
-    "apps/admin-web"
+    "apps/admin-web",
+    "apps/web-pay"
   ],
   "engines": {
     "node": ">=22"

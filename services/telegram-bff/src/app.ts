@@ -16,6 +16,7 @@ import { ExperienceCache } from "./experience.js";
 import { schemaErrors, type App } from "./http.js";
 import { EXTRA_REDACT_PATHS, scrub, type LogSink } from "./logging.js";
 import { createLimiter } from "./rateLimit.js";
+import { billingRoutes } from "./routes/billing.js";
 import { familyRoutes } from "./routes/family.js";
 import { gameRoutes } from "./routes/game.js";
 import { leaguesRoutes } from "./routes/leagues.js";
@@ -36,7 +37,8 @@ import { supportRoutes } from "./routes/support.js";
 import { whatsNewRoutes } from "./routes/whatsNew.js";
 import { SessionStore } from "./sessions.js";
 import { AccessTokens } from "./tokens.js";
-import { SERVICE_NAME, createDomains, createGame, createTts } from "./upstream.js";
+import { SERVICE_NAME, createBilling, createDomains, createGame, createTts } from "./upstream.js";
+import { webRoutes } from "./web/index.js";
 
 export interface AppDeps {
   /** Внешний Redis (тесты); иначе создаётся по REDIS_URL и закрывается вместе с приложением. */
@@ -191,6 +193,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
           { name: "leagues" },
           { name: "duels" },
           { name: "pair-rooms" },
+          { name: "billing" },
         ],
       },
       hideUntagged: true,
@@ -252,6 +255,16 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
       onFailure: (info) =>
         log.warn({ upstream: info.service, upstream_status: info.status, upstream_code: info.code }, "domain unavailable"),
     }),
+    // спринт 8: billing — один клиент на Mini App (chn miniapp) и сайт оплаты (chn web); канал — claim каждого вызова
+    billing: createBilling({
+      url: config.billingUrl,
+      key: keyRing,
+      timeoutMs: config.billingTimeoutMs,
+      retries: config.upstreamRetries,
+      ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+      onFailure: (info) =>
+        log.warn({ upstream: info.service, upstream_status: info.status, upstream_code: info.code }, "domain unavailable"),
+    }),
     log,
     store: makeStoreGuard(log),
   };
@@ -259,6 +272,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   if (!ctx.tts) log.warn({ upstream: "tts" }, "TTS_URL is not set: POST /v1/speech answers 503 SPEECH_UNAVAILABLE");
   // gamification необязателен (спринт 6): без адреса игровой блок Mini App скрыт, учёба работает
   if (!ctx.game) log.warn({ upstream: "gamification" }, "GAMIFICATION_URL is not set: /v1/game/* answer 503 GAME_UNAVAILABLE");
+  // billing необязателен (спринт 8): без адреса покупки недоступны, учёба работает
+  if (!ctx.billing) log.warn({ upstream: "billing" }, "BILLING_URL is not set: /v1/billing/* and /web/v1/* answer 503 BILLING_UNAVAILABLE");
 
   registerAuth(app, ctx);
 
@@ -302,6 +317,10 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   socialRoutes(app, ctx);
   leaguesRoutes(app, ctx);
   await pairRoomsRoutes(app, ctx);
+  // спринт 8 — деньги: подписка и покупки за Telegram Stars в Mini App (поток E); сайт оплаты /web/v1/* в своей области
+  // Fastify — регистрируется только при WEB_PAY_ENABLED (поток H)
+  billingRoutes(app, ctx);
+  await webRoutes(app, ctx);
 
   if (!config.isSecure) {
     app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());

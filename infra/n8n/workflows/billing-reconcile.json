@@ -1,0 +1,84 @@
+{
+  "id": "TilHeroBillRecon",
+  "name": "billing-reconcile",
+  "active": false,
+  "nodes": [
+    {
+      "id": "7f1e0000-0000-4000-8000-000000008041",
+      "name": "Расписание",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "15 23 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7f1e0000-0000-4000-8000-000000008042",
+      "name": "POST /internal/v1/billing:reconcile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BILLING_URL }}/internal/v1/billing:reconcile",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SCHEDULER_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "notes": "Источник — infra/n8n/workflows/billing-reconcile.json (импортируется при каждом старте, правки в UI перезаписываются). Спринт 8 (INTERNAL_API §1.14): ежедневная сверка в 23:15 UTC — оплачено, но не выполнено, зависшие транзакции, Click status_by_mti, возвраты без заявки, фискальные чеки, выписка Stars, подписки Stars, расхождение остатков → очередь сверки. Секрет — SCHEDULER_TOKEN. ВЫКЛЮЧЕН в репозитории (\"active\": false) до выкладки billing со сверкой (поток A) — entrypoint.sh такой workflow не включает даже при заданном BILLING_URL.",
+      "notesInFlow": false
+    }
+  ],
+  "connections": {
+    "Расписание": {
+      "main": [
+        [
+          {
+            "node": "POST /internal/v1/billing:reconcile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "billing.subscription.expiring.v1.schema.json",
+  "title": "billing.subscription.expiring.v1",
+  "type": "object",
+  "required": [
+    "account_id",
+    "period_id",
+    "ends_at",
+    "days_left",
+    "minutes_left"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "period_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "ends_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "days_left": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 30
+    },
+    "minutes_left": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    }
+  }
+}

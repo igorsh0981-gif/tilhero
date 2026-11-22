@@ -8,6 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type * as C from "@tilhero/contracts/bff";
+import type { DomainLessonSession } from "../src/routes/lessons.js";
 import type { Req } from "./helpers.js";
 
 const L = (ru: string) => ({ ru, uz: `${ru} (uz)` });
@@ -516,7 +517,7 @@ const paragraphsOf = (r: ReadingFixture) => [
 
 interface ReadingSess {
   owner: string;
-  view: C.LessonSession;
+  view: DomainLessonSession;
   reading: ReadingFixture;
   cursor: number;
 }
@@ -603,7 +604,7 @@ export class FakeReading {
       const active = [...this.sessions.values()].find((s) => s.owner === l.lrn && s.view.status !== "completed");
       if (active) return err(409, "SESSION_ACTIVE", { session_id: active.view.session_id, kind: "reading", title: active.view.title });
       const id = randomUUID();
-      const view: C.LessonSession = {
+      const view: DomainLessonSession = {
         session_id: id,
         kind: "reading",
         title: x.title,

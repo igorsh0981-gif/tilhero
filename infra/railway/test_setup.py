@@ -66,7 +66,8 @@ def test_scheduler_and_service_specific_secrets():
     n8n = env_of(files, "n8n")
     assert {k for k in n8n if k.endswith("_URL")} == {"LEARNING_PLAN_URL", "NOTIFICATIONS_URL", "SOCIAL_URL",
                                                        "USER_ADMIN_URL", "CATALOG_URL", "LESSONS_URL",
-                                                       "ASSESSMENT_URL", "MEMORY_URL", "GAMIFICATION_URL"}
+                                                       "ASSESSMENT_URL", "MEMORY_URL", "GAMIFICATION_URL",
+                                                       "BILLING_URL"}
     assert n8n["RAILWAY_RUN_UID"] == "0" and len(n8n["N8N_ENCRYPTION_KEY"]) >= 32
 
 
@@ -78,7 +79,8 @@ def test_db_passwords_cover_every_role_and_secrets_are_unique():
     assert set(roles) == schemas | {f"{x}_owner" for x in schemas}
     assert all(f"'{x}'" in bootstrap for x in schemas)
     values = [*sec.passwords.values(), sec.scheduler, sec.session_jwt, sec.invite_key, sec.webhook, sec.internal_hmac,
-              sec.n8n_key, sec.mfa_key, sec.admin_password, sec.user_ref, sec.member_key]
+              sec.n8n_key, sec.mfa_key, sec.admin_password, sec.user_ref, sec.member_key, sec.payments_edge,
+              sec.web_session]
     assert len(values) == len(set(values))
 
 
@@ -124,7 +126,7 @@ def test_admin_services_sprint2():
     assert {k for k in bff if k.endswith("_URL") and k != "REDIS_URL"} == {
         "ADMIN_IDENTITY_URL", "USER_ADMIN_URL", "IDENTITY_URL", "SUPPORT_URL", "AUDIT_URL", "EXPERIENCE_URL",
         "NOTIFICATIONS_URL", "CATALOG_URL", "DIAGNOSTICS_URL", "AI_GATEWAY_URL", "LESSONS_URL", "ASSESSMENT_URL",
-        "MEMORY_URL", "GAMIFICATION_URL", "SOCIAL_URL"}
+        "MEMORY_URL", "GAMIFICATION_URL", "SOCIAL_URL", "BILLING_URL"}
     assert not rs.by_name("admin-bff").public and rs.by_name("admin-web").public
     web = env_of(files, "admin-web")
     assert web["ADMIN_BFF_URL"] == "http://${{admin-bff.RAILWAY_PRIVATE_DOMAIN}}:8002"
@@ -279,3 +281,80 @@ def test_social_sprint7():
     assert {"gamification", "lessons", "telegram-bff", "admin-bff"} <= set(pub)
     assert "gamification" in json.loads(lessons["INTERNAL_JWT_PUBLIC_KEYS"])
 
+
+
+def test_billing_sprint8():
+    """Спринт 8: billing (8118, схема billing) без публичного домена; колбэки — через payments-edge, сайт — web-pay;
+    флаги продаж выключены; ключи провайдеров — только ссылки на общие переменные у billing."""
+    sec, files = build()
+    svc = rs.by_name("billing")
+    assert svc.port == 8118 and svc.schema == "billing" and not svc.public
+    bill = env_of(files, "billing")
+    urls = {k for k in bill if k.endswith("_URL") and k not in ("REDIS_URL", "NATS_URL", "DATABASE_URL",
+                                                                  "MIGRATION_DATABASE_URL")
+            and not k.startswith(("PAYME_", "CLICK_", "UZUM_"))}  # адреса провайдеров — не соседи
+    assert urls == {"IDENTITY_CONSENT_URL", "GAMIFICATION_URL", "BOTGW_URL"}
+    assert bill["BOTGW_URL"] == "http://${{telegram-bot-gateway.RAILWAY_PRIVATE_DOMAIN}}:8108"  # внутренний порт
+    assert bill["DATABASE_URL"].startswith("postgresql://billing:")
+    assert bill["MIGRATION_DATABASE_URL"].startswith("postgresql://billing_owner:")
+    assert bill["SCHEDULER_TOKEN"] == sec.scheduler and bill["NATS_URL"]
+    assert bill["WEB_PAY_ORIGIN"] == "https://${{web-pay.RAILWAY_PUBLIC_DOMAIN}}"
+    for flag in rs.BILLING_FLAGS:
+        assert bill[flag] == "false", flag
+    for name in rs.BILLING_SHARED_SECRETS:  # значения вводит владелец: в файлах только ссылки
+        assert bill[name] == "${{shared." + name + "}}", name
+    for s in rs.SERVICES:
+        if s.name != "billing":
+            e = env_of(files, s.name)
+            assert not set(rs.BILLING_SHARED_SECRETS) & set(e), s.name
+            assert not any(k.startswith(("PAYME_", "CLICK_", "UZUM_")) for k in e), s.name
+    # payments-edge: публичный Caddy только для /pay/* → billing по приватной сети, тот же X-Edge-Token
+    edge = env_of(files, "payments-edge")
+    assert rs.by_name("payments-edge").public and edge["BILLING_URL"] == "http://${{billing.RAILWAY_PRIVATE_DOMAIN}}:8118"
+    assert edge["PAYMENTS_EDGE_TOKEN"] == bill["PAYMENTS_EDGE_TOKEN"] == sec.payments_edge
+    assert len(sec.payments_edge) >= 32
+    assert {k for k in edge} == {"RAILWAY_DOCKERFILE_PATH", "PORT", "BILLING_URL", "PAYMENTS_EDGE_TOKEN"}
+    assert {s.name for s in rs.SERVICES if "PAYMENTS_EDGE_TOKEN" in env_of(files, s.name)} == {"billing",
+                                                                                              "payments-edge"}
+    # web-pay: статика за Caddy, /api/* → telegram-bff по приватной сети; секретов нет
+    web = env_of(files, "web-pay")
+    assert rs.by_name("web-pay").public and web == {"RAILWAY_DOCKERFILE_PATH": "apps/web-pay/Dockerfile",
+                                                    "PORT": "8080",
+                                                    "BFF_URL": "http://${{telegram-bff.RAILWAY_PRIVATE_DOMAIN}}:8001"}
+    # вызывающие billing: адрес и открытый ключ издателя billing (DEPLOYMENT §11 п. 8)
+    for caller in ("telegram-bff", "admin-bff", "lessons", "telegram-bot-gateway", "n8n"):
+        assert env_of(files, caller)["BILLING_URL"] == "http://${{billing.RAILWAY_PRIVATE_DOMAIN}}:8118", caller
+    for callee in ("identity-consent", "gamification", "telegram-bot-gateway", "lessons", "telegram-bff"):
+        assert "billing" in json.loads(env_of(files, callee)["INTERNAL_JWT_PUBLIC_KEYS"]), callee
+    lessons = env_of(files, "lessons")
+    assert lessons["BILLING_ENFORCED"] == "false" and lessons["BILLING_TIMEOUT_SECONDS"] == "2"
+    assert env_of(files, "telegram-bot-gateway")["TELEGRAM_TEST_ENV"] == "false"
+    # telegram-bff: сайт оплаты выключен; секрет клиента OIDC — ссылка только здесь; своя подпись сессии сайта
+    bff = env_of(files, "telegram-bff")
+    assert bff["WEB_PAY_ENABLED"] == "false" and bff["WEB_PAY_ORIGIN"] == "https://${{web-pay.RAILWAY_PUBLIC_DOMAIN}}"
+    assert bff["TELEGRAM_OIDC_BASE"] == "https://oauth.telegram.org"
+    assert bff["TELEGRAM_LOGIN_CLIENT_SECRET"] == "${{shared.TELEGRAM_LOGIN_CLIENT_SECRET}}"  # noqa: S105 — ссылка
+    assert bff["WEB_SESSION_SECRET"] == sec.web_session and len(sec.web_session) >= 32
+    assert sec.web_session != sec.session_jwt
+    for s in rs.SERVICES:
+        if s.name != "telegram-bff":
+            e = env_of(files, s.name)
+            assert "TELEGRAM_LOGIN_CLIENT_SECRET" not in e and "WEB_SESSION_SECRET" not in e, s.name
+    assert "billing" in rs.SCHEDULED and "billing" in rs.JWT_ISSUERS
+    assert "| billing | `services/billing/Dockerfile` | нет | `alembic" in files["services.md"]
+
+
+def test_bot_token_only_bot_gateway_and_telegram_bff():
+    """INTERNAL_API спринта 8 §0.8, AT-100: ссылка на токен бота — только у telegram-bot-gateway (Bot API, Stars) и
+    telegram-bff (проверка initData); billing, сайт оплаты и payments-edge токена не получают. Значения в файлах нет."""
+    _, files = build()
+    holders = {s.name for s in rs.SERVICES if "BOT_TOKEN" in env_of(files, s.name)}
+    assert holders == set(rs.BOT_TOKEN_SERVICES) == {"telegram-bot-gateway", "telegram-bff"}
+    for name in holders:
+        assert env_of(files, name)["BOT_TOKEN"] == "${{shared.BOT_TOKEN}}"  # noqa: S105 — ссылка Railway
+    token_like = re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{30,}")
+    for name, text in files.items():
+        assert not token_like.search(text), name
+        for line in text.splitlines():  # ни под каким другим именем: значение ссылки — только shared.BOT_TOKEN
+            if "shared.BOT_TOKEN" in line:
+                assert line == "BOT_TOKEN=${{shared.BOT_TOKEN}}", (name, line)

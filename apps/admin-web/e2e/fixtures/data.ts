@@ -30,18 +30,20 @@ export const MATRIX: Record<RoleCode, Permission[]> = {
   super_admin: [...ALL_PERMS],
   // sprint 5: + memory.read, memory.manage (step-up); sprint 6: + game.read, game.manage, game.publish, wallet.adjust
   // sprint 7 (PLAN «Права»): operations — every right of «Сообщество»
-  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read", "memory.manage", "game.read", "game.manage", "game.publish", "wallet.adjust", "social.read", "moderation.manage", "referral.read", "referral.manage", "league.read", "league.manage", "room.read", "room.manage"],
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read", "memory.manage", "game.read", "game.manage", "game.publish", "wallet.adjust", "social.read", "moderation.manage", "referral.read", "referral.manage", "league.read", "league.manage", "room.read", "room.manage", "billing.read", "billing.manage", "billing.publish", "billing.approve", "billing.refund", "subscriptions.override"],
   communications: ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"],
   // sprint 6: + game.read (the wallet of a learner from a ticket)
   // sprint 7: + social.read, moderation.manage, referral.read, room.read
-  support: ["dashboard.read", "users.read", "support.read", "support.reply", "game.read", "social.read", "moderation.manage", "referral.read", "room.read"],
+  support: ["dashboard.read", "users.read", "support.read", "support.reply", "game.read", "social.read", "moderation.manage", "referral.read", "room.read", "billing.read", "subscriptions.override"],
   // sprint 3 (PLAN «Права и роли»)
   // sprint 4: + agents, dialogue QA, costs; sprint 5: + memory.read, glossary.manage
   methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish", "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "memory.read", "glossary.manage", "game.read"],
   content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage", "game.read", "game.manage", "league.read"],
   qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts", "memory.read"],
-  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", "social.read", "referral.read", "league.read", "room.read"],
-  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", "social.read", "referral.read", "league.read", "room.read"],
+  // sprint 8 (PLAN «Права и роли»): finance — billing.* except subscriptions.override, costs.read; support, analyst, auditor — + billing.read
+  finance: ["dashboard.read", "users.read", "costs.read", "billing.read", "billing.manage", "billing.publish", "billing.approve", "billing.refund"],
+  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", "social.read", "referral.read", "league.read", "room.read", "billing.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", "social.read", "referral.read", "league.read", "room.read", "billing.read"],
   read_only: ["dashboard.read"],
 };
 
@@ -53,6 +55,7 @@ export const ROLE_NAMES: Record<RoleCode, { ru: string; en: string }> = {
   methodist: { ru: "Методист", en: "Methodist" },
   content_manager: { ru: "Контент-менеджер", en: "Content manager" },
   qa_analyst: { ru: "QA-аналитик", en: "QA analyst" },
+  finance: { ru: "Финансы", en: "Finance" },
   analyst: { ru: "Аналитик", en: "Analyst" },
   auditor: { ru: "Аудитор", en: "Auditor" },
   read_only: { ru: "Только чтение", en: "Read only" },
@@ -154,6 +157,7 @@ function row(id: string, extra: Partial<AdminLearnerRow>): AdminLearnerRow {
   return {
     user_id: id,
     kind: "account",
+    tier: null,
     guardian_user_id: null,
     display_name: null,
     username: null,

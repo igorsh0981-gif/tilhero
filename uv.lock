@@ -13,6 +13,7 @@ members = [
     "tilhero-ai-gateway",
     "tilhero-assessment",
     "tilhero-audit",
+    "tilhero-billing",
     "tilhero-botgw",
     "tilhero-catalog",
     "tilhero-common",
@@ -2098,6 +2099,17 @@ requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
 name = "tilhero-audit"
 version = "0.1.0"
 source = { editable = "services/audit" }
+dependencies = [
+    { name = "tilhero-common" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tilhero-common", editable = "packages/py-common" }]
+
+[[package]]
+name = "tilhero-billing"
+version = "0.1.0"
+source = { editable = "services/billing" }
 dependencies = [
     { name = "tilhero-common" },
 ]

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "billing.subscription.changed.v1.schema.json",
+  "title": "billing.subscription.changed.v1",
+  "type": "object",
+  "required": [
+    "account_id",
+    "status",
+    "reason",
+    "period_id",
+    "product_code",
+    "starts_at",
+    "ends_at",
+    "minutes_granted",
+    "changed_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "none",
+        "trial",
+        "active",
+        "expired"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "purchase",
+        "renewal",
+        "trial",
+        "trial_grant",
+        "grant",
+        "activated",
+        "ended",
+        "superseded",
+        "refund",
+        "staff"
+      ]
+    },
+    "period_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "product_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-z0-9_]{2,40}$"
+    },
+    "starts_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "ends_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "minutes_granted": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "changed_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

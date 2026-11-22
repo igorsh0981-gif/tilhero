@@ -107,6 +107,13 @@ export const ALL_PERMISSIONS = [
   "league.manage",
   "room.read",
   "room.manage",
+  // спринт 8 — деньги; step-up: billing.publish, billing.approve, billing.refund, subscriptions.override
+  "billing.read",
+  "billing.manage",
+  "billing.publish",
+  "billing.approve",
+  "billing.refund",
+  "subscriptions.override",
 ] as const satisfies readonly Permission[];
 
 /** Компиляция падает, если в admin.ts появилось право, которого нет в ALL_PERMISSIONS (права вне списка отбрасываются). */
@@ -122,6 +129,7 @@ export const ROLE_CODES = [
   "methodist",
   "content_manager",
   "qa_analyst",
+  "finance",
   "analyst",
   "auditor",
   "read_only",
@@ -140,12 +148,16 @@ void _allRolesListed;
  * game.manage — content_manager, operations; game.publish и wallet.adjust (step-up) — только operations (и
  * super_admin). Спринт 7 (PLAN спринта 7 «Права»): support — + social.read, moderation.manage, referral.read,
  * room.read; operations — все восемь прав социального; content_manager — + league.read; analyst и auditor — + чтение
- * (social.read, referral.read, league.read, room.read). methodist (content.publish, ai.publish, qa.review) и
+ * (social.read, referral.read, league.read, room.read). Спринт 8 (PLAN спринта 8 «Права и роли»): новая роль finance —
+ * billing.* кроме subscriptions.override, costs.read, dashboard.read, users.read (привилегированная: step-up);
+ * support — + billing.read, subscriptions.override; operations — + все billing.* и subscriptions.override; analyst и
+ * auditor — + billing.read. methodist (content.publish, ai.publish, qa.review) и
  * content_manager (media.rights) — привилегированные по составу прав (MFA, four-eyes), хотя PRIVILEGED_ROLES admin.ts
  * их не перечисляет; operations (costs.manage) привилегирован и по коду роли; qa_analyst (чтение и реплики с
  * причиной, без прав со step-up) — нет. Признак `Role.privileged` вычисляет admin-identity.
  */
 const SOCIAL_READ = ["social.read", "referral.read", "league.read", "room.read"] as const satisfies readonly Permission[];
+const BILLING_ALL = ["billing.read", "billing.manage", "billing.publish", "billing.approve", "billing.refund"] as const satisfies readonly Permission[];
 
 export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[]>> = {
   super_admin: ALL_PERMISSIONS,
@@ -176,6 +188,8 @@ export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[
     "league.manage",
     "room.read",
     "room.manage",
+    ...BILLING_ALL,
+    "subscriptions.override",
   ],
   communications: [
     "dashboard.read",
@@ -195,6 +209,8 @@ export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[
     "moderation.manage",
     "referral.read",
     "room.read",
+    "billing.read",
+    "subscriptions.override",
   ],
   methodist: [
     "dashboard.read",
@@ -215,8 +231,9 @@ export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[
   ],
   content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage", "game.read", "game.manage", "league.read"],
   qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts", "memory.read"],
-  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", ...SOCIAL_READ],
-  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", ...SOCIAL_READ],
+  finance: ["dashboard.read", "users.read", "costs.read", ...BILLING_ALL],
+  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", ...SOCIAL_READ, "billing.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", ...SOCIAL_READ, "billing.read"],
   read_only: ["dashboard.read"],
 };
 

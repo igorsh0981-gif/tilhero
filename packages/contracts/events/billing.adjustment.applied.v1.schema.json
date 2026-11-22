@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "billing.adjustment.applied.v1.schema.json",
+  "title": "billing.adjustment.applied.v1",
+  "type": "object",
+  "required": [
+    "adjustment_id",
+    "account_id",
+    "kind",
+    "minutes",
+    "days",
+    "period_id",
+    "applied_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "adjustment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "account_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "minutes",
+        "grant_period",
+        "revoke_period"
+      ]
+    },
+    "minutes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": -10000,
+      "maximum": 10000
+    },
+    "days": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 90
+    },
+    "period_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "applied_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

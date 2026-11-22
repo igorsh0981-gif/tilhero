@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "billing.minutes.low.v1.schema.json",
+  "title": "billing.minutes.low.v1",
+  "type": "object",
+  "required": [
+    "account_id",
+    "period_id",
+    "minutes_left",
+    "minutes_granted"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "period_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "minutes_left": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "minutes_granted": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    }
+  }
+}

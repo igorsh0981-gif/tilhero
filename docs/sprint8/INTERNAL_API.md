@@ -1236,6 +1236,48 @@ Step-up в admin-bff: `catalog/draft/activate`, `catalog/{v}/rollback`, `account
 | F1 | Фискализация | ставка НДС, ИКПУ, код упаковки, схема | О4; валидатор блокирует prod |
 | F2 | Фискализация | чеки и учёт продаж за Stars | О3 |
 
+## 16. Уточнения потока 0 (22.11.2026)
+Контракты и каркасы — источник истины; здесь — что уточнено при их написании.
+
+- **События (§10):** `billing.order.paid.v1.period` — `{starts_at, ends_at}` с датами `null` у периода «после текущего»
+  (запланирован, даты — при активации); `billing.order.refunded.v1.account_id` и `beneficiary_user_id` — `null` у
+  обезличенного заказа; `billing.subscription.changed.v1.reason` — `purchase | renewal | trial | trial_grant | grant |
+  activated | ended | superseded | refund | staff`, у `status none | expired` `period_id`, даты и `minutes_granted` —
+  `null`; `lesson.pair.completed.v1.billing` — `{payer_user_id, hold_id, billable_minutes}` (необязательное).
+- **bff.ts (Mini App):** `StarsOrder` — только Stars (`currency "XTR"`, `amount_stars`, `provider "telegram_stars"`),
+  плюс `channel: miniapp | renewal` и `paid_at`; `SubscriptionView` + `minutes_exhausted` (§1.10); каталог детского
+  профиля — `trial: null`; `LessonSession.ai_locked: {reason} | null`, `ai_minutes_left`; `GameSummary.purchase_available`
+  — `boolean`; приглашение в урок вдвоём — 403 `SUBSCRIPTION_REQUIRED {feature, reason}`.
+- **web.ts (сайт):** ошибка входа — 302 на `/?login_error=auth_failed | account_not_found | not_allowed`; каталог сайта
+  без пробного; `WebSubscriptionView` — без `stars_subscription` и `trial_available`; `WebOrder` + `paid_at`.
+- **admin.ts:** вкладка «Тариф» — отдельный маршрут `GET /admin/v1/learners/{user_id}/billing → AdminBillingAccount`
+  (карточка ученика не зависит от доступности billing); `AdminLearnerRow.tier: free | paid | null` (null — событий ещё
+  не было); `Dashboard.money: MoneyStats`; финансовый обзор — целые микродоллары (`*_micro_usd`) и тийины;
+  `Adjustment.can_decide` / `can_cancel`, `AdminOrderCard.can_refund` — подсказки UI («автор не видит «Подтвердить»»).
+  `PRIVILEGED_ROLES` не расширялся: finance привилегирована составом прав (`Role.privileged` admin-identity).
+- **ai.ts:** `AgentUnavailableReason` + `degraded` (уровень `paid_only`, ученик free); `AiDegradationUpdate.manual_level`
+  — `null` в режиме `auto`; `AiUnitCosts` + `from`, `to`.
+- **PaymentPort (§1.4):** `amount` — целое в единицах провайдера (тийины; у `telegram_stars` — звёзды); `order_ref` —
+  номер заказа строкой (фиатные) или `invoice_payload` (Stars); добавлена ошибка `SubscriptionExists` (pre-checkout
+  `subscription_exists`); `paid` получает `StarsRecurrence`.
+- **Настройки billing:** `PAYMENTS_ENABLED` не задан — по окружению; по умолчанию `PAYME_LOGIN=Paycom` (§14 P1),
+  `PAYME_CHECKOUT_URL=https://checkout.paycom.uz` (§14 P6), `CLICK_PAY_URL=https://my.click.uz/services/pay`,
+  `CLICK_API_URL=https://api.click.uz/v2/merchant` (§14 C1) — сверить; `*_ENABLED=true` в stage/prod без ключа,
+  реквизитов или с адресом не https — сервис не стартует.
+- **telegram-bff:** один клиент billing `ctx.billing` на `/v1/billing/*` и `/web/v1/*` (канал — claim вызова);
+  `BILLING_TIMEOUT_MS` (5000); сайт оплаты: в stage/prod при `WEB_PAY_ENABLED=true` обязательны `WEB_PAY_ORIGIN`
+  (https, не origin Mini App), `TELEGRAM_LOGIN_CLIENT_ID` (цифры), `TELEGRAM_LOGIN_CLIENT_SECRET` (≠ `BOT_TOKEN`),
+  `WEB_SESSION_SECRET` (≥ 32, ≠ секретам сессии и JWT); `TELEGRAM_OIDC_BASE` в stage/prod — только
+  `https://oauth.telegram.org`. Запросы сайта идут через Caddy web-pay: адрес клиента — глубина 2 справа в
+  `X-Forwarded-For` (как admin-bff), у payments-edge → billing — так же.
+- **Лимиты (§13):** префиксы политик `web.` и `pay.` добавлены в допустимые (py-common); `web.auth_ip` — fail closed.
+- **«Что нового»:** ключи `s8-plus`, `s8-plus-kids` и переходы `subscription`, `til_shop` — в `release-notes.json`
+  блоком `planned` (основные списки сверяются клиентами целиком и требуют файл иллюстрации); перенос — поток I.
+- **n8n:** `billing-tick`, `billing-reconcile` с `"active": false` — entrypoint не включает их и при заданном
+  `BILLING_URL`; включение — правка JSON на `true` вместе с выкладкой billing (поток A / I).
+- **Фильтр логов:** `key` и `code` — только точные имена поля; бизнес-код ошибки (UPPER_SNAKE) в `code` остаётся
+  виден (py-common и ts-common одинаково); ts-common применяет фильтр ко всем логам `buildBase`.
+
 ## 15. Источники
 **Telegram:** [Bot Payments API for Digital Goods and Services (Stars, 10 с на pre-checkout, `/paysupport`, `/terms`,
 тестовая среда)](https://core.telegram.org/bots/payments-stars);

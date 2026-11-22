@@ -14,6 +14,7 @@ import {
   currentContext,
 } from "./context.js";
 import { AppError, errorBody } from "./errors.js";
+import { scrubSecrets } from "./logRedact.js";
 
 export interface LogSink {
   write(msg: string): void;
@@ -26,7 +27,8 @@ export interface BaseOptions {
   readiness?: () => Promise<Record<string, "ok" | "down">>;
   /** Дополнительные redact-пути pino (к REDACT_PATHS). */
   redactPaths?: string[];
-  /** Пост-обработка объекта лога (например, рекурсивная вычистка ключей) — pino formatters.log. */
+  /** Пост-обработка объекта лога (например, рекурсивная вычистка ключей) — pino formatters.log; вызывается после
+   *  общего фильтра секретов scrubSecrets (logRedact.ts, спринт 8). */
   logFormatter?: (obj: Record<string, unknown>) => Record<string, unknown>;
   /** Поток логов (тесты перехватывают строки); по умолчанию stdout. */
   logStream?: LogSink;
@@ -59,6 +61,17 @@ export const REDACT_PATHS = [
   "req.body.refresh_token",
   "req.body.message",
   "req.body.text",
+  // спринт 8: секреты провайдеров платежей и входа «Log In with Telegram» (OIDC) — как SECRET_LOG_KEYS
+  "req.body.password",
+  "req.body.client_secret",
+  "req.body.code_verifier",
+  "req.body.id_token",
+  "req.body.sign_string",
+  "req.body.secret_key",
+  "req.body.key",
+  "req.query.code",
+  "req.query.code_verifier",
+  "req.query.id_token",
 ];
 
 const contextPlugin = fp(async (app: FastifyInstance) => {
@@ -122,7 +135,13 @@ export async function buildBase(opts: BaseOptions): Promise<FastifyInstance> {
         const c = currentContext();
         return { trace_id: c.traceId, correlation_id: c.correlationId, ...(c.userPid ? { user_pid: c.userPid } : {}) };
       },
-      ...(opts.logFormatter ? { formatters: { log: opts.logFormatter } } : {}),
+      // спринт 8: общий фильтр секретов (SECRET_LOG_KEYS) — всегда; свой formatter сервиса — поверх него
+      formatters: {
+        log: (obj: Record<string, unknown>) => {
+          const clean = scrubSecrets(obj) as Record<string, unknown>;
+          return opts.logFormatter ? opts.logFormatter(clean) : clean;
+        },
+      },
       ...(opts.logStream ? { stream: opts.logStream } : {}),
     },
     trustProxy,

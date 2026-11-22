@@ -24,6 +24,7 @@ SERVICES = [
     "tts",  # релиз 4.1: только проверяет токены telegram-bff (закрытый ключ нужен ServiceSettings в stage/prod)
     "memory",  # спринт 5: словарь, повторения FSRS, проверки удержания (вызывает catalog, assessment, ai-gateway, identity-consent)
     "gamification",  # спринт 6: игра и герои (сам никого не вызывает: начисления — по событиям)
+    "billing",  # спринт 8: деньги (вызывает identity-consent, gamification, telegram-bot-gateway /stars/*)
     "identity-consent",
     "learning-plan",
     "social",

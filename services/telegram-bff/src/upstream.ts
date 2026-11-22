@@ -281,6 +281,32 @@ export function createGame(o: {
   });
 }
 
+/** aud внутреннего JWT к billing (спринт 8). Не в DOMAIN: адрес необязателен (config.billingUrl). */
+export const BILLING_SERVICE = "billing";
+
+/** Клиент billing (спринт 8, RawClient): один на Mini App и сайт оплаты. Канал — claim `chn` каждого вызова:
+ *  `/v1/billing/*` (поток E) — `{lrn, age_band, chn: "miniapp"}`, `/web/v1/*` (поток H) — `{lrn: <аккаунт>, chn: "web"}`;
+ *  sub — аккаунт. Нет адреса — null (503 BILLING_UNAVAILABLE). */
+export function createBilling(o: {
+  url: string | undefined;
+  key: InternalKey;
+  timeoutMs: number;
+  retries: number;
+  fetchImpl?: typeof fetch;
+  onFailure?: UpstreamLogger;
+}): RawClient | null {
+  if (!o.url) return null;
+  return new RawClient({
+    target: BILLING_SERVICE,
+    baseUrl: o.url,
+    key: o.key,
+    timeoutMs: o.timeoutMs,
+    retries: o.retries,
+    fetchImpl: o.fetchImpl ?? ((...a) => fetch(...a)),
+    ...(o.onFailure ? { onFailure: o.onFailure } : {}),
+  });
+}
+
 export type RawMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export interface RawRequest {

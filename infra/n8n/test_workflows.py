@@ -72,6 +72,21 @@ EXPECTED: dict[str, dict[str, Any]] = {
         "body": None,
         "on_start": False,
     },
+    # спринт 8: billing — выключены в репозитории ("active": false) до выкладки billing с tick и сверкой (поток A)
+    "billing-tick.json": {
+        "cron": "*/5 * * * *",  # каждые 5 минут: заказы, периоды, подписки Stars, удержания, заявки, фискализация
+        "url": "={{ $env.BILLING_URL }}/internal/v1/billing:tick",
+        "body": None,
+        "on_start": False,
+        "active": False,
+    },
+    "billing-reconcile.json": {
+        "cron": "15 23 * * *",  # раз в сутки, 23:15 UTC: сверка с провайдерами и Telegram (INTERNAL_API §1.14)
+        "url": "={{ $env.BILLING_URL }}/internal/v1/billing:reconcile",
+        "body": None,
+        "on_start": False,
+        "active": False,
+    },
     "user-admin-reconcile.json": {
         "cron": "25 * * * *",  # каждый час: страховочная сверка read-модели учеников админки (спринт 2)
         "url": "={{ $env.USER_ADMIN_URL }}/internal/v1/reconcile",
@@ -98,6 +113,7 @@ def test_workflow_files_and_unique_fixed_ids():
 def test_workflow_schedule_and_http_call(name: str):
     wf, exp = load(name), EXPECTED[name]
     assert wf["settings"]["timezone"] == "UTC" and wf["settings"]["executionOrder"] == "v1"
+    assert wf["active"] is exp.get("active", True)  # false — выключен в репозитории (entrypoint не включает)
     nodes = {n["name"]: n for n in wf["nodes"]}
     assert len({n["id"] for n in wf["nodes"]}) == len(wf["nodes"])
     triggers = [n for n in wf["nodes"] if n["type"] == "n8n-nodes-base.scheduleTrigger"]
@@ -162,7 +178,8 @@ URL_VARS = {"invites-tick.json": "SOCIAL_URL", "notifications-dispatch.json": "N
             "plan-tick.json": "LEARNING_PLAN_URL", "user-admin-reconcile.json": "USER_ADMIN_URL",
             "catalog-tick.json": "CATALOG_URL", "lessons-tick.json": "LESSONS_URL",
             "assessment-tick.json": "ASSESSMENT_URL", "memory-tick.json": "MEMORY_URL",
-            "game-tick.json": "GAMIFICATION_URL"}
+            "game-tick.json": "GAMIFICATION_URL", "billing-tick.json": "BILLING_URL",
+            "billing-reconcile.json": "BILLING_URL"}
 
 
 def _run_entrypoint(tmp_path: Path, env: dict[str, str]) -> tuple[subprocess.CompletedProcess, list[str]]:
@@ -201,8 +218,12 @@ def test_entrypoint_activates_only_workflows_with_url(tmp_path: Path):
     new = {**old, "SOCIAL_URL": "http://social:8109", "USER_ADMIN_URL": "http://user-admin:8121",
            "CATALOG_URL": "http://catalog:8110", "LESSONS_URL": "http://lessons:8112",
            "ASSESSMENT_URL": "http://assessment:8113", "MEMORY_URL": "http://memory:8116",
-           "GAMIFICATION_URL": "http://gamification:8117"}
+           "GAMIFICATION_URL": "http://gamification:8117", "BILLING_URL": "http://billing:8118"}
     proc, calls = _run_entrypoint(tmp_path, new)
     assert proc.returncode == 0, proc.stderr
     activated = [c.split("--id=")[1].split()[0] for c in calls if c.startswith("update:workflow")]
-    assert sorted(activated) == sorted(ids.values()) and "WARNING" not in proc.stderr
+    # спринт 8: выключенные в репозитории (billing-tick, billing-reconcile) не включаются и при заданном адресе
+    disabled = {ids[n] for n, e in EXPECTED.items() if e.get("active") is False}
+    assert disabled == {ids["billing-tick.json"], ids["billing-reconcile.json"]}
+    assert sorted(activated) == sorted(set(ids.values()) - disabled) and "WARNING" not in proc.stderr
+    assert all(f"workflow {i}" in proc.stderr and "выключен в репозитории" in proc.stderr for i in disabled)

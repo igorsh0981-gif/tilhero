@@ -101,3 +101,52 @@ def test_dsn_pem_initdata_and_url_secrets(value: str, secret: str, kept: str) ->
 def test_plain_equals_and_short_values_untouched() -> None:
     for v in ("a=b", "retry=3", "status=ok page=2", "key=a"):
         assert redact({"detail": v}) == {"detail": v}, v
+
+
+# ---------------------------------------------------------------- спринт 8 (INTERNAL_API §0.8): платежи и вход на сайт
+
+@pytest.mark.parametrize("key", ["authorization", "sign_string", "signString", "secret_key", "CLICK_SECRET_KEY",
+                                 "password", "UZUM_PASSWORD", "key", "Key", "client_secret", "clientSecret",
+                                 "code", "code_verifier", "codeVerifier", "id_token", "idToken", "payme_key",
+                                 "PAYME_SUBSCRIBE_KEY", "member_id_key", "x-edge-token", "payments_edge_token",
+                                 "web_session_secret", "telegram_login_client_secret"])
+def test_sprint8_secret_keys_redacted(key: str) -> None:
+    assert sensitive_key(key), key
+    out = fmt(nested={"a": [{key: SECRET}]}, **{key.replace("-", "_"): SECRET})
+    assert SECRET not in json.dumps(out, ensure_ascii=False), key
+
+
+@pytest.mark.parametrize("key", ["idempotency_key", "dedup_key", "cache_key", "payload_hash", "error_code",
+                                 "upstream_code", "result_code", "order_no", "provider_txn_id", "state", "keys"])
+def test_sprint8_key_and_code_are_exact_field_names(key: str) -> None:
+    """`key` и `code` — точные имена поля: составные (идемпотентность, дедупликация, коды результата) — не секрет."""
+    assert not sensitive_key(key), key
+    assert redact({key: "value-1"}) == {key: "value-1"}
+
+
+def test_sprint8_business_error_code_kept_secret_code_redacted() -> None:
+    """Бизнес-код ошибки (UPPER_SNAKE) в поле `code` виден; одноразовый код OIDC, TOTP — нет."""
+    assert fmt(code="PAYMENTS_DISABLED")["code"] == "PAYMENTS_DISABLED"
+    assert redact({"nested": {"code": "WALLET_DRIFT"}}) == {"nested": {"code": "WALLET_DRIFT"}}
+    for secret_code in ("a1b2c3d4e5f6-oidc-code", "123456", "Ab_CDEF", "9ZZZ_ZZZ"):
+        assert fmt(code=secret_code)["code"] == "[redacted]", secret_code
+    assert fmt(key="PAYMENTS_DISABLED")["key"] == "[redacted]"  # исключение — только для `code`
+
+
+@pytest.mark.parametrize("value,secret", [
+    ("GET /web/v1/auth/callback?code=Qw3rTy-0neT1me-c0de&state=st4te0000", "Qw3rTy-0neT1me-c0de"),
+    ("POST https://oauth.telegram.org/token grant_type=authorization_code&code_verifier=V3r1f13r-abcdefgh",
+     "V3r1f13r-abcdefgh"),
+    ("client_secret=Cl13ntS3cr3t-xyz rejected", "Cl13ntS3cr3t-xyz"),
+    ("click sign_string=0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcdef"),
+    ("id_token=abcdef.ghijkl.mnopqr", "abcdef.ghijkl.mnopqr"),
+])
+def test_sprint8_secret_values_in_strings(value: str, secret: str) -> None:
+    out = fmt(value, detail=value)
+    assert secret not in json.dumps(out, ensure_ascii=False)
+    assert "[redacted]" in out["detail"] and "[redacted]" in out["msg"]
+
+
+def test_sprint8_plain_code_words_untouched() -> None:
+    for v in ("error code=PAYMENTS_DISABLED", "status=ok code=200", "promo code"):
+        assert redact({"detail": v}) == {"detail": v}, v

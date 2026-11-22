@@ -79,6 +79,8 @@ const session = (over: Partial<LessonSession> = {}): LessonSession => ({
   finished_at: null,
   expires_at: null,
   minutes: 0,
+  ai_locked: null,
+  ai_minutes_left: null,
   ...over,
 });
 const base = (n: number, stage: LessonStep["stage"] = "retrieval") => ({ step_id: `s${n}`, stage, position: 1, stage_total: 2 });

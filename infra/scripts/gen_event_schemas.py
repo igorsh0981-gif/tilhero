@@ -45,6 +45,27 @@ SCORE_OR_NULL = {"anyOf": [SCORE, {"type": "null"}]}
 UUID_OR_NULL = {"type": ["string", "null"], "format": "uuid"}
 SESSION_KINDS = ("lesson", "scenario", "media", "review", "reading")
 
+# ------------------------------------------------------------ спринт 8 (деньги и контроль ИИ)
+# Деньги — целые числа (ADR-0001): сумы — тийины (1 сум = 100 тийинов, валюта UZS), Stars — целые звёзды (XTR).
+# В событии заказа и возврата заполнено ровно одно из amount_tiyin / amount_stars (по currency), второе — null.
+TS_OR_NULL = {"type": ["string", "null"], "format": "date-time"}
+TIYIN_OR_NULL = {"type": ["integer", "null"], "minimum": 100, "maximum": 100_000_000_000}
+STARS_OR_NULL = {"type": ["integer", "null"], "minimum": 1, "maximum": 100_000}
+ORDER_NO = {"type": "integer", "minimum": 100_001}
+PRODUCT_CODE = {"type": "string", "pattern": r"^[a-z0-9_]{2,40}$"}
+PRODUCT_CODE_OR_NULL = {"type": ["string", "null"], "pattern": r"^[a-z0-9_]{2,40}$"}
+TITLE_RU_UZ = obj({"ru": {"type": "string", "minLength": 1, "maxLength": 60},
+                   "uz": {"type": "string", "minLength": 1, "maxLength": 60}})
+CHANNEL = enum("miniapp", "web", "renewal")
+PROVIDER = enum("telegram_stars", "payme", "click", "uzum")
+CURRENCY = enum("UZS", "XTR")
+PRODUCT_KIND = enum("subscription", "til_pack")
+FEATURES = {**arr(enum("ai_lessons", "pair_lessons"), 2), "uniqueItems": True}
+MINUTES = {"type": "integer", "minimum": 0, "maximum": 100_000}
+MINUTES_OR_NULL = {"type": ["integer", "null"], "minimum": 0, "maximum": 100_000}
+TIL_PACK = {"type": "integer", "minimum": 1, "maximum": 100_000}
+DEGRADATION_LEVEL = enum("normal", "economy", "paid_only", "off")
+
 
 CATALOG = {
     # ------------------------------------------------------------ identity-consent
@@ -143,7 +164,11 @@ CATALOG = {
                                      "outcome": {"type": ["string", "null"], "enum": ["success", "alt_success", "fail", None]},
                                      "minutes": {"type": "integer", "minimum": 0, "maximum": 600},
                                      "local_date": DATE, "evaluation_id": UUID, "passed": BOOL, "practice_only": BOOL,
-                                     "finished_at": TS, "duel_id": UUID, "room_id": UUID, "score": SCORE},
+                                     "finished_at": TS, "duel_id": UUID, "room_id": UUID, "score": SCORE,
+                                     # спринт 8 (необязательные; прежние читатели терпимы): ИИ-минуты к списанию
+                                     # ⌈ai_active_seconds/60⌉ и удержание billing, созданное при старте (нет — null)
+                                     "billable_minutes": {"type": "integer", "minimum": 0, "maximum": 240},
+                                     "billing_hold_id": UUID},
                                     ["session_id", "user_id", "kind", "pair_id", "status", "minutes", "practice_only",
                                      "finished_at"]),
     # ------------------------------------------------------------ lessons: парный урок (спринт 7)
@@ -171,7 +196,13 @@ CATALOG = {
                                       "speaking_seconds": {"type": "integer", "minimum": 0, "maximum": 7200},
                                       "minutes": {"type": "integer", "minimum": 0, "maximum": 240}}), 2),
                                       "minItems": 1},
-                                  "ended_at": TS},
+                                  "ended_at": TS,
+                                  # спринт 8 (необязательное): списание минут урока вдвоём у пригласившего — один раз
+                                  # за комнату по времени работы коуча ⌈coach_active_seconds/60⌉; null — без удержания
+                                  # (комната без коуча, с ребёнком, BILLING_ENFORCED=false)
+                                  "billing": obj({"payer_user_id": UUID, "hold_id": UUID,
+                                                  "billable_minutes": {"type": "integer", "minimum": 0,
+                                                                       "maximum": 240}})},
                                  ["room_id", "scenario_id", "pair_id", "status", "end_reason", "team_goal_reached",
                                   "participants", "ended_at"]),
     # ------------------------------------------------------------ assessment (спринт 4)
@@ -282,6 +313,103 @@ CATALOG = {
                                "finished_at": TS},
                               ["duel_id", "challenger_user_id", "opponent_user_id", "status", "result", "technical",
                                "result_version", "scores", "finished_at"]),
+    # ------------------------------------------------------------ gamification (спринт 8): тилы по заказу billing
+    # billing.order.paid.v1 (til_pack) обработан → billing: заказ fulfilled. outcome user_deleted — получатель удалён,
+    # тилы не начислены (op_id null): заказ закрывается, деньги — возвратом сотрудником
+    "game.til_pack.credited.v1": ({"order_id": UUID, "user_id": UUID, "til": TIL_PACK, "op_id": UUID_OR_NULL,
+                                   "outcome": enum("credited", "user_deleted"), "credited_at": TS},
+                                  ["order_id", "user_id", "til", "op_id", "outcome", "credited_at"]),
+    # billing.order.refunded.v1 (til_pack) обработан: reversed — обратная запись; tils_spent — тилов не хватило
+    # (пункт сверки tils_spent_on_refund); user_deleted — получатель удалён
+    "game.til_pack.reversed.v1": ({"order_id": UUID, "user_id": UUID,
+                                   "outcome": enum("reversed", "tils_spent", "user_deleted"), "at": TS},
+                                  ["order_id", "user_id", "outcome", "at"]),
+    # ------------------------------------------------------------ billing (спринт 8, INTERNAL_API §10)
+    # Без ПДн и Telegram ID. Заказ оплачен: подписка — период уже выдан в той же транзакции (period — его даты;
+    # запланированный «после текущего» — даты null до активации); til_pack — заказ paid, тилы начисляет gamification
+    # (til — размер пакета). → gamification (til_pack), notifications (канал miniapp|renewal — payment_succeeded, web —
+    # purchase_applied без суммы и провайдера)
+    "billing.order.paid.v1": ({"order_id": UUID, "order_no": ORDER_NO, "account_id": UUID, "beneficiary_user_id": UUID,
+                               "channel": CHANNEL, "product_kind": PRODUCT_KIND, "product_code": PRODUCT_CODE,
+                               "product_title": TITLE_RU_UZ, "currency": CURRENCY, "amount_tiyin": TIYIN_OR_NULL,
+                               "amount_stars": STARS_OR_NULL, "provider": PROVIDER, "til": TIL_PACK,
+                               "period": {"anyOf": [obj({"starts_at": TS_OR_NULL, "ends_at": TS_OR_NULL}),
+                                                    {"type": "null"}]},
+                               "paid_at": TS},
+                              ["order_id", "order_no", "account_id", "beneficiary_user_id", "channel", "product_kind",
+                               "product_code", "product_title", "currency", "amount_tiyin", "amount_stars", "provider",
+                               "period", "paid_at"]),
+    # возврат завершён (staff — по решению сотрудника, provider — по инициативе провайдера / Telegram). account_id и
+    # beneficiary_user_id — null у обезличенного заказа (аккаунт удалён, В15) → gamification (til_pack: обратная
+    # запись), notifications refund_completed (miniapp — со звёздами; web — нейтрально, без суммы и способа оплаты)
+    "billing.order.refunded.v1": ({"order_id": UUID, "order_no": ORDER_NO, "account_id": UUID_OR_NULL,
+                                   "beneficiary_user_id": UUID_OR_NULL, "channel": CHANNEL,
+                                   "product_kind": PRODUCT_KIND, "currency": CURRENCY,
+                                   "amount_tiyin": TIYIN_OR_NULL, "amount_stars": STARS_OR_NULL, "refund_id": UUID,
+                                   "initiated_by": enum("staff", "provider"), "refunded_at": TS},
+                                  ["order_id", "order_no", "account_id", "beneficiary_user_id", "channel",
+                                   "product_kind", "currency", "amount_tiyin", "amount_stars", "refund_id",
+                                   "initiated_by", "refunded_at"]),
+    # статус подписки аккаунта изменился (§1.10). reason: purchase — оплачен заказ (сайт или первый платёж Stars),
+    # renewal — продление Stars, trial — пробный по запросу ученика, trial_grant — разовая выдача пробного всем 14+,
+    # grant — выдача сотрудником («четыре глаза»), activated — запланированный период начался, ended — период
+    # закончился (status expired), superseded — заменён («начать сейчас», Stars поверх пробного), refund — отозван
+    # возвратом, staff — отозван сотрудником. Без периода (status none | expired) — period_id, даты и минуты null
+    # → notifications (subscription_expired — status expired и reason ended; trial_started — status trial)
+    "billing.subscription.changed.v1": ({"account_id": UUID, "status": enum("none", "trial", "active", "expired"),
+                                         "reason": enum("purchase", "renewal", "trial", "trial_grant", "grant",
+                                                        "activated", "ended", "superseded", "refund", "staff"),
+                                         "period_id": UUID_OR_NULL, "product_code": PRODUCT_CODE_OR_NULL,
+                                         "starts_at": TS_OR_NULL, "ends_at": TS_OR_NULL,
+                                         "minutes_granted": MINUTES_OR_NULL, "changed_at": TS},
+                                        ["account_id", "status", "reason", "period_id", "product_code", "starts_at",
+                                         "ends_at", "minutes_granted", "changed_at"]),
+    # тариф ученика изменился — каждому ученику аккаунта (сам аккаунт и детские профили), новому детскому профилю —
+    # по текущему статусу. tier paid — есть активный период с функциями; paid_until — его конец (null — free)
+    # → ai-gateway (learner_tiers: дневной лимит и уровень paid_only), user-admin (фильтр tier)
+    "billing.access.changed.v1": ({"user_id": UUID, "account_id": UUID, "tier": enum("free", "paid"),
+                                   "features": FEATURES, "paid_until": TS_OR_NULL, "changed_at": TS},
+                                  ["user_id", "account_id", "tier", "features", "paid_until", "changed_at"]),
+    # подписка Stars (нативная подписка Telegram): canceled — автопродление выключено (пользователь в Telegram или
+    # кнопкой в Mini App), active — включено снова, failed — продление не удалось (не хватило Stars), refunded —
+    # возврат, ended — expires_at прошёл без продления → notifications (failed — stars_renewal_failed)
+    "billing.stars_subscription.changed.v1": ({"account_id": UUID, "subscription_id": UUID,
+                                               "status": enum("active", "canceled", "failed", "refunded", "ended"),
+                                               "expires_at": TS, "changed_at": TS},
+                                              ["account_id", "subscription_id", "status", "expires_at", "changed_at"]),
+    # период заканчивается: за expiring_days (3) и в день окончания (days_left 0), если нет следующего периода и
+    # живой подписки Stars с автопродлением → notifications subscription_expiring
+    "billing.subscription.expiring.v1": ({"account_id": UUID, "period_id": UUID, "ends_at": TS,
+                                          "days_left": {"type": "integer", "minimum": 0, "maximum": 30},
+                                          "minutes_left": MINUTES},
+                                         ["account_id", "period_id", "ends_at", "days_left", "minutes_left"]),
+    # после списания доступно ≤ low_minutes_percent от выданного — один раз за период → notifications minutes_low
+    "billing.minutes.low.v1": ({"account_id": UUID, "period_id": UUID, "minutes_left": MINUTES,
+                                "minutes_granted": {"type": "integer", "minimum": 1, "maximum": 100_000}},
+                               ["account_id", "period_id", "minutes_left", "minutes_granted"]),
+    # корректировка «четыре глаза» применена (§1.13): minutes — ±N минут периода, grant_period — выдан период (days,
+    # minutes), revoke_period — период отозван. Основание и сотрудники в событие не входят (аудит) → notifications
+    # minutes_adjusted (минуты > 0 или выдача)
+    "billing.adjustment.applied.v1": ({"adjustment_id": UUID, "account_id": UUID,
+                                       "kind": enum("minutes", "grant_period", "revoke_period"),
+                                       "minutes": {"type": ["integer", "null"], "minimum": -10_000,
+                                                   "maximum": 10_000},
+                                       "days": {"type": ["integer", "null"], "minimum": 1, "maximum": 90},
+                                       "period_id": UUID_OR_NULL, "applied_at": TS},
+                                      ["adjustment_id", "account_id", "kind", "minutes", "days", "period_id",
+                                       "applied_at"]),
+    # активирована версия каталога тарифов и товаров (активация или откат новой версией) — аналитика
+    "billing.catalog.activated.v1": ({"version": {"type": "integer", "minimum": 1}, "activated_at": TS},
+                                     ["version", "activated_at"]),
+    # ------------------------------------------------------------ ai-gateway (спринт 8): уровень деградации ИИ
+    # смена действующего уровня: threshold — по доле расхода месяца (auto), manual — сотрудником (step-up, аудит
+    # ai.degradation_updated), emergency_stop — аварийная остановка, month_reset — новый месяц. spent_percent — доля
+    # потолка месяца с резервами (может быть > 100)
+    "ai.degradation.changed.v1": ({"from": DEGRADATION_LEVEL, "to": DEGRADATION_LEVEL,
+                                   "mode": enum("auto", "manual"),
+                                   "reason": enum("threshold", "manual", "emergency_stop", "month_reset"),
+                                   "spent_percent": {"type": "number", "minimum": 0, "maximum": 1000}, "at": TS},
+                                  ["from", "to", "mode", "reason", "spent_percent", "at"]),
     # ------------------------------------------------------------ catalog: словарь курса (спринт 5)
     "catalog.glossary.changed.v1": ({"pair_id": STR, "entry_id": UUID, "forms": arr(STR, 8),
                                      "change": enum("created", "updated", "reviewed", "archived"), "occurred_at": TS},

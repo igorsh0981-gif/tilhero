@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ai.degradation.changed.v1.schema.json",
+  "title": "ai.degradation.changed.v1",
+  "type": "object",
+  "required": [
+    "from",
+    "to",
+    "mode",
+    "reason",
+    "spent_percent",
+    "at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "from": {
+      "type": "string",
+      "enum": [
+        "normal",
+        "economy",
+        "paid_only",
+        "off"
+      ]
+    },
+    "to": {
+      "type": "string",
+      "enum": [
+        "normal",
+        "economy",
+        "paid_only",
+        "off"
+      ]
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "manual"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "threshold",
+        "manual",
+        "emergency_stop",
+        "month_reset"
+      ]
+    },
+    "spent_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

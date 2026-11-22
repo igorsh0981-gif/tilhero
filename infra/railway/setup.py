@@ -6,14 +6,19 @@
 1. Генерирует секреты: Ed25519-ключ внутреннего JWT на каждый сервис (+ общий список открытых ключей),
    SCHEDULER_TOKEN (n8n), SESSION_JWT_SECRET (BFF), INVITE_TOKEN_KEY (social), TELEGRAM_WEBHOOK_SECRET (бот),
    USER_REF_SECRET (lessons: псевдоним ученика в «Контроле диалогов»), MEMBER_ID_KEY (спринт 7: общий ключ social,
-   gamification и lessons — member_id ученика в социальном API), пароли ролей БД <svc> и <svc>_owner.
+   gamification и lessons — member_id ученика в социальном API), PAYMENTS_EDGE_TOKEN (спринт 8: один у billing и
+   payments-edge), WEB_SESSION_SECRET (спринт 8: cookie-сессия сайта оплаты, telegram-bff), пароли ролей БД <svc> и
+   <svc>_owner.
 2. Пишет в --out (каталог .dev/ в .gitignore — файлы НЕ коммитить):
    - <service>.env — переменные сервиса для вставки в Railway (Variables → Raw Editor);
    - db-passwords.sql — пароли ролей; выполнить ПОСЛЕ infra/db/bootstrap.sql под владельцем БД;
    - services.md — таблица: Dockerfile, публичный домен, Pre-Deploy Command, healthcheck.
 Ссылки ${{…}} Railway подставляет сам: адреса приватной сети, Redis, публичные домены.
 BOT_TOKEN скрипт не знает: сервисы ссылаются на общую переменную ${{shared.BOT_TOKEN}}, её вводят вручную
-(Railway → Project Settings → Shared Variables).
+(Railway → Project Settings → Shared Variables). Ссылка на BOT_TOKEN — только у telegram-bot-gateway (Bot API) и
+telegram-bff (проверка initData): BOT_TOKEN_SERVICES, тест это проверяет. Спринт 8: ключи провайдеров (PAYME_KEY,
+PAYME_SUBSCRIBE_KEY, CLICK_SECRET_KEY, UZUM_PASSWORD) — ссылки ${{shared.<ИМЯ>}} только у billing, секрет клиента
+«Log In with Telegram» (TELEGRAM_LOGIN_CLIENT_SECRET) — только у telegram-bff; значения вводит владелец.
 """
 
 from __future__ import annotations
@@ -60,20 +65,25 @@ SERVICES: tuple[Service, ...] = (
             calls=("identity-consent", "telegram-bot-gateway")),
     Service("audit", 8105, "services/audit/Dockerfile", "audit"),
     Service("experience-config", 8106, "services/experience-config/Dockerfile", "experience_config"),
+    # спринт 8: + billing (платёжные обновления Telegram: pre_checkout_query, successful_payment, refunded_payment,
+    # subscription → /internal/v1/stars/*); Bot API для Stars вызывает только bot-gateway (токен бота — только у него)
     Service("telegram-bot-gateway", 8107, "apps/telegram-bot-gateway/Dockerfile", public=True,
-            calls=("identity-consent",)),
+            calls=("identity-consent", "billing")),
     Service("social", 8109, "services/social/Dockerfile", "social", calls=("identity-consent",)),
+    # спринт 8: + billing (Mini App /v1/billing/* — канал miniapp; сайт оплаты /web/v1/* — канал web)
     Service("telegram-bff", 8001, "services/telegram-bff/Dockerfile", public=True,
             calls=("identity-consent", "learning-plan", "support", "notifications", "experience-config", "social",
-                   "catalog", "diagnostics", "lessons", "assessment", "tts", "memory", "gamification")),
+                   "catalog", "diagnostics", "lessons", "assessment", "tts", "memory", "gamification", "billing")),
     Service("telegram-miniapp", 8080, "apps/telegram-miniapp/Dockerfile", public=True, health="/healthz"),
     # спринт 3 — учебный контур: контент и диагностика
     Service("catalog", 8110, "services/catalog/Dockerfile", "catalog"),
     Service("diagnostics", 8111, "services/diagnostics/Dockerfile", "diagnostics", calls=("catalog",)),
     # спринт 4 — урок 20 минут, независимая оценка, ИИ (ai-gateway — единственный, у кого ключ провайдера)
     # спринт 7: + social (связь учеников, member_id → user_id), identity-consent (согласие на голос в парной комнате)
+    # спринт 8: + billing (удержание минут при старте урока с ИИ и урока вдвоём, доступ по подписке)
     Service("lessons", 8112, "services/lessons/Dockerfile", "lessons",
-            calls=("catalog", "ai-gateway", "assessment", "learning-plan", "diagnostics", "social", "identity-consent")),
+            calls=("catalog", "ai-gateway", "assessment", "learning-plan", "diagnostics", "social", "identity-consent",
+                   "billing")),
     Service("assessment", 8113, "services/assessment/Dockerfile", "assessment", calls=("catalog", "ai-gateway")),
     # релиз 5.1: оценка произношения — распознавание в tts (faster-whisper), ai-gateway сравнивает с эталоном
     Service("ai-gateway", 8114, "services/ai-gateway/Dockerfile", "ai_gateway", calls=("tts",)),
@@ -86,28 +96,37 @@ SERVICES: tuple[Service, ...] = (
     # спринт 7 — лиги и дуэли: social (связь учеников, member_id → user_id), lessons (набор заданий дуэли)
     Service("gamification", 8117, "services/gamification/Dockerfile", "gamification",
             calls=("social", "lessons", "diagnostics", "identity-consent")),
+    # спринт 8 — деньги: каталог, заказы, платёжный контур (Stars через bot-gateway, Payme/Click/Uzum через
+    # payments-edge), периоды и реестр минут, возвраты, сверка. Публичного домена нет: колбэки — через payments-edge
+    Service("billing", 8118, "services/billing/Dockerfile", "billing",
+            calls=("identity-consent", "gamification", "telegram-bot-gateway")),
+    # payments-edge — публичный Caddy только для колбэков Payme, Click, Uzum (/pay/*) → billing по приватной сети;
+    # web-pay — сайт оплаты вне Telegram (статика за Caddy, /api/* → telegram-bff /web/v1/* по приватной сети)
+    Service("payments-edge", 8080, "apps/payments-edge/Dockerfile", public=True, health="/healthz"),
+    Service("web-pay", 8080, "apps/web-pay/Dockerfile", public=True, health="/healthz"),
     # спринт 2 — админка: admin-bff без публичного домена, admin-web проксирует /admin/v1/* на него (один origin)
     Service("admin-identity", 8120, "services/admin-identity/Dockerfile", "admin_identity"),
     Service("user-admin", 8121, "services/user-admin/Dockerfile", "user_admin",
             calls=("identity-consent", "learning-plan")),
     # спринт 7: + social (друзья, модерация, реферальные кампании)
+    # спринт 8: + billing («Деньги», вкладка «Тариф», финансовый обзор)
     Service("admin-bff", 8002, "services/admin-bff/Dockerfile", health="/health/ready",
             calls=("admin-identity", "user-admin", "identity-consent", "support", "audit", "experience-config",
                    "notifications", "catalog", "diagnostics", "ai-gateway", "lessons", "assessment", "memory",
-                   "gamification", "social")),
+                   "gamification", "social", "billing")),
     Service("admin-web", 8080, "apps/admin-web/Dockerfile", public=True, health="/healthz"),
     Service("n8n", 5678, "infra/n8n/Dockerfile", health="/healthz",
             calls=("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment",
-                   "memory", "gamification")),
+                   "memory", "gamification", "billing")),
 )
 JWT_ISSUERS = ("identity-consent", "learning-plan", "support", "notifications", "audit", "experience-config",
                "telegram-bot-gateway", "social", "telegram-bff", "admin-bff", "admin-identity", "user-admin",
-               "catalog", "diagnostics", "lessons", "assessment", "ai-gateway", "memory", "gamification")
+               "catalog", "diagnostics", "lessons", "assessment", "ai-gateway", "memory", "gamification", "billing")
 # только проверяют внутренний JWT (сами никого не вызывают): закрытый ключ нужен ServiceSettings в stage/prod, но их
 # открытый ключ никому не раздаётся
 VERIFY_ONLY = ("tts",)
 SCHEDULED = ("learning-plan", "notifications", "social", "user-admin", "catalog", "lessons", "assessment", "memory",
-             "gamification")
+             "gamification", "billing")
 # имя переменной адреса в коде вызывающего (BFF и Python-сервисы называют identity по-разному)
 URL_VAR = {
     ("telegram-bff", "identity-consent"): "IDENTITY_URL",
@@ -115,11 +134,28 @@ URL_VAR = {
     ("admin-bff", "identity-consent"): "IDENTITY_URL",
     ("admin-bff", "experience-config"): "EXPERIENCE_URL",
     ("notifications", "telegram-bot-gateway"): "BOT_GATEWAY_URL",
+    ("billing", "telegram-bot-gateway"): "BOTGW_URL",  # спринт 8: внутренний порт 8108, /internal/v1/stars/*
 }
 BOT_INTERNAL_PORT = 8108
 # спринт 7: member_id = "mb_" + base64url(HMAC-SHA256(MEMBER_ID_KEY, str(user_id))[:16]) — одинаков в этих сервисах
 # (INTERNAL_API спринта 7 §0). Ключ не меняется: смена меняет все member_id (ссылки клиентов, проекции)
 MEMBER_ID_SERVICES = ("social", "gamification", "lessons")
+# BOT_TOKEN (${{shared.BOT_TOKEN}}) — только у этих сервисов (INTERNAL_API спринта 8 §0.8): bot-gateway вызывает
+# Bot API (в том числе Stars для billing), telegram-bff проверяет initData. Новых держателей токена нет
+BOT_TOKEN_SERVICES = ("telegram-bot-gateway", "telegram-bff")
+# спринт 8: секреты провайдеров — ссылки на общие переменные проекта (вводит владелец), только у billing
+BILLING_SHARED_SECRETS = ("PAYME_KEY", "PAYME_SUBSCRIBE_KEY", "CLICK_SECRET_KEY", "UZUM_PASSWORD")
+# флаги запуска (§0.7): в stage/prod всё выключено до ответов владельца и мерчантов
+BILLING_FLAGS = ("PAYMENTS_ENABLED", "STARS_ENABLED", "PAYME_ENABLED", "CLICK_ENABLED", "UZUM_ENABLED",
+                 "TRIAL_ON_ENFORCEMENT")
+# переменные, которые новый сервис добавляет уже работающим (extend.py кладёт их в updates.json вместе с адресами):
+# {новый сервис: {действующий сервис: (переменные)}}
+COMPANION_VARS: dict[str, dict[str, tuple[str, ...]]] = {
+    "billing": {"telegram-bot-gateway": ("TELEGRAM_TEST_ENV",),
+                "lessons": ("BILLING_ENFORCED", "BILLING_TIMEOUT_SECONDS")},
+    "web-pay": {"telegram-bff": ("WEB_PAY_ENABLED", "WEB_PAY_ORIGIN", "TELEGRAM_LOGIN_CLIENT_ID",
+                                 "TELEGRAM_LOGIN_CLIENT_SECRET", "TELEGRAM_OIDC_BASE", "WEB_SESSION_SECRET")},
+}
 _USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{3,31}$")
 _APP_RE = re.compile(r"^[A-Za-z0-9_]{3,30}$")
 _EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[A-Za-z]{2,}$")
@@ -170,6 +206,10 @@ class Secrets:
     user_ref: str
     # MEMBER_ID_KEY (спринт 7): общий для MEMBER_ID_SERVICES, ≥ 32 символов, отличен от остальных секретов
     member_key: str
+    # PAYMENTS_EDGE_TOKEN (спринт 8): X-Edge-Token payments-edge → billing (один у обоих), ≥ 32 символов
+    payments_edge: str
+    # WEB_SESSION_SECRET (спринт 8): подпись cookie-сессии сайта оплаты (telegram-bff), отличен от SESSION_JWT_SECRET
+    web_session: str
 
     @classmethod
     def new(cls) -> Secrets:
@@ -178,6 +218,7 @@ class Secrets:
                    passwords={r: secrets.token_hex(24) for r in roles},
                    scheduler=token(), session_jwt=token(48), invite_key=token(), webhook=secrets.token_hex(32),
                    n8n_key=token(), internal_hmac=token(48), user_ref=token(), member_key=token(),
+                   payments_edge=token(), web_session=token(48),
                    mfa_key=base64.b64encode(secrets.token_bytes(32)).decode(), admin_password=admin_password())
 
     def public_keys(self) -> str:
@@ -201,6 +242,11 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
                 "N8N_VERSION_NOTIFICATIONS_ENABLED=false", "RAILWAY_RUN_UID=0", "N8N_USER_FOLDER=/home/node"]
     if svc.name == "admin-web":  # Caddy: статика + /admin/v1/* → admin-bff по приватной сети
         return [dockerfile, f"PORT={svc.port}", f"ADMIN_BFF_URL={private_url('admin-bff')}"]
+    if svc.name == "web-pay":  # спринт 8: Caddy — статика сайта оплаты + /api/* → telegram-bff /web/v1/* (приватно)
+        return [dockerfile, f"PORT={svc.port}", f"BFF_URL={private_url('telegram-bff')}"]
+    if svc.name == "payments-edge":  # спринт 8: Caddy — только /pay/* колбэков провайдеров → billing /provider/v1/*
+        return [dockerfile, f"PORT={svc.port}", f"BILLING_URL={private_url('billing')}",
+                f"PAYMENTS_EDGE_TOKEN={sec.payments_edge}"]
     if svc.name == "telegram-bff":
         lines = [dockerfile, "NODE_ENV=production", f"PORT={svc.port}", "HOST=::", "TRUST_PROXY_HOPS=1"]
     if svc.name == "admin-bff":  # Railway edge + Caddy admin-web
@@ -229,7 +275,13 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
     if svc.name == "telegram-bff":
         lines += [f"SESSION_JWT_SECRET={sec.session_jwt}", f"TELEGRAM_APP_LINK={app_link}",
                   "MINIAPP_ORIGIN=https://${{telegram-miniapp.RAILWAY_PUBLIC_DOMAIN}}",
-                  "BOT_TOKEN=${{shared.BOT_TOKEN}}"]
+                  "BOT_TOKEN=${{shared.BOT_TOKEN}}",
+                  # спринт 8 — сайт оплаты (/web/v1/*, выключен до решения владельца): вход «Log In with Telegram»
+                  # (OIDC); Client ID = ID бота и секрет клиента из BotFather вводит владелец (секрет — общая
+                  # переменная проекта, ссылка только здесь). Токен бота сайту не нужен
+                  "WEB_PAY_ENABLED=false", "WEB_PAY_ORIGIN=https://${{web-pay.RAILWAY_PUBLIC_DOMAIN}}",
+                  "TELEGRAM_LOGIN_CLIENT_ID=", "TELEGRAM_LOGIN_CLIENT_SECRET=${{shared.TELEGRAM_LOGIN_CLIENT_SECRET}}",
+                  "TELEGRAM_OIDC_BASE=https://oauth.telegram.org", f"WEB_SESSION_SECRET={sec.web_session}"]
     if svc.name == "admin-bff":
         lines.append("ADMIN_ORIGIN=https://${{admin-web.RAILWAY_PUBLIC_DOMAIN}}")
     if svc.name == "admin-identity":
@@ -242,6 +294,21 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
                   # релиз 5.1: оценка произношения на своём сервере (tts распознаёт, ai-gateway сравнивает с эталоном);
                   # Azure — запасной провайдер (SPEECH_PROVIDER=azure + общие переменные AZURE_SPEECH_KEY/REGION)
                   "SPEECH_PROVIDER=whisper"]
+    if svc.name == "lessons":  # спринт 8: пэйвол уроков с ИИ и уроков вдвоём выключен до решения владельца
+        lines += ["BILLING_ENFORCED=false", "BILLING_TIMEOUT_SECONDS=2"]
+    if svc.name == "billing":
+        lines += [f"PAYMENTS_EDGE_TOKEN={sec.payments_edge}", "WEB_PAY_ORIGIN=https://${{web-pay.RAILWAY_PUBLIC_DOMAIN}}",
+                  "TIMEZONE=Asia/Tashkent", *(f"{flag}=false" for flag in BILLING_FLAGS),
+                  # реквизиты мерчантов — не секреты, вводит владелец после договоров (пусто — провайдер выключен)
+                  "PAYME_MERCHANT_ID=", "PAYME_LOGIN=Paycom", "PAYME_CHECKOUT_URL=https://checkout.paycom.uz",
+                  "PAYME_ALLOWED_CIDRS=", "PAYME_SUBSCRIBE_URL=",
+                  "CLICK_SERVICE_ID=", "CLICK_MERCHANT_ID=", "CLICK_MERCHANT_USER_ID=",
+                  "CLICK_PAY_URL=https://my.click.uz/services/pay", "CLICK_API_URL=https://api.click.uz/v2/merchant",
+                  "CLICK_ALLOWED_CIDRS=",
+                  "UZUM_SERVICE_ID=", "UZUM_LOGIN=", "UZUM_ACCOUNT_FIELD=order_id", "UZUM_CHECKOUT_URL_TEMPLATE=",
+                  "UZUM_ALLOWED_CIDRS=",
+                  # ключи — только ссылки на общие переменные проекта (значения вводит владелец, не в репозиторий)
+                  *(f"{name}=${{{{shared.{name}}}}}" for name in BILLING_SHARED_SECRETS)]
     if svc.name == "notifications":
         lines.append("ADMIN_TEST_CHAT_IDS=")  # Telegram chat id тестовых чатов через запятую (тестовая отправка)
     if svc.name == "telegram-bot-gateway":
@@ -249,7 +316,9 @@ def service_env(svc: Service, sec: Secrets, *, env: str, app_link: str, bot_user
                   "TELEGRAM_WEBHOOK_URL=https://${{telegram-bot-gateway.RAILWAY_PUBLIC_DOMAIN}}/telegram/webhook",
                   "MINIAPP_URL=https://${{telegram-miniapp.RAILWAY_PUBLIC_DOMAIN}}",
                   f"TELEGRAM_APP_LINK={app_link}", "BOT_AUTO_SETUP=true",
-                  "BOT_TOKEN=${{shared.BOT_TOKEN}}"]
+                  "BOT_TOKEN=${{shared.BOT_TOKEN}}",
+                  # спринт 8: Stars — боевой Bot API; true — тестовая среда Telegram (stage с тестовым ботом, §1.5)
+                  "TELEGRAM_TEST_ENV=false"]
     return lines
 
 
@@ -262,7 +331,9 @@ def services_table() -> str:
     infra = ("\nИнфраструктура: Postgres (шаблон Railway), Redis (шаблон Railway), nats (образ `nats:2.11-alpine`, "
              "команда `-js -sd /data`, том `/data`). n8n — том `/home/node/.n8n`.\n"
              "Порядок: Postgres → `psql \"$DATABASE_PUBLIC_URL\" -f infra/db/bootstrap.sql` → `-f db-passwords.sql` → "
-             "сервисы (Pre-Deploy применит миграции) → identity-consent раньше social (social требует поля согласия).\n")
+             "сервисы (Pre-Deploy применит миграции) → identity-consent раньше social (social требует поля согласия).\n"
+             "Спринт 8: публичные домены payments-edge (URL колбэков в кабинетах Payme, Click, Uzum) и web-pay (сайт "
+             "оплаты, Allowed URLs и redirect URI в BotFather); у billing публичного домена нет.\n")
     return "\n".join(rows) + "\n" + infra
 
 

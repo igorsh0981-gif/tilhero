@@ -430,6 +430,9 @@ export class MockLessons {
       finished_at: null,
       expires_at: null,
       minutes: 0,
+      // спринт 8: пэйвол выключен в mock BFF (поток E добавит сценарии ai_locked)
+      ai_locked: null,
+      ai_minutes_left: null,
     };
     const r: Run = { view, owner, kids, plan: p, pi: 0, emitted: [], results: new Map(), answers: new Map(), rp: null, hinted: new Set(), simplerAt: 0, openText: null, summary: null };
     this.runs.set(view.session_id, r);

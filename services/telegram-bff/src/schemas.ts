@@ -1048,7 +1048,7 @@ export const LessonCardDetailSchema = Type.Object({
 assertSame<Same<Static<typeof LessonCardDetailSchema>, C.LessonCardDetail>>();
 
 // ---------- Сессия ----------
-export const LessonSessionSchema = Type.Object({
+const LESSON_SESSION_PROPS = {
   session_id: Uuid,
   kind: SessionKind,
   title: Localized,
@@ -1065,8 +1065,22 @@ export const LessonSessionSchema = Type.Object({
   finished_at: Nullable(IsoTime),
   expires_at: Nullable(IsoTime),
   minutes: Type.Integer({ minimum: 0 }),
+};
+// спринт 8: пэйвол — урок «вариантами» по тарифу и остаток ИИ-минут
+const AiLockSchema = Type.Object({ reason: Enum(["no_subscription", "feature_not_in_plan", "minutes_exhausted", "billing_unavailable"]) });
+assertSame<Same<Static<typeof AiLockSchema>, C.AiLock>>();
+export const LessonSessionSchema = Type.Object({
+  ...LESSON_SESSION_PROPS,
+  ai_locked: Nullable(AiLockSchema),
+  ai_minutes_left: Nullable(Type.Integer({ minimum: 0 })),
 });
 assertSame<Same<Static<typeof LessonSessionSchema>, C.LessonSession>>();
+/** Сессия от lessons: поля пэйвола приходят после потока C — до этого их нет (BFF отдаёт null, sessionView). */
+export const LessonSessionDomainSchema = Type.Object({
+  ...LESSON_SESSION_PROPS,
+  ai_locked: Type.Optional(Nullable(AiLockSchema)),
+  ai_minutes_left: Type.Optional(Nullable(Type.Integer({ minimum: 0 }))),
+});
 export const ActiveSessionSchema = Type.Object({ session: Nullable(LessonSessionSchema) });
 assertSame<Same<Static<typeof ActiveSessionSchema>, { session: C.LessonSession | null }>>();
 
@@ -1913,8 +1927,9 @@ function gameShapes<I extends TSchema, P extends TSchema, S extends TSchema>(Ima
   return { ShopItemRef, HeroStageView, HeroView, MyHero, BadgeView, ShopItemView, Summary, Heroes, Badges, Shop, Rewards };
 }
 
-/** Схемы ответов Mini App (сериализация по ним — только поля контракта). */
-export const GameView = gameShapes(GameImageSchema, Type.Literal(false), GameSettingsSchema);
+/** Схемы ответов Mini App (сериализация по ним — только поля контракта). Спринт 8: purchase_available — boolean
+ *  (вычисляет BFF по каталогу billing — поток E; до этого всегда false). */
+export const GameView = gameShapes(GameImageSchema, Type.Boolean(), GameSettingsSchema);
 /** Схемы ответов gamification: картинки с sha256; purchase_available необязателен (BFF всегда отдаёт false);
  *  league_opt_in необязателен (до спринта 7 — false). */
 export const GameDomain = gameShapes(GameImageDomainSchema, Type.Optional(Type.Boolean()), GameSettingsDomainSchema);

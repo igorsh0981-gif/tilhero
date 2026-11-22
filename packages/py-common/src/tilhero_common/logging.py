@@ -62,6 +62,17 @@ REDACT_KEYS = {
     "credentials",
     "database_url",
     "dsn",
+    # спринт 8 (INTERNAL_API §0.8): секреты платёжных провайдеров и входа «Log In with Telegram» — точные имена полей.
+    # `key` и `code` — только целиком: `idempotency_key`, `dedup_key`, `error_code` не вычищаются; бизнес-код ошибки
+    # (UPPER_SNAKE) в поле `code` остаётся виден (см. _business_code)
+    "key",
+    "sign_string",
+    "secret_key",
+    "code_verifier",
+    "id_token",
+    "payme_key",
+    "payme_subscribe_key",
+    "member_id_key",
 }
 # Ключ, содержащий одну из частей (после нормализации camelCase/kebab-case → snake_case), — секрет или PII …
 REDACT_KEY_PARTS = ("password", "passwd", "secret", "token", "apikey", "api_key", "authorization", "cookie",
@@ -132,8 +143,10 @@ _PEM = _re.compile(r"-----BEGIN [A-Z0-9 ]+-----.*?(?:-----END [A-Z0-9 ]+-----|$)
 _DSN_PASSWORD = _re.compile(r"(\b[A-Za-z][A-Za-z0-9+.\-]*://[^:/@\s]*:)[^@/\s]+(@)")
 # строка initData Telegram (`…auth_date=…&hash=…`) — целиком
 _INIT_DATA = _re.compile(r"\S*(?:auth_date=|[?&]hash=[0-9A-Fa-f]{16,})\S*")
-# секреты в параметрах URL/строк: token=…, key=…, api_key=…, sig=…
-_URL_SECRET = _re.compile(r"((?:^|[?&;\s])(?:[A-Za-z_]*token|[A-Za-z_]*key|secret|sig|signature|password|passwd)=)"
+# секреты в параметрах URL/строк: token=…, key=…, api_key=…, sig=…; спринт 8 — client_secret=…, sign_string=…,
+# code_verifier=…, id_token=… (OIDC, Click) и одноразовый `code` OIDC — только как параметр адреса (?code= / &code=)
+_URL_SECRET = _re.compile(r"((?:^|[?&;\s])(?:[A-Za-z_]*token|[A-Za-z_]*key|[A-Za-z_]*secret|sig|signature|sign_string"
+                          r"|password|passwd|code_verifier)=|[?&]code=)"
                           r"[^&\s#\"']{6,}", _re.IGNORECASE)
 
 
@@ -153,11 +166,21 @@ def redact_text(value: str) -> str:
     return _VALUE_PATTERNS.sub(REDACTED, value)
 
 
+_BUSINESS_CODE = _re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
+
+
+def _business_code(key: Any, value: Any) -> bool:
+    """Поле `code` с бизнес-кодом ошибки (`WALLET_DRIFT`, `PAYMENTS_DISABLED`) — не секрет: остаётся в логе. Секретные
+    коды (OIDC `code`, TOTP, код подтверждения) на него не похожи: в них есть строчные буквы, цифры в начале или `-`."""
+    return isinstance(value, str) and _norm_key(str(key)) == "code" and bool(_BUSINESS_CODE.match(value))
+
+
 def redact(value: Any, depth: int = 0) -> Any:
     if depth > 6:
         return "[depth]"
     if isinstance(value, dict):
         return {k: (REDACTED if v is not None and not isinstance(v, bool) and sensitive_key(k)
+                    and not _business_code(k, v)
                     else redact(v, depth + 1)) for k, v in value.items()}
     if isinstance(value, list | tuple):
         return [redact(v, depth + 1) for v in value]

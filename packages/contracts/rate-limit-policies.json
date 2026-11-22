@@ -223,6 +223,61 @@
       "description": "Голосовой ход парного урока (POST /v1/pair-rooms/*/audio) — на ученика за 10 минут (спринт 7)"
     },
     {
+      "policy": "tg.billing.read",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 120,
+      "window_s": 60,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Подписка, минуты, каталог и заказы Stars в Mini App (GET /v1/billing/*) — на аккаунт в минуту (спринт 8)"
+    },
+    {
+      "policy": "tg.billing.order",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 10,
+      "window_s": 600,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Команды оплаты Mini App: заказ, отмена, пробный период, автопродление (POST /v1/billing/*) — на аккаунт за 10 минут (спринт 8)"
+    },
+    {
+      "policy": "web.auth_ip",
+      "service": "telegram-bff",
+      "subject": "ip",
+      "limit": 20,
+      "window_s": 60,
+      "burst": null,
+      "fail": "closed",
+      "env": null,
+      "description": "Сайт оплаты: вход через Telegram и выход (/web/v1/auth/*) — с одного IP в минуту (спринт 8)"
+    },
+    {
+      "policy": "web.read",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 120,
+      "window_s": 60,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Сайт оплаты: профиль, тарифы, подписка, заказы (GET /web/v1/*) — на аккаунт в минуту (спринт 8)"
+    },
+    {
+      "policy": "web.order",
+      "service": "telegram-bff",
+      "subject": "user",
+      "limit": 10,
+      "window_s": 600,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Сайт оплаты: заказ и отмена (POST /web/v1/orders*) — на аккаунт за 10 минут (спринт 8)"
+    },
+    {
       "policy": "adm.login_ip",
       "service": "admin-bff",
       "subject": "ip",
@@ -320,6 +375,17 @@
       "fail": "open",
       "env": null,
       "description": "Потоковый LLM (ai-gateway, спринт 4) — на пользователя"
+    },
+    {
+      "policy": "pay.callback_ip",
+      "service": "billing",
+      "subject": "ip",
+      "limit": 600,
+      "window_s": 60,
+      "burst": null,
+      "fail": "open",
+      "env": null,
+      "description": "Колбэки Payme, Click, Uzum через payments-edge (/provider/v1/*) — с одного IP клиента в минуту (спринт 8)"
     }
   ]
 }

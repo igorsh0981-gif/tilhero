@@ -322,6 +322,7 @@ describe("overview block «Сообщество»", () => {
     memory: off("memory"),
     game: off("gamification"),
     social: { available: true, data: { period: "today", friend_requests: 14, friendships_added: 9, duels_finished: null, pair_rooms_finished: 3, referrals_in_review: 2, cases_opened: 4, cases_open: 3 } },
+    money: { available: false, data: null, service: "billing" },
   };
   it("counters; a source that did not answer is «нет данных»; the queues link only with their rights; attention rows", async () => {
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);

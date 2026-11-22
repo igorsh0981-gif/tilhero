@@ -401,6 +401,8 @@ export class MockBff {
       game: ((st) => (st ? blk("game", "gamification", st) : { available: false, data: null, service: "gamification" }))(this.game.stats(period)),
       // sprint 7: the community block (social; duels and rooms counters — null when gamification / lessons are down)
       social: ((st) => (st ? { available: true, data: st } : { available: false, data: null, service: "social" }))(this.social.stats(period)),
+      // sprint 8: the «Деньги» block (billing) — поток F
+      money: { available: false, data: null, service: "billing" },
     };
   }
 

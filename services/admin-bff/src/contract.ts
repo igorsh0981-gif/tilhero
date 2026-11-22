@@ -31,6 +31,7 @@ import type {
   GuardianConsent,
   Goal,
   LearnerKind,
+  LearnerTier,
   LearnerStatus,
   LevelSelf,
   Localized,
@@ -225,6 +226,8 @@ const GOALS: readonly Goal[] = ["work", "career", "travel", "daily", "study", "e
 const LEARNER_ROW_PROPS = {
   user_id: C.uuid,
   kind: C.oneOf<LearnerKind>(["account", "child"]),
+  // спринт 8 (ADM-USR-01): тариф — проекция billing.access.changed.v1 в user-admin; нет поля (до потока D) — null
+  tier: C.nullable(C.oneOf<LearnerTier>(["free", "paid"])),
   guardian_user_id: C.nullable(C.uuid),
   display_name: C.optText(120),
   // полный username (без «@») — только сотруднику с users.sensitive.read; остальным домен отдаёт маску `ig•••81`
