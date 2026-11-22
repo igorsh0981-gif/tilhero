@@ -75,7 +75,7 @@ async def test_accept_consent_with_evidence(env) -> None:
         "basis": "self",
     }
     [notify] = await env.events("user.notification_settings.changed.v1", uid)
-    assert notify.payload == {"user_id": uid, "enabled": True, "categories": ["support"]}
+    assert notify.payload == {"user_id": uid, "enabled": True, "categories": ["support", "game"]}
 
 
 async def test_refusing_voice_recording_does_not_block_onboarding(env) -> None:

@@ -219,7 +219,7 @@ export const uzGame: Record<keyof typeof ruGame, string> = {
   "game.set.notifNote": "Yangi nishonlar va qahramon oʻsishi haqida. Saqlangan seriya haqida doim xabar beramiz.",
   "game.set.notifNoteKid": "Nishonlar haqidagi yangiliklar profilingdagi bildirishnomalarga keladi.",
   "game.set.saved": "Saqlandi",
-  "game.set.learning": "Oʻyin oʻqishni oʻzgartirmaydi: til darajasi, koʻnikmalar va reja oʻsha-oʻsha qoladi. Reyting va boshqalar bilan solishtirish yoʻq.",
+  "game.set.learning": "Oʻyin oʻqishni oʻzgartirmaydi: til darajasi, koʻnikmalar va reja oʻsha-oʻsha qoladi. Umumiy hafta ligasi — faqat xohishga koʻra.",
 
   // ---- profile ----
   "profile.game": "Oʻyin",

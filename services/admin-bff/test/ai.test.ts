@@ -729,7 +729,7 @@ describe("затраты, модели и обзор", () => {
     expect(h.fake.calls.find((c) => c.service === "aiGateway" && c.path === "/admin/v1/ai/usage")!.query).toEqual({ session_id: SESSION_ID });
     expect(calls.body).not.toContain(LEARNER_USER_ID);
     expect(calls.body).not.toContain("request_id");
-    expect((await get(s, "/admin/v1/ai/budget")).json()).toEqual({ ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80, updated_at: "2026-11-19T00:00:00Z" });
+    expect((await get(s, "/admin/v1/ai/budget")).json()).toEqual({ ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, room_cap_usd: 0.1, alert_percent: 80, updated_at: "2026-11-19T00:00:00Z" });
   });
 
   it("дашборд: lessons = статистика lessons (period) + счётчики assessment; ai = сводка месяца; assessment недоступен → блок lessons недоступен", async () => {
@@ -737,7 +737,7 @@ describe("затраты, модели и обзор", () => {
     const d = (await get(s, "/admin/v1/dashboard?period=7d")).json() as Dashboard;
     expect(d.lessons).toEqual({
       available: true,
-      data: { period: "7d", started: 40, completed: 31, completion_pct: 77.5, median_minutes: 19, by_kind: { lesson: 30, scenario: 6, media: 3, review: 1, reading: 2 }, ai_degraded_pct: 4.2, appeals_open: 2, human_review_open: 1 },
+      data: { period: "7d", started: 40, completed: 31, completion_pct: 77.5, median_minutes: 19, by_kind: { lesson: 30, scenario: 6, media: 3, review: 1, reading: 2, duel: 5 }, ai_degraded_pct: 4.2, appeals_open: 2, human_review_open: 1 },
     });
     expect(d.ai.data).toMatchObject({ period: "month", spent_usd: 3.25, cap_used_pct: 16.3, unavailable_pct: 1.5, p95_latency_ms: 2300 });
     expect(h.fake.callsTo("lessons", "GET", "/admin/v1/lesson-sessions/stats")[0]!.query).toEqual({ period: "7d" });

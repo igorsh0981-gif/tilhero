@@ -97,6 +97,16 @@ export const ALL_PERMISSIONS = [
   "game.manage",
   "game.publish",
   "wallet.adjust",
+  // спринт 7 — социальное; step-up: social_ban > 7 дней и бессрочный (moderation.manage, по телу команды), активация
+  // кампании (referral.manage), переоценка лиги и дуэли (league.manage), остановка комнаты (room.manage)
+  "social.read",
+  "moderation.manage",
+  "referral.read",
+  "referral.manage",
+  "league.read",
+  "league.manage",
+  "room.read",
+  "room.manage",
 ] as const satisfies readonly Permission[];
 
 /** Компиляция падает, если в admin.ts появилось право, которого нет в ALL_PERMISSIONS (права вне списка отбрасываются). */
@@ -128,11 +138,15 @@ void _allRolesListed;
  * memory.read — methodist, qa_analyst, analyst, operations, auditor; glossary.manage (без step-up) — methodist,
  * content_manager. Спринт 6: game.read — content_manager, methodist, operations, support, analyst, auditor;
  * game.manage — content_manager, operations; game.publish и wallet.adjust (step-up) — только operations (и
- * super_admin). methodist (content.publish, ai.publish, qa.review) и
+ * super_admin). Спринт 7 (PLAN спринта 7 «Права»): support — + social.read, moderation.manage, referral.read,
+ * room.read; operations — все восемь прав социального; content_manager — + league.read; analyst и auditor — + чтение
+ * (social.read, referral.read, league.read, room.read). methodist (content.publish, ai.publish, qa.review) и
  * content_manager (media.rights) — привилегированные по составу прав (MFA, four-eyes), хотя PRIVILEGED_ROLES admin.ts
  * их не перечисляет; operations (costs.manage) привилегирован и по коду роли; qa_analyst (чтение и реплики с
  * причиной, без прав со step-up) — нет. Признак `Role.privileged` вычисляет admin-identity.
  */
+const SOCIAL_READ = ["social.read", "referral.read", "league.read", "room.read"] as const satisfies readonly Permission[];
+
 export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[]>> = {
   super_admin: ALL_PERMISSIONS,
   operations: [
@@ -154,6 +168,14 @@ export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[
     "game.manage",
     "game.publish",
     "wallet.adjust",
+    "social.read",
+    "moderation.manage",
+    "referral.read",
+    "referral.manage",
+    "league.read",
+    "league.manage",
+    "room.read",
+    "room.manage",
   ],
   communications: [
     "dashboard.read",
@@ -163,7 +185,17 @@ export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[
     "notif.campaigns.manage",
     "notif.campaigns.send",
   ],
-  support: ["dashboard.read", "users.read", "support.read", "support.reply", "game.read"],
+  support: [
+    "dashboard.read",
+    "users.read",
+    "support.read",
+    "support.reply",
+    "game.read",
+    "social.read",
+    "moderation.manage",
+    "referral.read",
+    "room.read",
+  ],
   methodist: [
     "dashboard.read",
     "users.read",
@@ -181,10 +213,10 @@ export const DEFAULT_ROLE_MATRIX: Readonly<Record<RoleCode, readonly Permission[
     "glossary.manage",
     "game.read",
   ],
-  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage", "game.read", "game.manage"],
+  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage", "game.read", "game.manage", "league.read"],
   qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts", "memory.read"],
-  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
-  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
+  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", ...SOCIAL_READ],
+  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", ...SOCIAL_READ],
   read_only: ["dashboard.read"],
 };
 

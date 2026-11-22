@@ -23,9 +23,8 @@ async def counts(env: Env, user: uuid.UUID) -> dict[str, int]:
 
 async def test_saga_holds_lock_and_parallel_work_does_not_resurrect(env: Env, user: uuid.UUID) -> None:
     """🔴 1: отметка удаления проверяется после блокировки ученика. Сага держит блокировку и удаляет; параллельные
-    событие урока, GET /summary (пишущий путь: задания нового дня ещё не выпущены), реферал и план ждут, а после
-    фиксации саги ничего не создают заново."""
-    inviter = uuid.uuid4()
+    событие урока, GET /summary (пишущий путь: задания нового дня ещё не выпущены), профиль сообщества (спринт 7)
+    и план ждут, а после фиксации саги ничего не создают заново."""
     await env.profile(user)
     await env.lesson(user)
     assert all(v > 0 for k, v in (await counts(env, user)).items() if k not in ("badges",))
@@ -36,7 +35,7 @@ async def test_saga_holds_lock_and_parallel_work_does_not_resurrect(env: Env, us
             await saga.delete_user_data(db, user, uuid.uuid4(), env.now, None)
             tasks = [asyncio.create_task(env.lesson(user, passed=True)),
                      asyncio.create_task(env.c.get("/internal/v1/game/summary", headers=env.h(user))),
-                     asyncio.create_task(env.invite(inviter, user)),
+                     asyncio.create_task(env.community(user, "Nick_saga")),
                      asyncio.create_task(env.plan(user, tz="Europe/Moscow"))]
             await asyncio.sleep(0.6)
             assert not any(t.done() for t in tasks), "должны ждать блокировку саги"
@@ -46,7 +45,7 @@ async def test_saga_holds_lock_and_parallel_work_does_not_resurrect(env: Env, us
     r = results[1]
     assert r.status_code == 410 and r.json()["code"] == "USER_DELETED"
     assert all(v == 0 for v in (await counts(env, user)).values())
-    assert await env.sql("SELECT count(*) FROM referrals") == [(0,)]
+    assert await env.sql("SELECT count(*) FROM community") == [(0,)]
     # чтение без блокировки после фиксации саги — тоже 410, данные не создаются
     r = await env.c.get("/internal/v1/game/shop", headers=env.h(user))
     assert r.status_code == 410 and await env.sql("SELECT count(*) FROM learners WHERE user_id = :u", u=user) == [(0,)]

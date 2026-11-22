@@ -21,7 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tilhero_common.errors import ApiError, bad_request, conflict, not_found
 from tilhero_common.messaging import emit
 from tilhero_social.domain import family as fam
-from tilhero_social.domain import rules
+from tilhero_social.domain import friends, members, referrals, restrictions, rules
+from tilhero_social.domain.common import blocked
 from tilhero_social.identity import Person, PublicProfile
 from tilhero_social.models import Friendship, Invite, InviteRedemption, Profile
 from tilhero_social.schemas import InviteOut, InvitePreviewOut
@@ -326,8 +327,13 @@ async def accept(session: AsyncSession, invite_id: uuid.UUID, inviter: uuid.UUID
             raise conflict("ALREADY_FRIENDS", "Вы уже друзья")
         if inv.kind == "referral" and await _referral_used(session, me, inv.invite_id):
             raise conflict("INVITE_ALREADY_USED", "Реферальное приглашение уже было принято раньше")
-        a, b = rules.ordered_pair(inv.inviter_user_id, me)
-        session.add(Friendship(user_a=a, user_b=b, invite_id=inv.invite_id, created_at=now))
+        # спринт 7: дружба через приглашение — с теми же запретами, что и заявка (блокировка, санкция, предел)
+        if await friends.blocked_any(session, inv.inviter_user_id, me):
+            raise blocked()
+        await restrictions.require_not_banned(session, me, now)
+        await friends.check_limits(session, inv.inviter_user_id, me, settings.friends_max)
+        await friends.add_friendship(session, inv.inviter_user_id, me, now, source="invite", invite_id=inv.invite_id)
+        await members.register(session, settings.member_key_bytes(), [inv.inviter_user_id, me])
     red.accepted_at = now
     inv.uses += 1
     if inv.max_uses is not None and inv.uses >= inv.max_uses:
@@ -338,6 +344,9 @@ async def accept(session: AsyncSession, invite_id: uuid.UUID, inviter: uuid.UUID
         "invite_id": str(inv.invite_id), "inviter_user_id": str(inv.inviter_user_id), "invitee_user_id": str(me),
         "kind": inv.kind, "accepted_at": _iso(now),
     }, producer=settings.service_name)
+    if inv.kind == "referral":  # спринт 7: реферал (§1.4) — в той же транзакции
+        await referrals.create_from_invite(session, inv.inviter_user_id, me, inv.invite_id, now, red.opened_at,
+                                           referrals.policy_of(settings))
     return inv, family_id
 
 

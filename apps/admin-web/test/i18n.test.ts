@@ -26,6 +26,7 @@ import { READING_QUESTION_TYPES, VOICES } from "../src/screens/content/model";
 import { GLOSSARY_ACTIONS, GLOSSARY_SOURCES, GLOSSARY_STATUSES, PARTS_OF_SPEECH } from "../src/screens/content/glossary";
 import * as MEM from "../src/screens/memory/model";
 import * as GM from "../src/screens/game/model";
+import * as SOC from "../src/screens/social/model";
 
 const placeholders = (s: string) => [...new Set([...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort();
 const CYR = /[Ѐ-ӿ]/;
@@ -250,6 +251,43 @@ describe("i18n dictionaries", () => {
         "token_bg", "token_accent",
       ].map((x) => `gi.${x}`),
       ...["earn", "caps", "levels", "hero", "stage_thresholds", "freeze", "bonuses", "quests", "templates", "badges", "streak", "skills", "reviews_cards", "readings", "index"].map((x) => `grp.${x}`),
+      // sprint 7: «Сообщество» — friends, moderation, referrals, leagues and duels, pair rooms, the overview block
+      ...["social"].flatMap((b) => [`dash.b.${b}`, `dash.empty.${b}`, `dash.svc.${b}`]),
+      ...["room_cap_usd"].flatMap((x) => [`csf.l.${x}`, `csf.h.${x}`]),
+      ...SOC.MOD_TABS.map((x) => `mod.tab.${x}`),
+      ...SOC.REF_TABS.map((x) => `ref.tab.${x}`),
+      ...SOC.LEAGUE_TABS.map((x) => `lgu.tab.${x}`),
+      ...SOC.CASE_STATUSES.map((x) => `cst7.${x}`),
+      ...SOC.MOD_ACTIONS.flatMap((x) => [`mact7.${x}`, `mact7.${x}.h`]),
+      ...SOC.MOD_ACTIONS.filter((x) => x !== "social_ban").map((x) => `mod.do.${x}`),
+      ...SOC.SANCTION_KINDS.map((x) => `sk7.${x}`),
+      ...["active", "revoked", "expired", "done"].map((x) => `ssst.${x}`),
+      ...SOC.APPEAL_STATUSES.map((x) => `aps7.${x}`),
+      ...["upheld", "overturned"].flatMap((x) => [`map.d.${x}`, `map.d.${x}.h`]),
+      ...SOC.SUBJECT_KINDS.map((x) => `subj.${x}`),
+      ...SOC.COMPLAINT_REASONS.map((x) => `crsn.${x}`),
+      ...SOC.FRIEND_REQUEST_STATUSES.map((x) => `frs.${x}`),
+      ...["in", "out"].map((x) => `fr.dir.${x}`),
+      ...["reporter", "target"].map((x) => `fr.role.${x}`),
+      ...SOC.REFERRAL_STATUSES.map((x) => `rfs.${x}`),
+      ...SOC.REJECT_CODES.flatMap((x) => [`rjc.${x}`, `rjc.${x}.learner`]),
+      ...SOC.RISK_FLAGS.flatMap((x) => [`rflag.${x}`, `rflag.${x}.h`]),
+      ...["approved", "rejected"].map((x) => `rr.d.${x}`),
+      ...["qualify", "rewards", "limits", "review"].map((x) => `rcs.${x}`),
+      ...["require_diagnostic", "inviter_reward", ...SOC.CAMPAIGN_NUMBERS].map((x) => `rcf.${x}`),
+      ...["required", "not_integer", "range", "days_gt_lessons", "no_reward", "window_short"].map((x) => `rci.${x}`),
+      ...["invited", "in_progress", "in_review", "qualified", "rejected", "expired", "capped"].map((x) => `rst.${x}`),
+      ...SOC.GROUP_STATUSES.map((x) => `lgus.${x}`),
+      ...["open", "closed"].map((x) => `lgw.${x}`),
+      ...SOC.DUEL_STATUSES.map((x) => `dst.${x}`),
+      ...SOC.DUEL_RESULTS.map((x) => `drs.${x}`),
+      ...SOC.ROOM_STATUSES.map((x) => `rst7.${x}`),
+      ...SOC.END_REASONS.map((x) => `per.${x}`),
+      ...SOC.ROOM_MODES.map((x) => `prm.${x}`),
+      ...SOC.ROOM_EVENT_KINDS.map((x) => `rek.${x}`),
+      ...["inviter", "invitee"].map((x) => `prs.${x}`),
+      ...["online", "offline"].map((x) => `prn.${x}`),
+      ...["required", "days_range", "reason_short", "reason_long", "too_many", "same_result"].map((x) => `sci.${x}`),
     ];
     expect(want.filter((k) => !has(k))).toEqual([]);
     void OBJECT_TYPES;
@@ -281,6 +319,10 @@ describe("i18n dictionaries", () => {
       "INSUFFICIENT_TILS", "ALREADY_OWNED", "FREEZE_STOCK_FULL", "ITEM_NOT_AVAILABLE", "NOT_OWNED", "HERO_NOT_AVAILABLE", "HERO_IN_USE", "RULES_INVALID",
       "RULES_NOT_VALIDATED", "DRAFT_CONFLICT", "EVENT_OVERLAP", "BALANCE_NEGATIVE", "ALREADY_REVERSED", "ASSET_TOO_LARGE", "ASSET_INVALID", "GAME_UNAVAILABLE",
       "RULES_VERSION_NOT_FOUND", "HERO_NOT_FOUND", "ITEM_NOT_FOUND", "EVENT_NOT_FOUND", "WALLET_NOT_FOUND", "ASSET_NOT_FOUND",
+      // sprint 7 (admin.ts «Социальное», INTERNAL_API §8 «Админка»)
+      "CASE_NOT_FOUND", "CASE_STATE", "APPEAL_NOT_FOUND", "APPEAL_STATE", "SANCTION_NOT_FOUND", "SANCTION_STATE", "SOCIAL_PROFILE_NOT_FOUND",
+      "CAMPAIGN_NOT_VALIDATED", "CAMPAIGN_VERSION_NOT_FOUND", "REFERRAL_NOT_FOUND", "REFERRAL_STATE", "GROUP_NOT_FOUND", "RESULT_STATE",
+      "DUEL_NOT_FOUND", "ROOM_NOT_FOUND", "ROOM_NOT_ACTIVE",
     ];
     expect(codes.filter((c) => !has(`err.${c}`))).toEqual([]);
   });
@@ -300,6 +342,15 @@ describe("i18n dictionaries", () => {
     // the hints the review asked for
     expect(translate("ru", "err.OPERATION_NOT_REVERSIBLE")).toMatch(/покупку отменяют возвратом/);
     expect(translate("ru", "err.RULES_STATE")).toMatch(/сначала удалите черновик/);
+  });
+
+  it("every admin error code of INTERNAL_API §8 (sprint 7) has a text in RU and EN", () => {
+    const doc = readFileSync(join(__dirname, "..", "..", "..", "docs", "sprint7", "INTERNAL_API.md"), "utf8");
+    const line = doc.split("\n").find((l) => l.includes("**Админка:**")) ?? "";
+    const codes = [...new Set([...line.matchAll(/`([A-Z][A-Z0-9_]+)`/g)].map((m) => m[1]!))];
+    expect(codes.length).toBeGreaterThan(12);
+    expect(codes.filter((c) => !has(`err.${c}`))).toEqual([]);
+    expect(codes.filter((c) => !(`err.${c}` in en))).toEqual([]);
   });
 
   it("no interface text is hard-coded outside the dictionaries (Cyrillic only in src/i18n)", () => {

@@ -13,9 +13,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
+import hashlib
+import hmac
 import json
 import re
+import struct
 import uuid
 from pathlib import Path
 from typing import Any
@@ -272,19 +276,84 @@ def _words(text: str) -> set[str]:
 
 class FakeAI:
     def __init__(self) -> None:
-        self.mode: dict[str, str] = {"conversation_partner": "ok", "teaching_coach": "ok"}
+        self.mode: dict[str, str] = {"conversation_partner": "ok", "teaching_coach": "ok",
+                                     "cooperative_lesson_coach": "ok"}
         self.requests: list[dict[str, Any]] = []
         self.available: bool | None = True  # GET /internal/v1/status; None — ai-gateway отвечает 500
+        self.speech_available = True
         self.status_delay = 0.0  # статус отвечает через N секунд
         self.hint_offered = False  # conversation_partner: персонаж подсказал в ответе
+        # коуч (спринт 7): прирост цели за ход; режимы ok | unavailable | refused | garbage | error | busy |
+        # wrong_room | steal_evidence (доказательство молчащей роли) | escalate
+        self.coach_step = 0.25
+        self.coach_cost = 0.01
+        self.coach_delay = 0.0  # ответ коуча через N секунд (фоновые вызовы не держат запрос)
+        self.coach_quote = False  # подсказка коуча цитирует последнюю реплику ученика
+        self.speech_mode = "ok"  # ok | unavailable | invalid
+        self.speech_text = "Hello, I would like a coffee please."
+        self.speech_requests: list[dict[str, Any]] = []
+
+    def coach_calls(self) -> list[dict[str, Any]]:
+        return [r for r in self.requests if r["agent"] == "cooperative_lesson_coach"]
+
+    def _coach(self, body: dict[str, Any]) -> dict[str, Any]:
+        ctx = body["context"]
+        mode = self.mode.get("cooperative_lesson_coach", "ok")
+        trigger = ctx["trigger"]
+        progress = min(1.0, ctx["team_goal_progress"] + (self.coach_step if trigger in ("turn", "wrap_up") else 0))
+        learner = [t for t in ctx["turns"] if t["speaker"] in ("A", "B")]
+        last = learner[-1] if learner else None
+        nxt = "A" if last is None else ("B" if last["speaker"] == "A" else "A")
+        evidence = []
+        if last is not None and trigger in ("turn", "wrap_up"):
+            role = last["speaker"] if mode != "steal_evidence" else nxt
+            evidence = [{"role": role, "turn_id": last["turn_id"], "skill_id": "en.func.order-food",
+                         "assist_used": False}]
+        finished = progress >= 1.0
+        out: dict[str, Any] = {
+            "room_id": ctx["room_id"] if mode != "wrong_room" else str(uuid.uuid4()),
+            "status": "finished" if finished else "in_progress", "next_speaker": None if finished else nxt,
+            "prompt": "Great teamwork! Goodbye." if finished else (
+                f'You said "{last["text"][:120]}". {nxt}, your turn.' if self.coach_quote and last
+                else f"{nxt}, what would you like to say?"),
+            "prompt_gloss": {"ru": "Что ты скажешь?", "uz": "Nima deysan?"}, "options": None,
+            "roles": {"A": "You are a customer.", "B": "You are a friend who pays."} if trigger == "start" else None,
+            "team_goal_en": "Order two coffees together." if trigger == "start" else None,
+            "team_goal_progress": progress, "individual_evidence": evidence,
+            "escalation": "abuse" if mode == "escalate" else None,
+            "report": {"team_summary": {"ru": "Вы отлично справились вместе!", "uz": "Birga zoʻr bajardingiz!"},
+                       "tips": [{"role": "A", "text": {"ru": "Подсказка для A", "uz": "A uchun maslahat"}},
+                                {"role": "B", "text": {"ru": "Подсказка для B", "uz": "B uchun maslahat"}}]}
+            if finished else None,
+        }
+        return out
+
+    def _speech(self, request: httpx.Request) -> httpx.Response:
+        raw = request.headers["x-speech-meta"]
+        meta = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+        self.speech_requests.append({**meta, "content_type": request.headers.get("content-type"),
+                                     "bytes": len(request.content)})
+        if meta.get("audience") == "kids":
+            return error(403, "KIDS_NOT_ALLOWED")
+        if self.speech_mode == "unavailable":
+            return error(503, "SPEECH_UNAVAILABLE")
+        if self.speech_mode == "invalid":
+            return httpx.Response(422, json={"code": "AUDIO_INVALID", "message": "x", "trace_id": "t",
+                                             "details": {"reason": "too_short"}})
+        ms = (len(request.content) - 44) * 1000 // 32000
+        return httpx.Response(200, json={"text": self.speech_text, "words": [], "duration_ms": ms,
+                                         "provider": "fake_speech", "latency_ms": 1})
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         assert request.headers.get("x-internal-token")
         if request.url.path == "/internal/v1/status":
             if self.available is None:
                 return error(500, "INTERNAL_ERROR")
-            resp = httpx.Response(200, json={"ai_available": self.available})
+            resp = httpx.Response(200, json={"ai_available": self.available,
+                                             "speech_available": self.speech_available})
             return slow(resp, self.status_delay) if self.status_delay else resp
+        if request.url.path == "/internal/v1/speech:transcribe":
+            return self._speech(request)
         m = re.fullmatch(r"/internal/v1/agents/([a-z_]+)/invoke", request.url.path)
         assert m, request.url.path
         agent = m.group(1)
@@ -306,6 +375,11 @@ class FakeAI:
         if mode == "refused" or (agent == "conversation_partner" and body["audience"] == "kids"):
             return httpx.Response(200, json={**base, "status": "refused", "reason": "kids_not_allowed",
                                              "output": None})
+        if agent == "cooperative_lesson_coach":
+            assert body["session_kind"] == "pair" and body["audience"] in ("teens", "adults")
+            resp = httpx.Response(200, json={**base, "status": "ok", "reason": None, "output": self._coach(body),
+                                             "cost_usd": self.coach_cost})
+            return slow(resp, self.coach_delay) if self.coach_delay else resp
         if agent == "teaching_coach":
             return httpx.Response(200, json={**base, "status": "ok", "reason": None, "output": {
                 "explanation": "Проще говоря: поздоровайтесь и назовите имя.", "example_en": "Hi! I'm Tom.",
@@ -537,3 +611,95 @@ def assert_no_keys(obj: Any, path: str = "$") -> None:
     elif isinstance(obj, list):
         for i, v in enumerate(obj):
             assert_no_keys(v, f"{path}[{i}]")
+
+
+# ---------------------------------------------------------------- спринт 7: social, identity-consent, голос
+
+MEMBER_KEY = b"dev-member-id-key-change-me-0000000000"  # общий dev-ключ social, gamification, lessons
+
+
+def member_id(user_id: uuid.UUID) -> str:
+    digest = hmac.new(MEMBER_KEY, str(user_id).encode(), hashlib.sha256).digest()[:16]
+    return "mb_" + base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def wav(ms: int = 2000, *, rate: int = 16_000, channels: int = 1) -> bytes:
+    """WAV PCM 16 бит (тишина) нужной длительности."""
+    data = b"\x00\x00" * (rate * ms // 1000) * channels
+    fmt = struct.pack("<HHIIHH", 1, channels, rate, rate * 2 * channels, 2 * channels, 16)
+    return (b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVE" + b"fmt " + struct.pack("<I", 16) + fmt
+            + b"data" + struct.pack("<I", len(data)) + data)
+
+
+class FakeSocial:
+    """social: GET /internal/v1/relations/{a}/{b}, GET /internal/v1/members/{member_id} (только lessons-вызов)."""
+
+    def __init__(self) -> None:
+        self.friends: set[frozenset[uuid.UUID]] = set()
+        self.families: list[set[uuid.UUID]] = []
+        self.blocks: set[tuple[uuid.UUID, uuid.UUID]] = set()
+        self.restricted: dict[uuid.UUID, str | None] = {}
+        self.audience: dict[uuid.UUID, str] = {}
+        self.social_off: set[uuid.UUID] = set()  # друзья недоступны (подросток без согласия родителя)
+        self.users: set[uuid.UUID] = set()
+        self.down = False
+        self.calls: list[str] = []
+
+    def know(self, *users: uuid.UUID) -> None:
+        self.users.update(users)
+
+    def same_family(self, a: uuid.UUID, b: uuid.UUID) -> bool:
+        return any(a in f and b in f for f in self.families)
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("x-internal-token")
+        path = request.url.path
+        self.calls.append(path)
+        if self.down:
+            return error(503, "UNAVAILABLE")
+        m = re.fullmatch(r"/internal/v1/members/(mb_[A-Za-z0-9_-]{22})", path)
+        if m:
+            found = next((u for u in self.users if member_id(u) == m.group(1)), None)
+            if found is None:
+                return error(404, "MEMBER_NOT_FOUND")
+            return httpx.Response(200, json={"user_id": str(found)})
+        m = re.fullmatch(r"/internal/v1/relations/([0-9a-f-]{36})/([0-9a-f-]{36})", path)
+        if m:
+            a, b = uuid.UUID(m.group(1)), uuid.UUID(m.group(2))
+            if a not in self.users or b not in self.users:
+                return error(404, "MEMBER_NOT_FOUND")
+
+            def allowed(u: uuid.UUID) -> bool:
+                return self.audience.get(u, "adults") != "kids" and u not in self.social_off
+
+            return httpx.Response(200, json={  # форма social api/internal.py relations
+                "friends": frozenset((a, b)) in self.friends, "same_family": self.same_family(a, b),
+                "blocked_any": (a, b) in self.blocks or (b, a) in self.blocks,
+                "a_restricted": a in self.restricted, "b_restricted": b in self.restricted,
+                "a_restricted_until": self.restricted.get(a), "b_restricted_until": self.restricted.get(b),
+                "a_audience": self.audience.get(a, "adults"), "b_audience": self.audience.get(b, "adults"),
+                "a_social_allowed": allowed(a), "b_social_allowed": allowed(b),
+                "a_member_id": member_id(a), "b_member_id": member_id(b)})
+        return error(404, "NOT_FOUND")
+
+
+class FakeIdentity:
+    """identity-consent GET /internal/v1/users/{lrn}/public: purposes ∋ voice_recording — согласие на голос."""
+
+    def __init__(self) -> None:
+        self.voice: set[uuid.UUID] = set()
+        self.bands: dict[uuid.UUID, str] = {}
+        self.down = False
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("x-internal-token")
+        if self.down:
+            return error(503, "UNAVAILABLE")
+        m = re.fullmatch(r"/internal/v1/users/([0-9a-f-]{36})/public", request.url.path)
+        assert m, request.url.path
+        u = uuid.UUID(m.group(1))
+        band = self.bands.get(u, "18+")
+        return httpx.Response(200, json={
+            "kind": "child" if band in ("6-9", "10-13") else "account", "age_band": band,
+            "guardian_consent": None, "consent_accepted": True, "status": "ACTIVE",
+            "purposes": ["service", *(["voice_recording"] if u in self.voice else [])]})

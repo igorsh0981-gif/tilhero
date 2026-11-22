@@ -227,14 +227,16 @@ async def stats(db: AsyncSession, *, period: str, since: datetime) -> dict[str, 
     """LessonStats без appeals_open / human_review_open (их добавляет admin-bff из assessment).
     started — сессии, начатые (ready → in_progress) за период; completed — завершённые за период;
     completion_pct — доля завершённых среди начатых за период (null при 0 начатых); median_minutes — медиана minutes
-    завершённых за период; by_kind — начатые по видам (все 5 ключей SessionKind, с чтением); ai_degraded_pct — доля
+    завершённых за период; by_kind — начатые по видам (все ключи SessionKind: + reading, + duel); ai_degraded_pct — доля
     начатых в упрощённом режиме (ИИ недоступен)."""
     started_rows = (await db.execute(
         select(Session.kind, Session.status, Session.ai_degraded).where(Session.started_at >= since)
     )).all()
+    # ровно виды SessionKind (спринт 7: + duel); парные комнаты — не сессии журнала (admin «Парные комнаты»)
     by_kind = dict.fromkeys(KINDS, 0)
     for kind, _, _ in started_rows:
-        by_kind[kind] = by_kind.get(kind, 0) + 1
+        if kind in by_kind:
+            by_kind[kind] += 1
     started = len(started_rows)
     minutes = list((await db.execute(
         select(Session.minutes).where(Session.status == "completed", Session.finished_at >= since)

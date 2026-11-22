@@ -45,9 +45,9 @@ async def audits(env: Env, action: str) -> list[Any]:
 
 async def test_rules_draft_validate_activate(env: Env, user: uuid.UUID) -> None:
     listing = await env.adm("GET", "rules", perms=("game.read",))
-    assert [(v["version"], v["status"]) for v in listing["items"]] == [(1, "active")]
+    assert [(v["version"], v["status"]) for v in listing["items"]] == [(2, "active"), (1, "archived")]
     assert "payload" not in listing["items"][0]
-    v1 = await env.adm("GET", "rules/1", perms=("game.read",))
+    v1 = await env.adm("GET", "rules/2", perms=("game.read",))  # версия 2 — миграция спринта 7
     assert v1["diff"] == [] and v1["created_by"] == {"staff_id": "system", "name": "Система"}
     await env.adm("GET", "rules/99", expect=404)
     # структурные ошибки — черновик не сохраняется
@@ -55,23 +55,23 @@ async def test_rules_draft_validate_activate(env: Env, user: uuid.UUID) -> None:
     bad["earn"]["lesson"]["xp"] = "20"
     bad["extra"] = 1
     del bad["caps"]
-    out = await env.adm("PUT", "rules/draft", {"payload": bad, "comment": None, "based_on": 1}, 422)
+    out = await env.adm("PUT", "rules/draft", {"payload": bad, "comment": None, "based_on": 2}, 422)
     assert out["code"] == "RULES_INVALID"
     assert {(e["path"], e["code"]) for e in out["details"]["errors"]} == {
         ("earn.lesson.xp", "type"), ("extra", "unknown_key"), ("caps", "required")}
-    await env.adm("PUT", "rules/draft", {"payload": v1["payload"], "comment": None, "based_on": 1}, 403,
+    await env.adm("PUT", "rules/draft", {"payload": v1["payload"], "comment": None, "based_on": 2}, 403,
                   perms=("game.read",))
     # смысловые ошибки — сохраняется, проверка показывает
     semantic = copy.deepcopy(v1["payload"])
     semantic["levels"] = [0, 100, 90]
     semantic["caps"]["xp_per_day"] = 10
     semantic["quests"]["templates"] = [t for t in semantic["quests"]["templates"] if "kids" not in t["audiences"]]
-    draft = await env.adm("PUT", "rules/draft", {"payload": semantic, "comment": "черновик", "based_on": 1})
-    assert draft["status"] == "draft" and draft["version"] == 2 and draft["validated_at"] is None
+    draft = await env.adm("PUT", "rules/draft", {"payload": semantic, "comment": "черновик", "based_on": 2})
+    assert draft["status"] == "draft" and draft["version"] == 3 and draft["validated_at"] is None
     assert {d["path"] for d in draft["diff"]} >= {"levels", "caps.xp_per_day", "quests.templates"}
     # замена — только с If-Match = updated_at
-    await env.adm("PUT", "rules/draft", {"payload": semantic, "comment": None, "based_on": 1}, 409)
-    out = await env.adm("PUT", "rules/draft", {"payload": semantic, "comment": None, "based_on": 1}, 409,
+    await env.adm("PUT", "rules/draft", {"payload": semantic, "comment": None, "based_on": 2}, 409)
+    out = await env.adm("PUT", "rules/draft", {"payload": semantic, "comment": None, "based_on": 2}, 409,
                         headers={"If-Match": "2020-01-01T00:00:00.000Z"})
     assert out["code"] == "DRAFT_CONFLICT" and out["details"]["updated_at"] == draft["updated_at"]
     check = await env.adm("POST", "rules/draft/validate")
@@ -84,7 +84,7 @@ async def test_rules_draft_validate_activate(env: Env, user: uuid.UUID) -> None:
     good["earn"]["lesson"]["xp"] = 70
     good["caps"]["xp_per_day"] = 400
     good["hero"]["stage_thresholds"] = [0, 12, 20]
-    draft = await env.adm("PUT", "rules/draft", {"payload": good, "comment": None, "based_on": 1},
+    draft = await env.adm("PUT", "rules/draft", {"payload": good, "comment": None, "based_on": 2},
                           headers={"If-Match": f'"{draft["updated_at"]}"'})
     check = await env.adm("POST", "rules/draft/validate")
     assert check["ok"] and check["errors"] == []
@@ -100,19 +100,19 @@ async def test_rules_draft_validate_activate(env: Env, user: uuid.UUID) -> None:
                          headers=env.staff(step_up=False))
     assert r.json()["code"] == "STEP_UP_REQUIRED"
     active = await env.adm("POST", "rules/draft/activate", {"comment": "активируем правила"})
-    assert active["status"] == "active" and active["version"] == 2 and active["diff"] == []
+    assert active["status"] == "active" and active["version"] == 3 and active["diff"] == []
     assert active["activated_by"]["name"] == "Оператор" and active["comment"] == "активируем правила"
-    assert [v["status"] for v in (await env.adm("GET", "rules"))["items"]] == ["active", "archived"]
-    assert (await env.adm("GET", "rules/1"))["diff"]  # архивная отличается от активной
+    assert [v["status"] for v in (await env.adm("GET", "rules"))["items"]] == ["active", "archived", "archived"]
+    assert (await env.adm("GET", "rules/2"))["diff"]  # архивная отличается от активной
     [ev] = await env.events("game.rules.activated.v1")
-    assert ev.payload["version"] == 2 and ev.payload["based_on"] == 1
+    assert ev.payload["version"] == 3 and ev.payload["based_on"] == 2
     assert [a.payload["reason"] for a in await audits(env, "game.rules.activated")] == ["активируем правила"]
     # откат — только архивная; активную и несуществующую — нельзя
-    assert (await env.adm("POST", "rules/2/rollback", {"comment": "откат правил игры"}, 409))["code"] == "RULES_STATE"
+    assert (await env.adm("POST", "rules/3/rollback", {"comment": "откат правил игры"}, 409))["code"] == "RULES_STATE"
     await env.adm("POST", "rules/77/rollback", {"comment": "откат правил игры"}, 404)
-    await env.adm("POST", "rules/1/rollback", {"comment": "откат правил игры"}, 403, step_up=False)
+    await env.adm("POST", "rules/2/rollback", {"comment": "откат правил игры"}, 403, step_up=False)
     # черновик удаляется; без черновика — 404
-    await env.adm("PUT", "rules/draft", {"payload": good, "comment": None, "based_on": 2})
+    await env.adm("PUT", "rules/draft", {"payload": good, "comment": None, "based_on": 3})
     await env.adm("DELETE", "rules/draft", expect=204)
     await env.adm("DELETE", "rules/draft", expect=404)
     await env.adm("POST", "rules/draft/validate", expect=404)
@@ -320,5 +320,5 @@ async def test_week_events_admin(env: Env, user: uuid.UUID) -> None:
     env.now += timedelta(days=8)
     assert (await env.tick())["events_finished"] == 2
     overview = await env.adm("GET", "overview?period=7d", perms=("dashboard.read",))
-    assert overview["active_events"] == [] and overview["active_rules_version"] == 1
+    assert overview["active_events"] == [] and overview["active_rules_version"] == 2
     await env.adm("GET", "overview", expect=403, perms=("wallet.adjust",))

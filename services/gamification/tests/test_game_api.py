@@ -107,7 +107,8 @@ async def test_session_rewards(env: Env, user: uuid.UUID) -> None:
 async def test_kids_defaults(env: Env, user: uuid.UUID) -> None:
     parent = uuid.uuid4()
     s = await env.get(user, "settings", age_band="10-13", account=parent)
-    assert s == {"auto_freeze": True, "quests_hidden": False, "celebrations": "quiet", "game_notifications": True}
+    assert s == {"auto_freeze": True, "quests_hidden": False, "celebrations": "quiet", "game_notifications": True,
+                 "league_opt_in": False}
     # детский профиль (lrn ≠ sub) — дети, даже если в claims возраст аккаунта
     kid = uuid.uuid4()
     s = await env.get(kid, "summary", age_band="18+", account=parent)
@@ -210,7 +211,7 @@ async def test_overview(env: Env, user: uuid.UUID) -> None:
     await env.buy(user, "streak_freeze")
     await env.missed(user)
     out = await env.adm("GET", "overview?period=30d", perms=("game.read",))
-    assert out["period"] == "30d" and out["active_rules_version"] == 1
+    assert out["period"] == "30d" and out["active_rules_version"] == 2
     assert out["earned"]["xp"] >= 50 and out["spent_til"] == 40 and out["purchases"] == 1
     assert out["freezes"] == {"granted": 4, "bought": 1, "used": 1}
     by = {a["audience"]: a for a in out["by_audience"]}

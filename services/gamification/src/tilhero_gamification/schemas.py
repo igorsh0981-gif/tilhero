@@ -72,6 +72,46 @@ class SettingsPatch(In):
     quests_hidden: bool | None = None
     celebrations: Literal["full", "quiet"] | None = None
     game_notifications: bool | None = None
+    # спринт 7: общая лига недели (14+, только ник)
+    league_opt_in: bool | None = None
+
+
+# ---------------------------------------------------------------- спринт 7: дуэли, лиги
+
+
+MEMBER_PATTERN = r"^mb_[A-Za-z0-9_-]{22}$"
+PAIR_PATTERN = r"^[a-z]{2,3}-[a-z]{2,3}$"
+
+
+class DuelChallengeIn(In):
+    opponent_member_id: str = Field(pattern=MEMBER_PATTERN)
+    pair_id: str | None = Field(default=None, pattern=PAIR_PATTERN, max_length=16)
+
+
+class Reason500(In):
+    """Причина команды сотрудника (admin.ts «Социальное»): 10..500 символов."""
+
+    reason: str = Field(min_length=10, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        if len(v.strip()) < 10:
+            raise ValueError("reason must have at least 10 characters")
+        return v.strip()
+
+
+class LeagueReevaluateIn(Reason500):
+    exclude_user_ids: list[uuid.UUID] = Field(max_length=30)
+
+    @model_validator(mode="after")
+    def _check(self) -> LeagueReevaluateIn:
+        _unique(self.exclude_user_ids, "user_id")
+        return self
+
+
+class DuelReevaluateIn(Reason500):
+    result: Literal["challenger", "opponent", "draw"]
 
 
 # ---------------------------------------------------------------- админка: общее

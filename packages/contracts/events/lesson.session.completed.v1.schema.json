@@ -30,7 +30,9 @@
         "scenario",
         "media",
         "review",
-        "reading"
+        "reading",
+        "duel",
+        "pair"
       ]
     },
     "pair_id": {
@@ -140,6 +142,55 @@
     "finished_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "duel_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "room_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "score": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "correct",
+            "total"
+          ],
+          "properties": {
+            "correct": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 50
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   }
 }

@@ -42,6 +42,12 @@ const MemoryPage = lazy(() => import("../screens/memory/MemoryPage").then((m) =>
 const HeroesPage = lazy(() => import("../screens/game/HeroesPage").then((m) => ({ default: m.HeroesPage })));
 const GamePage = lazy(() => import("../screens/game/GamePage").then((m) => ({ default: m.GamePage })));
 const EventsPage = lazy(() => import("../screens/game/EventsPage").then((m) => ({ default: m.EventsPage })));
+// sprint 7: «Сообщество» — friends and complaints, moderation, referral campaigns, leagues and duels, pair rooms
+const FriendsPage = lazy(() => import("../screens/social/FriendsPage").then((m) => ({ default: m.FriendsPage })));
+const ModerationPage = lazy(() => import("../screens/social/ModerationPage").then((m) => ({ default: m.ModerationPage })));
+const ReferralsPage = lazy(() => import("../screens/social/ReferralsPage").then((m) => ({ default: m.ReferralsPage })));
+const LeaguesPage = lazy(() => import("../screens/social/LeaguesPage").then((m) => ({ default: m.LeaguesPage })));
+const PairRoomsPage = lazy(() => import("../screens/social/PairRoomsPage").then((m) => ({ default: m.PairRoomsPage })));
 
 export const APP_VERSION = "admin-web 0.3.0";
 
@@ -54,6 +60,8 @@ function crumbOf(page: PageId | "", id: string | null): string | null {
   if (page === "agents") return id === "models" ? null : id;
   if (page === "memory") return null;
   if (page === "game") return id.split("/").slice(1).join("/") || null;
+  // sprint 7: a tab alone is not an object; a learner, a case, a referral, a group, a duel or a room is
+  if (page === "moderation" || page === "referrals" || page === "leagues") return id.split("/").slice(1).join("/") || null;
   return id;
 }
 
@@ -180,7 +188,7 @@ export function Shell() {
   return (
     <NavCtx.Provider value={{ route, navigate }}>
       <div className={cx("shell", collapsed && "is-collapsed", navOpen && "is-nav-open", session.adminLayout?.density === "comfortable" && "density-comfortable")} data-testid="shell">
-        <aside className="sidenav" id="sidenav" aria-label={t("nav.label")}>
+        <aside className={cx("sidenav", groups.reduce((n, g) => n + g.items.length, 0) > 17 && "is-many")} id="sidenav" aria-label={t("nav.label")}>
           <div className="sn-head">
             <Wordmark compact={collapsed} sub={t("nav.brandSub", { env: me.env })} />
           </div>
@@ -396,6 +404,26 @@ export function Shell() {
               ) : page === "events" ? (
                 <Suspense fallback={<Spinner label={t("common.loading")} />}>
                   <EventsPage routeId={route.id} />
+                </Suspense>
+              ) : page === "friends" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <FriendsPage routeId={route.id} />
+                </Suspense>
+              ) : page === "moderation" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <ModerationPage routeId={route.id} />
+                </Suspense>
+              ) : page === "referrals" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <ReferralsPage routeId={route.id} />
+                </Suspense>
+              ) : page === "leagues" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <LeaguesPage routeId={route.id} />
+                </Suspense>
+              ) : page === "pair_rooms" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <PairRoomsPage routeId={route.id} />
                 </Suspense>
               ) : null}
             </ErrorBoundary>

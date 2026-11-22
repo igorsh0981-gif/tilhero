@@ -110,7 +110,7 @@ def version_view(row: TemplateVersion) -> dict[str, Any]:
 def info_view(spec: TemplateSpec, active: TemplateVersion | None, updated_at: datetime | None) -> dict[str, Any]:
     return {
         "key": spec.name,
-        "category": public_category(spec.category),  # game (спринт 6) — как reminders, см. templates
+        "category": public_category(spec.category),  # спринт 7: game — категория admin.ts TemplateInfo
         "kid": spec.kid,
         "description": {"ru": spec.description[0], "en": spec.description[1]},
         "placeholders": placeholders_view(spec),

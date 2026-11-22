@@ -25,6 +25,11 @@
 лимиту). Версия, чья схема вывода не принимает вид запроса (v1 teaching_coach и черновики из неё), его не обслуживает:
 `refused: agent_not_active` без вызова провайдера (`supports_request`) — до публикации v2 memory получает «перевода
 нет».
+
+Парная комната (спринт 7, INTERNAL_API §4): `cooperative_lesson_coach` — `session_kind pair`, `session_id = room_id`;
+бюджет — потолок комнаты `room_cap_usd` и месяц (budget.Scope.room), дневной лимит ученика и лимит урока не
+применяются. До публикации версии (черновик сида) — `refused: agent_not_active`: lessons ведёт комнату по сценарию с
+выбором реплик.
 """
 
 from __future__ import annotations
@@ -42,7 +47,7 @@ from typing import Any, Final
 
 from sqlalchemy import select, update
 
-from tilhero_ai_gateway.contracts import output_contract_errors, request_kind
+from tilhero_ai_gateway.contracts import PAIR_SESSION, output_contract_errors, request_kind
 from tilhero_ai_gateway.domain import budget as budgets
 from tilhero_ai_gateway.domain import jsonschema_lite
 from tilhero_ai_gateway.domain.common import usd
@@ -260,10 +265,15 @@ async def invoke(deps: Deps, req: InvokeRequest, *, caller: str, version_overrid
     async with deps.rt.transaction() as s:
         s.add(UsageRow(**base, version=version.version, status="pending", canary=canary))
     # лимит урока — сумма по session_id занятия; у memory (перевод по тапу) занятия нет: месяц и ученик в день
-    # (решение владельца 20.11.2026), дневной session_id memory под лимит урока не попадает
-    lesson_session = req.session_id if req.session_kind not in NO_LESSON_CAP_KINDS else None
-    scope = budgets.Scope(call_id=call_id, user_id=user_id, session_id=lesson_session,
-                          learner_limits=learner_limits)
+    # (решение владельца 20.11.2026), дневной session_id memory под лимит урока не попадает; парная комната
+    # (спринт 7) — потолок комнаты по session_id = room_id и месяц, без лимитов ученика и урока
+    if req.session_kind == PAIR_SESSION:
+        scope = budgets.Scope(call_id=call_id, user_id=user_id, session_id=req.session_id,
+                              learner_limits=learner_limits, room=learner_limits)
+    else:
+        lesson_session = req.session_id if req.session_kind not in NO_LESSON_CAP_KINDS else None
+        scope = budgets.Scope(call_id=call_id, user_id=user_id, session_id=lesson_session,
+                              learner_limits=learner_limits)
     outcome = Outcome()
     status, reason = await _attempts(deps, req, version, context, models, budget, scope, outcome)
     latency = _ms(started)

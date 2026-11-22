@@ -32,6 +32,7 @@ from tilhero_gamification.models import (
     Purchase,
     Quest,
     Referral,
+    ReferralReward,
     ShopItem,
     Wallet,
 )
@@ -101,6 +102,9 @@ async def wallet_view(session: AsyncSession, settings: Settings, user_id: uuid.U
                                     .order_by(Badge.earned_at))).scalars().all()
     refs = {r[0]: int(r[1]) for r in (await session.execute(select(Referral.status, func.count()).where(
         Referral.inviter_user_id == user_id).group_by(Referral.status))).all()}
+    # спринт 7: награды по реферальной кампании social (история спринта 6 — referrals)
+    refs["rewarded"] = refs.get("rewarded", 0) + int(await session.scalar(select(func.count()).select_from(
+        ReferralReward).where(ReferralReward.inviter_user_id == user_id, ReferralReward.outcome == "rewarded")) or 0)
     return {
         "user_id": str(user_id), "audience": learner_audience(learner),
         "level": int(wallet.level) if wallet else 1, "xp_total": int(wallet.xp_total) if wallet else 0,

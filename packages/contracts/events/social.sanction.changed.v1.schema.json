@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "social.sanction.changed.v1.schema.json",
+  "title": "social.sanction.changed.v1",
+  "type": "object",
+  "required": [
+    "user_id",
+    "sanction_id",
+    "kind",
+    "until",
+    "active",
+    "change",
+    "changed_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sanction_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "warning",
+        "social_ban",
+        "nickname_reset"
+      ]
+    },
+    "until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "active": {
+      "type": "boolean"
+    },
+    "change": {
+      "type": "string",
+      "enum": [
+        "applied",
+        "expired",
+        "revoked",
+        "overturned"
+      ]
+    },
+    "changed_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

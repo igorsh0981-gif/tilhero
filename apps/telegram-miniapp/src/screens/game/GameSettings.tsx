@@ -6,7 +6,7 @@ import { useI18n } from "../../i18n";
 import { useApp } from "../../state/app";
 import { useLoad } from "../../state/hooks";
 import { Icon } from "../../ui/Icon";
-import { ErrorLine, Skeleton, ToggleRow } from "../../ui/kit";
+import { ErrorLine, NavRow, Skeleton, ToggleRow } from "../../ui/kit";
 import { showToast } from "../../ui/overlays";
 import { Bar } from "../../ui/shell";
 import { GameError } from "./parts";
@@ -91,6 +91,21 @@ export function GameSettingsScreen() {
                 />
               </div>
             </div>
+            {!kid ? (
+              <div className="pad">
+                {/* sprint 7: the general league is switched on in «Лига недели», with what others see (only the nickname) */}
+                <div className="list">
+                  <NavRow
+                    title={t("game.set.league")}
+                    note={t("game.set.leagueNote")}
+                    value={s.league_opt_in ? t("c.on") : t("c.off")}
+                    icon="trophy"
+                    onClick={() => nav.push({ name: "leagues", tab: "general" })}
+                    testId="gs-league"
+                  />
+                </div>
+              </div>
+            ) : null}
             <div className="pad">
               <ErrorLine text={error} />
             </div>

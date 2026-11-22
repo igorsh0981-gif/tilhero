@@ -26,6 +26,26 @@ def arr(item, max_items=50):
     return {"type": "array", "items": item, "maxItems": max_items}
 
 
+def obj(props, required=None):
+    """Вложенный объект: строго, без лишних полей; required по умолчанию — все поля."""
+    return {"type": "object", "additionalProperties": False, "required": list(required or props),
+            "properties": props}
+
+
+# ------------------------------------------------------------ спринт 7 (социальное)
+# ник сообщества (3–20) или null — не задан; обязательное поле со значением null
+NICK = {"type": ["string", "null"], "minLength": 3, "maxLength": 20}
+MEMBER_ID = {"type": "string", "pattern": r"^mb_[A-Za-z0-9_-]{22}$"}
+LEVEL_BAND = enum("A0-A1", "A2", "B1+")
+REWARD = obj({"freeze": {"type": "integer", "minimum": 0, "maximum": 10},
+              "til": {"type": "integer", "minimum": 0, "maximum": 10000}})
+SCORE = obj({"correct": {"type": "integer", "minimum": 0, "maximum": 50},
+             "total": {"type": "integer", "minimum": 1, "maximum": 50}})
+SCORE_OR_NULL = {"anyOf": [SCORE, {"type": "null"}]}
+UUID_OR_NULL = {"type": ["string", "null"], "format": "uuid"}
+SESSION_KINDS = ("lesson", "scenario", "media", "review", "reading")
+
+
 CATALOG = {
     # ------------------------------------------------------------ identity-consent
     # kind: account — аккаунт Telegram; child — детский профиль 6–13 у родителя (без своего Telegram)
@@ -106,20 +126,54 @@ CATALOG = {
                                  "occurred_at": TS},
                                 ["user_id", "pair_id", "changes", "occurred_at"]),
     # ------------------------------------------------------------ lessons (спринт 4)
-    "lesson.session.started.v1": ({"session_id": UUID, "user_id": UUID, "kind": enum("lesson", "scenario", "media", "review", "reading"),
+    # спринт 7: kind duel — сессия заданий дуэли (duel_id)
+    "lesson.session.started.v1": ({"session_id": UUID, "user_id": UUID, "kind": enum(*SESSION_KINDS, "duel"),
                                    "pair_id": STR, "lesson_id": STR, "scenario_id": STR, "asset_id": STR,
-                                   "ai_mode": enum("full", "choices"), "started_at": TS},
+                                   "ai_mode": enum("full", "choices"), "started_at": TS, "duel_id": UUID},
                                   ["session_id", "user_id", "kind", "pair_id", "ai_mode", "started_at"]),
+    # спринт 7: kind duel — задания дуэли (duel_id, score; practice_only=true, без оценки — учёбу не меняет);
+    # kind pair — участие в парном уроке, по событию на участника: session_id — сессия участника
+    # uuid5(room_id, str(user_id)), room_id, evaluation_id — его оценка (без вклада — null). Для рефералов и пройденных
+    # уроков duel и pair — не урок (зачётный — только kind lesson); learning-plan — занятие practice (INTERNAL_API
+    # спринта 7 §10, п. 2)
     "lesson.session.completed.v1": ({"session_id": UUID, "user_id": UUID,
-                                     "kind": enum("lesson", "scenario", "media", "review", "reading"), "pair_id": STR,
+                                     "kind": enum(*SESSION_KINDS, "duel", "pair"), "pair_id": STR,
                                      "lesson_id": STR, "scenario_id": STR, "asset_id": STR,
                                      "status": enum("completed", "cancelled", "failed"),
                                      "outcome": {"type": ["string", "null"], "enum": ["success", "alt_success", "fail", None]},
                                      "minutes": {"type": "integer", "minimum": 0, "maximum": 600},
                                      "local_date": DATE, "evaluation_id": UUID, "passed": BOOL, "practice_only": BOOL,
-                                     "finished_at": TS},
+                                     "finished_at": TS, "duel_id": UUID, "room_id": UUID, "score": SCORE},
                                     ["session_id", "user_id", "kind", "pair_id", "status", "minutes", "practice_only",
                                      "finished_at"]),
+    # ------------------------------------------------------------ lessons: парный урок (спринт 7)
+    # приглашение в парный урок → notifications pair_invited (ник пригласившего — для текста; null — не задан)
+    "lesson.pair.invited.v1": ({"room_id": UUID, "inviter_user_id": UUID, "invitee_user_id": UUID,
+                                "inviter_nickname": NICK, "pair_id": STR, "scenario_id": STR,
+                                "mode": enum("free", "choices"), "start_at": TS, "invited_at": TS},
+                               ["room_id", "inviter_user_id", "invitee_user_id", "inviter_nickname", "pair_id",
+                                "scenario_id", "mode", "start_at", "invited_at"]),
+    # запланированная комната (принята, waiting) начнётся через 5 минут — notifications pair_starting обоим
+    "lesson.pair.starting.v1": ({"room_id": UUID, "user_ids": {**arr(UUID, 2), "minItems": 2, "uniqueItems": True},
+                                 "scenario_id": STR, "start_at": TS},
+                                ["room_id", "user_ids", "scenario_id", "start_at"]),
+    # комната завершена (участники — вошедшие в комнату) → gamification (XP за вклад, значок together_1),
+    # notifications (end_reason stopped — pair_stopped). Тексты реплик и оценки в событие не входят
+    "lesson.pair.completed.v1": ({"room_id": UUID, "scenario_id": STR, "pair_id": STR,
+                                  "status": enum("finished", "abandoned", "stopped"),
+                                  "end_reason": enum("completed", "participant_left", "inactivity", "stopped"),
+                                  "team_goal_reached": BOOL,
+                                  "participants": {**arr(obj({
+                                      "user_id": UUID,
+                                      "role": {"type": ["string", "null"], "enum": ["A", "B", None]},
+                                      "contributed": BOOL,
+                                      "turns": {"type": "integer", "minimum": 0, "maximum": 500},
+                                      "speaking_seconds": {"type": "integer", "minimum": 0, "maximum": 7200},
+                                      "minutes": {"type": "integer", "minimum": 0, "maximum": 240}}), 2),
+                                      "minItems": 1},
+                                  "ended_at": TS},
+                                 ["room_id", "scenario_id", "pair_id", "status", "end_reason", "team_goal_reached",
+                                  "participants", "ended_at"]),
     # ------------------------------------------------------------ assessment (спринт 4)
     "assessment.completed.v1": ({"evaluation_id": UUID, "user_id": UUID, "pair_id": STR, "session_id": UUID,
                                  "kind": enum("lesson", "scenario", "media", "review", "reading"),
@@ -189,6 +243,45 @@ CATALOG = {
                                  "based_on": {"type": "integer", "minimum": 1}, "activated_by": UUID,
                                  "activated_at": TS},
                                 ["version", "activated_by", "activated_at"]),
+    # ------------------------------------------------------------ gamification (спринт 7)
+    # награды по social.referral.qualified.v1 обработаны (ack) → social: referral rewarded. outcome (необязательное,
+    # нет — rewarded): rewarded — награды выданы; legacy — приглашённый уже награждён (или упёрся в лимит) по правилу
+    # спринта 6, пригласившему по кампании ничего; inviter_capped — месячный лимит пригласившего исчерпан с наградами
+    # спринта 6, пригласившему ничего. Приветственная награда приглашённого — во всех исходах. inviter_reward
+    # (необязательное) — фактически выданное пригласившему; null — ничего (legacy, inviter_capped, пригласивший удалён).
+    # notifications: referral_qualified пригласившему — только при outcome rewarded (или без поля)
+    "game.referral.rewarded.v1": ({"referral_id": UUID, "inviter_user_id": UUID, "invitee_user_id": UUID,
+                                   "rewarded_at": TS, "outcome": enum("rewarded", "legacy", "inviter_capped"),
+                                   "inviter_reward": REWARD},
+                                  ["referral_id", "inviter_user_id", "rewarded_at"]),
+    # итоги группы общей лиги закрыты (version 1) или переоценены / призы выданы после удержания (version + 1) →
+    # notifications league_closed (место и приз). prizes_held — призы удержаны до решения администратора (prize_til 0)
+    "game.league.closed.v1": ({"week": DATE, "group_id": UUID, "version": {"type": "integer", "minimum": 1},
+                               "pair_id": STR, "level_band": LEVEL_BAND, "prizes_held": BOOL,
+                               "standings": arr(obj({"user_id": UUID,
+                                                     "place": {"type": "integer", "minimum": 1, "maximum": 100},
+                                                     "xp": INT,
+                                                     "prize_til": {"type": "integer", "minimum": 0,
+                                                                   "maximum": 10000}}), 50),
+                               "closed_at": TS},
+                              ["week", "group_id", "version", "pair_id", "level_band", "prizes_held", "standings",
+                               "closed_at"]),
+    # вызов на дуэль → notifications duel_challenged (ник вызывающего — для текста; null — не задан)
+    "game.duel.challenged.v1": ({"duel_id": UUID, "challenger_user_id": UUID, "opponent_user_id": UUID,
+                                 "challenger_nickname": NICK, "pair_id": STR, "level_band": LEVEL_BAND,
+                                 "accept_deadline": TS, "created_at": TS},
+                                ["duel_id", "challenger_user_id", "opponent_user_id", "challenger_nickname", "pair_id",
+                                 "level_band", "accept_deadline", "created_at"]),
+    # дуэль завершена (finished) или отменена после принятия — никто не сыграл (cancelled, result none) →
+    # notifications duel_finished, lessons (разбор ответов открывается). Переоценка — result_version + 1
+    "game.duel.finished.v1": ({"duel_id": UUID, "challenger_user_id": UUID, "opponent_user_id": UUID,
+                               "status": enum("finished", "cancelled"),
+                               "result": enum("challenger", "opponent", "draw", "none"), "technical": BOOL,
+                               "result_version": {"type": "integer", "minimum": 1},
+                               "scores": obj({"challenger": SCORE_OR_NULL, "opponent": SCORE_OR_NULL}),
+                               "finished_at": TS},
+                              ["duel_id", "challenger_user_id", "opponent_user_id", "status", "result", "technical",
+                               "result_version", "scores", "finished_at"]),
     # ------------------------------------------------------------ catalog: словарь курса (спринт 5)
     "catalog.glossary.changed.v1": ({"pair_id": STR, "entry_id": UUID, "forms": arr(STR, 8),
                                      "change": enum("created", "updated", "reviewed", "archived"), "occurred_at": TS},
@@ -244,11 +337,66 @@ CATALOG = {
     "social.family.member_added.v1": ({"family_id": UUID, "owner_user_id": UUID, "user_id": UUID,
                                        "role": enum("owner", "adult", "teen", "child"), "added_at": TS},
                                       ["family_id", "owner_user_id", "user_id", "role", "added_at"]),
+    # ------------------------------------------------------------ social (спринт 7)
+    # профиль сообщества изменён (ник, скрытие) → gamification, lessons (проекция member_id и ника)
+    "social.profile.updated.v1": ({"user_id": UUID, "member_id": MEMBER_ID, "nickname": NICK,
+                                   "game_profile_hidden": BOOL, "updated_at": TS},
+                                  ["user_id", "member_id", "nickname", "game_profile_hidden", "updated_at"]),
+    # заявка в друзья → notifications friend_request (ник отправителя — для текста; null — не задан)
+    "social.friend_request.created.v1": ({"request_id": UUID, "from_user_id": UUID, "to_user_id": UUID,
+                                          "from_nickname": NICK, "created_at": TS},
+                                         ["request_id", "from_user_id", "to_user_id", "from_nickname", "created_at"]),
+    # дружба: user_a < user_b (по строке UUID). source: request — принятая заявка (requester_user_id — кому
+    # friend_accepted, accepter_nickname — ник принявшего); invite — приглашение Telegram kind friend; removed —
+    # удаление другом; block — блокировка; deletion — сага удаления → gamification, notifications (added + request)
+    "social.friendship.changed.v1": ({"user_a": UUID, "user_b": UUID, "status": enum("added", "removed"),
+                                      "source": enum("request", "invite", "removed", "block", "deletion"),
+                                      "requester_user_id": UUID, "accepter_nickname": NICK, "at": TS},
+                                     ["user_a", "user_b", "status", "source", "at"]),
+    # блокировка A→B (односторонняя) → gamification, lessons: отменить вызовы и приглашения между ними
+    "social.block.changed.v1": ({"blocker_user_id": UUID, "blocked_user_id": UUID, "status": enum("added", "removed"),
+                                 "at": TS},
+                                ["blocker_user_id", "blocked_user_id", "status", "at"]),
+    # санкция применена (applied), истекла (expired, tick), снята (revoked) или отменена по обжалованию (overturned) →
+    # gamification, lessons (social_ban: общая лига, вызовы, приглашения), notifications sanction_applied (applied).
+    # until: social_ban — конец запрета или null (бессрочно); warning, nickname_reset — null. Основание в событие не входит
+    "social.sanction.changed.v1": ({"user_id": UUID, "sanction_id": UUID,
+                                    "kind": enum("warning", "social_ban", "nickname_reset"),
+                                    "until": {"type": ["string", "null"], "format": "date-time"}, "active": BOOL,
+                                    "change": enum("applied", "expired", "revoked", "overturned"), "changed_at": TS},
+                                   ["user_id", "sanction_id", "kind", "until", "active", "change", "changed_at"]),
+    # дело модерации закрыто → notifications complaint_resolved жалобщику (без подробностей)
+    "social.case.resolved.v1": ({"case_id": UUID, "reporter_user_id": UUID,
+                                 "outcome": enum("action_taken", "dismissed"), "resolved_at": TS},
+                                ["case_id", "reporter_user_id", "outcome", "resolved_at"]),
+    # обжалование санкции решено → notifications appeal_decided (overturned дополнительно даёт sanction.changed)
+    "social.appeal.decided.v1": ({"appeal_id": UUID, "sanction_id": UUID, "user_id": UUID,
+                                  "decision": enum("upheld", "overturned"), "decided_at": TS},
+                                 ["appeal_id", "sanction_id", "user_id", "decision", "decided_at"]),
+    # реферал квалифицирован (условия кампании, проверка, лимит месяца) → gamification (награды, ack
+    # game.referral.rewarded.v1). inviter_monthly_cap — месячный лимит кампании: gamification считает против него
+    # награды пригласившего обоих правил (кампании и «доживающих» спринта 6) за месяц qualified_at по Ташкенту
+    "social.referral.qualified.v1": ({"referral_id": UUID, "inviter_user_id": UUID, "invitee_user_id": UUID,
+                                      "campaign_version": {"type": "integer", "minimum": 1},
+                                      "inviter_reward": REWARD, "invitee_reward": REWARD,
+                                      "inviter_monthly_cap": {"type": "integer", "minimum": 1, "maximum": 100},
+                                      "qualified_at": TS},
+                                     ["referral_id", "inviter_user_id", "invitee_user_id", "campaign_version",
+                                      "inviter_reward", "invitee_reward", "inviter_monthly_cap", "qualified_at"]),
+    # реферал без награды: rejected (правила или оператор), expired (window_expired), capped (monthly_cap) →
+    # notifications referral_rejected; reject_code — публичный, без правил антифрода
+    "social.referral.rejected.v1": ({"referral_id": UUID, "inviter_user_id": UUID,
+                                     "reject_code": enum("not_new_user", "family_member", "window_expired",
+                                                         "review_rejected", "monthly_cap"),
+                                     "rejected_at": TS},
+                                    ["referral_id", "inviter_user_id", "reject_code", "rejected_at"]),
+    # реферал удержан на проверке оператора — только аналитика (флаги риска в событие не входят)
+    "social.referral.held.v1": ({"referral_id": UUID, "held_at": TS}, ["referral_id", "held_at"]),
     # ------------------------------------------------------------ notifications
     "notification.requested.v1": ({
         "notification_id": UUID, "user_id": UUID,
         "kind": enum("critical", "transactional", "standard"),
-        "category": enum("reminders", "missed", "social", "support", "product", "service"),
+        "category": enum("reminders", "missed", "social", "support", "product", "service", "game"),
         "template": {"type": "string", "pattern": "^[a-z][a-z0-9_.]*$", "not": {"pattern": "^pin\\."}},
         "params": {"type": "object"},
         "dedup_key": {"type": "string", "maxLength": 200},

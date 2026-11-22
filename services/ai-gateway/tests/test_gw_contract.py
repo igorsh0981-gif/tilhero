@@ -62,7 +62,10 @@ def _compare(ts_fields: dict[str, str], model: type[BaseModel], where: str) -> N
 @pytest.mark.parametrize("iface", ["ConversationPartnerContext", "ConversationPartnerOutput", "TeachingCoachContext",
                                    "TeachingCoachOutput", "IndependentEvaluatorContext", "IndependentEvaluatorOutput",
                                    "ConfirmedError", "TeachingCoachGlossContext", "TeachingCoachGlossOutput",
-                                   "SpeechAssessMeta", "PronunciationResult", "AiStatus"])
+                                   "SpeechAssessMeta", "PronunciationResult", "AiStatus",
+                                   # спринт 7: коуч парного урока и распознавание голосового хода комнаты
+                                   "CooperativeCoachContext", "CooperativeCoachOutput", "SpeechTranscribeMeta",
+                                   "SpeechTranscribeResult"])
 def test_agent_models_match_ai_ts(iface: str) -> None:
     _compare(ts.fields("ai.ts", iface), getattr(contracts, iface), iface)
 
@@ -72,9 +75,13 @@ def test_speech_enums_match_ai_ts() -> None:
     assert set(get_args(contracts.PronunciationErrorType)) == aliases["PronunciationErrorType"]
     pos = ts.literals(ts.fields("ai.ts", "TeachingCoachGlossOutput")["part_of_speech"])
     assert pos is not None and set(get_args(contracts.PartOfSpeech)) == pos
-    # AiSessionKind = SessionKind | "memory"
-    assert set(get_args(contracts.AiSessionKind)) == aliases["SessionKind"] | {"memory"}
-    assert 'export type AiSessionKind = SessionKind | "memory"' in ts.source("ai.ts")
+    # AiSessionKind = SessionKind | "memory" | "pair" (спринт 7); SessionKind + duel
+    assert set(get_args(contracts.AiSessionKind)) == aliases["SessionKind"] | {"memory", "pair"}
+    assert 'export type AiSessionKind = SessionKind | "memory" | "pair"' in ts.source("ai.ts")
+    assert "duel" in aliases["SessionKind"] and "duel" in get_args(contracts.SessionKind)
+    assert set(get_args(contracts.CoachRole)) == aliases["CoachRole"]
+    transcribe = ts.fields("ai.ts", "SpeechTranscribeResult")
+    assert ts.literals(transcribe["provider"]) == {"whisper", "fake_speech"}
     model = ts.fields("ai.ts", "AiModel")
     assert ts.literals(model["provider"]) == {"anthropic", "fake", "whisper", "azure_speech", "fake_speech"}
     speech = ts.inline_object(ts.fields("ai.ts", "AiProviderStatus")["speech"])

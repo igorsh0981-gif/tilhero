@@ -98,6 +98,30 @@ describe("loadConfig", () => {
     expect(problems({ GAMIFICATION_URL: "ftp://gamification" })).toEqual(['GAMIFICATION_URL="ftp://gamification": ожидается http(s) URL']);
   });
 
+  it("спринт 7: long-poll ленты парной комнаты — PAIR_ROOM_POLL_TIMEOUT_MS 30 с (> 25 с ожидания lessons); в stage/prod ≤ 25 с — ошибка", () => {
+    const LESSONS_POLL_WAIT_MS = 25_000; // lessons держит GET …/state до 25 с (INTERNAL_API §3.2)
+    for (const c of [loadConfig({}), loadConfig(PROD_OK)]) {
+      expect(c.pairRoomPollTimeoutMs).toBe(30_000);
+      expect(c.pairRoomPollTimeoutMs).toBeGreaterThan(LESSONS_POLL_WAIT_MS);
+    }
+    expect(loadConfig({ ...PROD_OK, PAIR_ROOM_POLL_TIMEOUT_MS: "40000" }).pairRoomPollTimeoutMs).toBe(40_000);
+    expect(problems({ ...PROD_OK, PAIR_ROOM_POLL_TIMEOUT_MS: "25000" })).toEqual([
+      "PAIR_ROOM_POLL_TIMEOUT_MS=25000: в stage/prod больше 25000 (long-poll lessons — до 25 с)",
+    ]);
+    // dev/test — меньше допустимо (тесты таймаута), вне 1000..120000 — ошибка
+    expect(loadConfig({ PAIR_ROOM_POLL_TIMEOUT_MS: "3000" }).pairRoomPollTimeoutMs).toBe(3000);
+    expect(problems({ PAIR_ROOM_POLL_TIMEOUT_MS: "500" })).toEqual(["PAIR_ROOM_POLL_TIMEOUT_MS=500: допустимо от 1000 до 120000"]);
+  });
+
+  it("спринт 7: вход / ход / выход парной комнаты ждут ИИ-коуча — PAIR_ROOM_COACH_TIMEOUT_MS 30 с; в stage/prod не меньше 25 с", () => {
+    for (const c of [loadConfig({}), loadConfig(PROD_OK)]) expect(c.pairRoomCoachTimeoutMs).toBe(30_000);
+    expect(loadConfig({ ...PROD_OK, PAIR_ROOM_COACH_TIMEOUT_MS: "25000" }).pairRoomCoachTimeoutMs).toBe(25_000);
+    expect(problems({ ...PROD_OK, PAIR_ROOM_COACH_TIMEOUT_MS: "24999" })).toEqual([
+      "PAIR_ROOM_COACH_TIMEOUT_MS=24999: в stage/prod не меньше 25000 (вход и ход ждут ИИ-коуча)",
+    ]);
+    expect(loadConfig({ PAIR_ROOM_COACH_TIMEOUT_MS: "2000" }).pairRoomCoachTimeoutMs).toBe(2000);
+  });
+
   it("R2-02: таймаут lessons больше таймаута ИИ в lessons (20 с); завершение — больше ожидания оценки (до 32 с)", () => {
     const LESSONS_AI_TIMEOUT_MS = 20_000; // services/lessons AI_TIMEOUT_SECONDS по умолчанию
     const LESSONS_FINISH_WAIT_MS = 32_000; // lessons → assessment при finish

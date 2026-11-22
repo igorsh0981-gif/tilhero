@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tilhero_gamification.domain import badges, quests
+from tilhero_gamification.domain import badges, duels, quests, social_rewards
 from tilhero_gamification.domain.common import (
     AGE_BANDS,
     STAGE_REACHED,
@@ -39,7 +39,7 @@ from tilhero_gamification.domain.engine import (
     recent,
 )
 from tilhero_gamification.domain.rules import stage_of
-from tilhero_gamification.models import EvidenceReward, Learner, Ledger, Referral, SessionReward, SkillState
+from tilhero_gamification.models import EvidenceReward, Learner, Ledger, SessionReward, SkillState
 from tilhero_gamification.settings import Settings
 
 log = logging.getLogger("tilhero.gamification.earning")
@@ -59,21 +59,24 @@ def _uuid(value: object) -> uuid.UUID:
 async def on_lesson(session: AsyncSession, settings: Settings, now: datetime, payload: dict[str, Any],
                     event_id: str) -> None:
     """lesson.session.completed.v1: XP и тилы по `earn[kind]`; урок с passed — бонус; practice_only — практика.
-    Счётчики значков, задания, реферальный бонус пригласившему за первый урок приглашённого."""
+    Счётчики значков, задания. Спринт 7: kind duel — счёт дуэли (duels.on_score, награды — при завершении дуэли);
+    kind pair — без начислений (XP за вклад — по lesson.pair.completed.v1), только итоги занятия. Рефералы спринта 6
+    в pending «доживают»: первый завершённый урок приглашённого — награда пригласившему (social_rewards)."""
+    kind = str(payload.get("kind"))
+    if kind == "duel":
+        await duels.on_score(session, settings, now, payload, event_id)
+        return
     user_id = _uuid(payload["user_id"])
     session_id = _uuid(payload["session_id"])
-    kind = str(payload.get("kind"))
-    referral = None
+    legacy = None
     if payload.get("status") == "completed" and kind == "lesson":
-        referral = await session.get(Referral, user_id)
-        if referral is not None and referral.status == "pending":
-            await lock_users(session, user_id, referral.inviter_user_id)
+        legacy = await social_rewards.legacy_inviter(session, user_id)
+        if legacy is not None:  # оба ученика — в одном порядке (как квалификация кампании)
+            await lock_users(session, user_id, legacy)
     turn = await open_turn(session, settings, now, user_id, event_id=event_id,
                            at=parse_ts(payload.get("finished_at"), now))
     if turn is None:
         return
-    if referral is not None:  # перечитать под блокировкой: параллельный урок мог уже наградить пригласившего
-        referral = await session.get(Referral, user_id, populate_existing=True, with_for_update=True)
     turn.session_id = session_id
     evaluation = _uuid_or_none(payload.get("evaluation_id"))
     if payload.get("status") != "completed" or kind not in LESSON_KINDS:
@@ -101,8 +104,8 @@ async def on_lesson(session: AsyncSession, settings: Settings, now: datetime, pa
         await quests.advance_xp(turn)
     await badges.check(turn, {"lessons", "readings"})
     await _close_session(turn, evaluation)
-    if referral is not None and referral.status == "pending":
-        await _referral_reward(session, settings, now, referral, event_id)
+    if legacy is not None:
+        await social_rewards.legacy_lesson(session, settings, now, user_id, turn.moment, event_id)
 
 
 def _uuid_or_none(value: object) -> uuid.UUID | None:
@@ -292,49 +295,9 @@ async def on_profile_created(session: AsyncSession, settings: Settings, now: dat
 
 
 async def on_invite_accepted(session: AsyncSession, now: datetime, payload: dict[str, Any]) -> None:
-    """social.invite.accepted.v1 kind referral → referrals pending (без операций). Один приглашённый — один
-    пригласивший; самоприглашение и удалённые — игнор."""
-    if payload.get("kind") != "referral":
-        return
-    inviter, invitee = _uuid(payload["inviter_user_id"]), _uuid(payload["invitee_user_id"])
-    if inviter == invitee:
-        return
-    await lock_users(session, inviter, invitee)  # отметка удаления — после блокировки (сага держит её же)
-    if await is_deleted(session, inviter) or await is_deleted(session, invitee):
-        return
-    await session.execute(insert(Referral).values(
-        invitee_user_id=invitee, inviter_user_id=inviter, invite_id=_uuid(payload["invite_id"]), status="pending",
-        accepted_at=parse_ts(payload.get("accepted_at"), now), updated_at=now,
-    ).on_conflict_do_nothing(index_elements=["invitee_user_id"]))
-
-
-async def _referral_reward(session: AsyncSession, settings: Settings, now: datetime, referral: Referral,
-                           event_id: str) -> None:
-    """Пригласившему +referral_freeze за первый урок приглашённого; не больше referral_monthly_cap наград за
-    календарный месяц пригласившего — сверх лимита `capped` без операции."""
-    if referral.status != "pending":
-        return
-    inviter = await open_turn(session, settings, now, referral.inviter_user_id, event_id=event_id)
-    if inviter is None:
-        referral.status, referral.updated_at = "void", now
-        return
-    month_start = inviter.today.replace(day=1)
-    tz = zone(inviter.learner.timezone, settings.default_timezone)
-    since = datetime.combine(month_start, datetime.min.time(), tzinfo=tz)
-    done = int(await session.scalar(select(func.count()).select_from(Referral).where(
-        Referral.inviter_user_id == referral.inviter_user_id, Referral.status == "rewarded",
-        Referral.rewarded_at >= since)) or 0)
-    if done >= inviter.rules.bonuses["referral_monthly_cap"]:
-        referral.status, referral.updated_at = "capped", now
-        return
-    op = None
-    bonus = inviter.rules.bonuses["referral_freeze"]
-    if bonus > 0:
-        op = await inviter.post(currency="freeze", amount=bonus, reason="referral_bonus",
-                                key=f"referral_bonus:{referral.invitee_user_id}", source_kind="event",
-                                source_ref=event_id, rules_version=inviter.rules.version, use_session=False)
-    referral.status, referral.rewarded_at, referral.updated_at = "rewarded", now, now
-    referral.op_id = op.op_id if op is not None else None
+    """social.invite.accepted.v1 — со спринта 7 не исполняется: реферал квалифицирует social по кампании и присылает
+    social.referral.qualified.v1 (social_rewards). Новых строк referrals нет; pending спринта 6 «доживают» 90 дней."""
+    return None
 
 
 # ---------------------------------------------------------------- пропуск (learning-plan)

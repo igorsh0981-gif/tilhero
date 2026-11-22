@@ -192,7 +192,7 @@ async def test_stats_permissions_and_empty(env: Env, user: uuid.UUID) -> None:
         assert r.status_code == 200, r.text
         assert r.json() == {"period": "today", "started": 0, "completed": 0, "completion_pct": None,
                             "median_minutes": None, "by_kind": {"lesson": 0, "scenario": 0, "media": 0, "review": 0,
-                                                                     "reading": 0},
+                                                                     "reading": 0, "duel": 0},
                             "ai_degraded_pct": None}
 
 
@@ -232,7 +232,7 @@ async def test_stats_calculations(env: Env) -> None:
     day = (await env.c.get(STATS, params={"period": "today"}, headers=env.staff("dashboard.read"))).json()
     assert day == {"period": "today", "started": 3, "completed": 1, "completion_pct": 33.3,
                    "median_minutes": float(done["minutes"]),
-                   "by_kind": {"lesson": 1, "scenario": 1, "media": 1, "review": 0, "reading": 0},
+                   "by_kind": {"lesson": 1, "scenario": 1, "media": 1, "review": 0, "reading": 0, "duel": 0},
                    "ai_degraded_pct": 33.3}
     week = (await env.c.get(STATS, params={"period": "7d"}, headers=env.staff("qa.read"))).json()
     assert week["started"] == 4 and week["completed"] == 1 and week["completion_pct"] == 25.0

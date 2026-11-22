@@ -86,8 +86,8 @@ test("release 6.1: illustration from the catalogue with previews, the phone show
   await expect(page.getByTestId("wn-pv-art")).toHaveCount(0);
   // the picker shows each catalogue picture (a real bundled file of the Mini App)
   const picker = page.getByTestId("wn-ill");
-  await expect(picker.getByRole("radio")).toHaveCount(3);
-  for (const key of ["welcome", "s6-heroes"]) {
+  await expect(picker.getByRole("radio")).toHaveCount(5);
+  for (const key of ["welcome", "s6-heroes", "s7-social", "s7-family"]) {
     const thumb = picker.locator("label", { has: page.getByTestId(`wn-ill-${key}`) }).locator("img");
     await expect.poll(() => thumb.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(1200);
   }
@@ -142,4 +142,20 @@ test("version conflict: another staff member saved first", async ({ page }) => {
   await page.getByTestId("wn-title-ru").fill("Ноябрь: семья, график и тихие часы");
   await page.getByTestId("wn-save").click();
   await expect(page.getByTestId("wn-conflict")).toBeVisible();
+});
+
+test("sprint 7: the routes «Друзья», «Лиги недели», «Дуэли», «Пригласить друга» are in the «Подробнее» list and saved with the draft", async ({ page }) => {
+  const bff = await openAs(page, "comms@tilhero.local", "#/news/whatsnew");
+  await page.getByTestId("wn-open-2026.11").click();
+  await expect(page.getByTestId("wn-editor")).toBeVisible();
+  const link = page.getByTestId("wn-link-0");
+  for (const label of ["Друзья", "Лиги недели", "Дуэли", "Пригласить друга"]) await expect(link.locator("option", { hasText: label })).toHaveCount(1);
+  await link.selectOption("leagues");
+  await page.getByTestId("wn-link-1").selectOption("referrals");
+  await page.getByTestId("wn-save").click();
+  await expect(page.getByText("Черновик 2026.11 сохранён")).toBeVisible();
+  expect(bff.calls("PUT", /\/release-notes\//).at(-1)!.body).toMatchObject({ items: [{ link: "leagues" }, { link: "referrals" }] });
+  // the list of routes is translated too (EN)
+  await page.getByTestId("lang-en").click();
+  await expect(page.getByTestId("wn-link-0").locator("option:checked")).toHaveText("Weekly leagues");
 });

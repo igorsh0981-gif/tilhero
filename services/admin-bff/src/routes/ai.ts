@@ -358,14 +358,18 @@ export function aiRoutes(app: App, ctx: BffContext): void {
     return shaped(ctx, auth, AI_SERVICE, AI_BUDGET, await aiGet(ctx, `${BASE}/budget`, { actor: auth.actor }));
   });
 
-  /** Лимиты ИИ (costs.manage, step-up); подлимит речи — не больше месячного потолка (422 до домена). */
-  app.put<{ Body: { monthly_cap_usd: number; speech_monthly_cap_usd: number } & Record<string, unknown> }>(
+  /** Лимиты ИИ (costs.manage, step-up); подлимит речи и потолок парной комнаты (спринт 7) — не больше месячного
+   *  потолка (422 до домена). */
+  app.put<{ Body: { monthly_cap_usd: number; speech_monthly_cap_usd: number; room_cap_usd?: number } & Record<string, unknown> }>(
     `${BASE}/budget`,
     { config: { ...requirePermission("costs.manage"), ...requireStepUp() }, schema: { response: out(AI_BUDGET), body: BUDGET_UPDATE } },
     async (req, reply) => {
       const auth = staffOf(req);
       if (req.body.speech_monthly_cap_usd > req.body.monthly_cap_usd) {
         throw validationError("speech_monthly_cap_usd", "Подлимит речи — не больше месячного потолка ИИ");
+      }
+      if (req.body.room_cap_usd !== undefined && req.body.room_cap_usd > req.body.monthly_cap_usd) {
+        throw validationError("room_cap_usd", "Потолок парной комнаты — не больше месячного потолка ИИ");
       }
       const res = await aiCall(ctx, "PUT", `${BASE}/budget`, { actor: auth.actor, body: req.body, idempotencyKey: idempotencyKeyOf(req, false) });
       return relayAi(auth, reply, AI_BUDGET, res);

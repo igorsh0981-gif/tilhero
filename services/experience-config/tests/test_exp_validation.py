@@ -273,12 +273,15 @@ def test_payload_miniapp_rules() -> None:
 def test_payload_admin_rules() -> None:
     p = admin_payload()
     p["layout"]["menu"].append({"id": "audit", "enabled": False})
-    assert ("payload.layout.menu[15].id", "duplicate") in _errors("admin", p)  # 16 из 17 разрешённых — дубль, не лимит
+    assert ("payload.layout.menu[15].id", "duplicate") in _errors("admin", p)  # 16 из 22 разрешённых — дубль, не лимит
     p = admin_payload()
     p["layout"]["menu"].append({"id": "memory", "enabled": True})  # спринт 5: раздел «Память» разрешён
     assert validate_payload("admin", p)["layout"]["menu"][-1]["id"] == "memory"
+    for section in ("friends", "moderation", "referrals", "leagues", "pair_rooms"):  # спринт 7: «Сообщество»
+        p["layout"]["menu"].append({"id": section, "enabled": True})
+    assert validate_payload("admin", p)["layout"]["menu"][-1]["id"] == "pair_rooms"
     p["layout"]["menu"].append({"id": "audit", "enabled": False})
-    assert _errors("admin", p) == [("payload.layout.menu[16].id", "duplicate")]  # 17 — ровно лимит
+    assert _errors("admin", p) == [("payload.layout.menu[21].id", "duplicate")]  # 22 — ровно лимит
     p["layout"]["menu"].append({"id": "users", "enabled": False})
     assert ("payload.layout.menu", "too_many") in _errors("admin", p)
     p = admin_payload()
@@ -330,3 +333,21 @@ def test_payload_size_and_type() -> None:
     p = miniapp_payload()
     p["flags"] = {f"flag_{i}_{'x' * 50}": True for i in range(600)}
     assert _errors("miniapp", p) == [("payload", "too_large")]
+
+
+def test_payload_admin_community_menu() -> None:
+    """Спринт 7 (INTERNAL_API §6): разделы «Сообщества» — friends, moderation, referrals, leagues, pair_rooms —
+    допустимы и выключаются, как любые другие; неизвестные id не принимаются."""
+    from tilhero_experience.domain.payload import ADMIN_MENU
+
+    community = ["friends", "moderation", "referrals", "leagues", "pair_rooms"]
+    assert list(ADMIN_MENU[-5:]) == community
+    p = admin_payload()
+    at = [m["id"] for m in p["layout"]["menu"]].index("events") + 1
+    p["layout"]["menu"][at:at] = [{"id": c, "enabled": c != "pair_rooms"} for c in community]
+    out = validate_payload("admin", p)["layout"]["menu"]
+    assert [m["id"] for m in out[at:at + 5]] == community and out[at + 4]["enabled"] is False
+    for bad in ("social", "friends_list", "Pair_rooms", "duels"):
+        p = admin_payload()
+        p["layout"]["menu"].append({"id": bad, "enabled": True})
+        assert _errors("admin", p) == [("payload.layout.menu[15].id", "not_allowed")], bad

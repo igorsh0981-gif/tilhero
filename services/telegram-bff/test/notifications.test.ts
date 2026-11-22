@@ -43,6 +43,26 @@ describe("GET /v1/notifications", () => {
     expect(call.query).toEqual({ limit: "10" });
   });
 
+  it("спринт 7: категория game и ссылки duel_<id> / room_<id> — как есть", async () => {
+    h.fake.addInbox(s.userId, { category: "game", startapp: "duel_8b0e1c3a-5d2f-4a6b-9c7d-1e2f3a4b5c6d" });
+    h.fake.addInbox(s.userId, { category: "social", startapp: "room_8b0e1c3a-5d2f-4a6b-9c7d-1e2f3a4b5c6d" });
+    const items = (await get("/v1/notifications")).json().items as Array<{ category: string; startapp: string }>;
+    expect(items.map((i) => [i.category, i.startapp])).toEqual([
+      ["social", "room_8b0e1c3a-5d2f-4a6b-9c7d-1e2f3a4b5c6d"],
+      ["game", "duel_8b0e1c3a-5d2f-4a6b-9c7d-1e2f3a4b5c6d"],
+    ]);
+  });
+
+  it("спринт 7: настройки уведомлений — категория game (нет у identity — включена, по умолчанию); PATCH пробрасывается", async () => {
+    const cats = h.fake.account(s.userId).settings.categories as unknown as Record<string, boolean>;
+    delete cats.game;
+    expect((await get("/v1/profile")).json().notifications.categories.game).toBe(true);
+    const res = await h.app.inject({ method: "PATCH", url: "/v1/profile/settings", headers: bearer(s.access), payload: { notifications: { categories: { game: false } } } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().notifications.categories.game).toBe(false);
+    expect(h.fake.callsTo("identity", "PATCH", "/internal/v1/me/settings")[0]!.body).toMatchObject({ notifications: { categories: { game: false } } });
+  });
+
   it("limit/cursor проверяются (≤ 100); 401 без токена; ошибки домена — как есть", async () => {
     expect((await get("/v1/notifications?limit=101")).statusCode).toBe(422);
     expect((await get("/v1/notifications?limit=0")).statusCode).toBe(422);

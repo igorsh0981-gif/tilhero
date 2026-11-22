@@ -7,12 +7,14 @@ import { ruContent } from "./ru.content";
 import { ruAi } from "./ru.ai";
 import { ruMemory } from "./ru.memory";
 import { ruGame } from "./ru.game";
+import { ruSocial } from "./ru.social";
 
 export const ru = {
   ...ruContent,
   ...ruAi,
   ...ruMemory,
   ...ruGame,
+  ...ruSocial,
   /* account */
   "account.changePwd": "Сменить пароль",
   "account.idle": "Выход после {n} мин бездействия",

@@ -375,8 +375,9 @@ export class ApiClient {
 
 /** 503 codes that mean «BFF is reachable, one domain is down» — no connectivity banner. SPEECH_UNAVAILABLE — the
  *  server speech is down, the player falls back to the device voice (tts.ts). GAME_UNAVAILABLE (sprint 6) — the game
- *  block is hidden, learning goes on. */
-const REACHABLE_503: ReadonlySet<string> = new Set(["UPSTREAM_UNAVAILABLE", "RATE_LIMIT_UNAVAILABLE", "CATALOG_UNAVAILABLE", "SPEECH_UNAVAILABLE", "GAME_UNAVAILABLE"]);
+ *  block is hidden, learning goes on. DUEL_SET_UNAVAILABLE (sprint 7) — lessons could not give the tasks of a duel: the duel
+ *  stays challenged, «Принять» can be repeated. */
+const REACHABLE_503: ReadonlySet<string> = new Set(["UPSTREAM_UNAVAILABLE", "RATE_LIMIT_UNAVAILABLE", "CATALOG_UNAVAILABLE", "SPEECH_UNAVAILABLE", "GAME_UNAVAILABLE", "DUEL_SET_UNAVAILABLE"]);
 
 /** Idempotency-Key for creating commands (one per draft, reused on retries). */
 export function newIdempotencyKey(): string {

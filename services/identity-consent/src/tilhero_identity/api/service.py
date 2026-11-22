@@ -1,15 +1,24 @@
 """Служебный API: адресация доставки (только notifications), публичный профиль (social, notifications; спринт 5 —
-memory: согласие на запись голоса) и статус бота (только telegram-bot-gateway)."""
+memory: согласие на запись голоса), статус бота (только telegram-bot-gateway) и выгрузка профилей для начальной
+загрузки проекции (спринт 7, только gamification)."""
 
 from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Path, Response
+from fastapi import APIRouter, Depends, Path, Query, Response
 
+from tilhero_common.app import Runtime, get_runtime
 from tilhero_common.internal_auth import Principal
-from tilhero_identity.api.deps import bot_gateway_only, get_service, notifications_only, public_profile_callers
-from tilhero_identity.schemas import BotStatusRequest, DeliveryInfo, PublicProfile
+from tilhero_identity.api.deps import (
+    bot_gateway_only,
+    gamification_service_call,
+    get_service,
+    notifications_only,
+    public_profile_callers,
+)
+from tilhero_identity.export import EXPORT_DEFAULT_LIMIT, EXPORT_MAX_LIMIT, ProfileExport
+from tilhero_identity.schemas import BotStatusRequest, DeliveryInfo, ProfileExportPage, PublicProfile
 from tilhero_identity.service import IdentityService
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"])
@@ -43,3 +52,15 @@ async def bot_status(
 ) -> Response:
     await svc.set_bot_status(telegram_user_id, body.blocked)
     return Response(status_code=204)
+
+
+@router.get("/export/profiles", response_model=ProfileExportPage)
+async def export_profiles(
+    _: Principal = Depends(gamification_service_call),
+    rt: Runtime = Depends(get_runtime),
+    cursor: str | None = Query(default=None, max_length=128),
+    limit: int = Query(default=EXPORT_DEFAULT_LIMIT, ge=1, le=EXPORT_MAX_LIMIT),
+) -> ProfileExportPage:
+    """Профили неудалённых учеников для начальной загрузки проекции (export.py): user_id, kind, age_band,
+    guardian_consent, updated_at; курсор — по user_id, битый — 400 INVALID_CURSOR."""
+    return await ProfileExport(rt).page(cursor=cursor, limit=limit)

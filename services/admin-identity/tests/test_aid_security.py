@@ -118,7 +118,7 @@ async def test_no_secrets_in_logs_or_audit(env: Env, caplog: pytest.LogCaptureFi
 
 async def test_audit_events_conform_to_contract(env: Env, root: Person, root2: Person) -> None:
     await env.login(root.email, "Wrong-passw0rd-zz")
-    t = await env.onboard(root.actor, new_email("c"), "support")
+    t = await env.onboard(root.actor, new_email("c"), "analyst")
     r = await env.patch(root.actor, t.staff_id, {"role": "communications", "reason": "Контракт"})
     await env.approve(root2.actor, r.json()["approval"]["approval_id"])
     await env.post("/auth/logout", {"staff_id": root.staff_id, "session_id": "abc"})

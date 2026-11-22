@@ -21,7 +21,8 @@ from tilhero_identity.domain.purposes import consent_accepted, delivery_categori
 from tilhero_identity.models import Consent, GuardianConsentRequest
 
 GRANTS = "/internal/v1/me/guardian-consents"
-ALL_CATEGORIES = {"reminders": True, "missed": True, "social": True, "support": True, "product": True}
+ALL_CATEGORIES = {"reminders": True, "missed": True, "social": True, "support": True, "product": True,
+                  "game": True}
 
 
 async def _consents(env, uid: str) -> list[Consent]:
@@ -147,18 +148,19 @@ async def test_delivery_categories_follow_consent_purposes(env) -> None:
     # настройки хранятся как выбрал пользователь, в доставке social/product — только при целях
     me = (await env.call("GET", "/internal/v1/me", uid)).json()
     assert me["settings"]["categories"] == ALL_CATEGORIES
-    assert (await env.delivery(uid)).json()["categories"] == ["reminders", "missed", "support"]
+    assert (await env.delivery(uid)).json()["categories"] == ["reminders", "missed", "support", "game"]
 
     # повторный POST /me/consent с добавленной целью — новая запись согласия, consent.accepted.v1 и сброс кэша
     # адресации (user.notification_settings.changed.v1 с категориями доставки)
     added = await env.consent(uid, [*REQUIRED, "social"])
     assert added.status_code == 200 and added.json()["purposes"] == [*REQUIRED, "social"]
-    assert (await env.delivery(uid)).json()["categories"] == ["reminders", "missed", "social", "support"]
+    assert (await env.delivery(uid)).json()["categories"] == ["reminders", "missed", "social", "support", "game"]
     await env.consent(uid, [*REQUIRED, "social", "product_news"])
-    assert (await env.delivery(uid)).json()["categories"] == ["reminders", "missed", "social", "support", "product"]
+    assert (await env.delivery(uid)).json()["categories"] == [
+        "reminders", "missed", "social", "support", "product", "game"]
     removed = await env.consent(uid, [*REQUIRED, "product_news"])  # сняли social
     assert removed.json()["purposes"] == [*REQUIRED, "product_news"]
-    assert (await env.delivery(uid)).json()["categories"] == ["reminders", "missed", "support", "product"]
+    assert (await env.delivery(uid)).json()["categories"] == ["reminders", "missed", "support", "product", "game"]
     await env.consent(uid, [*REQUIRED, "product_news"])  # тот же набор — без новой записи и событий
     await env.consent(uid, [*REQUIRED, "product_news", "voice_recording"])  # цель без категории доставки
 
@@ -173,11 +175,11 @@ async def test_delivery_categories_follow_consent_purposes(env) -> None:
     assert all("granted_by_user_id" not in e.payload for e in accepted)
     notify = [e.payload["categories"] for e in await env.events("user.notification_settings.changed.v1", uid)]
     assert notify == [
-        ["support"],  # первое согласие
-        ["reminders", "missed", "support"],  # включил все категории: social/product без целей не доставляются
-        ["reminders", "missed", "social", "support"],
-        ["reminders", "missed", "social", "support", "product"],
-        ["reminders", "missed", "support", "product"],
+        ["support", "game"],  # первое согласие
+        ["reminders", "missed", "support", "game"],  # включил все категории: social/product без целей не доставляются
+        ["reminders", "missed", "social", "support", "game"],
+        ["reminders", "missed", "social", "support", "product", "game"],
+        ["reminders", "missed", "support", "product", "game"],
     ]  # voice_recording на доставку не влияет — события нет
 
 
@@ -186,9 +188,9 @@ async def test_teen_social_category_without_guardian_consent_is_not_delivered(en
     teen = await env.teen()
     await env.consent(teen)
     await _set_categories(env, teen, social=True, product=True, reminders=True)
-    assert (await env.delivery(teen)).json()["categories"] == ["reminders", "support"]
+    assert (await env.delivery(teen)).json()["categories"] == ["reminders", "support", "game"]
     [*_, last] = await env.events("user.notification_settings.changed.v1", teen)
-    assert last.payload["categories"] == ["reminders", "support"]
+    assert last.payload["categories"] == ["reminders", "support", "game"]
 
 
 async def test_child_delivery_has_no_social_or_product(env) -> None:
@@ -197,7 +199,7 @@ async def test_child_delivery_has_no_social_or_product(env) -> None:
     r = await env.call("PATCH", f"/internal/v1/me/learners/{child['learner_id']}", guardian,
                        {"settings": {"categories": ALL_CATEGORIES}})
     assert r.status_code == 200 and r.json()["settings"]["categories"] == ALL_CATEGORIES
-    assert (await env.delivery(child["learner_id"])).json()["categories"] == ["reminders", "missed", "support"]
+    assert (await env.delivery(child["learner_id"])).json()["categories"] == ["reminders", "missed", "support", "game"]
 
 
 # ---------------------------------------------------------------- решение родителя по ссылке (P-4)
@@ -368,7 +370,7 @@ async def test_revoke_guardian_consent(env) -> None:
     granted_own = await env.consent(teen, ALL_PURPOSES)  # подросток включил необязательные цели
     assert granted_own.status_code == 200
     await _set_categories(env, teen, social=True, product=True, reminders=True)
-    assert (await env.delivery(teen)).json()["categories"] == ["reminders", "social", "support", "product"]
+    assert (await env.delivery(teen)).json()["categories"] == ["reminders", "social", "support", "product", "game"]
     own_before = await _active(env, teen, "self")
     grant = await _active(env, teen, "guardian")
     assert own_before is not None and grant is not None
@@ -402,7 +404,7 @@ async def test_revoke_guardian_consent(env) -> None:
     public = (await env.public(teen)).json()
     assert (public["guardian_consent"], public["consent_accepted"], public["purposes"]) == (
         "declined", True, REQUIRED)
-    assert (await env.delivery(teen)).json()["categories"] == ["reminders", "support"]
+    assert (await env.delivery(teen)).json()["categories"] == ["reminders", "support", "game"]
     # необязательные цели снова только после нового согласия родителя
     r = await env.consent(teen, [*REQUIRED, "social"])
     assert r.status_code == 403 and r.json()["code"] == "GUARDIAN_CONSENT_REQUIRED"
@@ -421,7 +423,7 @@ async def test_revoke_guardian_consent(env) -> None:
     assert (updated.payload["changed_fields"], updated.payload["guardian_consent"]) == (
         ["guardian_consent"], "declined")
     [*_, notify] = await env.events("user.notification_settings.changed.v1", teen)
-    assert notify.payload == {"user_id": teen, "enabled": True, "categories": ["reminders", "support"]}
+    assert notify.payload == {"user_id": teen, "enabled": True, "categories": ["reminders", "support", "game"]}
     assert "Подросток" not in await env.outbox_dump()
 
     # список родителя: отказ со временем отзыва; повтор отзыва — 200, без изменений и событий

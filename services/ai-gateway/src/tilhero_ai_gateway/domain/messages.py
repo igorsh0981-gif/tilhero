@@ -55,6 +55,11 @@ def sanitize_context(agent_id: str, context: dict[str, Any]) -> dict[str, Any]:
         for turn in ctx.get("turns", []):
             if turn.get("speaker") == "learner":
                 turn["text"] = clean_text(str(turn.get("text", "")), LEARNER_TURN_MAX)
+    elif agent_id == "cooperative_lesson_coach":
+        # реплики участников A/B (спринт 7) — тексты учеников: данные, не длиннее 500 символов
+        for turn in ctx.get("turns", []):
+            if turn.get("speaker") in ("A", "B"):
+                turn["text"] = clean_text(str(turn.get("text", "")), LEARNER_TURN_MAX)
     return ctx
 
 

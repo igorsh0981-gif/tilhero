@@ -29,17 +29,19 @@ export const ALL_PERMS: Permission[] = [...PERMISSIONS];
 export const MATRIX: Record<RoleCode, Permission[]> = {
   super_admin: [...ALL_PERMS],
   // sprint 5: + memory.read, memory.manage (step-up); sprint 6: + game.read, game.manage, game.publish, wallet.adjust
-  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read", "memory.manage", "game.read", "game.manage", "game.publish", "wallet.adjust"],
+  // sprint 7 (PLAN «Права»): operations — every right of «Сообщество»
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read", "memory.manage", "game.read", "game.manage", "game.publish", "wallet.adjust", "social.read", "moderation.manage", "referral.read", "referral.manage", "league.read", "league.manage", "room.read", "room.manage"],
   communications: ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"],
   // sprint 6: + game.read (the wallet of a learner from a ticket)
-  support: ["dashboard.read", "users.read", "support.read", "support.reply", "game.read"],
+  // sprint 7: + social.read, moderation.manage, referral.read, room.read
+  support: ["dashboard.read", "users.read", "support.read", "support.reply", "game.read", "social.read", "moderation.manage", "referral.read", "room.read"],
   // sprint 3 (PLAN «Права и роли»)
   // sprint 4: + agents, dialogue QA, costs; sprint 5: + memory.read, glossary.manage
   methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish", "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "memory.read", "glossary.manage", "game.read"],
-  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage", "game.read", "game.manage"],
+  content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage", "game.read", "game.manage", "league.read"],
   qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts", "memory.read"],
-  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
-  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
+  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", "social.read", "referral.read", "league.read", "room.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", "social.read", "referral.read", "league.read", "room.read"],
   read_only: ["dashboard.read"],
 };
 
@@ -208,7 +210,7 @@ export function card(rows: AdminLearnerRow[], id: string, tickets: AdminLearnerC
       basis: child || r.age_band === "14-17" ? "guardian" : "self",
     },
     security: { pin_enabled: r.user_id === LEARNER.botir, pin_reset_pending: false },
-    notifications: { enabled: r.reminders_enabled, categories: { reminders: r.reminders_enabled, missed: true, social: !child, support: true, product: r.user_id === LEARNER.madina } },
+    notifications: { enabled: r.reminders_enabled, categories: { reminders: r.reminders_enabled, missed: true, social: !child, game: true, support: true, product: r.user_id === LEARNER.madina } },
     plan: r.onboarding_completed
       ? {
           goal: r.goal,

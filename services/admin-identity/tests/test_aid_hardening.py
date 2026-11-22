@@ -36,7 +36,7 @@ async def test_staff_manage_cannot_escalate(env: Env, root: Person) -> None:
     r = await env.patch(a, ops.staff_id, {"display_name": "X", "reason": "Попытка"})
     assert _err(r) == (403, "PERMISSION_DENIED")
     # создать/назначить непривилегированную роль шире своей — 403; ⊆ своей — можно
-    r = await env.create_staff(a, new_email("sup"), "support")
+    r = await env.create_staff(a, new_email("sup"), "analyst")
     assert _err(r) == (403, "PERMISSION_DENIED") and r.json()["details"]["permission"] == "users.read"
     ro = await env.create_staff(a, new_email("ro"), "read_only")
     assert ro.status_code == 201
@@ -224,8 +224,8 @@ async def test_bootstrap_reminds_to_remove_variables(env_factory, capsys: pytest
 
 async def test_idempotency_key_is_scoped_to_actor(env: Env, root: Person, root2: Person) -> None:
     key = uuid.uuid4().hex
-    a = await env.create_staff(root.actor, new_email("k1"), "support", **{"Idempotency-Key": key})
-    b = await env.create_staff(root2.actor, new_email("k2"), "support", **{"Idempotency-Key": key})
+    a = await env.create_staff(root.actor, new_email("k1"), "analyst", **{"Idempotency-Key": key})
+    b = await env.create_staff(root2.actor, new_email("k2"), "analyst", **{"Idempotency-Key": key})
     assert a.status_code == b.status_code == 201
     assert a.json()["staff"]["staff_id"] != b.json()["staff"]["staff_id"]
     assert a.json()["temporary_password"] and b.json()["temporary_password"]

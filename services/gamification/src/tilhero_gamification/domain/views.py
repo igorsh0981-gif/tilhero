@@ -18,7 +18,8 @@ from tilhero_gamification.models import Ledger, Quest, SessionReward
 def settings_view(turn: Turn) -> dict[str, Any]:
     lr = turn.learner
     return {"auto_freeze": bool(lr.auto_freeze), "quests_hidden": bool(lr.quests_hidden),
-            "celebrations": lr.celebrations, "game_notifications": bool(lr.game_notifications)}
+            "celebrations": lr.celebrations, "game_notifications": bool(lr.game_notifications),
+            "league_opt_in": bool(lr.league_opt_in) and turn.audience != "kids"}
 
 
 async def summary(session: AsyncSession, turn: Turn) -> dict[str, Any]:

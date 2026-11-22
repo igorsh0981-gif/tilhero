@@ -1,0 +1,84 @@
+/* ==========================================================================
+   Sprint 7 screens in the notebook language: friends (my nickname and code, the search, requests), leagues of the week,
+   duels, the pair lesson (the room, the turns, the voice), referrals, sanctions. Tokens only, no colour literals; a state
+   is never shown by colour alone (my row — the word «вы» and a frame; places — numbers; a done step — a check and a
+   word; whose turn — words). Same layer as content.css / lessons.css / game.css (request to move into ui-tokens — README).
+   ========================================================================== */
+@layer layout {
+  /* ---------- common ---------- */
+  .soc-av {
+    width: 40px; height: 40px; flex-shrink: 0; border-radius: 20px; background: var(--pen-soft); color: var(--pen);
+    display: grid; place-items: center; overflow: hidden; border: 1.5px solid transparent;
+  }
+  .soc-av.me { border-color: var(--pen); }
+  .soc-av .hero { height: 38px; width: auto; max-width: 38px; object-fit: contain; }
+  .btn2.soc-small, .btn.soc-small { min-height: var(--tap); width: auto; padding: 0 14px; font-size: 14px; }
+  .lnk.soc-inline { min-height: 32px; padding: 0; font-size: 13px; justify-content: flex-start; }
+  .soc-actions { display: flex; flex-direction: column; gap: 8px; }
+  .soc-code { border-top: 1px dashed var(--line); padding-top: 12px; }
+  .soc-code-v { font: 700 22px var(--font-display); letter-spacing: .06em; color: var(--ink); overflow-wrap: anywhere; }
+  .soc-search { display: flex; gap: 8px; align-items: stretch; }
+  .soc-search .inp { flex: 1; min-width: 0; }
+  .soc-search .btn { width: auto; padding: 0 16px; flex-shrink: 0; }
+  .soc-row-acts { display: flex; gap: 6px; flex-shrink: 0; }
+  .soc-card .soc-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  /* ---------- leagues ---------- */
+  .lg-total { display: flex; gap: 6px; align-items: center; }
+  .lg-total svg { color: var(--warn); flex-shrink: 0; }
+  .lg-row { gap: 10px; }
+  .lg-row.me { background: var(--pen-soft); box-shadow: inset 3px 0 0 var(--pen); }
+  .lg-row.gap { border-top: 2px dashed var(--line); }
+  .lg-place {
+    width: 30px; flex-shrink: 0; text-align: center; font: 700 16px var(--font-display); color: var(--ink2);
+  }
+  .lg-place.top { color: var(--warn); }
+  .lg-me-mark { font-weight: 700; color: var(--pen); }
+  .lg-badges { display: inline-flex !important; gap: 2px; color: var(--warn); margin-top: 2px; }
+  .lg-xp { flex-shrink: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .lg-facts { display: flex; flex-direction: column; gap: 6px; padding: 0; margin: 0; list-style: none; font-size: var(--fs-md); }
+  .lg-facts li { display: flex; gap: 8px; align-items: flex-start; }
+  .lg-facts svg { flex-shrink: 0; margin-top: 2px; color: var(--pen); }
+
+  /* ---------- duels ---------- */
+  .duel-res h2 { display: flex; gap: 8px; align-items: center; margin: 0; }
+  .duel-res.win h2 svg { color: var(--warn); }
+  .duel-res.draw h2 svg, .duel-res.loss h2 svg { color: var(--pen); }
+  .duel-scores { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0; }
+  .duel-scores div { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 10px 12px; }
+  .duel-scores dt { font-size: var(--fs-sm); color: var(--ink2); overflow-wrap: anywhere; }
+  .duel-scores dd { margin: 2px 0 0; font: 700 18px var(--font-display); }
+  .duel-items { list-style: none; padding: 0; margin: 0; }
+  .duel-items .cap { display: inline-flex; gap: 4px; align-items: center; }
+
+  /* ---------- the pair room ---------- */
+  .room-feed { list-style: none; padding: 0; margin: 0; }
+  .chat .bub.coach { border-color: var(--pen); }
+  .chat .bub.coach .who { color: var(--pen); }
+  .chat .bub.me .who { color: var(--pen-ink); opacity: .85; font-size: 11.5px; font-weight: 700; }
+  .chat .bub.me { display: flex; flex-direction: column; gap: 2px; }
+  .room-end { height: 1px; }
+  .lnk.room-leave { flex-shrink: 0; width: auto; min-height: var(--tap); padding: 0 4px; }
+  .room-foot { gap: 8px; max-height: 58%; overflow-y: auto; }
+  .room-turn { display: flex; gap: 6px; align-items: center; margin: 0; font-weight: 600; color: var(--ink2); }
+  .room-turn.mine { color: var(--pen); }
+  .room-prompt .sub { margin: 0; }
+  .opt.room-opt { min-height: var(--tap); text-align: left; }
+  .room-voice .rec-state { margin: 0; }
+
+  /* ---------- referrals ---------- */
+  .ref-url { font-size: 14px; color: var(--ink); overflow-wrap: anywhere; margin: 0; }
+  .ref-terms { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-md); list-style: disc; }
+  .ref-steps { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .ref-step {
+    display: inline-flex; gap: 4px; align-items: center; min-height: 28px; padding: 2px 10px; border-radius: var(--r-pill);
+    border: 1.5px dashed var(--line); font-size: 13px; color: var(--ink2);
+  }
+  .ref-step.done { border-style: solid; border-color: var(--ok); color: var(--ok); background: var(--ok-soft); }
+
+  /* ---------- the report of a pair lesson ---------- */
+  .prep-stats { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-md); list-style: disc; }
+
+  /* children: bigger targets in their screens */
+  .app[data-learner="child"] .room-opt { min-height: 56px; font-size: 16px; }
+}

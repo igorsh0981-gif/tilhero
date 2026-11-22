@@ -362,7 +362,7 @@ async def test_admin_journal_card_and_stats(env: Env, user: uuid.UUID) -> None:
                            headers=env.staff("qa.transcripts"))).json()
     assert [a["item_id"] for a in tr["answers"]] == ["rq-coffee-1", "rq-coffee-2", "rq-coffee-3"]
     stats = (await env.c.get("/admin/v1/lesson-sessions/stats", headers=env.staff("dashboard.read"))).json()
-    assert stats["by_kind"] == {"lesson": 0, "scenario": 0, "media": 0, "review": 0, "reading": 1}
+    assert stats["by_kind"] == {"lesson": 0, "scenario": 0, "media": 0, "review": 0, "reading": 1, "duel": 0}
     assert stats["ai_degraded_pct"] == 0.0
 
 

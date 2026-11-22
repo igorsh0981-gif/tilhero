@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "social.friendship.changed.v1.schema.json",
+  "title": "social.friendship.changed.v1",
+  "type": "object",
+  "required": [
+    "user_a",
+    "user_b",
+    "status",
+    "source",
+    "at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "user_a": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "user_b": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "added",
+        "removed"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "request",
+        "invite",
+        "removed",
+        "block",
+        "deletion"
+      ]
+    },
+    "requester_user_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "accepter_nickname": {
+      "anyOf": [
+        {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 3,
+          "maxLength": 20
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

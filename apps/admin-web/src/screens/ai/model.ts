@@ -19,7 +19,8 @@ export const IMPLEMENTATIONS: readonly AgentImplementation[] = ["llm", "rules", 
 export const VERSION_STATUSES: readonly AgentVersion["status"][] = ["draft", "published", "archived"];
 export const RUN_STATUSES = ["running", "finished", "failed"] as const;
 export const CHECK_KINDS: readonly GoldenCheck["kind"][] = ["schema_valid", "field_equals", "field_in", "field_absent", "text_not_contains", "max_length"];
-export const SESSION_KINDS: readonly SessionKind[] = ["lesson", "scenario", "media", "review", "reading"];
+/** sprint 7: + duel (a duel session of lessons — no AI, closed tasks only; listed for completeness of the journal) */
+export const SESSION_KINDS: readonly SessionKind[] = ["lesson", "scenario", "media", "review", "reading", "duel"];
 export const SESSION_STATUSES: readonly SessionRow["status"][] = ["ready", "in_progress", "paused", "completed", "failed", "cancelled"];
 export const OUTCOMES: readonly NonNullable<SessionRow["outcome"]>[] = ["success", "alt_success", "fail"];
 export const SESSION_FLAGS: readonly SessionFlag[] = ["ai_used", "ai_unavailable", "hints", "human_review", "appealed", "flagged", "failed"];
@@ -466,7 +467,7 @@ export function budgetLevel(pct: number, alertPercent: number): "ok" | "warn" | 
   return "ok";
 }
 
-export type BudgetForm = Record<"monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "speech_monthly_cap_usd" | "alert_percent", string>;
+export type BudgetForm = Record<"monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "speech_monthly_cap_usd" | "room_cap_usd" | "alert_percent", string>;
 export interface BudgetIssue {
   field: keyof BudgetForm;
   code: "range" | "range0" | "gt_daily" | "gt_monthly";
@@ -476,8 +477,12 @@ export const budgetForm = (b: Pick<AiBudget, keyof BudgetForm>): BudgetForm => (
   learner_daily_cap_usd: String(b.learner_daily_cap_usd),
   lesson_cap_usd: String(b.lesson_cap_usd),
   speech_monthly_cap_usd: String(b.speech_monthly_cap_usd),
+  // sprint 7: an ai-gateway before the room cap answers without it — the default of the contract (0.10)
+  room_cap_usd: String(b.room_cap_usd ?? ROOM_CAP_DEFAULT),
   alert_percent: String(b.alert_percent),
 });
+/** AiBudget.room_cap_usd by default (INTERNAL_API sprint 7 §4) */
+export const ROOM_CAP_DEFAULT = 0.1;
 
 /**
  * 409 BUDGET_CONFLICT (review R2-07): someone saved the limits after they were read. The fields this user edited keep
@@ -491,7 +496,8 @@ export function mergeBudgetForm(read: BudgetForm, entered: BudgetForm, now: Budg
 
 /**
  * Caps are positive, a lesson ≤ a learner's day ≤ the month; the sub-cap of pronunciation (sprint 5, owner's decision:
- * $5 a month) is 0…the month (0 — the feature is off); the alert threshold is 1…100 %.
+ * $5 a month) is 0…the month (0 — the feature is off); the coach of one pair room (sprint 7, $0.10 by default) is
+ * 0…the month (0 — rooms go by the scenario with choices); the alert threshold is 1…100 %.
  */
 export function checkBudget(f: BudgetForm): { issues: BudgetIssue[]; value: Pick<AiBudget, keyof BudgetForm> | null } {
   const issues: BudgetIssue[] = [];
@@ -499,6 +505,7 @@ export function checkBudget(f: BudgetForm): { issues: BudgetIssue[]; value: Pick
   const d = num(f.learner_daily_cap_usd);
   const l = num(f.lesson_cap_usd);
   const sp = num(f.speech_monthly_cap_usd);
+  const rc = num(f.room_cap_usd);
   const a = num(f.alert_percent);
   if (m == null || m <= 0 || m > 100_000) issues.push({ field: "monthly_cap_usd", code: "range" });
   if (d == null || d <= 0) issues.push({ field: "learner_daily_cap_usd", code: "range" });
@@ -507,8 +514,10 @@ export function checkBudget(f: BudgetForm): { issues: BudgetIssue[]; value: Pick
   else if (d != null && d > 0 && l > d) issues.push({ field: "lesson_cap_usd", code: "gt_daily" });
   if (sp == null || sp < 0) issues.push({ field: "speech_monthly_cap_usd", code: "range0" });
   else if (m != null && m > 0 && sp > m) issues.push({ field: "speech_monthly_cap_usd", code: "gt_monthly" });
+  if (rc == null || rc < 0) issues.push({ field: "room_cap_usd", code: "range0" });
+  else if (m != null && m > 0 && rc > m) issues.push({ field: "room_cap_usd", code: "gt_monthly" });
   if (a == null || !Number.isInteger(a) || a < 1 || a > 100) issues.push({ field: "alert_percent", code: "range" });
-  return { issues, value: issues.length ? null : { monthly_cap_usd: m!, learner_daily_cap_usd: d!, lesson_cap_usd: l!, speech_monthly_cap_usd: sp!, alert_percent: a! } };
+  return { issues, value: issues.length ? null : { monthly_cap_usd: m!, learner_daily_cap_usd: d!, lesson_cap_usd: l!, speech_monthly_cap_usd: sp!, room_cap_usd: rc!, alert_percent: a! } };
 }
 
 /** sprint 5: a speech model (pronunciation) is priced per hour of audio, not per token. */

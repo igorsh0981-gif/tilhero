@@ -9,6 +9,7 @@ import type { AdminLearnerCard, AdminLearnerRow, AgeBand, LearnerKind, LearnerMe
 import { Learners, Memory, type LearnerFilters } from "../../api/endpoints";
 import { SummaryCard } from "../memory/Summary";
 import { LearnerGameTab } from "../game/LearnerGame";
+import { LearnerSocialTab } from "../social/LearnerSocial";
 import { ApiError } from "../../api/errors";
 import { useI18n, fmtCountdown } from "../../i18n";
 import { shortId } from "../../lib/ids";
@@ -349,7 +350,7 @@ function LearnerMemoryTab({ id }: { id: string }) {
 
 /* ---------------------------------------------------------------- card */
 
-type Tab = "account" | "consent" | "plan" | "notif" | "tickets" | "memory" | "game";
+type Tab = "account" | "consent" | "plan" | "notif" | "tickets" | "memory" | "game" | "social";
 
 export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () => void; onOpen: (id: string) => void }) {
   const i = useI18n();
@@ -405,6 +406,8 @@ export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () =
               ...(can("memory.read") ? [{ v: "memory" as const, label: t("lr.tab.memory"), testId: "lc-tab-memory" }] : []),
               // sprint 6: the learner's wallet of the game (game.read) — the summary here, the ledger in «Геймификация»
               ...(can("game.read") ? [{ v: "game" as const, label: t("lr.tab.game"), testId: "lc-tab-game" }] : []),
+              // sprint 7: the learner's community profile (social.read) — the summary here, the card in «Друзья и жалобы»
+              ...(can("social.read") ? [{ v: "social" as const, label: t("lr.tab.social"), testId: "lc-tab-social" }] : []),
             ]}
           />
         )
@@ -624,6 +627,7 @@ export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () =
             ))}
           {tab === "memory" && can("memory.read") && <LearnerMemoryTab id={card.user_id} />}
           {tab === "game" && can("game.read") && <LearnerGameTab id={card.user_id} />}
+          {tab === "social" && can("social.read") && <LearnerSocialTab id={card.user_id} />}
           <p className="xs muted mt-16 row">
             <Icon name="shield" /> {t("lr.piiNote")}
           </p>

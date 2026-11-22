@@ -61,6 +61,8 @@ ROUTES = (
     "home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support", "news",
     "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
     "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
+    # спринт 7: социальное (release-notes.json routes)
+    "friends", "leagues", "duels", "referrals",
 )
 UI_LANGS = ("ru", "uz")
 AGES = ("teens", "adults")

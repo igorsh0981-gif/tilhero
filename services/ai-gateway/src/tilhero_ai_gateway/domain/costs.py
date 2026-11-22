@@ -51,8 +51,8 @@ def model_view(m: ModelRow) -> dict[str, Any]:
 def budget_view(b: BudgetRow) -> dict[str, Any]:
     return {"ai_enabled": b.ai_enabled, "monthly_cap_usd": float(b.monthly_cap_usd),
             "learner_daily_cap_usd": float(b.learner_daily_cap_usd), "lesson_cap_usd": float(b.lesson_cap_usd),
-            "speech_monthly_cap_usd": float(b.speech_monthly_cap_usd), "alert_percent": b.alert_percent,
-            "updated_at": iso_z(b.updated_at)}
+            "speech_monthly_cap_usd": float(b.speech_monthly_cap_usd), "room_cap_usd": float(b.room_cap_usd),
+            "alert_percent": b.alert_percent, "updated_at": iso_z(b.updated_at)}
 
 
 async def list_models(session: AsyncSession) -> list[ModelRow]:
@@ -157,9 +157,11 @@ async def update_budget(session: AsyncSession, values: dict[str, Any], expected_
     for key, value in values.items():
         setattr(row, key, value)
     # подлимит речи — внутри потолка месяца (решение владельца 20.11.2026; в БД — CHECK ck_budget_speech)
-    if row.speech_monthly_cap_usd > row.monthly_cap_usd:
-        raise unprocessable("BUDGET_INVALID", "Подлимит оценки произношения больше потолка месяца",
-                            {"fields": ["speech_monthly_cap_usd"]})
+    # спринт 7: потолок парной комнаты — тоже внутри потолка месяца (CHECK ck_budget_room)
+    over = [name for name, value in (("speech_monthly_cap_usd", row.speech_monthly_cap_usd),
+                                     ("room_cap_usd", row.room_cap_usd)) if value > row.monthly_cap_usd]
+    if over:
+        raise unprocessable("BUDGET_INVALID", "Подлимит больше потолка месяца", {"fields": over})
     after = budget_view(row)
     if {k: v for k, v in after.items() if k != "updated_at"} == {k: v for k, v in before.items() if k != "updated_at"}:
         return row

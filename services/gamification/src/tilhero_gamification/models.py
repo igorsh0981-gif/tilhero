@@ -1,4 +1,4 @@
-"""Модели gamification — зеркало миграции 0001 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
+"""Модели gamification — зеркало миграций 0001–0002 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
 
 user_id везде — ученик (`lrn` внутреннего токена). PII сервис не хранит: только идентификаторы, счётчики и суммы.
 Реестр `ledger` — только добавление (триггер): UPDATE — лишь перевод `confirmed → reversed` с `reversed_by`,
@@ -35,21 +35,34 @@ TS = DateTime(timezone=True)
 CURRENCIES = ("xp", "til", "freeze")
 REASONS = ("lesson", "scenario", "media", "reading", "review", "skill_demonstrated", "skill_retained", "quest",
            "quest_bonus", "registration_bonus", "referral_bonus", "streak_freeze", "shop", "manual", "reversal",
-           "purchase")
+           "purchase",
+           # спринт 7: XP за дуэль и парный урок, приз общей лиги (тилы), награда приглашённому по кампании
+           "duel", "pair_lesson", "league_prize", "referral_welcome")
 AUDIENCES = ("kids", "teens", "adults")
 AGE_BANDS = ("6-9", "10-13", "14-17", "18+")
 SKILL_STATES = ("not_started", "learning", "demonstrated", "retained")
 QUEST_KINDS = ("lesson_complete", "review_cards", "reading_complete", "scenario_complete", "media_complete",
                "xp_earned", "skill_confirmed")
 QUEST_STATUSES = ("active", "completed", "expired")
-REFERRAL_STATUSES = ("pending", "rewarded", "capped", "void")
+REFERRAL_STATUSES = ("pending", "rewarded", "capped", "void", "expired")
 RULES_STATUSES = ("draft", "active", "archived")
 HERO_LINES = ("robot", "pet", "human")
 ASSET_PURPOSES = ("hero_stage", "shop_item", "badge")
 SHOP_KINDS = ("background", "hero_frame", "streak_freeze")
 SHOP_STATUSES = ("draft", "published", "retired")
 EVENT_STATUSES = ("draft", "published", "cancelled", "finished")
-BADGE_METRICS = ("lessons", "streak", "skills", "skill_retained", "reviews_cards", "readings", "freeze")
+BADGE_METRICS = ("lessons", "streak", "skills", "skill_retained", "reviews_cards", "readings", "freeze", "together")
+# спринт 7
+LEVEL_BANDS = ("A0-A1", "A2", "B1+")
+LEAGUE_WEEK_STATUSES = ("open", "closing", "closed")
+LEAGUE_GROUP_STATUSES = ("open", "closed", "held")
+DUEL_STATUSES = ("challenged", "declined", "expired", "accepted", "finished", "cancelled")
+DUEL_RESULTS = ("challenger", "opponent", "draw", "none")
+SANCTION_KINDS = ("warning", "social_ban", "nickname_reset")
+FAMILY_ROLES = ("owner", "adult", "teen", "child")
+GUARDIAN_CONSENTS = ("not_required", "pending", "granted", "declined")
+REFERRAL_OUTCOMES = ("rewarded", "inviter_capped", "legacy")
+PROJECTIONS = ("families", "friendships", "levels", "profiles")
 
 
 def _in(values: tuple[str, ...]) -> str:
@@ -81,6 +94,7 @@ class Ledger(Base):
               postgresql_where=sql_text("source_session_id IS NOT NULL")),
         Index("uq_ledger_reversal_of", "reversal_of", unique=True,
               postgresql_where=sql_text("reversal_of IS NOT NULL")),
+        Index("ix_ledger_league_week", "league_week", "user_id", postgresql_where=sql_text("league_week IS NOT NULL")),
     )
 
     op_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
@@ -102,6 +116,8 @@ class Ledger(Base):
     comment: Mapped[str | None] = mapped_column(String(300))
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    # спринт 7: неделя лиг (понедельник) операции XP, идущей в «XP недели»; null — не идёт (ручные, призы, бонусы)
+    league_week: Mapped[date | None] = mapped_column(Date())
 
 
 class Wallet(Base):
@@ -137,7 +153,11 @@ class Learner(Base):
         CheckConstraint("confirmed_skills >= 0 AND lessons_completed >= 0 AND reviews_cards >= 0 "
                         "AND readings_completed >= 0 AND streak_best >= 0 AND freezes_used >= 0 "
                         "AND skills_retained >= 0", name="ck_learners_counters"),
+        CheckConstraint("together_count >= 0", name="ck_learners_together"),
+        CheckConstraint(f"guardian_consent IS NULL OR guardian_consent {_in(GUARDIAN_CONSENTS)}",
+                        name="ck_learners_guardian_consent"),
         Index("ix_learners_hero", "hero_code", postgresql_where=sql_text("hero_code IS NOT NULL")),
+        Index("ix_learners_league_opt_in", "user_id", postgresql_where=sql_text("league_opt_in")),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
@@ -169,6 +189,12 @@ class Learner(Base):
     last_session_at: Mapped[datetime | None] = mapped_column(TS)
     created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    # спринт 7: участие в общей лиге недели (14+, по желанию); парные уроки с целью и вкладом обоих (значок together)
+    league_opt_in: Mapped[bool] = mapped_column(Boolean(), nullable=False, server_default=sql_text("false"))
+    together_count: Mapped[int] = mapped_column(Integer(), nullable=False, server_default=sql_text("0"))
+    # проекция user.profile.updated.v1 (identity-consent): согласие родителя на социальное (14–17); время события
+    guardian_consent: Mapped[str | None] = mapped_column(String(16))
+    profile_updated_at: Mapped[datetime | None] = mapped_column(TS)
 
 
 class SkillState(Base):
@@ -190,7 +216,9 @@ class SkillState(Base):
 
 
 class Referral(Base):
-    """Привлечение по реферальной ссылке: один приглашённый награждает одного пригласившего."""
+    """Спринт 6: привлечение по реферальной ссылке (награда после первого урока). Со спринта 7 новые строки не
+    создаются; pending «доживают» по правилу спринта 6 LEGACY_REFERRAL_DAYS с принятия (первый урок приглашённого →
+    награда пригласившему с месячным лимитом), затем — expired. Награды спринта 7 — referral_rewards."""
 
     __tablename__ = "referrals"
     __table_args__ = (
@@ -546,3 +574,304 @@ class TickState(Base):
 
     name: Mapped[str] = mapped_column(String(32), primary_key=True)
     last_run_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+# ===================================================================================================================
+# Спринт 7: проекции social и diagnostics (INTERNAL_API спринта 7 §2.1). Запоздавшее событие не откатывает более
+# новое (changed_at / updated_at / completed_at); события удалённых учеников не воскрешают данные.
+# ===================================================================================================================
+
+
+class SocialFriend(Base):
+    """Дружба из social.friendship.changed.v1: пара упорядочена (user_a < user_b по строке UUID), status — последний
+    известный (added | removed)."""
+
+    __tablename__ = "social_friends"
+    __table_args__ = (
+        CheckConstraint("status IN ('added','removed')", name="ck_social_friends_status"),
+        CheckConstraint("user_a <> user_b", name="ck_social_friends_pair"),
+        Index("ix_social_friends_b", "user_b", postgresql_where=sql_text("status = 'added'")),
+    )
+
+    user_a: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_b: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    status: Mapped[str] = mapped_column(String(8), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class SocialBlock(Base):
+    """Блокировка A→B (односторонняя) из social.block.changed.v1."""
+
+    __tablename__ = "social_blocks"
+    __table_args__ = (
+        CheckConstraint("status IN ('added','removed')", name="ck_social_blocks_status"),
+        Index("ix_social_blocks_blocked", "blocked_user_id", postgresql_where=sql_text("status = 'added'")),
+    )
+
+    blocker_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    blocked_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    status: Mapped[str] = mapped_column(String(8), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class Community(Base):
+    """Профиль сообщества из social.profile.updated.v1: member_id, ник, скрытие игрового профиля."""
+
+    __tablename__ = "community"
+    __table_args__ = (UniqueConstraint("member_id", name="uq_community_member"),)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    member_id: Mapped[str] = mapped_column(String(25), nullable=False)
+    nickname: Mapped[str | None] = mapped_column(String(20))
+    hidden: Mapped[bool] = mapped_column(Boolean(), nullable=False, server_default=sql_text("false"))
+    updated_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class FamilyMember(Base):
+    """Семья из social.family.member_added.v1 (участник и владелец семьи); ученик — не больше чем в одной семье."""
+
+    __tablename__ = "family_members"
+    __table_args__ = (
+        CheckConstraint(f"role {_in(FAMILY_ROLES)}", name="ck_family_members_role"),
+        Index("ix_family_members_family", "family_id"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    family_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    role: Mapped[str] = mapped_column(String(8), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class Sanction(Base):
+    """Санкция из social.sanction.changed.v1 (без основания). Действует social_ban: active и (until null или в
+    будущем)."""
+
+    __tablename__ = "sanctions"
+    __table_args__ = (
+        CheckConstraint(f"kind {_in(SANCTION_KINDS)}", name="ck_sanctions_kind"),
+        Index("ix_sanctions_user_active", "user_id", postgresql_where=sql_text("active AND kind = 'social_ban'")),
+    )
+
+    sanction_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    until: Mapped[datetime | None] = mapped_column(TS)
+    active: Mapped[bool] = mapped_column(Boolean(), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class LearnerLevel(Base):
+    """Полоса уровня для лиги и дуэли из diagnostics.completed.v1 (provisional_level: A0/A1 → A0-A1, A2, B1/B2 →
+    B1+). Активная пара ученика — пара последней диагностики."""
+
+    __tablename__ = "learner_levels"
+    __table_args__ = (CheckConstraint(f"level_band {_in(LEVEL_BANDS)}", name="ck_learner_levels_band"),)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    pair_id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    level_band: Mapped[str] = mapped_column(String(6), nullable=False)
+    result_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+# ===================================================================================================================
+# Спринт 7: лиги недели (§2.2), дуэли (§2.3), реферальные награды (§2.4)
+# ===================================================================================================================
+
+
+class LeagueWeek(Base):
+    """Неделя лиг (понедельник по LEAGUE_TIMEZONE): open → closing (с этого момента XP с временем этой недели идёт в
+    текущую; отметка ставится под исключительной advisory-блокировкой недели) → closed (все группы закрыты)."""
+
+    __tablename__ = "league_weeks"
+    __table_args__ = (CheckConstraint(f"status {_in(LEAGUE_WEEK_STATUSES)}", name="ck_league_weeks_status"),)
+
+    week: Mapped[date] = mapped_column(Date(), primary_key=True)
+    status: Mapped[str] = mapped_column(String(8), nullable=False)
+    formed_at: Mapped[datetime | None] = mapped_column(TS)
+    closing_at: Mapped[datetime | None] = mapped_column(TS)
+    closed_at: Mapped[datetime | None] = mapped_column(TS)
+    updated_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class LeagueGroup(Base):
+    """Группа общей лиги (неделя, пара, полоса, номер): open → closed | held (призы удержаны — аномалия)."""
+
+    __tablename__ = "league_groups"
+    __table_args__ = (
+        CheckConstraint(f"status {_in(LEAGUE_GROUP_STATUSES)}", name="ck_league_groups_status"),
+        CheckConstraint(f"level_band {_in(LEVEL_BANDS)}", name="ck_league_groups_band"),
+        CheckConstraint("group_no >= 1", name="ck_league_groups_no"),
+        UniqueConstraint("week", "pair_id", "level_band", "group_no", name="uq_league_groups_no"),
+        Index("ix_league_groups_week_status", "week", "status"),
+    )
+
+    group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    week: Mapped[date] = mapped_column(Date(), nullable=False)
+    pair_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    level_band: Mapped[str] = mapped_column(String(6), nullable=False)
+    group_no: Mapped[int] = mapped_column(SmallInteger(), nullable=False)
+    status: Mapped[str] = mapped_column(String(6), nullable=False)
+    version: Mapped[int | None] = mapped_column(Integer())
+    anomalies: Mapped[int] = mapped_column(SmallInteger(), nullable=False, server_default=sql_text("0"))
+    closed_at: Mapped[datetime | None] = mapped_column(TS)
+    created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class LeagueMember(Base):
+    """Участник группы недели: один на неделю. left_at — выключил участие (доигрывает без строки в рейтинге)."""
+
+    __tablename__ = "league_members"
+    __table_args__ = (Index("ix_league_members_group", "group_id"),)
+
+    week: Mapped[date] = mapped_column(Date(), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    joined_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    left_at: Mapped[datetime | None] = mapped_column(TS)
+
+
+class LeagueResult(Base):
+    """Итоги группы — неизменяемы (триггер): переоценка добавляет версию, прежняя хранится. standings:
+    [{user_id | null (обезличено сагой), place, xp, prize_til, anomaly}]; closed_by — system | staff:<id>."""
+
+    __tablename__ = "league_results"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_league_results_version"),
+        CheckConstraint("closed_by = 'system' OR closed_by LIKE 'staff:%'", name="ck_league_results_by"),
+        Index("ix_league_results_week", "week"),
+    )
+
+    group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer(), primary_key=True, autoincrement=False)
+    week: Mapped[date] = mapped_column(Date(), nullable=False)
+    standings: Mapped[list[dict[str, Any]]] = mapped_column(JSONB(), nullable=False)
+    prizes_held: Mapped[bool] = mapped_column(Boolean(), nullable=False)
+    excluded_user_ids: Mapped[list[str]] = mapped_column(JSONB(), nullable=False,
+                                                         server_default=sql_text("'[]'::jsonb"))
+    closed_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    closed_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    closed_by_name: Mapped[str | None] = mapped_column(String(120))
+    reason: Mapped[str | None] = mapped_column(String(500))
+
+
+class Duel(Base):
+    """Дуэль (§2.3): challenged → accepted → finished | cancelled; declined, expired. scores — по ролям
+    {challenger | opponent: {correct, total, session_id, finished_at}}; rewards — операции XP по версиям результата;
+    eligible — роль уложилась в дневной лимит наградных дуэлей при завершении. pair_key — упорядоченная пара учеников
+    (не больше одной активной дуэли на пару); challenger / opponent / pair_key → null — обезличено сагой удаления."""
+
+    __tablename__ = "duels"
+    __table_args__ = (
+        CheckConstraint(f"status {_in(DUEL_STATUSES)}", name="ck_duels_status"),
+        CheckConstraint(f"result IS NULL OR result {_in(DUEL_RESULTS)}", name="ck_duels_result"),
+        CheckConstraint(f"level_band {_in(LEVEL_BANDS)}", name="ck_duels_band"),
+        CheckConstraint("challenger IS NULL OR opponent IS NULL OR challenger <> opponent", name="ck_duels_self"),
+        CheckConstraint("result_version >= 0", name="ck_duels_version"),
+        UniqueConstraint("challenger", "idempotency_key", name="uq_duels_idempotency"),
+        Index("uq_duels_active_pair", "pair_key", unique=True,
+              postgresql_where=sql_text("status IN ('challenged','accepted')")),
+        Index("ix_duels_challenger", "challenger", "status"),
+        Index("ix_duels_opponent", "opponent", "status"),
+        Index("ix_duels_challenged", "accept_deadline", postgresql_where=sql_text("status = 'challenged'")),
+        Index("ix_duels_accepted", "play_deadline", postgresql_where=sql_text("status = 'accepted'")),
+        Index("ix_duels_created", "created_at", "duel_id"),
+        Index("ix_duels_finished", "finished_at", postgresql_where=sql_text("status = 'finished'")),
+    )
+
+    duel_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    challenger: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    opponent: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    pair_key: Mapped[str | None] = mapped_column(String(80))
+    pair_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    level_band: Mapped[str] = mapped_column(String(6), nullable=False)
+    status: Mapped[str] = mapped_column(String(10), nullable=False)
+    set_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    accept_deadline: Mapped[datetime] = mapped_column(TS, nullable=False)
+    play_deadline: Mapped[datetime | None] = mapped_column(TS)
+    scores: Mapped[dict[str, Any]] = mapped_column(JSONB(), nullable=False, server_default=sql_text("'{}'::jsonb"))
+    result: Mapped[str | None] = mapped_column(String(10))
+    technical: Mapped[bool] = mapped_column(Boolean(), nullable=False, server_default=sql_text("false"))
+    result_version: Mapped[int] = mapped_column(Integer(), nullable=False, server_default=sql_text("0"))
+    rewards: Mapped[list[dict[str, Any]]] = mapped_column(JSONB(), nullable=False,
+                                                          server_default=sql_text("'[]'::jsonb"))
+    eligible: Mapped[dict[str, bool]] = mapped_column(JSONB(), nullable=False, server_default=sql_text("'{}'::jsonb"))
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(TS)
+    finished_at: Mapped[datetime | None] = mapped_column(TS)
+    updated_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class DuelResultHistory(Base):
+    """Версии результата дуэли (неизменяемы, триггер): версия 1 — завершение, далее — переоценки сотрудником."""
+
+    __tablename__ = "duel_results_history"
+    __table_args__ = (CheckConstraint(f"result {_in(DUEL_RESULTS)}", name="ck_duel_results_history_result"),)
+
+    duel_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer(), primary_key=True, autoincrement=False)
+    result: Mapped[str] = mapped_column(String(10), nullable=False)
+    technical: Mapped[bool] = mapped_column(Boolean(), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(500))
+    decided_by: Mapped[str | None] = mapped_column(String(80))
+    decided_by_name: Mapped[str | None] = mapped_column(String(120))
+    at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class ReferralReward(Base):
+    """Награды по social.referral.qualified.v1 (§2.4): одна строка на реферал; операции — op_ids. Пригласивший или
+    приглашённый → null — обезличено сагой удаления."""
+
+    __tablename__ = "referral_rewards"
+    __table_args__ = (
+        CheckConstraint(f"outcome {_in(REFERRAL_OUTCOMES)}", name="ck_referral_rewards_outcome"),
+        Index("ix_referral_rewards_inviter", "inviter_user_id", "qualified_at"),
+        Index("ix_referral_rewards_invitee", "invitee_user_id"),
+    )
+
+    referral_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    inviter_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    invitee_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    campaign_version: Mapped[int] = mapped_column(Integer(), nullable=False)
+    # rewarded — награды выданы; inviter_capped — пригласившему нет (месячный лимит с наградами спринта 6);
+    # legacy — приглашённый уже награждён (или упёрся в лимит) по правилу спринта 6: награды пригласившему нет
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False, server_default=sql_text("'rewarded'"))
+    op_ids: Mapped[list[str]] = mapped_column(JSONB(), nullable=False, server_default=sql_text("'[]'::jsonb"))
+    rewarded_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    # qualified_at события — месяц лимита пригласившего (как в social)
+    qualified_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class PairAward(Base):
+    """Награды участника парного урока (одна строка на комнату и ученика — повтор события не учитывается дважды):
+    XP за вклад (0 — без вклада, комната не finished, меньше min_turns ходов или дневной лимит) и значок «Вместе»."""
+
+    __tablename__ = "pair_awards"
+    __table_args__ = (
+        CheckConstraint("xp >= 0", name="ck_pair_awards_xp"),
+        Index("ix_pair_awards_user_day", "user_id", "local_date"),
+    )
+
+    room_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    xp: Mapped[int] = mapped_column(Integer(), nullable=False)
+    together: Mapped[bool] = mapped_column(Boolean(), nullable=False)
+    local_date: Mapped[date] = mapped_column(Date(), nullable=False)
+    at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class ProjectionLoad(Base):
+    """Разовая загрузка проекции из выгрузки источника (social families / friendships, diagnostics levels): курсор
+    продолжения после сбоя, completed_at — загрузка завершена."""
+
+    __tablename__ = "projection_loads"
+    __table_args__ = (CheckConstraint(f"name {_in(PROJECTIONS)}", name="ck_projection_loads_name"),)
+
+    name: Mapped[str] = mapped_column(String(16), primary_key=True)
+    cursor: Mapped[str | None] = mapped_column(String(500))
+    items: Mapped[int] = mapped_column(Integer(), nullable=False, server_default=sql_text("0"))
+    attempted_at: Mapped[datetime | None] = mapped_column(TS)
+    completed_at: Mapped[datetime | None] = mapped_column(TS)
+    error: Mapped[str | None] = mapped_column(String(64))

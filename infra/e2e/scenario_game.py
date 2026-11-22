@@ -582,12 +582,14 @@ def s_learners(c: s2.Ctx) -> None:
         registration_ok(lc.users[role], role)
     s = summary(la)
     today = s1.loc(datetime.now(UTC), z).date().isoformat()
-    check(s["level"] == 1 and s["xp_total"] == 0 and s["til_balance"] == 0 and s["hero"] is None
-          and s["purchase_available"] is False and s["freeze_max"] == 5 and s["freeze_price_til"] == 40
-          and s["xp_level_start"] == 0 and s["xp_next_level"] == c.data["levels"][1]
-          and s["equipment"] == {"background": None, "frame": None}
-          and s["settings"] == {"auto_freeze": True, "quests_hidden": False, "celebrations": "full",
-                                "game_notifications": True}, f"сводка нового ученика: {json.dumps(s, ensure_ascii=False)[:600]}")
+    want = {"level": 1, "xp_total": 0, "til_balance": 0, "hero": None, "purchase_available": False, "freeze_max": 5,
+            "freeze_price_til": 40, "xp_level_start": 0, "xp_next_level": c.data["levels"][1],
+            "equipment": {"background": None, "frame": None},
+            # спринт 7 (bff.ts GameSettings): + league_opt_in — участие в общей лиге, по умолчанию false
+            "settings": {"auto_freeze": True, "quests_hidden": False, "celebrations": "full", "game_notifications": True,
+                         "league_opt_in": False}}
+    diff = {k: s.get(k) for k, v in want.items() if s.get(k) != v}
+    check(not diff, f"сводка нового ученика — отличия от ожидаемого: {json.dumps(diff, ensure_ascii=False)[:600]}")
     q = s["quests"]
     tpl = {t["code"]: t for t in c.data["rules0"]["payload"]["quests"]["templates"]}
     check(q["local_date"] == today and q["hidden"] is False and len(q["items"]) == 3
@@ -978,6 +980,11 @@ def s_freeze(c: s2.Ctx) -> None:
 
 
 def s_referral(c: s2.Ctx) -> None:
+    """Спринт 7 (INTERNAL_API спринта 7 §2.4, §11): правило спринта 6 «+2 заморозки после первого урока
+    приглашённого» отключено — новых pending в gamification нет; реферал ведёт social (диагностика, 3 урока в 2 дня,
+    антифрод), награду gamification начисляет по social.referral.qualified.v1 (полный путь — scenario_social.py S07).
+    Здесь: принятие → первый урок приглашённого → бонуса нет, у пригласившего реферал «в процессе»; повтор события —
+    без бонуса. Уведомления игры — своя категория game (по умолчанию включена): выключил — значок только в центре."""
     lr, lb = c.lc.users["LR"], c.lc.users["LB"]
     root = c.staff["root"]
     inv = lr.ok("POST", "/v1/invites", 201, json={"kind": "referral"}, idem=True)
@@ -987,36 +994,44 @@ def s_referral(c: s2.Ctx) -> None:
     pv = lb.ok("POST", "/v1/invites/open", json={"token": token})
     check(pv["can_accept"] is True and pv["kind"] == "referral", f"карточка реферала: {pv}")
     lb.ok("POST", f"/v1/invites/{inv['invite_id']}/accept")
-    w = wait_for(lambda: (x := admin_wallet(root, lr.learner_id))["referrals"]["pending"] == 1 and x, 30, interval=1.0,
-                 what="реферал pending у пригласившего (social.invite.accepted.v1 → gamification)")
-    check(w["freeze_stock"] == 2 and w["referrals"] == {"pending": 1, "rewarded": 0, "capped": 0},
-          f"до первого урока приглашённого: {w['freeze_stock']} {w['referrals']}")
+    ref = wait_for(lambda: next(iter(lr.ok("GET", "/v1/referrals")["items"]), None), 20, interval=1.0,
+                   what="реферал у пригласившего (social)")
+    check(ref["status"] in ("invited", "diagnostic_done") and ref["progress"]["lessons"] == 0 and ref["reward"] is None,
+          f"реферал после принятия: {ref}")
+    time.sleep(2.0)
+    w = admin_wallet(root, lr.learner_id)
+    check(w["freeze_stock"] == 2 and w["referrals"] == {"pending": 0, "rewarded": 0, "capped": 0},
+          f"спринт 7: новых pending в gamification нет — {w['freeze_stock']} {w['referrals']}")
+    # выключатель категории game: значок приглашённого — только в центре, без Telegram
+    st = lb.ok("PATCH", "/v1/profile/settings", json={"notifications": {"categories": {"game": False}}})
+    check((st.get("notifications") or {}).get("categories", {}).get("game") is False,
+          f"категория game не выключилась: {str(st.get('notifications'))[:300]}")
     seq = s1.tg_last_seq()
     les = s5.pass_lesson(c, lb, OPEN_OK)
-    s = wait_for(lambda: (x := summary(lr))["freeze_stock"] == 4 and x, 45, interval=1.5,
-                 what="+2 заморозки пригласившему после первого урока приглашённого")
-    ops = [x for x in history(lr) if x["reason"] == "referral_bonus"]
-    check(len(ops) == 1 and ops[0]["currency"] == "freeze" and ops[0]["amount"] == 2, f"бонус привлечения: {ops}")
-    led = [x for x in admin_ledger(root, lr.learner_id) if x["reason"] == "referral_bonus"]
-    check(led and led[0]["source"]["kind"] == "event" and led[0]["rules_version"] == c.data["rules0"]["version"]
-          and led[0]["actor"] == "system", f"бонус в реестре: {led}")
+    ref = wait_for(lambda: (x := lr.ok("GET", "/v1/referrals")["items"][0])["progress"]["lessons"] == 1 and x, 30,
+                   interval=1.0, what="зачётный урок приглашённого (lesson.session.completed.v1 → social)")
+    check(ref["status"] == "learning" and ref["reward"] is None, f"реферал после первого урока: {ref}")
+    time.sleep(3.0)
+    check(summary(lr)["freeze_stock"] == 2 and not [x for x in history(lr) if x["reason"] == "referral_bonus"],
+          "бонус пригласившему после первого урока (правило спринта 6 отключено в спринте 7)")
     w = admin_wallet(root, lr.learner_id)
-    check(w["referrals"] == {"pending": 0, "rewarded": 1, "capped": 0}, f"рефералы: {w['referrals']}")
+    check(w["referrals"] == {"pending": 0, "rewarded": 0, "capped": 0}, f"рефералы в кошельке: {w['referrals']}")
     check(summary(lb)["freeze_stock"] == 2, "приглашённому начислены заморозки за реферал")
     env = pj("SELECT envelope FROM lessons.outbox WHERE envelope->>'event_type' = 'lesson.session.completed.v1' "
              f"AND envelope->'payload'->>'session_id' = '{uid(les['sid'])}' LIMIT 1")
     sq = replay(env, "gamification_lessons")
     wait_delivered("gamification_lessons", sq)
     time.sleep(1.0)
-    check(summary(lr)["freeze_stock"] == 4, "повтор урока приглашённого — второй бонус")
-    # LB без категории «Напоминания»: значок — запись в центре без Telegram
+    check(summary(lr)["freeze_stock"] == 2, "повтор урока приглашённого дал бонус")
     items = wait_for(lambda: [x for x in lb.inbox() if "Новый значок: Первый урок" in x["body"]], 30, interval=1.0,
-                     what="LB (напоминания выключены): значок в центре уведомлений")
-    check(len(items) == 1 and items[0]["telegram"] == "in_app_only", f"значок LB в центре: {items}")
+                     what="LB (категория game выключена): значок в центре уведомлений")
+    check(len(items) == 1 and items[0]["telegram"] == "in_app_only" and items[0]["category"] == "game",
+          f"значок LB в центре: {items}")
     time.sleep(1.0)
-    check(not s1.tg_sent(lb.tg_id, seq, contains="Новый значок"), "значок ушёл в Telegram при выключенных напоминаниях")
-    print(f"      LR пригласил LB (referral) → pending → урок LB → LR +2 заморозки (итого {s['freeze_stock']}); повтор — без "
-          "второго бонуса", flush=True)
+    check(not s1.tg_sent(lb.tg_id, seq, contains="Новый значок"), "значок ушёл в Telegram при выключенной категории game")
+    print(f"      LR пригласил LB → реферал «{ref['status']}» (уроков {ref['progress']['lessons']}/"
+          f"{ref['progress']['lessons_required']}); первый урок — без бонуса (правило спринта 6 отключено); повтор — "
+          "без бонуса; значок при выключенной категории game — только центр", flush=True)
 
 
 # ---------------------------------------------------------------- AT-69 магазин
@@ -1539,7 +1554,10 @@ def s_tick_overview(c: s2.Ctx) -> None:
                         f"zoneinfo, но неизвестные PostgreSQL: {bad}")
     else:
         res = r.json() if not r.json().get("skipped") else game_tick()
-        check({"quests_expired", "events_finished", "referrals_void", "reconciled", "wallets_fixed"} <= set(res),
+        # спринт 7: referrals_void → legacy_referrals_expired (доживающие pending спринта 6), + лиги, дуэли и
+        # начальная загрузка проекций
+        check({"quests_expired", "events_finished", "legacy_referrals_expired", "reconciled", "wallets_fixed",
+               "league_groups_closed", "league_members_assigned", "duels_finished", "projections_loaded"} <= set(res),
               f"tick: {res}")
         if res["reconciled"] and res["wallets_fixed"]:
             note(f"game:tick: сверка исправила кошельков {res['wallets_fixed']} (WALLET_DRIFT)")
@@ -1753,8 +1771,9 @@ STEPS: list[tuple[str, Callable[[s2.Ctx], None], bool]] = [
      "меняется, событие и уведомление", s_heroes, False),
     ("G08 AT-66 пропуск дня графика (plan:tick) с заморозкой → game.streak.frozen.v1, серия цела, неделя frozen, "
      "«Серия спасена»; без автозаморозки — серия рвётся мягко; повтор — без второго списания", s_freeze, False),
-    ("G09 AT-67 реферал: принят → pending → первый урок приглашённого → +2 заморозки пригласившему; повтор — без "
-     "второго бонуса", s_referral, False),
+    ("G09 AT-67 реферал (спринт 7): принят → первый урок приглашённого — без бонуса (правило «первого урока» "
+     "отключено), реферал в social «в процессе»; повтор — без бонуса; категория game выключена — значок только в "
+     "центре", s_referral, False),
     ("G10 AT-69 магазин: предмет (черновик → публикация, step-up), покупка, повтор ключа, ALREADY_OWNED, экипировка, "
      "INSUFFICIENT_TILS (purchase_available false), снятие с продажи не отбирает", s_shop, False),
     ("G11 AT-71 правила: черновик (RULES_INVALID, DRAFT_CONFLICT) → проверка → активация (step-up, RULES_NOT_VALIDATED, "

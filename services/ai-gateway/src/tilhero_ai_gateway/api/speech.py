@@ -14,7 +14,16 @@ SHA-256 аудио), заголовок `idempotent-replay: true`. Аудито�
 6–13) — мягкие советы.
 
 Тело больше общего лимита сервисов (256 КиБ, tilhero_common.app) читает `SpeechBodyMiddleware` — снаружи общего
-middleware и только для этого маршрута: не больше 600 000 байт, байты — в состоянии запроса до его конца.
+middleware и только для маршрутов речи: не больше 600 000 байт, байты — в состоянии запроса до его конца.
+
+Спринт 7 (INTERNAL_API §4, ai.ts SpeechTranscribe*): `POST /internal/v1/speech:transcribe` — распознавание голосового
+хода парной комнаты, вызывающий только lessons (иначе 403 CALLER_NOT_ALLOWED). Тело — тот же WAV, мета —
+`X-Speech-Meta` = base64url(JSON SpeechTranscribeMeta {request_id, user_id, room_id, audience, language}).
+Ответ 200 SpeechTranscribeResult {text, words, duration_ms, provider, latency_ms}; тишина — пустые text и words.
+Ошибки: 422 SPEECH_META_INVALID {errors}, AUDIO_INVALID {reason}, IDEMPOTENCY_KEY_REUSED; 403 USER_CONTEXT_MISMATCH,
+KIDS_NOT_ALLOWED (audience kids или детский токен — детям в комнате только выбор реплик); 409 IDEMPOTENCY_IN_PROGRESS;
+503 SPEECH_UNAVAILABLE (аварийная остановка, распознаватель не настроен или выключен, tts недоступен или не успел).
+Повтор request_id ≤ 24 ч — сохранённый результат; 503 не сохраняется (повтор распознаёт заново).
 """
 
 from __future__ import annotations
@@ -39,11 +48,14 @@ from tilhero_ai_gateway.api.common import (
     settings_of,
     speech_auth,
     speech_deps_of,
+    transcribe_auth,
+    transcribe_deps_of,
 )
-from tilhero_ai_gateway.contracts import SpeechAssessMeta, error_list
+from tilhero_ai_gateway.contracts import SpeechAssessMeta, SpeechTranscribeMeta, error_list
 from tilhero_ai_gateway.domain.speech import assess
+from tilhero_ai_gateway.domain.transcribe import SpeechUnavailable, transcribe
 from tilhero_ai_gateway.domain.wav import MAX_AUDIO_BYTES, AudioInvalid, parse_wav
-from tilhero_common.errors import ApiError, unprocessable
+from tilhero_common.errors import ApiError, forbidden, unavailable, unprocessable
 from tilhero_common.internal_auth import Principal
 from tilhero_common.redis_tools import fingerprint
 
@@ -51,6 +63,8 @@ router = APIRouter(prefix="/internal/v1", tags=["internal"])
 log = logging.getLogger("tilhero.ai_gateway.speech_api")
 
 SPEECH_PATH: Final = "/internal/v1/speech/pronunciation"
+TRANSCRIBE_PATH: Final = "/internal/v1/speech:transcribe"
+AUDIO_PATHS: Final = frozenset({SPEECH_PATH, TRANSCRIBE_PATH})
 AUDIO_KEY: Final = "speech_audio"
 TOO_LARGE_KEY: Final = "speech_audio_too_large"
 WAV_TYPES: Final = frozenset({"audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"})
@@ -69,7 +83,7 @@ class SpeechBodyMiddleware:
         self.app = app
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
-        if scope.get("type") != "http" or scope.get("path") != SPEECH_PATH or scope.get("method") != "POST":
+        if scope.get("type") != "http" or scope.get("path") not in AUDIO_PATHS or scope.get("method") != "POST":
             await self.app(scope, receive, send)
             return
         declared = None
@@ -118,6 +132,10 @@ def audio_invalid(reason: str) -> ApiError:
 
 def parse_meta(header: str | None) -> SpeechAssessMeta:
     """X-Speech-Meta: base64url (без выравнивания или с ним) JSON → SpeechAssessMeta; ошибки — без значений."""
+    return _parse_meta(header, SpeechAssessMeta)
+
+
+def _parse_meta[M: (SpeechAssessMeta, SpeechTranscribeMeta)](header: str | None, model: type[M]) -> M:
     def invalid(errors: list[dict[str, str]]) -> ApiError:
         return unprocessable("SPEECH_META_INVALID", "Заголовок X-Speech-Meta не соответствует контракту",
                              {"errors": errors})
@@ -133,7 +151,7 @@ def parse_meta(header: str | None) -> SpeechAssessMeta:
     except (binascii.Error, ValueError, UnicodeDecodeError):
         raise invalid([{"path": "X-Speech-Meta", "message": "ожидается base64url(JSON)"}]) from None
     try:
-        return SpeechAssessMeta.model_validate(data)
+        return model.model_validate(data)
     except ValidationError as exc:
         raise invalid(error_list(exc)) from None
 
@@ -195,4 +213,71 @@ async def pronunciation(request: Request, principal: Principal = Depends(speech_
             await cache.complete(caller, request_key, fp, result, str(meta.user_id))
         except RedisError:
             log.warning("speech cache complete failed")
+    return JSONResponse(result)
+
+
+def _audio(request: Request, content_type: str | None) -> tuple[bytes, Any]:
+    """Тело маршрута речи → (байты, WavInfo) или 422 AUDIO_INVALID."""
+    state = request.scope.get("state") or {}
+    audio = state.get(AUDIO_KEY)
+    if state.get(TOO_LARGE_KEY):
+        raise audio_invalid("too_large")
+    if not _content_type_ok(content_type) or not isinstance(audio, bytes | bytearray):
+        raise audio_invalid("format")
+    try:
+        return bytes(audio), parse_wav(bytes(audio))
+    except AudioInvalid as exc:
+        raise audio_invalid(exc.reason) from None
+
+
+@router.post("/speech:transcribe",
+             responses={403: {"description": "CALLER_NOT_ALLOWED | USER_CONTEXT_MISMATCH | KIDS_NOT_ALLOWED"},
+                        422: {"description": "SPEECH_META_INVALID {errors} | AUDIO_INVALID {reason} | "
+                                             "IDEMPOTENCY_KEY_REUSED"},
+                        409: {"description": "IDEMPOTENCY_IN_PROGRESS"},
+                        503: {"description": "SPEECH_UNAVAILABLE"}})
+async def transcribe_turn(request: Request, principal: Principal = Depends(transcribe_auth),
+                          x_speech_meta: str | None = Header(default=None, alias="X-Speech-Meta"),
+                          content_type: str | None = Header(default=None, alias="Content-Type")) -> JSONResponse:
+    """SpeechTranscribeResult — текст голосового хода парной комнаты (ai.ts). Аудио — только в памяти запроса."""
+    received = time.monotonic()
+    meta = _parse_meta(x_speech_meta, SpeechTranscribeMeta)
+    check_user(principal, meta.user_id)
+    if meta.audience == "kids" or is_child_token(principal):
+        raise forbidden("KIDS_NOT_ALLOWED", "Детям в парной комнате доступен только выбор реплик")
+    audio, info = _audio(request, content_type)
+    deps = transcribe_deps_of(request)
+    rt = deps.rt
+    caller = principal.issuer
+    request_key = str(meta.request_id)
+    fp = fingerprint({"meta": meta.model_dump(mode="json"), "audio_sha256": hashlib.sha256(audio).hexdigest()})
+    cache: InvokeCache | None = None
+    if rt.redis is not None:
+        conf = settings_of(rt)
+        cache = InvokeCache(rt.redis, conf.cache_namespace, conf.invoke_cache_ttl_seconds, PENDING_TTL,
+                            kind="transcribe")
+        try:
+            replay = await cache.begin(caller, request_key, fp, wait_until=received + DUPLICATE_WAIT_S)
+        except RedisError:
+            log.warning("transcribe cache unavailable, executing without idempotency")
+            cache, replay = None, None
+        if replay is not None:
+            return JSONResponse(replay, headers={"idempotent-replay": "true"})
+    try:
+        result = await transcribe(deps, meta, audio, info, caller=caller, received=received)
+    except BaseException as exc:
+        if cache is not None:
+            try:
+                await cache.abort(caller, request_key)
+            except RedisError:
+                log.warning("transcribe cache abort failed")
+        if isinstance(exc, SpeechUnavailable):
+            raise unavailable("SPEECH_UNAVAILABLE", "Распознавание речи сейчас недоступно — продолжите текстом") \
+                from None
+        raise
+    if cache is not None:
+        try:
+            await cache.complete(caller, request_key, fp, result, str(meta.user_id))
+        except RedisError:
+            log.warning("transcribe cache complete failed")
     return JSONResponse(result)

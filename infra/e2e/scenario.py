@@ -1653,16 +1653,27 @@ def s_missed(c: Ctx) -> None:
     row = loc(datetime.fromtimestamp(int(epoch), UTC), zm).strftime("%Y-%m-%d %H:%M") if epoch else "-"
     expected = f"{(d + timedelta(days=1)).isoformat()} {hhmm(c.data['slot'], zm)}"
     check(row == expected, f"пропуск отправляется в слот-время следующего дня: {row} (ожидали {expected})")
-    check(not tg_sent(m1.tg_id, seq), "пропуск ушёл ночью, не дожидаясь слот-времени")
+
+    # Только сообщения о пропуске: со спринта 6 пропуск закрывает автозаморозка (2 заморозки бонуса регистрации) —
+    # «Серия спасена» и значок «Первая заморозка», а со спринта 7 они в категории game, включённой по умолчанию
+    # (INTERNAL_API спринта 7 §5; до этого — выключатель reminders, у M1 выключен). M1 без тихих часов — эти сообщения
+    # уходят сразу, ночью; к пропуску (отложен до слот-времени) это не относится.
+    def missed_tg(u: U) -> list[dict[str, Any]]:
+        return [m for m in tg_sent(u.tg_id, seq) if "Вчера занятия не было" in m["payload"].get("text", "")]
+
+    check(not missed_tg(m1), "пропуск ушёл ночью, не дожидаясь слот-времени")
+    other = [m["payload"].get("text", "")[:50] for m in tg_sent(m1.tg_id, seq)]
+    if other:
+        print(f"      M1 ночью получил не о пропуске (категория game, тихие часы выключены): {other}", flush=True)
     # ТЕСТОВОЕ ИЗМЕНЕНИЕ БД: «наступило слот-время следующего дня» (ждать сутки на стенде нельзя)
     _psql("UPDATE notifications.notifications SET not_before = now(), scheduled_for = now() "
           f"WHERE dedup_key = 'missed:{uid(m1.account_id)}:{d.isoformat()}'")
     dispatch()
-    msgs = wait_for(lambda: tg_sent(m1.tg_id, seq), 20, what="сообщение о пропуске M1")
+    msgs = wait_for(lambda: missed_tg(m1), 20, what="сообщение о пропуске M1")
     check(len(msgs) == 1 and startapp_of(msgs[0]["payload"]) == "route_home", msgs)
     dispatch()
     time.sleep(1)
-    check(len(tg_sent(m1.tg_id, seq)) == 1 and not tg_sent(m2.tg_id, seq), "пропусков в Telegram больше одного")
+    check(len(missed_tg(m1)) == 1 and not missed_tg(m2), "пропусков в Telegram больше одного")
     today = m1.ok("GET", "/v1/plan/today")
     wk = {w["local_date"]: w for w in today["week"]}
     if d.isoformat() in wk:

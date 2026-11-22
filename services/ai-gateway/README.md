@@ -85,6 +85,40 @@ pattern, anyOf; прочие ключевые слова отклоняются 
 критерий вне рубрики. Подтверждённая ошибка оценщика, чьей цитаты нет дословно в реплике ученика с этим `turn_id`,
 отбрасывается (`warnings: ["evidence_dropped"]`). `warnings` успешного ответа — коды, исправленные повтором.
 
+## Спринт 7: коуч парного урока и голос комнаты (INTERNAL_API §4)
+- **`cooperative_lesson_coach`** — `llm`/`active`, свободный текст (детям — `refused: kids_not_allowed`). Вызывающий —
+  только lessons (иначе 403 `CALLER_NOT_ALLOWED`), `session_kind: pair`, `session_id = context.room_id` (иначе 422
+  `CONTEXT_INVALID`); вид `pair` — только у коуча, в сессии `duel` ИИ не вызывается (422). Контракт —
+  `CooperativeCoachContext` → `CooperativeCoachOutput` (ai.ts): участники только ролями A/B. Версия 1 — черновик сида
+  (накладка `migrations/seed/0008`: инструкции по скиллу 11, 8 обязательных золотых кейсов — молчащий, монополизация,
+  чужой транскрипт, ребёнок, переподключение, грубость, уход от темы, оценка без вклада); публикует владелец после
+  прогона на anthropic (`POST …/cooperative_lesson_coach/versions/1/test-runs` → `…/publish`), на стенде — шлюз при
+  старте. До публикации — `refused: agent_not_active` (комнаты идут по сценарию с выбором).
+  - Бюджет: потолок комнаты `room_cap_usd` (сумма usage по `session_id = room_id`, по умолчанию 0,10 $) и месяц;
+    дневной лимит ученика и лимит урока не применяются. Исчерпан — `unavailable: budget_exceeded`.
+  - safety_quality_gate коуча: эхо `room_id` (`room_mismatch`); согласованность статуса и триггера (`coach_state`:
+    finished ⇔ отчёт; paused/finished — `next_speaker` null; ход — роль из комнаты или both; roles и цель — только при
+    start; варианты — только в режиме choices; прогресс не убывает); язык (`wrong_language`: английские поля без
+    кириллицы, ru — кириллица, uz — латиница, апострофы uz исправляются); идентификаторы (room_id, turn_id, skill_id,
+    choice_id) не проверяются как текст. Без повтора отбрасываются доказательства чужой роли (`evidence_dropped`) и
+    подсказки отчёта роли без вклада или сверх трёх (`tips_dropped`).
+- **`duel_host`** → `code` (`implemented_in lessons`), **`referral_integrity_reviewer`** → `rules` (`implemented_in
+  social`): вызова и версий нет (404 `AGENT_NOT_ACTIVE`, 409 `AGENT_NOT_LLM`).
+- **`POST /internal/v1/speech:transcribe`** (только lessons) — голосовой ход комнаты: WAV как у произношения, мета —
+  `X-Speech-Meta` = base64url(JSON `SpeechTranscribeMeta {request_id, user_id, room_id, audience, language}`) → 200
+  `SpeechTranscribeResult {text ≤ 600, words ≤ 120, duration_ms, provider, latency_ms}`. Распознаёт tts (`TTS_URL`,
+  `whisper-base-en`, 0 $, бюджеты не тратятся) при любом `SPEECH_PROVIDER` (Azure — только оценка произношения),
+  `SPEECH_PROVIDER=fake` — `fake_speech`. Ошибки: 403 `KIDS_NOT_ALLOWED` (audience kids или детский токен),
+  `USER_CONTEXT_MISMATCH`; 422 `SPEECH_META_INVALID`, `AUDIO_INVALID {reason}`, `IDEMPOTENCY_KEY_REUSED`; 409
+  `IDEMPOTENCY_IN_PROGRESS`; 503 `SPEECH_UNAVAILABLE` — аварийная остановка, нет `TTS_URL`, модель речи выключена, tts
+  недоступен (сеть, 502/504 — один повтор; 503 и неверный ответ — без повтора) или не успел. Тишина — пустые text и
+  words. Учёт — строка `usage` агента коуча (`session_kind pair`, `session_id = room_id`, `audio_ms`, 0 $), без текста;
+  повтор `request_id` ≤ 24 ч — сохранённый результат (кеш `transcribe`, стирается сагой), 503 не сохраняется.
+- **Миграция 0008:** реестр (снимок для отката — `registry.AGENTS_SPRINT6`), пустая маршрутизация версий двух не-LLM
+  агентов удаляется, `budget.room_cap_usd` (CHECK ≤ потолка месяца), `usage.session_kind` + `duel`, `pair`, накладка
+  `0008`. `PUT /admin/v1/ai/budget` принимает `room_cap_usd` (необязателен — не передан, прежний; больше потолка месяца
+  → 422 `BUDGET_INVALID {fields: [room_cap_usd]}`), `GET` всегда его отдаёт.
+
 ## Admin API (`/admin/v1/ai`, только admin-bff с `actor`; права — здесь, step-up — в admin-bff)
 | Метод | Путь | Право | Ответ / ошибки |
 |---|---|---|---|

@@ -63,6 +63,7 @@ STAGES_BY_KIND: dict[str, list[str]] = {
     "media": ["listen", "exercises", "summary"],
     "review": ["assessment", "summary"],
     "reading": ["reading", "questions", "summary"],
+    "duel": ["assessment", "summary"],
 }
 HISTORY_IN_STEP = 10
 HISTORY_FOR_AI = 6
@@ -248,6 +249,15 @@ async def enter_unit(db: AsyncSession, s: Session, b: Bundle, stage_i: int, unit
         return _add_step(db, s, stype, "item",
                          {**base, "item": control_item_view(item, s.seed), "hint_available": False,
                           "graded_later": True}, ref, now)
+    if t == "duel_item":
+        # задание дуэли (спринт 7): без подсказок и ИИ, правильность не показывается; варианты перемешаны по seed
+        # набора — у обоих участников одинаково
+        n = int(unit["n"])
+        item = b.duel[n]["item"]
+        return _add_step(db, s, stype, "item",
+                         {**base, "item": control_item_view(item, b.duel_seed), "hint_available": False,
+                          "graded_later": True},
+                         {"src": "duel", "n": n}, now)
     if t == "exercise":
         ex = b.exercises[unit["key"]]
         return _add_step(db, s, stype, "item",
@@ -573,6 +583,9 @@ async def answer_item(db: AsyncSession, s: Session, b: Bundle, step: Step, answe
                                item_id=step.ref["item_id"], skill_id=str(item.get("skill_id") or ""),
                                reason="wrong" if not correct else "hinted", now=now, settings=settings)
         return result, {"correct": correct, "correct_answer": None if correct else correct_text(item)}, stored
+    if src == "duel":  # проверка по ключу снимка набора; ученику — без обратной связи (счёт — после дуэли)
+        correct = grade_control_item(b.duel[int(step.ref["n"])]["item"], value)
+        return ("skipped" if dont_know else ("correct" if correct else "incorrect")), None, stored
     if src == "meaning":
         correct = value == int(step.ref["correct"])
         result = "skipped" if dont_know else ("correct" if correct else "incorrect")

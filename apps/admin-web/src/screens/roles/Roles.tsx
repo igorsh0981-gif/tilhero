@@ -31,7 +31,8 @@ export function privilegedOf(roles: readonly Pick<Role, "code" | "privileged">[]
 
 /** Matrix rows: section access first, then commands (admin.ts Permission catalogue). */
 export const PERM_GROUPS: ReadonlyArray<{ id: "sections" | "actions"; perms: readonly Permission[] }> = [
-  { id: "sections", perms: ["dashboard.read", "users.read", "support.read", "whatsnew.manage", "notif.templates.manage", "notif.campaigns.manage", "config.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"] },
+  // sprint 7: the five sections of «Сообщество» (moderation.manage opens «Модерация» and is its only right)
+  { id: "sections", perms: ["dashboard.read", "users.read", "support.read", "whatsnew.manage", "notif.templates.manage", "notif.campaigns.manage", "config.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", "social.read", "moderation.manage", "referral.read", "league.read", "room.read"] },
   {
     id: "actions",
     perms: [
@@ -65,6 +66,11 @@ export const PERM_GROUPS: ReadonlyArray<{ id: "sections" | "actions"; perms: rea
       "game.manage",
       "game.publish",
       "wallet.adjust",
+      // sprint 7: campaigns and the referral review (activation — step-up), re-evaluation of leagues and duels
+      // (step-up), the stop of a pair room (step-up)
+      "referral.manage",
+      "league.manage",
+      "room.manage",
     ],
   },
 ]

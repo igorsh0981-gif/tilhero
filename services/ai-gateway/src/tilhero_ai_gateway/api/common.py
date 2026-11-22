@@ -19,6 +19,7 @@ from redis.exceptions import RedisError
 from tilhero_ai_gateway.domain.invoke import Deps
 from tilhero_ai_gateway.domain.provider_status import ProviderStatus
 from tilhero_ai_gateway.domain.speech import SpeechDeps
+from tilhero_ai_gateway.domain.transcribe import TranscribeDeps, Transcriber
 from tilhero_ai_gateway.providers import Provider
 from tilhero_ai_gateway.providers.speech import SpeechProvider
 from tilhero_ai_gateway.settings import Settings
@@ -30,10 +31,12 @@ from tilhero_common.redis_tools import IdempotencyStore, fingerprint
 log = logging.getLogger("tilhero.ai_gateway.api")
 
 # Вызывающие (INTERNAL_API §0, §1.2, §1.5; спринт 5 §1.7, §1.9, §3): вызов агента — lessons, assessment и memory
-# (memory — только teaching_coach gloss_word, см. api/internal.py CALLER_REQUESTS); статус — они же; оценка
-# произношения — только memory; сотрудники — только admin-bff с actor
+# (memory — только teaching_coach gloss_word, см. api/internal.py CALLER_REQUESTS; спринт 7: cooperative_lesson_coach —
+# только lessons); статус — они же; оценка произношения — только memory; распознавание голосового хода парной
+# комнаты (спринт 7) — только lessons; сотрудники — только admin-bff с actor
 invoke_auth = InternalAuth({"lessons", "assessment", "memory"})
 speech_auth = InternalAuth({"memory"})
+transcribe_auth = InternalAuth({"lessons"})
 staff_auth = InternalAuth({"admin-bff"})
 
 IdempotencyKey = Header(default=None, alias="Idempotency-Key", min_length=8, max_length=128,
@@ -62,15 +65,28 @@ def deps_of(request: Request) -> Deps:
     return Deps(rt=rt, settings=settings_of(rt), provider=provider, clock=lambda: now_of(rt), status=status)
 
 
-def speech_deps_of(request: Request) -> SpeechDeps:
+def _speech_status(request: Request) -> ProviderStatus:
     rt: Runtime = request.app.state.runtime
     state = request.app.state
     status = getattr(state, "speech_status", None)
     if status is None:
         status = ProviderStatus(rt.redis, settings_of(rt).cache_namespace, kind="speech")
         state.speech_status = status
-    return SpeechDeps(rt=rt, settings=settings_of(rt), provider=cast(SpeechProvider, state.speech),
-                      clock=lambda: now_of(rt), status=status)
+    return cast(ProviderStatus, status)
+
+
+def speech_deps_of(request: Request) -> SpeechDeps:
+    rt: Runtime = request.app.state.runtime
+    return SpeechDeps(rt=rt, settings=settings_of(rt), provider=cast(SpeechProvider, request.app.state.speech),
+                      clock=lambda: now_of(rt), status=_speech_status(request))
+
+
+def transcribe_deps_of(request: Request) -> TranscribeDeps:
+    """Распознавание хода парной комнаты (спринт 7): ошибки tts — в общий `speech.last_error` админки."""
+    rt: Runtime = request.app.state.runtime
+    return TranscribeDeps(rt=rt, settings=settings_of(rt), transcriber=cast(Transcriber,
+                                                                            request.app.state.transcriber),
+                          clock=lambda: now_of(rt), status=_speech_status(request))
 
 
 def check_user(principal: Principal, user_id: uuid.UUID) -> None:
@@ -142,10 +158,10 @@ class InvokeCache:
     (см. begin) и только не дождавшись получает 409 IDEMPOTENCY_IN_PROGRESS.
     Ключи ученика индексируются множеством — сага удаления стирает его результаты из кеша.
     kind: `invoke` — вызовы агентов, `speech` — оценка произношения (результат без аудио; отпечаток запроса — хеш
-    меты и хеша аудио)."""
+    меты и хеша аудио), `transcribe` — распознавание хода парной комнаты (спринт 7: текст хода, без аудио)."""
 
     POLL_S = 0.2
-    KINDS = ("invoke", "speech")
+    KINDS = ("invoke", "speech", "transcribe")
 
     def __init__(self, redis: Redis, namespace: str, ttl: int, pending_ttl: int, kind: str = "invoke") -> None:
         self.redis = redis

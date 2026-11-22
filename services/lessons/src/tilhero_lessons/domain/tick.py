@@ -8,6 +8,10 @@
 3. Сессии без оценки (assessment был недоступен): повторная отправка EvaluationRequest (идемпотентно по session_id);
    старше EVALUATION_RETRY_DAYS — больше не отправляются (evaluation_status = failed). Событие completed повторно
    не публикуется.
+4. Спринт 7 (INTERNAL_API §3): наборы дуэлей с прошедшим сроком закрываются (незаконченные сессии — completed со
+   счётом); парные комнаты — истечение приглашений, offline по heartbeat, соло, неактивность, предел 20 минут,
+   «скоро начнётся» (lesson.pair.starting.v1), просроченные записи голоса, повторная оценка участников; тексты
+   реплик комнат старше срока хранения стираются.
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ from tilhero_common.app import Runtime
 from tilhero_common.errors import ApiError
 from tilhero_lessons import clients
 from tilhero_lessons.catalog import CatalogGateway, ContentGone
-from tilhero_lessons.domain import evaluation, machine
+from tilhero_lessons.domain import duels, evaluation, machine, pair
 from tilhero_lessons.domain.common import lock_user
 from tilhero_lessons.domain.content import load_bundle
 from tilhero_lessons.models import Session, Step, Turn
@@ -49,7 +53,7 @@ async def stale_sessions(rt: Runtime, settings: Settings, now: datetime) -> dict
     ready_before = now - timedelta(hours=settings.ready_expiry_hours)
     async with rt.transaction() as db:
         rows = (await db.execute(
-            select(Session.session_id, Session.user_id).where(or_(
+            select(Session.session_id, Session.user_id).where(Session.kind != "duel", or_(
                 and_(Session.status == "in_progress", Session.last_activity_at < idle),
                 and_(Session.status == "paused", Session.paused_at < paused_before),
                 and_(Session.status == "ready", Session.created_at < ready_before),
@@ -92,7 +96,9 @@ async def redact(rt: Runtime, settings: Settings, now: datetime) -> dict[str, in
         for s in rows:
             s.evaluation = evaluation.redact_evaluation(s.evaluation or {})
             s.summary = {**(s.summary or {}), "texts_redacted": True}
-    return {"redacted_turns": int(turns), "redacted_answers": int(answers), "redacted_evaluations": len(rows)}
+        room_texts = await pair.redact(db, cutoff, now, batch)
+    return {"redacted_turns": int(turns), "redacted_answers": int(answers), "redacted_evaluations": len(rows),
+            "redacted_room_texts": room_texts}
 
 
 async def resend_evaluations(rt: Runtime, catalog: CatalogGateway, settings: Settings,
@@ -142,10 +148,13 @@ async def resend_evaluations(rt: Runtime, catalog: CatalogGateway, settings: Set
     return {"evaluations_sent": sent, "evaluations_failed": failed, "evaluations_given_up": int(given_up)}
 
 
-async def run(rt: Runtime, catalog: CatalogGateway, settings: Settings, now: datetime) -> dict[str, Any]:
+async def run(rt: Runtime, catalog: CatalogGateway, settings: Settings, now: datetime,
+              hub: pair.RoomHub | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     out.update(await stale_sessions(rt, settings, now))
     out.update(await redact(rt, settings, now))
     out.update(await resend_evaluations(rt, catalog, settings, now))
+    out.update(await duels.close_due(rt, settings, now))
+    out.update(await pair.tick(rt, hub or pair.RoomHub(), settings, now))
     return out
 

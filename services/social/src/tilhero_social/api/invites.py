@@ -7,6 +7,7 @@ user_id — только из внутреннего токена; чужое п
 from __future__ import annotations
 
 import uuid
+from typing import cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy import select
@@ -16,6 +17,7 @@ from tilhero_common.errors import not_found, unprocessable
 from tilhero_social.api.common import clock_of, current_user, gateway_of, idempotency_key, settings_of
 from tilhero_social.domain import family as fam
 from tilhero_social.domain import invites as inv
+from tilhero_social.domain import members as member_ids
 from tilhero_social.domain import rules
 from tilhero_social.identity import IdentityGateway, PublicProfile
 from tilhero_social.models import Invite
@@ -28,6 +30,7 @@ from tilhero_social.schemas import (
     InvitePreviewOut,
     OpenInviteIn,
 )
+from tilhero_social.settings import Settings
 
 router = APIRouter(prefix="/internal/v1", tags=["client"])
 
@@ -40,15 +43,19 @@ def _invite_uuid(raw: str) -> uuid.UUID:
 
 
 async def family_view(rt: Runtime, gateway: IdentityGateway, family_id: uuid.UUID, me: uuid.UUID) -> FamilyOut | None:
+    key = cast(Settings, rt.settings).member_key_bytes()
     async with rt.transaction() as session:
         members = await fam.members(session, family_id)
+        # спринт 7: member_id каждого члена семьи (дуэль и парный урок с семьёй — по нему, §0)
+        mids = await member_ids.register(session, key, [m.user_id for m in members])
     if not members:
         return None
     names = await gateway.names(m.user_id for m in members)
     return FamilyOut.model_validate({
         "family_id": str(family_id),
         "members": [
-            {"user_id": str(m.user_id), "display_name": names[m.user_id], "role": m.role, "is_me": m.user_id == me}
+            {"user_id": str(m.user_id), "member_id": mids[m.user_id], "display_name": names[m.user_id],
+             "role": m.role, "is_me": m.user_id == me}
             for m in members if names[m.user_id] is not None  # удалённый (сага в процессе) не показываем
         ],
     })

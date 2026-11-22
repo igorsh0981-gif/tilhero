@@ -47,9 +47,9 @@ from tilhero_learning_plan.domain.plans import ACTIVITY_RECORDED, lock_user, str
 from tilhero_learning_plan.models import Activity, CompletedLesson, DeletedUser, LessonEvaluation, Plan
 
 # kind сессии lessons → kind занятия (bff.ts SessionKind; review — повтор ошибок без влияния на освоение;
-# спринт 5: reading — вопросы к тексту, практика)
+# спринт 5: reading — вопросы к тексту, практика; спринт 7: duel — дуэль с другом, pair — парный урок, практика)
 ACTIVITY_KIND: Final = {"lesson": "lesson", "scenario": "practice", "media": "practice", "review": "practice",
-                        "reading": "practice"}
+                        "reading": "practice", "duel": "practice", "pair": "practice"}
 MAX_ACTIVITY_MINUTES: Final = 240
 SESSION_KEY_PREFIX: Final = "lesson/"  # «/» нет в Idempotency-Key клиента — ручной ключ не займёт ключ сессии
 REVIEW_KEY_PREFIX: Final = "review/"  # спринт 5: «Повторение дня» memory — одно занятие на сессию повторения

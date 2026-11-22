@@ -27,6 +27,7 @@ import { MockContent, type ContentScenario } from "./content";
 import { MockGame, type GameScenario } from "./game";
 import { MockLessons, type LessonsScenario } from "./lessons";
 import { MockMemory, type MemoryScenario } from "./memory";
+import { kidFamily, MockSocial, type Ctx as SocialCtx, type SocialScenario } from "./social";
 import * as F from "./data";
 
 /**
@@ -94,6 +95,8 @@ export interface Scenario {
   frozenDays?: string[];
   /** past days with a session (done) */
   doneDays?: string[];
+  /** sprint 7: friends, sanctions, referrals, leagues, duels, pair rooms (fixtures/social.ts); absent — the defaults */
+  social?: SocialScenario;
 }
 
 /** ~0.1 s of silent MP3 (4 frames of MPEG-1 Layer III, 32 kbit/s, 48 kHz, mono) — the body of the mock speech. */
@@ -154,6 +157,7 @@ export class MockBff {
   readonly lessons: MockLessons;
   readonly memory: MockMemory;
   readonly game: MockGame;
+  readonly social: MockSocial;
   private dropOnce: Set<string>;
   private lateOnce: Record<string, [number, string]>;
   private access = 0;
@@ -174,7 +178,7 @@ export class MockBff {
     this.pendingPin = sc.pendingReset?.pin ?? null;
     if (sc.pendingReset) this.security.pin_reset_effective_at = sc.pendingReset.at;
     this.grants = sc.grants ? sc.grants.map((g) => ({ ...g })) : [];
-    this.settings[F.ACCOUNT_ID] = F.settings(onboarded ? { categories: { reminders: true, missed: true, social: true, support: true, product: true } } : {});
+    this.settings[F.ACCOUNT_ID] = F.settings(onboarded ? { categories: { reminders: true, missed: true, social: true, support: true, product: true, game: true } } : {});
     this.plans[F.ACCOUNT_ID] = onboarded ? F.onboardedPlan(F.ACCOUNT_ID) : F.plan(F.ACCOUNT_ID, { ui_lang: sc.locale ?? "ru" });
     this.notes = sc.notes ?? [F.WELCOME, F.UPDATE_1, F.UPDATE_2];
     this.seen[F.ACCOUNT_ID] = new Set(sc.seen ?? (onboarded ? [F.WELCOME.id] : []));
@@ -198,6 +202,9 @@ export class MockBff {
     this.lessons = new MockLessons(sc.lessons ?? {}, { self: this.active });
     this.memory = new MockMemory(sc.memory ?? {}, this.lessons, { self: F.ACCOUNT_ID, kid: this.learners.find((l) => l.kind === "child")?.learner_id });
     this.game = new MockGame(sc.game ?? { mode: "down" }, (owner) => this.learners.some((l) => l.learner_id === owner && l.kind === "child"));
+    this.social = new MockSocial(sc.social ?? {}, this.lessons, { owner: this.active, kid: !!sc.child });
+    // sprint 7: a child profile has a family (the parent and a sibling, by member_id) unless the scenario says otherwise
+    if (sc.child && sc.family === undefined) this.family = kidFamily(this.active, F.ACCOUNT_ID);
     this.syncVoice();
   }
 
@@ -565,7 +572,7 @@ export class MockBff {
         kind: b.kind as Invite["kind"],
         link: `https://t.me/TilHeroBot/app?startapp=inv_Tok${String(this.seq).padStart(29, "0")}`,
         status: "active",
-        expires_at: b.kind === "friend" ? "2026-12-18T08:00:00Z" : "2026-11-25T08:00:00Z",
+        expires_at: b.kind === "friend" ? "2026-12-18T08:00:00Z" : b.kind === "referral" ? null : "2026-11-25T08:00:00Z",
         created_at: new Date().toISOString(),
         accepted_count: 0,
       };
@@ -604,8 +611,8 @@ export class MockBff {
         this.family = {
           family_id: "44444444-aaaa-4bbb-8ccc-000000000001",
           members: [
-            { user_id: "55555555-aaaa-4bbb-8ccc-000000000001", display_name: entry.invite.inviter_display_name, role: "owner", is_me: false },
-            { user_id: F.ACCOUNT_ID, display_name: this.account.display_name, role: "adult", is_me: true },
+            { user_id: "55555555-aaaa-4bbb-8ccc-000000000001", member_id: "mb_inviter00000000000000", display_name: entry.invite.inviter_display_name, role: "owner", is_me: false },
+            { user_id: F.ACCOUNT_ID, member_id: "mb_me0000000000000000000", display_name: this.account.display_name, role: "adult", is_me: true },
           ],
         };
       }
@@ -672,6 +679,23 @@ export class MockBff {
       if (sp.mode === "down") return this.err(route, 503, "SPEECH_UNAVAILABLE", { service: "tts" });
       if (typeof b.text !== "string" || !/[A-Za-z]/.test(b.text) || (b.variant !== "en-GB" && b.variant !== "en-US")) return this.err(route, 422, "TEXT_INVALID", { field: "text" });
       return route.fulfill({ status: 200, contentType: "audio/mpeg", body: SPEECH_MP3, headers: { "cache-control": "private, max-age=86400" } });
+    }
+
+    // ---- sprint 7: social, leagues and duels, pair rooms (the game down → /v1/game/* answers GAME_UNAVAILABLE below) ----
+    if (!(this.game.down && path.startsWith("/v1/game/"))) {
+      const ctx = this.socialCtx();
+      if (key === "PATCH /v1/game/settings" && typeof b.league_opt_in === "boolean") {
+        const p7 = this.social.optInProblem(ctx, b.league_opt_in);
+        if (p7) return this.err(route, p7.status, p7.code!, p7.details ?? {});
+      }
+      const s7 = this.social.handle(method, path, url.searchParams, b, headers, ctx);
+      if (s7) {
+        const r7 = await s7;
+        // the turn is taken, then its answer is lost on the way (once, the test's command)
+        if (!r7.code && this.social.takeTurnDrop(key)) return route.abort("failed");
+        if (r7.code) return this.err(route, r7.status, r7.code, r7.details ?? {});
+        return this.ok(route, r7.body, r7.status);
+      }
     }
 
     // ---- sprint 6: the game ----
@@ -749,6 +773,24 @@ export class MockBff {
       return this.ok(route, { request_id: "77777777-aaaa-4bbb-8ccc-000000000001", status: "REQUESTED", domains: ["identity-consent", "learning-plan", "social", "notifications", "support", "experience-config"], learners: this.learners.length }, 202);
     }
     return this.err(route, 404, "NOT_FOUND");
+  }
+
+  /** What the social mock needs of the session: the learner, a teen without the parent, consents, the family, the
+   *  general league switch and my hero. */
+  private socialCtx(): SocialCtx {
+    const l = this.learner();
+    const kid = l.kind === "child";
+    const g = this.game.down ? null : this.game.state(this.active);
+    const sum = g ? this.game.summary(this.active) : null;
+    return {
+      owner: this.active,
+      kid,
+      teenLocked: !kid && this.account.age_band === "14-17" && this.account.guardian_consent !== "granted",
+      purposes: this.consent.purposes,
+      family: this.family,
+      optIn: !!g?.settings.league_opt_in,
+      myHero: sum?.hero ? { code: sum.hero.code, stage: sum.hero.stage, image: sum.hero.image } : null,
+    };
   }
 
   private preview(entry: NonNullable<Scenario["incoming"]>[string]): InvitePreview {

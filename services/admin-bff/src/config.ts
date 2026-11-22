@@ -99,6 +99,12 @@ export interface Config {
    * остальная админка работает. Значения по умолчанию нет (в dev тоже) — локальный стенд задаёт её явно.
    */
   gamificationUrl: string | null;
+  /**
+   * Спринт 7: social (SOCIAL_URL) — друзья и жалобы, модерация, реферальные кампании, блок обзора `social`. Как
+   * GAMIFICATION_URL — необязательна во всех окружениях: не задана → эти маршруты отвечают 503 UPSTREAM_UNAVAILABLE
+   * {service: social}, блок обзора недоступен, остальная админка работает. Значения по умолчанию нет.
+   */
+  socialUrl: string | null;
   upstreamTimeoutMs: number;
   upstreamRetries: number;
   /** Таймаут одного независимого блока: блок дашборда, блок карточки сессии «Контроля диалогов», затраты строки
@@ -285,18 +291,21 @@ export function loadConfig(env: Env = process.env): Config {
     (Object.entries(DOMAIN_URL_VARS) as Array<[keyof DomainUrls, keyof typeof DEV_DEFAULTS]>).map(([k, name]) => [k, url(name)]),
   ) as unknown as DomainUrls;
 
-  // спринт 6: необязательный адрес gamification (пусто — игра выключена)
-  const gameRaw = raw("GAMIFICATION_URL");
-  let gamificationUrl: string | null = null;
-  if (gameRaw !== undefined) {
+  // необязательные адреса: gamification (спринт 6) и social (спринт 7); пусто — раздел выключен (503 на его маршрутах)
+  const optionalUrl = (name: "GAMIFICATION_URL" | "SOCIAL_URL"): string | null => {
+    const v = raw(name);
+    if (v === undefined) return null;
     try {
-      const u = new URL(gameRaw);
+      const u = new URL(v);
       if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("protocol");
-      gamificationUrl = gameRaw.replace(/\/+$/, "");
+      return v.replace(/\/+$/, "");
     } catch {
-      problems.push(`GAMIFICATION_URL=${JSON.stringify(gameRaw)}: ожидается http(s) URL`);
+      problems.push(`${name}=${JSON.stringify(v)}: ожидается http(s) URL`);
+      return null;
     }
-  }
+  };
+  const gamificationUrl = optionalUrl("GAMIFICATION_URL");
+  const socialUrl = optionalUrl("SOCIAL_URL");
 
   const cfg: Config = {
     nodeEnv,
@@ -319,6 +328,7 @@ export function loadConfig(env: Env = process.env): Config {
     adminOrigin,
     urls,
     gamificationUrl,
+    socialUrl,
     upstreamTimeoutMs: int("UPSTREAM_TIMEOUT_MS", 3000, 100, 60_000),
     upstreamRetries: int("UPSTREAM_RETRIES", 1, 0, 5),
     dashboardTimeoutMs: int("DASHBOARD_TIMEOUT_MS", 2000, 100, 30_000),

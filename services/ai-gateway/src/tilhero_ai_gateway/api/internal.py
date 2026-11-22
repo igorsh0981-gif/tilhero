@@ -7,6 +7,10 @@
 LLM-агенты, кроме `gloss_word` (иначе в «перевод слова» мог бы попасть произвольный текст ученика, а gloss_word
 разрешён детям). Нарушение → 403 CALLER_NOT_ALLOWED {agent_id, request}.
 
+Спринт 7 (INTERNAL_API §4): `cooperative_lesson_coach` — только lessons и только `session_kind: pair` с
+`session_id = context.room_id` (парная комната; иначе 403 CALLER_NOT_ALLOWED / 422 CONTEXT_INVALID); вид `pair` — только
+у коуча; вид `duel` — дуэль без ИИ: вызов агента в ней → 422 CONTEXT_INVALID.
+
 Ответ всегда AgentInvokeResult со статусом 200 (`ok | unavailable | refused`) — вызывающий продолжает без ИИ при
 unavailable/refused. 404 — агент не найден или не `llm`+`active`; 422 — контекст не по ai.ts; 401 — в токене нет
 ученика (`sub`); 403 — user_id тела не совпадает с учеником токена (`sub` или `lrn`).
@@ -43,7 +47,15 @@ from tilhero_ai_gateway.api.common import (
     settings_of,
     speech_deps_of,
 )
-from tilhero_ai_gateway.contracts import AiSessionKind, AudienceSegment, request_kind, validate_context
+from tilhero_ai_gateway.contracts import (
+    COACH_AGENT,
+    NO_AI_SESSION_KINDS,
+    PAIR_SESSION,
+    AiSessionKind,
+    AudienceSegment,
+    request_kind,
+    validate_context,
+)
 from tilhero_ai_gateway.domain import costs
 from tilhero_ai_gateway.domain.invoke import InvokeRequest, invoke
 from tilhero_ai_gateway.domain.speech import speech_available
@@ -79,12 +91,32 @@ class InvokeIn(BaseModel):
 MEMORY_REQUESTS: Final = frozenset({("teaching_coach", "gloss_word")})
 
 
+# Агент → единственный допустимый вызывающий (спринт 7: коуч парного урока — только lessons)
+AGENT_CALLERS: Final = {COACH_AGENT: "lessons"}
+
+
 def _check_caller(caller: str, agent_id: str, context: Any) -> None:
     kind = request_kind(agent_id, context)
     allowed = (agent_id, kind) in MEMORY_REQUESTS if caller == "memory" else kind is None
+    if agent_id in AGENT_CALLERS and caller != AGENT_CALLERS[agent_id]:
+        allowed = False
     if not allowed:
         raise forbidden("CALLER_NOT_ALLOWED", "Вызывающему недоступен этот агент или вид запроса",
                         {"agent_id": agent_id[:64], "request": kind})
+
+
+def _check_session(agent_id: str, body: InvokeIn, context: dict[str, Any]) -> None:
+    """Вид сессии и агент согласованы (спринт 7): pair ⇔ коуч парного урока (session_id = room_id контекста); в
+    дуэли ИИ не вызывается."""
+    errors: list[dict[str, str]] = []
+    if body.session_kind in NO_AI_SESSION_KINDS:
+        errors.append({"path": "session_kind", "message": "в дуэли ИИ не вызывается"})
+    elif (agent_id == COACH_AGENT) != (body.session_kind == PAIR_SESSION):
+        errors.append({"path": "session_kind", "message": "pair — только у cooperative_lesson_coach, и наоборот"})
+    elif agent_id == COACH_AGENT and str(context.get("room_id")) != str(body.session_id):
+        errors.append({"path": "context.room_id", "message": "room_id контекста ≠ session_id вызова"})
+    if errors:
+        raise unprocessable("CONTEXT_INVALID", "Контекст агента не соответствует контракту", {"errors": errors})
 
 
 @router.post("/agents/{agent_id}/invoke",
@@ -108,6 +140,7 @@ async def invoke_agent(agent_id: str, body: InvokeIn, request: Request,
     context, errors = validate_context(agent_id, body.context)
     if context is None:
         raise unprocessable("CONTEXT_INVALID", "Контекст агента не соответствует контракту", {"errors": errors})
+    _check_session(agent_id, body, context)
     audience = "kids" if is_child_token(principal) else body.audience
     req = InvokeRequest(agent_id=agent_id, request_id=body.request_id, session_id=body.session_id,
                         session_kind=body.session_kind, user_id=body.user_id, audience=audience, locale=body.locale,

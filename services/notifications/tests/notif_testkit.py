@@ -27,7 +27,8 @@ from tilhero_notifications.settings import Settings
 SERVICE_DIR = str(Path(__file__).resolve().parents[1])
 SCHEDULER_TOKEN = "sched-" + "n" * 40
 TZ = "Asia/Tashkent"
-ALL_CATEGORIES = ("reminders", "missed", "social", "support", "product")
+# спринт 7: game — категория настроек ученика (identity-consent, по умолчанию включена)
+ALL_CATEGORIES = ("reminders", "missed", "social", "support", "product", "game")
 TEST_CHATS = "5550001111,5550002222"
 STAFF_ID = "0b6e2c1a-8d3f-4b7e-9a51-6c2d8e4f1a30"
 COMMS_PERMISSIONS = frozenset({

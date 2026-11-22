@@ -73,6 +73,7 @@ class NotificationCategoriesPatch(_In):
     social: StrictBool | None = None
     support: StrictBool | None = None
     product: StrictBool | None = None
+    game: StrictBool | None = None  # спринт 7
 
 
 class NotificationSettingsPatch(_In):
@@ -233,6 +234,7 @@ class NotificationCategories(BaseModel):
     social: bool
     support: bool
     product: bool
+    game: bool  # спринт 7: игра и лиги (по умолчанию включена)
 
 
 class NotificationSettings(BaseModel):
@@ -430,6 +432,21 @@ class AudienceMember(BaseModel):
 
 class AudiencePage(BaseModel):
     items: list[AudienceMember]
+    next_cursor: str | None
+
+
+class ProfileExportItem(BaseModel):
+    """Строка выгрузки профилей (export.py): значения age_band и guardian_consent — как в user.profile.updated.v1."""
+
+    user_id: uuid.UUID
+    kind: Literal["account", "child"]
+    age_band: Literal["6-9", "10-13", "14-17", "18+"] | None
+    guardian_consent: Literal["not_required", "pending", "granted", "declined"] | None
+    updated_at: datetime
+
+
+class ProfileExportPage(BaseModel):
+    items: list[ProfileExportItem]
     next_cursor: str | None
 
 

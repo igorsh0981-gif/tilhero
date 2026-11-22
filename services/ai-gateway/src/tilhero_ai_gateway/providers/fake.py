@@ -12,6 +12,11 @@
 - independent_evaluator: правила — задача по исходу (success 3, alt_success 2, fail 1), самостоятельность по
   подсказкам (0 → 3, 1 → 2, 2 → 1, 3+ → 0), грамматика по найденным ошибкам; ошибки — по словарю типичных ошибок
   A1–A2 с цитатой, дословно взятой из реплики ученика; без реплик ученика — insufficient_evidence.
+- cooperative_lesson_coach (спринт 7): шаблон по триггеру — start: роли A/B и общая цель, первым говорит A;
+  partner_offline — paused; end — finished с отчётом (подсказки — только ролям с вкладом); иначе in_progress, следующим
+  говорит онлайн-роль с меньшим числом реплик (молчащему возвращается слово); доказательство — последняя реплика
+  участника (её роль и turn_id); варианты — только в режиме choices; эскалация — по safety_flags (abuse → abuse,
+  personal_data → safety). Тексты — английские шаблоны и переводы ru/uz, данные контекста в них не попадают.
 """
 
 from __future__ import annotations
@@ -154,10 +159,69 @@ def independent_evaluator(ctx: dict[str, Any]) -> dict[str, Any]:
             "cefr_certificate": False, "requires_human_review": False}
 
 
+COACH_GLOSS: Final = {"ru": "Ваш ход: ответьте партнёру по-английски.",
+                      "uz": "Sizning navbatingiz: sherigingizga inglizcha javob bering."}
+COACH_OPTIONS: Final = ({"choice_id": "c1", "text_en": "Hello! Can you help me, please?"},
+                        {"choice_id": "c2", "text_en": "Sure, let's do it together."})
+COACH_SUMMARY: Final = {"ru": "Отличная командная работа! Вы вместе продвинулись к цели.",
+                        "uz": "Ajoyib jamoaviy ish! Birgalikda maqsadga yaqinlashdingiz."}
+COACH_TIP: Final = {"ru": "Попробуйте отвечать полными предложениями.",
+                    "uz": "Toʻliq gaplar bilan javob berishga harakat qiling."}
+
+
+def cooperative_lesson_coach(ctx: dict[str, Any]) -> dict[str, Any]:
+    trigger = ctx.get("trigger")
+    participants = [p for p in ctx.get("participants", []) if isinstance(p, dict)]
+    current = float(ctx.get("team_goal_progress", 0) or 0)
+    flags = set(ctx.get("safety_flags") or [])
+    out: dict[str, Any] = {
+        "room_id": str(ctx.get("room_id", "")), "status": "in_progress", "next_speaker": None,
+        "prompt": "", "prompt_gloss": None, "options": None, "roles": None, "team_goal_en": None,
+        "team_goal_progress": current, "individual_evidence": [],
+        "escalation": "abuse" if "abuse" in flags else "safety" if "personal_data" in flags else None,
+        "report": None,
+    }
+    if trigger == "end":
+        contributed = [str(p["role"]) for p in participants if int(p.get("turns", 0)) > 0]
+        out.update(status="finished", prompt="Thank you both! The lesson is over. See you next time.",
+                   report={"team_summary": dict(COACH_SUMMARY),
+                           "tips": [{"role": r, "text": dict(COACH_TIP)} for r in contributed]})
+        return out
+    if trigger == "partner_offline":
+        out.update(status="paused", prompt="Your partner lost the connection. Let's wait a moment.")
+        return out
+    online = [p for p in participants if p.get("network") == "online"] or participants
+    nxt = min(online, key=lambda p: (int(p.get("turns", 0)), str(p.get("role")))) if online else None
+    out["next_speaker"] = str(nxt["role"]) if nxt else "both"
+    who = out["next_speaker"]
+    if trigger == "start":
+        out.update(roles={"A": "You start the conversation and ask the first question.",
+                          "B": "You answer your partner and ask a question back."},
+                   team_goal_en="Finish the scene task together, both of you speaking.",
+                   prompt="Welcome! A, please start the conversation.")
+    elif trigger == "wrap_up":
+        out["prompt"] = f"Two minutes left. {who}, let's finish the task together."
+    elif trigger == "silence":
+        out["prompt"] = f"Take your time, {who}. You can say just a few words."
+    else:
+        out["prompt"] = f"Thank you! Now it's your turn, {who}."
+    if trigger == "turn":
+        out["team_goal_progress"] = round(min(1.0, current + 0.1), 2)
+        last = next((t for t in reversed(ctx.get("turns", [])) if t.get("speaker") in ("A", "B")), None)
+        if last is not None:
+            out["individual_evidence"] = [{"role": last["speaker"], "turn_id": str(last["turn_id"]),
+                                           "skill_id": None, "assist_used": last.get("mode") == "choice"}]
+    out["prompt_gloss"] = dict(COACH_GLOSS)
+    if ctx.get("mode") == "choices":
+        out["options"] = [dict(o) for o in COACH_OPTIONS]
+    return out
+
+
 AGENTS: Final[dict[str, Callable[[dict[str, Any]], dict[str, Any]]]] = {
     "conversation_partner": conversation_partner,
     "teaching_coach": teaching_coach,
     "independent_evaluator": independent_evaluator,
+    "cooperative_lesson_coach": cooperative_lesson_coach,
 }
 
 

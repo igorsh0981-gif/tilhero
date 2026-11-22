@@ -156,9 +156,10 @@ describe("«Что нового» editor", () => {
     await screen.findByTestId("wn-editor");
     const group = screen.getByRole("radiogroup", { name: "Иллюстрация заставки" });
     const radios = within(group).getAllByRole("radio");
-    expect(radios.map((r) => r.getAttribute("data-testid"))).toEqual(["wn-ill-none", "wn-ill-welcome", "wn-ill-s6-heroes"]);
+    // sprint 7: + s7-social (adults) and s7-family (children, no podium)
+    expect(radios.map((r) => r.getAttribute("data-testid"))).toEqual(["wn-ill-none", "wn-ill-welcome", "wn-ill-s6-heroes", "wn-ill-s7-social", "wn-ill-s7-family"]);
     expect(screen.getByTestId("wn-ill-none")).toBeChecked();
-    expect(group.querySelectorAll("img")).toHaveLength(2);
+    expect(group.querySelectorAll("img")).toHaveLength(4);
     expect(screen.queryByTestId("wn-pv-art")).toBeNull();
     fireEvent.click(within(group).getByRole("radio", { name: "welcome" }));
     expect(screen.getByTestId("wn-ill-welcome")).toBeChecked();
@@ -274,6 +275,7 @@ describe("overview", () => {
       ai: { available: false, data: null, service: "ai-gateway" },
       memory: { available: false, data: null, service: "memory" },
       game: { available: false, data: null, service: "gamification" },
+      social: { available: false, data: null, service: "social" },
     };
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);
     ui(<Overview />, ["dashboard.read"]);
@@ -297,6 +299,7 @@ describe("overview", () => {
       ai: { available: false, data: null, service: "ai-gateway" },
       memory: { available: false, data: null, service: "memory" },
       game: { available: false, data: null, service: "gamification" },
+      social: { available: false, data: null, service: "social" },
     };
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: d } : undefined);
     ui(<Overview />, ["dashboard.read"]);
@@ -321,7 +324,7 @@ describe("overview · sprint 4 blocks", () => {
     campaigns: { available: false, data: null, service: "notifications" },
     content: { available: false, data: null, service: "catalog" },
     diagnostics: { available: false, data: null, service: "diagnostics" },
-    lessons: { available: true, data: { period: "today", started: 64, completed: 51, completion_pct: 79.7, median_minutes: 18, by_kind: { lesson: 40, scenario: 14, media: 8, review: 2, reading: 3 }, ai_degraded_pct: 6.3, appeals_open: 2, human_review_open: 1 } },
+    lessons: { available: true, data: { period: "today", started: 64, completed: 51, completion_pct: 79.7, median_minutes: 18, by_kind: { lesson: 40, scenario: 14, media: 8, review: 2, reading: 3, duel: 0 }, ai_degraded_pct: 6.3, appeals_open: 2, human_review_open: 1 } },
     ai: {
       available: true,
       data: {
@@ -332,6 +335,7 @@ describe("overview · sprint 4 blocks", () => {
     },
     memory: { available: true, data: { period: "today", review_sessions: 84, learners_reviewing: 61, median_minutes: 6, d30_pass_pct: 78.9, avg_due_per_learner: 11.4, ai_glosses_pending: 3 } },
     game: { available: true, data: { period: "today", earned_xp: 1240, earned_til: 310, freezes_used: 4, quests_completed: 57, active_event: { title: { ru: "Неделя чтения", uz: "Oʻqish haftaligi" }, ends_at: "2026-11-23T19:00:00Z" } } },
+    social: { available: false, data: null, service: "social" },
   };
   it("lessons and ai blocks with their own «no data»; attention: budget threshold, AI off, appeals, manual reviews", async () => {
     handler = (_m, p) => (p === "/dashboard" ? { status: 200, body: base } : undefined);

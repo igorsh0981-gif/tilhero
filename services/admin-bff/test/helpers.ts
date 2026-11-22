@@ -35,6 +35,7 @@ export const URLS = {
   assessment: "http://assessment.test",
   memory: "http://memory.test",
   gamification: "http://gamification.test",
+  social: "http://social.test",
 } as const;
 export type Service = keyof typeof URLS;
 export const AUD: Record<Service, string> = {
@@ -52,6 +53,7 @@ export const AUD: Record<Service, string> = {
   assessment: "assessment",
   memory: "memory",
   gamification: "gamification",
+  social: "social",
 };
 
 export function testConfig(env: Record<string, string> = {}): Config {
@@ -78,6 +80,7 @@ export function testConfig(env: Record<string, string> = {}): Config {
     ASSESSMENT_URL: URLS.assessment,
     MEMORY_URL: URLS.memory,
     GAMIFICATION_URL: URLS.gamification,
+    SOCIAL_URL: URLS.social,
     UPSTREAM_RETRIES: "0",
     UPSTREAM_TIMEOUT_MS: "2000",
     DASHBOARD_TIMEOUT_MS: "500",
@@ -849,7 +852,7 @@ export function aiProvider(p: Record<string, unknown> = {}) {
 }
 
 export function aiBudget(p: Record<string, unknown> = {}) {
-  return { ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, alert_percent: 80, updated_at: "2026-11-19T00:00:00Z", ...p };
+  return { ai_enabled: true, monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, room_cap_usd: 0.1, alert_percent: 80, updated_at: "2026-11-19T00:00:00Z", ...p };
 }
 
 export function aiCall(p: Record<string, unknown> = {}) {
@@ -1025,7 +1028,7 @@ export const LESSON_STATS_DOMAIN = {
   completed: 31,
   completion_pct: 77.5,
   median_minutes: 19,
-  by_kind: { lesson: 30, scenario: 6, media: 3, review: 1, reading: 2 },
+  by_kind: { lesson: 30, scenario: 6, media: 3, review: 1, reading: 2, duel: 5 },
   ai_degraded_pct: 4.2,
 };
 
@@ -1464,6 +1467,303 @@ export function gameOverview(p: Record<string, unknown> = {}) {
   };
 }
 
+// ---------------------------------------------------------------- спринт 7: социальное (social, gamification, lessons)
+
+export const SOCIAL_STAFF_ID = "9e0f1a2b-3c4d-4e5f-8a71-8293a4b5c6d7";
+export const TARGET_USER_ID = "8d9e0f1a-2b3c-4d4e-9f60-718293a4b5c6";
+export const CASE_ID = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
+export const SANCTION_ID = "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f60";
+export const SANCTION_APPEAL_ID = "3e4f5a6b-7c8d-4e9f-8a1b-2c3d4e5f6071";
+export const REFERRAL_ID = "4f5a6b7c-8d9e-4f0a-9b2c-3d4e5f607182";
+export const GROUP_ID = "5a6b7c8d-9e0f-4a1b-8c3d-4e5f60718293";
+export const DUEL_ID = "6b7c8d9e-0f1a-4b2c-9d4e-5f60718293a4";
+export const ROOM_ID = "7c8d9e0f-1a2b-4c3d-8e5f-60718293a4b5";
+export const MEMBER_ID = "mb_AbCdEfGhIjKlMnOpQrStUv";
+export const MEMBER_ID_2 = "mb_ZyXwVuTsRqPoNmLkJiHg-_";
+export const WEEK = "2026-11-16";
+const T0 = "2026-11-20T09:00:00Z";
+const T1 = "2026-11-21T10:00:00Z";
+
+export function sanctionDomain(p: Record<string, unknown> = {}) {
+  return {
+    sanction_id: SANCTION_ID,
+    user_id: TARGET_USER_ID,
+    kind: "social_ban",
+    until: "2026-11-28T10:00:00Z",
+    active: true,
+    basis: "Оскорбительный ник и три жалобы",
+    case_id: CASE_ID,
+    decided_by: { staff_id: SOCIAL_STAFF_ID, name: "Имя из токена" },
+    decided_at: T1,
+    revoked_at: null,
+    revoked_by: null,
+    revoke_reason: null,
+    appeal: null,
+    ...p,
+  };
+}
+export function caseRowDomain(p: Record<string, unknown> = {}) {
+  return {
+    case_id: CASE_ID,
+    status: "open",
+    reporter_user_id: LEARNER_USER_ID,
+    target_user_id: TARGET_USER_ID,
+    target_nickname: "Bahodir_07",
+    subject_kind: "nickname",
+    subject_id: MEMBER_ID,
+    reason: "inappropriate_nickname",
+    target_complaints_30d: 3,
+    created_at: T0,
+    resolved_at: null,
+    ...p,
+  };
+}
+export function caseDomain(p: Record<string, unknown> = {}) {
+  return {
+    ...caseRowDomain(),
+    comment: "Ник обидный, прошу проверить",
+    subject: { nickname_at_report: "Bahodir_07", status: null },
+    resolution: null,
+    target_sanctions: [sanctionDomain()],
+    ...p,
+  };
+}
+export function sanctionAppealDomain(p: Record<string, unknown> = {}) {
+  return {
+    appeal_id: SANCTION_APPEAL_ID,
+    sanction: sanctionDomain({ appeal: { appeal_id: SANCTION_APPEAL_ID, status: "open" } }),
+    text: "Я сменил ник, прошу снять запрет",
+    status: "open",
+    created_at: T1,
+    decided_by: null,
+    decided_at: null,
+    decision_note: null,
+    ...p,
+  };
+}
+export function socialCardDomain(p: Record<string, unknown> = {}) {
+  return {
+    user_id: LEARNER_USER_ID,
+    member_id: MEMBER_ID,
+    nickname: "Лола_учит",
+    friend_code: "TH-7KQ2-M9XA",
+    game_profile_hidden: false,
+    nickname_changed_at: T0,
+    friends: 4,
+    requests: [{ request_id: OP_ID, direction: "out", status: "accepted", created_at: T0, decided_at: T1 }],
+    blocks: { given: 1, received: 0 },
+    cases: { as_reporter: 1, as_target: 0, open_as_target: 0, recent: [caseRowDomain()] },
+    sanctions: [],
+    restrictions: { social_ban: false, social_ban_until: null },
+    ...p,
+  };
+}
+export function campaignPayload(p: Record<string, unknown> = {}) {
+  return {
+    require_diagnostic: true,
+    min_lessons: 3,
+    min_days: 2,
+    window_days: 30,
+    inviter_reward: { freeze: 2, til: 0 },
+    invitee_reward: { freeze: 0, til: 0 },
+    monthly_cap: 10,
+    review: { velocity_per_day: 5, min_lesson_minutes: 3 },
+    ...p,
+  };
+}
+export function campaignSummaryDomain(p: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    status: "active",
+    comment: "Начальная кампания",
+    based_on: null,
+    created_by: null,
+    created_at: "2026-11-01T00:00:00Z",
+    validated_at: "2026-11-01T00:00:00Z",
+    activated_by: null,
+    activated_at: "2026-11-01T00:00:00Z",
+    ...p,
+  };
+}
+export function campaignVersionDomain(p: Record<string, unknown> = {}) {
+  return { ...campaignSummaryDomain(), payload: campaignPayload(), diff: [], updated_at: "2026-11-01T00:00:00Z", ...p };
+}
+export function campaignStatsDomain(p: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    invited: 40,
+    in_progress: 20,
+    in_review: 3,
+    qualified: 12,
+    rejected: 2,
+    expired: 2,
+    capped: 1,
+    rewards: { inviter: { freeze: 24, til: 0 }, invitee: { freeze: 0, til: 0 } },
+    ...p,
+  };
+}
+export function referralRowDomain(p: Record<string, unknown> = {}) {
+  return {
+    referral_id: REFERRAL_ID,
+    inviter_user_id: LEARNER_USER_ID,
+    invitee_user_id: TARGET_USER_ID,
+    campaign_version: 1,
+    status: "review",
+    accepted_at: "2026-11-10T08:00:00Z",
+    diagnostic_at: "2026-11-10T09:00:00Z",
+    lessons: 3,
+    days: 2,
+    minutes_total: 7,
+    risk_flags: ["short_lessons"],
+    reject_code: null,
+    reward_outcome: null,
+    qualified_at: null,
+    decided_by: null,
+    decided_at: null,
+    ...p,
+  };
+}
+export function referralDomain(p: Record<string, unknown> = {}) {
+  return {
+    ...referralRowDomain(),
+    lessons_log: [
+      { local_date: "2026-11-11", minutes: 2 },
+      { local_date: "2026-11-11", minutes: 2 },
+      { local_date: "2026-11-12", minutes: 3 },
+    ],
+    inviter_month: { qualified: 4, cap: 10 },
+    decision_history: [],
+    can_redecide: false,
+    ...p,
+  };
+}
+export function leagueGroupRowDomain(p: Record<string, unknown> = {}) {
+  return {
+    group_id: GROUP_ID,
+    week: WEEK,
+    pair_id: "ru-en",
+    level_band: "A2",
+    group_no: 1,
+    size: 24,
+    status: "held",
+    version: 1,
+    anomalies: 1,
+    closed_at: "2026-11-23T00:05:00+05:00",
+    ...p,
+  };
+}
+export function leagueWeekDomain(p: Record<string, unknown> = {}) {
+  return {
+    week: WEEK,
+    starts_at: "2026-11-16T00:00:00+05:00",
+    ends_at: "2026-11-23T00:00:00+05:00",
+    status: "closed",
+    participants: 24,
+    prizes_til: 0,
+    groups: [leagueGroupRowDomain()],
+    ...p,
+  };
+}
+export function leagueGroupDomain(p: Record<string, unknown> = {}) {
+  return {
+    ...leagueGroupRowDomain(),
+    members: [
+      { user_id: LEARNER_USER_ID, member_id: MEMBER_ID, nickname: "Лола_учит", xp: 4200, place: 1, prize_til: 0, anomaly: true, excluded: false, joined_at: "2026-11-16T08:00:00Z" },
+      { user_id: TARGET_USER_ID, member_id: MEMBER_ID_2, nickname: null, xp: 300, place: 2, prize_til: 0, anomaly: false, excluded: false, joined_at: "2026-11-17T08:00:00Z" },
+    ],
+    results: [
+      {
+        version: 1,
+        standings: [{ user_id: LEARNER_USER_ID, place: 1, xp: 4200, prize_til: 50 }, { user_id: TARGET_USER_ID, place: 2, xp: 300, prize_til: 30 }],
+        prizes_held: true,
+        excluded_user_ids: [],
+        closed_at: "2026-11-23T00:05:00+05:00",
+        closed_by: null,
+        reason: null,
+      },
+    ],
+    ...p,
+  };
+}
+export function duelRowDomain(p: Record<string, unknown> = {}) {
+  return {
+    duel_id: DUEL_ID,
+    status: "finished",
+    challenger_user_id: LEARNER_USER_ID,
+    opponent_user_id: TARGET_USER_ID,
+    pair_id: "ru-en",
+    level_band: "A2",
+    scores: { challenger: { correct: 8, total: 10 }, opponent: { correct: 6, total: 10 } },
+    result: "challenger",
+    technical: false,
+    result_version: 1,
+    created_at: "2026-11-18T10:00:00Z",
+    finished_at: "2026-11-19T10:00:00Z",
+    ...p,
+  };
+}
+export function duelDomain(p: Record<string, unknown> = {}) {
+  return {
+    ...duelRowDomain(),
+    set_id: OP_ID_2,
+    accept_deadline: "2026-11-19T10:00:00Z",
+    play_deadline: "2026-11-20T11:00:00Z",
+    rewards: [
+      { user_id: LEARNER_USER_ID, op_id: OP_ID, amount: 30, status: "confirmed", result_version: 1 },
+      { user_id: TARGET_USER_ID, op_id: OP_ID_2, amount: 10, status: "confirmed", result_version: 1 },
+    ],
+    history: [],
+    ...p,
+  };
+}
+function pairParticipant(p: Record<string, unknown> = {}) {
+  return {
+    user_id: LEARNER_USER_ID,
+    side: "inviter",
+    role: "A",
+    turns: 6,
+    speaking_seconds: 84.5,
+    minutes: 12,
+    contributed: true,
+    network: "online",
+    joined_at: "2026-11-20T10:00:00Z",
+    ...p,
+  };
+}
+export function pairRoomRowDomain(p: Record<string, unknown> = {}) {
+  return {
+    room_id: ROOM_ID,
+    status: "in_progress",
+    pair_id: "ru-en",
+    scenario_id: "cafe-order",
+    scenario_title: { ru: "Заказ в кафе", uz: "Kafeda buyurtma" },
+    mode: "free",
+    participants: [pairParticipant(), pairParticipant({ user_id: TARGET_USER_ID, side: "invitee", role: "B", turns: 0, speaking_seconds: 0, contributed: false, network: "offline" })],
+    created_at: "2026-11-20T09:55:00Z",
+    start_at: "2026-11-20T10:00:00Z",
+    started_at: "2026-11-20T10:00:30Z",
+    ended_at: null,
+    duration_s: 690,
+    end_reason: null,
+    ai_cost_usd: 0.034,
+    ...p,
+  };
+}
+export function pairRoomDomain(p: Record<string, unknown> = {}) {
+  return {
+    ...pairRoomRowDomain(),
+    timeline: [
+      { seq: 1, kind: "joined", role: "A", at: "2026-11-20T10:00:10Z" },
+      { seq: 2, kind: "roles", role: null, at: "2026-11-20T10:00:30Z" },
+      { seq: 3, kind: "turn", role: "A", at: "2026-11-20T10:01:00Z" },
+    ],
+    stopped_by: null,
+    stop_reason: null,
+    ...p,
+  };
+}
+export const SOCIAL_STATS_DOMAIN = { friend_requests: 25, friendships_added: 18, referrals_in_review: 3, cases_opened: 4, cases_open: 2 };
+
 export class FakeDomains {
   readonly calls: Call[] = [];
   readonly staff = new Map<string, FakeStaff>();
@@ -1610,7 +1910,9 @@ export class FakeDomains {
       case "memory":
         return this.memory(c, key);
       case "gamification":
-        return this.gamification(c, key);
+        return this.leaguesAndDuels(c, key) ?? this.gamification(c, key);
+      case "social":
+        return this.social(c, key);
     }
     return domainError(404, "NOT_FOUND");
   }
@@ -1758,7 +2060,86 @@ export class FakeDomains {
     return domainError(404, "NOT_FOUND");
   }
 
+  /** gamification `/internal/v1/admin/game/leagues*`, `…/duels*` (спринт 7): StaffRef — {staff_id, name} из actor. */
+  private leaguesAndDuels(c: Call, key: string): Response | null {
+    const B = "/internal/v1/admin/game";
+    const by = { staff_id: c.actor?.id ?? SOCIAL_STAFF_ID, name: c.actor?.name ?? "Имя из токена" };
+    if (key === `GET ${B}/duels/stats`) return json(200, { period: c.query.period ?? "today", duels_finished: 12, duels_started: 20 });
+    if (key === `GET ${B}/leagues`) return json(200, leagueWeekDomain(c.query.week ? { week: c.query.week } : {}));
+    const lg = /^\/internal\/v1\/admin\/game\/leagues\/([^/]+)(\/reevaluate|\/release-prizes)?$/.exec(c.path);
+    if (lg && c.method === "GET" && !lg[2]) return json(200, leagueGroupDomain({ group_id: lg[1] }));
+    if (lg && c.method === "POST" && lg[2] === "/reevaluate") {
+      const prev = leagueGroupDomain().results[0]!;
+      const v2 = { ...prev, version: 2, excluded_user_ids: c.body.exclude_user_ids, closed_by: by, reason: c.body.reason, prizes_held: false, closed_at: "2026-11-24T10:00:00Z" };
+      return json(200, leagueGroupDomain({ group_id: lg[1], version: 2, status: "closed", results: [v2, prev] }));
+    }
+    if (lg && c.method === "POST" && lg[2] === "/release-prizes") return json(200, leagueGroupDomain({ group_id: lg[1], status: "closed" }));
+    if (key === `GET ${B}/duels`) return json(200, { items: [duelRowDomain(), duelRowDomain({ duel_id: randomUUID(), status: "challenged", scores: { challenger: null, opponent: null }, result: null, result_version: 0, finished_at: null })], next_cursor: "d2" });
+    const dl = /^\/internal\/v1\/admin\/game\/duels\/([^/]+)(\/reevaluate)?$/.exec(c.path);
+    if (dl && c.method === "GET" && !dl[2]) return json(200, duelDomain({ duel_id: dl[1] }));
+    if (dl && c.method === "POST" && dl[2]) {
+      return json(200, duelDomain({ duel_id: dl[1], result: c.body.result, result_version: 2, history: [{ version: 1, result: "challenger", reason: null, by: null, at: "2026-11-19T10:00:00Z" }] }));
+    }
+    return null;
+  }
+
+  /** social `/internal/v1/admin/*` (спринт 7): карточка, модерация, рефералы, обзор; StaffRef — из actor-токена. */
+  private social(c: Call, key: string): Response {
+    const B = "/internal/v1/admin";
+    const by = { staff_id: c.actor?.id ?? SOCIAL_STAFF_ID, name: c.actor?.name ?? "Имя из токена" };
+    if (key === `GET ${B}/social/stats`) return json(200, { period: c.query.period ?? "today", ...SOCIAL_STATS_DOMAIN });
+    const u = /^\/internal\/v1\/admin\/social\/users\/([^/]+)$/.exec(c.path);
+    if (u && c.method === "GET") return json(200, socialCardDomain({ user_id: u[1] }));
+    if (key === `GET ${B}/moderation/cases`) return json(200, { items: [caseRowDomain(), caseRowDomain({ case_id: randomUUID(), reporter_user_id: null, subject_kind: "pair_room", subject_id: ROOM_ID, reason: "abuse" })], next_cursor: null });
+    const cs = /^\/internal\/v1\/admin\/moderation\/cases\/([^/]+)(\/resolve)?$/.exec(c.path);
+    if (cs && c.method === "GET" && !cs[2]) return json(200, caseDomain({ case_id: cs[1] }));
+    if (cs && c.method === "POST" && cs[2]) {
+      const dismissed = c.body.action === "dismiss";
+      return json(200, caseDomain({ case_id: cs[1], status: dismissed ? "dismissed" : "resolved", resolved_at: T1, resolution: { action: c.body.action, sanction_id: dismissed ? null : SANCTION_ID, basis: c.body.basis, resolved_by: by } }));
+    }
+    if (key === `GET ${B}/moderation/sanctions`) return json(200, { items: [sanctionDomain(), sanctionDomain({ sanction_id: randomUUID(), kind: "warning", until: null, active: false })], next_cursor: null });
+    const sn = /^\/internal\/v1\/admin\/moderation\/sanctions\/([^/]+)\/revoke$/.exec(c.path);
+    if (sn && c.method === "POST") return json(200, sanctionDomain({ sanction_id: sn[1], active: false, revoked_at: T1, revoked_by: by, revoke_reason: c.body.reason }));
+    if (key === `GET ${B}/moderation/appeals`) return json(200, { items: [sanctionAppealDomain()], next_cursor: null });
+    const ap = /^\/internal\/v1\/admin\/moderation\/appeals\/([^/]+)\/decide$/.exec(c.path);
+    if (ap && c.method === "POST") {
+      return json(200, sanctionAppealDomain({ appeal_id: ap[1], status: c.body.decision, decided_by: by, decided_at: T1, decision_note: c.body.note }));
+    }
+    if (key === `GET ${B}/referrals/campaigns`) return json(200, { items: [campaignSummaryDomain({ version: 2, status: "draft", validated_at: null, activated_at: null, created_by: by, based_on: 1 }), campaignSummaryDomain()] });
+    if (key === `GET ${B}/referrals/campaigns/stats`) return json(200, { items: [campaignStatsDomain()] });
+    if (key === `PUT ${B}/referrals/campaigns/draft`) {
+      return json(200, campaignVersionDomain({ version: 2, status: "draft", payload: c.body.payload, comment: c.body.comment, based_on: c.body.based_on, created_by: by, validated_at: null, activated_at: null, updated_at: T1 }));
+    }
+    if (key === `DELETE ${B}/referrals/campaigns/draft`) return new Response(null, { status: 204 });
+    if (key === `POST ${B}/referrals/campaigns/draft/validate`) return json(200, { ok: true, errors: [], warnings: [{ path: "monthly_cap", code: "HIGH_CAP" }] });
+    if (key === `POST ${B}/referrals/campaigns/draft/activate`) {
+      return json(200, campaignVersionDomain({ version: 2, status: "active", comment: c.body.comment, based_on: 1, created_by: by, activated_by: by, activated_at: T1, updated_at: T1 }));
+    }
+    const cv = /^\/internal\/v1\/admin\/referrals\/campaigns\/(\d+)$/.exec(c.path);
+    if (cv && c.method === "GET") return json(200, campaignVersionDomain({ version: Number(cv[1]) }));
+    if (key === `GET ${B}/referrals`) return json(200, { items: [referralRowDomain(), referralRowDomain({ referral_id: randomUUID(), status: "rewarded", risk_flags: [], reward_outcome: "rewarded", qualified_at: T1 })], next_cursor: null });
+    const rf = /^\/internal\/v1\/admin\/referrals\/([^/]+)(\/approve|\/reject)?$/.exec(c.path);
+    if (rf && c.method === "GET" && !rf[2]) return json(200, referralDomain({ referral_id: rf[1] }));
+    if (rf && c.method === "POST" && rf[2] === "/approve") {
+      return json(200, referralDomain({ referral_id: rf[1], status: "qualified", qualified_at: T1, decided_by: by, decided_at: T1, decision_history: [{ decision: "approved", reject_code: null, note: c.body.note, by, at: T1 }] }));
+    }
+    if (rf && c.method === "POST" && rf[2] === "/reject") {
+      return json(200, referralDomain({ referral_id: rf[1], status: "rejected", reject_code: c.body.reject_code, decided_by: by, decided_at: T1, can_redecide: true, decision_history: [{ decision: "rejected", reject_code: c.body.reject_code, note: c.body.note, by, at: T1 }] }));
+    }
+    return domainError(404, "NOT_FOUND");
+  }
+
   private lessons(c: Call, key: string): Response {
+    // спринт 7: парные комнаты — /internal/v1/admin/pair-rooms*
+    const R = "/internal/v1/admin/pair-rooms";
+    if (key === `GET ${R}/stats`) return json(200, { period: c.query.period ?? "today", pair_rooms_finished: 4 });
+    if (key === `GET ${R}`) return json(200, { items: [pairRoomRowDomain(), pairRoomRowDomain({ room_id: randomUUID(), status: "finished", ended_at: "2026-11-19T10:20:00Z", end_reason: "completed" })], next_cursor: null });
+    const pr = /^\/internal\/v1\/admin\/pair-rooms\/([^/]+)(\/stop)?$/.exec(c.path);
+    if (pr && c.method === "GET" && !pr[2]) return json(200, pairRoomDomain({ room_id: pr[1] }));
+    if (pr && c.method === "POST" && pr[2]) {
+      const by = { staff_id: c.actor?.id ?? SOCIAL_STAFF_ID, name: c.actor?.name ?? "Имя из токена" };
+      return json(200, pairRoomDomain({ room_id: pr[1], status: "stopped", ended_at: T1, end_reason: "stopped", stopped_by: by, stop_reason: c.body.reason }));
+    }
     const B = "/admin/v1/lesson-sessions";
     if (key === `GET ${B}/stats`) return json(200, { ...LESSON_STATS_DOMAIN, period: c.query.period ?? "today" });
     if (key === `GET ${B}`) return json(200, { items: [sessionRowDomain(), sessionRowDomain({ session_id: SESSION_ID_2, ai_mode: "choices", audience: "kids", flags: ["hints"] })], next_cursor: null });

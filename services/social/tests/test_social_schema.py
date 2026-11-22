@@ -16,7 +16,9 @@ from tilhero_social.main import build_app
 from tilhero_social.models import Base
 
 TABLES = ("invites", "invite_redemptions", "families", "family_members", "friendships", "profiles", "deleted_users",
-          "outbox")
+          "outbox", "member_ids", "community_profiles", "friend_requests", "blocks", "cases", "sanctions", "appeals",
+          "referral_campaigns", "referrals", "referral_lessons", "learner_activity", "learner_idempotency",
+          "nickname_stoplist", "counters")
 
 
 async def test_models_match_migrations_and_runtime_role() -> None:

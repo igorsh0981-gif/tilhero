@@ -3,6 +3,7 @@ import { uzContent } from "./uz.content";
 import { uzGame } from "./uz.game";
 import { uzLessons } from "./uz.lessons";
 import { uzMemory } from "./uz.memory";
+import { uzSocial } from "./uz.social";
 
 /** Oʻzbekcha (lotin yozuvi). Exactly the keys of ru.ts; no Cyrillic (test/i18n.test.ts). Apostrophes: ʻ (U+02BB) in
  *  oʻ / gʻ, ʼ (U+02BC) for the tutuq belgisi. Draft translation — checked by the methodologist (prototype note). */
@@ -11,6 +12,7 @@ export const uz: Record<MessageKey, string> = {
   ...uzLessons,
   ...uzMemory,
   ...uzGame,
+  ...uzSocial,
   // ---- common ----
   "c.continue": "Davom etish",
   "c.back": "Orqaga",

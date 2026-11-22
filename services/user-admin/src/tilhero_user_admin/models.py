@@ -41,8 +41,8 @@ LOCALES = ("ru", "uz")
 GOALS = ("work", "career", "travel", "daily", "study", "exam")
 LEVELS = ("zero", "beginner", "some", "confident")
 PRESETS = ("daily", "weekdays", "three_per_week", "custom")
-# категории настроек ученика (admin.ts NotificationCategory без service)
-CATEGORIES = ("reminders", "missed", "social", "support", "product")
+# категории настроек ученика (admin.ts NotificationCategory без service; спринт 7: + game, миграция 0003)
+CATEGORIES = ("reminders", "missed", "social", "support", "product", "game")
 TICKET_STATUSES = ("NEW", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED")
 OPEN_TICKET_STATUSES = ("NEW", "IN_PROGRESS", "WAITING_CUSTOMER")
 MASK = "•"
@@ -125,7 +125,8 @@ class LearnerSummary(Base):
     security: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text(SECURITY_DEFAULT_SQL))
     pin_at: Mapped[datetime | None] = mapped_column(TS)
     pin_reset_at: Mapped[datetime | None] = mapped_column(TS)
-    # --- настройки уведомлений {enabled, categories{reminders, missed, social, support, product}}; NULL — не известны
+    # --- настройки уведомлений {enabled, categories{reminders, missed, social, support, product, game}}; NULL —
+    # не известны
     # (none_as_null: None → SQL NULL, а не JSON null — CHECK ck_learner_deleted_erased)
     notifications: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     notifications_at: Mapped[datetime | None] = mapped_column(TS)

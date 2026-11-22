@@ -19,8 +19,18 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tilhero_common.messaging import emit
+from tilhero_lessons.domain import duels, pair
 from tilhero_lessons.domain.common import DOMAIN_DELETED, PRODUCER, lock_user, user_deleted
-from tilhero_lessons.models import DeletedUser, LearnerProfile, ReviewItem, Session
+from tilhero_lessons.models import (
+    CommunityMember,
+    DeletedUser,
+    LearnerProfile,
+    ReviewItem,
+    Session,
+    SocialBlock,
+    SocialSanction,
+)
+from tilhero_lessons.settings import Settings
 
 KIDS_AGE_BANDS = frozenset({"6-9", "10-13"})
 AGE_BANDS = frozenset({"6-9", "10-13", "14-17", "18+"})
@@ -75,7 +85,8 @@ async def on_profile_event(session: AsyncSession, event_type: str, payload: dict
     """user.profile.created.v1 → kind и age_band; user.profile.updated.v1 → age_band, если поле есть в событии.
     Запоздавшее событие не откатывает более новое значение возраста; удалённый ученик не воскрешается."""
     user_id = uuid.UUID(str(payload["user_id"]))
-    if await session.get(DeletedUser, user_id) is not None:
+    await lock_user(session, user_id)  # как сага: проверка удаления — после блокировки ученика
+    if await session.get(DeletedUser, user_id, populate_existing=True) is not None:
         return
     at = occurred_at.astimezone(UTC)
     row = (await session.execute(
@@ -99,14 +110,24 @@ async def on_profile_event(session: AsyncSession, event_type: str, payload: dict
 
 
 async def delete_user_data(session: AsyncSession, user_id: uuid.UUID, request_id: uuid.UUID,
-                           causation_id: str | None) -> None:
-    """Физическое удаление сессий ученика (и сессий, начатых из его аккаунта) с шагами, репликами и историей
-    (каскад), очереди повторения и проекции профиля + ACK `user.domain.deleted.v1 {domain: lessons, mode: deleted}`.
-    Повтор саги снова подтверждается."""
+                           causation_id: str | None, *, now: datetime | None = None,
+                           settings: Settings | None = None) -> None:
+    """Физическое удаление сессий ученика (и сессий, начатых из его аккаунта; спринт 7 — и сессий дуэли) с шагами,
+    репликами и историей (каскад), очереди повторения и проекций (профиль, сообщество, блокировки, санкции);
+    наборы дуэлей и начатые парные комнаты обезличиваются (отчёт и реплики партнёра не трогаются), неначатые
+    комнаты удаляются + ACK `user.domain.deleted.v1 {domain: lessons, mode: deleted}`. Повтор саги снова
+    подтверждается. Блокировка ученика держится до фиксации: параллельные команды ждут и видят удаление."""
+    when = now or datetime.now(UTC)
     await lock_user(session, user_id)
     await session.execute(delete(Session).where(or_(Session.user_id == user_id, Session.account_id == user_id)))
     await session.execute(delete(ReviewItem).where(ReviewItem.user_id == user_id))
     await session.execute(delete(LearnerProfile).where(LearnerProfile.user_id == user_id))
+    await duels.forget_user(session, user_id)
+    await pair.forget_user(session, user_id, when, settings or Settings())
+    await session.execute(delete(CommunityMember).where(CommunityMember.user_id == user_id))
+    await session.execute(delete(SocialBlock).where(or_(SocialBlock.blocker == user_id,
+                                                        SocialBlock.blocked == user_id)))
+    await session.execute(delete(SocialSanction).where(SocialSanction.user_id == user_id))
     await session.execute(
         insert(DeletedUser).values(user_id=user_id, request_id=request_id).on_conflict_do_nothing(
             index_elements=["user_id"])

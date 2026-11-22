@@ -13,6 +13,8 @@
   пройденного урока после переоценки (сессия — по заменённой оценке: session_id в событии нет);
 - спринт 5 (INTERNAL_API §6, AT-59): `memory.review.completed.v1` (memory) — занятие `review` («Повторение дня»,
   идемпотентно по session_id, 0 минут не засчитывается); kind `reading` у событий уроков — практика;
+- спринт 7 (INTERNAL_API спринта 7 §10, решение 2): kind `duel` и `pair` у событий уроков — практика (день графика и
+  серия, минуты — из события; пройденным уроком не считается), а не DLQ;
 - спринт 6 (INTERNAL_API спринта 6 §2, AT-66): `game.streak.frozen.v1` (только gamification) — день закрыт
   заморозкой серии (`frozen_days`, повтор ничего не меняет): пропуск этого дня не рвёт серию и цепочку пропусков,
   неделя TodayPlan показывает `frozen`. Единственное обратное влияние игры на учёбу.
@@ -130,11 +132,13 @@ class ProfileUpdated(_Payload):
 
 
 class SessionCompletedIn(_Payload):
-    """lesson.session.completed.v1 (схема — packages/contracts/events)."""
+    """lesson.session.completed.v1 (схема — packages/contracts/events). Спринт 7 (INTERNAL_API спринта 7 §10,
+    решение 2): kind duel (дуэль) и pair (парный урок) — практика; duel_id, room_id, score не нужны (терпимый
+    читатель)."""
 
     session_id: uuid.UUID
     user_id: uuid.UUID
-    kind: Literal["lesson", "scenario", "media", "review", "reading"]
+    kind: Literal["lesson", "scenario", "media", "review", "reading", "duel", "pair"]
     pair_id: Annotated[str, Field(min_length=1, max_length=200)]
     lesson_id: Annotated[str, Field(min_length=1, max_length=200)] | None = None
     status: Literal["completed", "cancelled", "failed"]

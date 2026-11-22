@@ -124,7 +124,7 @@ export class FakeGame {
         hero: null,
         owned: new Set(),
         equipment: { background: null, frame: null },
-        settings: { auto_freeze: true, quests_hidden: false, celebrations: kids ? "quiet" : "full", game_notifications: true },
+        settings: { auto_freeze: true, quests_hidden: false, celebrations: kids ? "quiet" : "full", game_notifications: true, league_opt_in: false },
         ops: [
           { op_id: randomUUID(), currency: "xp", amount: 20, reason: "lesson", capped: false, multiplier: 1, status: "confirmed", created_at: "2026-11-20T09:00:00Z", actor: "system", comment: null },
           { op_id: randomUUID(), currency: "til", amount: 5, reason: "lesson", capped: true, multiplier: 2, status: "confirmed", created_at: "2026-11-20T08:00:00Z", actor: "system", comment: null },

@@ -33,8 +33,10 @@ const ids = (role: RoleCode, menu?: Array<{ id: string; enabled: boolean }>) => 
 const live = (role: RoleCode) => ids(role);
 const GAME = ["heroes", "game", "events"];
 
-/** sprint 5 sections not yet in the experience-config whitelist (ADMIN_MENU) — they follow the config's sections */
-const NOT_IN_SEED = ["memory"];
+/** sections not in the experience-config seed 1.0.0 — they follow the config's sections: «memory» (sprint 5) and the five
+ *  of «Сообщество» (sprint 7: ADMIN_MENU friends, moderation, referrals, leagues, pair_rooms) */
+const SOCIAL = ["friends", "moderation", "referrals", "leagues", "pair_rooms"];
+const NOT_IN_SEED = ["memory", ...SOCIAL];
 
 describe("menu: 15 sections of the experience-config seed + «memory» (sprint 5), filtered by role (UX only — admin-bff re-checks)", () => {
   it("the menu ids are the admin seed (services/experience-config 0002_seed.py) plus the sprint 5 section", () => {
@@ -129,12 +131,46 @@ describe("menu order and switches from the active admin config (layout.menu)", (
   });
   it("an empty menu falls back to the defaults", () => {
     expect(orderedItems([]).map((i) => i.id)).toEqual(NAV_ITEMS.map((i) => i.id));
-    expect(orderedItems(null)).toHaveLength(16);
+    expect(orderedItems(null)).toHaveLength(21);
   });
   it("a section the config does not know yet («memory») follows the config's sections and joins its group", () => {
     const seedMenu = ["overview", "users", "content", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit"].map((id) => ({ id, enabled: true }));
-    expect(orderedItems(seedMenu).map((i) => i.id).at(-1)).toBe("memory");
+    expect(orderedItems(seedMenu).map((i) => i.id).slice(-6)).toEqual(["memory", ...SOCIAL]);
     expect(visibleNav(new Set(ALL), seedMenu)[0]!.items.map((i) => i.id)).toEqual(["overview", "users", "content", "memory"]);
+  });
+});
+
+describe("sprint 7: «Сообщество» — five sections by their own read rights (PLAN «Права»)", () => {
+  const S7: Permission[] = ["social.read", "moderation.manage", "referral.read", "referral.manage", "league.read", "league.manage", "room.read", "room.manage"];
+  const roles: Record<string, Permission[]> = {
+    support: [...MATRIX.support, "social.read", "moderation.manage", "referral.read", "room.read"],
+    operations: [...MATRIX.operations, ...S7],
+    content_manager: [...MATRIX.content_manager, "league.read"],
+    analyst: [...MATRIX.analyst, "social.read", "referral.read", "league.read", "room.read"],
+  };
+  const social = (ps: Permission[]) => visibleNav(new Set(ps)).find((g) => g.group === "social")?.items.map((i) => i.id) ?? [];
+  it("each section opens with its read right only; the manage rights alone open nothing but «Модерация»", () => {
+    expect(pageAllowed("friends", new Set<Permission>(["social.read"]))).toBe(true);
+    expect(pageAllowed("moderation", new Set<Permission>(["moderation.manage"]))).toBe(true);
+    expect(pageAllowed("moderation", new Set<Permission>(["social.read"]))).toBe(false);
+    expect(pageAllowed("referrals", new Set<Permission>(["referral.read"]))).toBe(true);
+    expect(pageAllowed("referrals", new Set<Permission>(["referral.manage"]))).toBe(false);
+    expect(pageAllowed("leagues", new Set<Permission>(["league.read"]))).toBe(true);
+    expect(pageAllowed("leagues", new Set<Permission>(["league.manage", "game.read"]))).toBe(false);
+    expect(pageAllowed("pair_rooms", new Set<Permission>(["room.read"]))).toBe(true);
+    expect(pageAllowed("pair_rooms", new Set<Permission>(["room.manage", "dashboard.read"]))).toBe(false);
+  });
+  it("the group «Сообщество» per role: support — friends, moderation, referrals, rooms; content manager — leagues; analyst — the reads", () => {
+    expect(social(roles.operations!)).toEqual(SOCIAL);
+    expect(social(roles.support!)).toEqual(["friends", "moderation", "referrals", "pair_rooms"]);
+    expect(social(roles.content_manager!)).toEqual(["leagues"]);
+    expect(social(roles.analyst!)).toEqual(["friends", "referrals", "leagues", "pair_rooms"]);
+    expect(social(MATRIX.communications)).toEqual([]);
+    expect(visibleNav(new Set([...ALL, ...S7])).map((g) => g.group)).toEqual(["product", "ai", "game", "social", "comms", "manage"]);
+  });
+  it("the hash keeps «_» of the menu id: #/pair_rooms/<id>", () => {
+    expect(parseHash("#/pair_rooms/f7000000-0000-4000-8000-000000000002")).toEqual({ page: "pair_rooms", id: "f7000000-0000-4000-8000-000000000002" });
+    expect(routeHash("pair_rooms", "x")).toBe("#/pair_rooms/x");
   });
 });
 

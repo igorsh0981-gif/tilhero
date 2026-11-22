@@ -78,7 +78,7 @@ def test_db_passwords_cover_every_role_and_secrets_are_unique():
     assert set(roles) == schemas | {f"{x}_owner" for x in schemas}
     assert all(f"'{x}'" in bootstrap for x in schemas)
     values = [*sec.passwords.values(), sec.scheduler, sec.session_jwt, sec.invite_key, sec.webhook, sec.internal_hmac,
-              sec.n8n_key, sec.mfa_key, sec.admin_password, sec.user_ref]
+              sec.n8n_key, sec.mfa_key, sec.admin_password, sec.user_ref, sec.member_key]
     assert len(values) == len(set(values))
 
 
@@ -124,7 +124,7 @@ def test_admin_services_sprint2():
     assert {k for k in bff if k.endswith("_URL") and k != "REDIS_URL"} == {
         "ADMIN_IDENTITY_URL", "USER_ADMIN_URL", "IDENTITY_URL", "SUPPORT_URL", "AUDIT_URL", "EXPERIENCE_URL",
         "NOTIFICATIONS_URL", "CATALOG_URL", "DIAGNOSTICS_URL", "AI_GATEWAY_URL", "LESSONS_URL", "ASSESSMENT_URL",
-        "MEMORY_URL", "GAMIFICATION_URL"}
+        "MEMORY_URL", "GAMIFICATION_URL", "SOCIAL_URL"}
     assert not rs.by_name("admin-bff").public and rs.by_name("admin-web").public
     web = env_of(files, "admin-web")
     assert web["ADMIN_BFF_URL"] == "http://${{admin-bff.RAILWAY_PRIVATE_DOMAIN}}:8002"
@@ -237,11 +237,45 @@ def test_memory_sprint5():
 def test_gamification_sprint6():
     sec, files = build()
     game = env_of(files, "gamification")
-    # начисления — только по событиям: gamification никого не вызывает синхронно
+    # начисления — только по событиям; синхронно (спринт 7) — social и lessons для лиг и дуэлей,
+    # diagnostics и identity-consent — только разовые выгрузки (уровни; возраст и согласие) для начальной загрузки
     assert {k for k in game if k.endswith("_URL") and k not in ("REDIS_URL", "NATS_URL", "DATABASE_URL",
-                                                                  "MIGRATION_DATABASE_URL")} == set()
+                                                                  "MIGRATION_DATABASE_URL")} == {
+        "SOCIAL_URL", "LESSONS_URL", "DIAGNOSTICS_URL", "IDENTITY_CONSENT_URL"}
     assert game["PORT"] == "8117" and game["SCHEDULER_TOKEN"] == sec.scheduler and game["NATS_URL"]
     for caller in ("telegram-bff", "admin-bff", "n8n"):
         assert env_of(files, caller)["GAMIFICATION_URL"].endswith(":8117"), caller
     assert "gamification" in json.loads(env_of(files, "learning-plan")["INTERNAL_JWT_PUBLIC_KEYS"])
+
+
+def test_social_sprint7():
+    """Спринт 7: синхронные вызовы социального контура и общий ключ member_id (INTERNAL_API спринта 7 §0)."""
+    sec, files = build()
+    urls = lambda name: {k for k in env_of(files, name) if k.endswith("_URL") and k not in (  # noqa: E731
+        "REDIS_URL", "NATS_URL", "DATABASE_URL", "MIGRATION_DATABASE_URL")}
+    # gamification → social (relations, members, выгрузки), lessons (duel-sets), diagnostics (выгрузка levels)
+    game = env_of(files, "gamification")
+    assert game["SOCIAL_URL"].endswith(":8109") and game["LESSONS_URL"].endswith(":8112")
+    assert {"SOCIAL_URL", "LESSONS_URL", "DIAGNOSTICS_URL", "IDENTITY_CONSENT_URL"} <= urls("gamification")
+    # lessons → social (relations, members), ai-gateway (коуч, распознавание), identity-consent (согласие на голос)
+    lessons = env_of(files, "lessons")
+    assert {"SOCIAL_URL", "AI_GATEWAY_URL", "IDENTITY_CONSENT_URL"} <= urls("lessons")
+    assert lessons["SOCIAL_URL"].endswith(":8109") and lessons["IDENTITY_CONSENT_URL"].endswith(":8101")
+    # social синхронно не вызывает ни gamification, ни lessons (только события) — без циклов
+    assert urls("social") == {"IDENTITY_CONSENT_URL"}
+    # админка: модерация, рефералы и друзья — в social
+    assert env_of(files, "admin-bff")["SOCIAL_URL"].endswith(":8109")
+    assert env_of(files, "telegram-bff")["SOCIAL_URL"].endswith(":8109")
+    # MEMBER_ID_KEY — один на social, gamification, lessons; больше ни у кого
+    assert len(sec.member_key) >= 32 and sec.member_key != rs.Secrets.new().member_key
+    for name in rs.MEMBER_ID_SERVICES:
+        assert env_of(files, name)["MEMBER_ID_KEY"] == sec.member_key, name
+    assert set(rs.MEMBER_ID_SERVICES) == {"social", "gamification", "lessons"}
+    for s in rs.SERVICES:
+        if s.name not in rs.MEMBER_ID_SERVICES:
+            assert "MEMBER_ID_KEY" not in env_of(files, s.name), s.name
+    # вызываемые принимают токены вызывающих (открытые ключи — у всех)
+    pub = json.loads(env_of(files, "social")["INTERNAL_JWT_PUBLIC_KEYS"])
+    assert {"gamification", "lessons", "telegram-bff", "admin-bff"} <= set(pub)
+    assert "gamification" in json.loads(lessons["INTERNAL_JWT_PUBLIC_KEYS"])
 

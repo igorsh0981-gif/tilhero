@@ -55,8 +55,13 @@ const INTERNAL_AUTH_RE = /^(INTERNAL_|USER_CONTEXT_|CALLER_|ACTOR_)/;
 export const DOMAIN_BUSINESS_401: ReadonlySet<string> = new Set(["PIN_INVALID", "BIOMETRIC_INVALID", "RESET_CODE_INVALID"]);
 
 /** 503 доменов, которые клиент различает по коду: спринт 3 — learning-plan без снимка курса и кеша (CATALOG_UNAVAILABLE);
- *  спринт 5 — memory: оценка произношения выключена (SPEECH_UNAVAILABLE — Mini App скрывает «Произнести»). */
-export const DOMAIN_BUSINESS_503: ReadonlySet<string> = new Set(["CATALOG_UNAVAILABLE", "SPEECH_UNAVAILABLE"]);
+ *  спринт 5 — memory: оценка произношения выключена (SPEECH_UNAVAILABLE — Mini App скрывает «Произнести»; спринт 7 —
+ *  и распознавание голосового хода парной комнаты: перейти на текст); спринт 7 — gamification: lessons не выдал набор
+ *  заданий при принятии дуэли (DUEL_SET_UNAVAILABLE — дуэль остаётся challenged, принятие можно повторить). */
+export const DOMAIN_BUSINESS_503: ReadonlySet<string> = new Set(["CATALOG_UNAVAILABLE", "SPEECH_UNAVAILABLE", "DUEL_SET_UNAVAILABLE"]);
+
+/** Клиент закрыл соединение раньше ответа (long-poll парной комнаты): вызов домена прерван, ответ никому не нужен. */
+export const clientClosed = () => new AppError(499, "CLIENT_CLOSED_REQUEST", "Запрос отменён клиентом");
 
 export const catalogUnavailable = () =>
   new AppError(503, "CATALOG_UNAVAILABLE", "Курс временно недоступен, повторите позже", { service: "catalog" });
@@ -159,6 +164,9 @@ export interface Domains {
   assessment: RawClient;
   /** Спринт 5: memory — sub = аккаунт, claims `lrn`, `age_band` (как lessons); байты аудио произношения. */
   memory: RawClient;
+  /** Спринт 7: social от имени активного ученика — sub = аккаунт, claims `lrn`, `age_band` (профиль сообщества, друзья,
+   *  блокировки, жалобы, санкции, рефералы). Приглашения и семья спринта 1 — по-прежнему `social` (sub = аккаунт). */
+  socialRaw: RawClient;
 }
 
 export interface DomainsOptions {
@@ -210,9 +218,10 @@ export function createDomains(o: DomainsOptions): Domains {
     lessons: raw("lessons", o.lessonsTimeoutMs),
     assessment: raw("assessment", o.lessonsTimeoutMs),
     memory: raw("memory", o.memoryTimeoutMs),
+    socialRaw: raw("social", undefined),
   };
 
-  function raw(key: "lessons" | "assessment" | "memory", timeoutMs: number | undefined): RawClient {
+  function raw(key: "lessons" | "assessment" | "memory" | "social", timeoutMs: number | undefined): RawClient {
     return new RawClient({
       target: DOMAIN[key],
       baseUrl: o.urls[key],
@@ -286,6 +295,10 @@ export interface RawRequest {
   idempotencyKey?: string;
   /** таймаут этого вызова (завершение урока ждёт оценку дольше обычного) */
   timeoutMs?: number;
+  /** повторы GET этого вызова вместо общих (long-poll не повторяется: повтор удвоил бы ожидание) */
+  retries?: number;
+  /** отмена вызова снаружи (клиент закрыл соединение long-poll) → 499 CLIENT_CLOSED_REQUEST без записи о сбое домена */
+  signal?: AbortSignal;
 }
 
 /** Внутренний JWT v2 в формате ts-common issueInternalToken (EdDSA, kid = iss, aud, iat, exp 60 с, jti) + свои claims.
@@ -348,6 +361,7 @@ export class RawClient {
     try {
       return { status: resp.status, body: (await resp.json()) as T };
     } catch {
+      if (ro.signal?.aborted) throw clientClosed();
       this.o.onFailure?.({ service: this.o.target, status: resp.status, code: "UPSTREAM_BAD_RESPONSE" });
       throw upstreamUnavailable(this.o.target);
     }
@@ -370,17 +384,21 @@ export class RawClient {
     if (ro.rawBody) headers["content-type"] = ro.rawBody.contentType;
     else if (ro.body !== undefined) headers["content-type"] = "application/json";
     if (ro.idempotencyKey) headers["idempotency-key"] = ro.idempotencyKey;
-    const attempts = method === "GET" ? (this.o.retries ?? 0) + 1 : 1;
+    const attempts = method === "GET" ? (ro.retries ?? this.o.retries ?? 0) + 1 : 1;
     let resp: Response | null = null;
     for (let attempt = 1; attempt <= attempts; attempt++) {
+      if (ro.signal?.aborted) throw clientClosed();
+      const timeout = AbortSignal.timeout(ro.timeoutMs ?? this.o.timeoutMs);
       try {
         resp = await this.o.fetchImpl(url, {
           method,
           headers,
           body: ro.rawBody ? ro.rawBody.bytes : ro.body !== undefined ? JSON.stringify(ro.body) : null,
-          signal: AbortSignal.timeout(ro.timeoutMs ?? this.o.timeoutMs),
+          signal: ro.signal ? AbortSignal.any([timeout, ro.signal]) : timeout,
         });
       } catch {
+        // отменил клиент — не сбой домена: без повтора и без записи «domain unavailable»
+        if (ro.signal?.aborted) throw clientClosed();
         if (attempt < attempts) continue;
         this.o.onFailure?.({ service: this.o.target, status: 0, code: "UPSTREAM_UNREACHABLE" });
         throw upstreamUnavailable(this.o.target);

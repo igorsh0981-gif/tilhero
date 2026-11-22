@@ -93,7 +93,7 @@ describe("GET /v1/profile", () => {
     ]);
     expect(p.notifications).toEqual({
       enabled: true,
-      categories: { reminders: false, missed: false, social: false, support: true, product: false },
+      categories: { reminders: false, missed: false, social: false, support: true, product: false, game: true },
       quiet_hours: { start: "22:00", end: "08:00" },
       timezone: "Asia/Tashkent",
     });
@@ -135,7 +135,7 @@ describe("PATCH /v1/profile/settings", () => {
     expect(p.account.locale).toBe("uz");
     expect(p.notifications).toEqual({
       enabled: true,
-      categories: { reminders: true, missed: true, social: false, support: true, product: false },
+      categories: { reminders: true, missed: true, social: false, support: true, product: false, game: true },
       quiet_hours: { start: "21:30", end: "07:00" },
       timezone: "Asia/Samarkand",
     });

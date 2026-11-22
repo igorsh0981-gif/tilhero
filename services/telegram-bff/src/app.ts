@@ -18,6 +18,7 @@ import { EXTRA_REDACT_PATHS, scrub, type LogSink } from "./logging.js";
 import { createLimiter } from "./rateLimit.js";
 import { familyRoutes } from "./routes/family.js";
 import { gameRoutes } from "./routes/game.js";
+import { leaguesRoutes } from "./routes/leagues.js";
 import { lessonsRoutes } from "./routes/lessons.js";
 import { memoryRoutes } from "./routes/memory.js";
 import { pronunciationRoutes } from "./routes/pronunciation.js";
@@ -25,9 +26,11 @@ import { readingRoutes } from "./routes/reading.js";
 import { contentRoutes } from "./routes/content.js";
 import { diagnosticsRoutes } from "./routes/diagnostics.js";
 import { notificationsRoutes } from "./routes/notifications.js";
+import { pairRoomsRoutes } from "./routes/pairRooms.js";
 import { planRoutes } from "./routes/plan.js";
 import { profileRoutes } from "./routes/profile.js";
 import { sessionRoutes } from "./routes/session.js";
+import { socialRoutes } from "./routes/social.js";
 import { speechRoutes } from "./routes/speech.js";
 import { supportRoutes } from "./routes/support.js";
 import { whatsNewRoutes } from "./routes/whatsNew.js";
@@ -184,6 +187,10 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
           { name: "memory" },
           { name: "reading" },
           { name: "game" },
+          { name: "social" },
+          { name: "leagues" },
+          { name: "duels" },
+          { name: "pair-rooms" },
         ],
       },
       hideUntagged: true,
@@ -291,6 +298,10 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   readingRoutes(app, ctx);
   await pronunciationRoutes(app, ctx);
   gameRoutes(app, ctx);
+  // спринт 7 — социальное: social, лиги и дуэли (gamification), задания дуэли и парные комнаты (lessons)
+  socialRoutes(app, ctx);
+  leaguesRoutes(app, ctx);
+  await pairRoomsRoutes(app, ctx);
 
   if (!config.isSecure) {
     app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());

@@ -33,6 +33,16 @@
 | `EVALUATION_RETRY_DAYS` | 7 | повторная отправка в assessment сессий без оценки (дальше — `failed`) |
 | `STATS_TIMEZONE` | `Asia/Tashkent` | граница «сегодня» в статистике админки |
 | `PRACTICE_DURATION_MIN` | 10 | длительность практики (сценарий, медиа, повтор, чтение) для ограничения minutes (≤ 2× длительности) |
+| `SOCIAL_URL` / `IDENTITY_CONSENT_URL` | `http://127.0.0.1:8109` / `:8101` | спринт 7: связь учеников и member_id → user_id; согласие на голос — **обязательны в stage/prod** |
+| `MEMBER_ID_KEY` | dev-значение | спринт 7: ключ member_id (общий с social и gamification) — **обязателен в stage/prod** (≥ 32) |
+| `DUEL_ITEMS` / `DUEL_PLAY_HOURS` | 10 / 48 | заданий в наборе дуэли; срок, если gamification не передал `play_deadline` |
+| `PAIR_ROOM_MAX_MINUTES` | 20 | длительность парной комнаты в in_progress (wrap_up — за 2 минуты) |
+| `PAIR_INVITE_MINUTES` / `PAIR_SCHEDULE_DAYS` | 15 / 7 | ответ на приглашение (и вход после start_at); планирование вперёд |
+| `PAIR_OFFLINE_SECONDS` / `PAIR_RECONNECT_MINUTES` / `PAIR_INACTIVITY_MINUTES` | 30 / 3 / 10 | offline без heartbeat; возврат без новой сессии; завершение без активности |
+| `PAIR_SILENCE_SECONDS` | 60 | молчание в свой ход — напоминание коуча (один раз за ход); предел секунд речи без голоса на ход |
+| `PAIR_POLL_SECONDS` / `PAIR_POLL_INTERVAL_SECONDS` | 20 / 1 | long-poll ленты (контракт ≤ 25 с) и опрос БД (другие экземпляры) |
+| `PAIR_AUDIO_MINUTES` / `PAIR_STARTING_MINUTES` | 5 / 5 | срок audio_id; «скоро начнётся» до start_at |
+| `PAIR_AI_ROOMS_PER_DAY` | 5 | комнат с ИИ-коучем на ученика в сутки (STATS_TIMEZONE); сверх — комната сценарием с выбором реплик; 0 — без коуча |
 
 ## API ученика (только `telegram-bff`; ученик — claim `lrn`, аккаунт — `sub`, возраст — claim `age_band`)
 Чужая сессия → 404 `SESSION_NOT_FOUND`. Ключей ответов в ответах нет никогда; правильность проверки без подсказок —
@@ -162,3 +172,69 @@
 сверяют EvaluationRequest с моделью assessment (в т. ч. чтения) и вызовы агентов с моделями ai-gateway. Тексты для
 чтения — свои фикстуры в `tests/ls_testkit.py` (`READINGS`, форма `ReadingPayload`; сид catalog спринта 5 — у
 catalog), заглушка `GET /internal/v1/readings/{id}` — по INTERNAL_API §2.1 спринта 5.
+
+## Спринт 7 — дуэли и парные комнаты (docs/sprint7/INTERNAL_API.md §3)
+
+**Дуэль (`duel_host` — код).** `POST /internal/v1/duel-sets {duel_id, pair_id, level_band, user_ids, play_deadline?}`
+(только gamification) → `{set_id, duel_id, pair_id, level_band, items_total, play_deadline}` (201; повтор — 200 тот же
+набор; другие участники — 409 `DUEL_SET_CONFLICT`; catalog недоступен или мало заданий — 503 `DUEL_SET_UNAVAILABLE`).
+10 закрытых заданий опубликованных уроков пары и полосы (мало — соседние уровни, сначала ниже), аудитория — самая
+строгая (ребёнок или возраст неизвестен — только детские уроки), выбор по `sha256(duel_id)` по кругу навыков;
+снимки заданий с ключами — в `duel_sets.items` (наружу не уходят). `play_deadline` — расширение контракта (нет —
+`DUEL_PLAY_HOURS` от выдачи).
+- `POST /internal/v1/me/duel-sessions {duel_id}` (Idempotency-Key) → `LessonSession` kind `duel` (одна на участника;
+  повтор — 200 та же; не участник — 404 `DUEL_NOT_FOUND`; после срока — 409 `DUEL_CLOSED`). Дальше — общие маршруты
+  `/sessions/{id}/…`: задания без подсказок и ИИ, `graded_later`, перемешивание по seed набора (у обоих одинаково),
+  проверка по ключу снимка, повтор ответа — тот же результат; `finish` → итог без оценки; `cancel` — 409. Сессия дуэли
+  вне правила одной активной сессии, не видна в `/sessions/active` и истории.
+- `GET /internal/v1/me/duel-sessions/{session_id}/review` → `DuelReview` — только после `game.duel.finished.v1`
+  (раньше 409 `DUEL_NOT_FINISHED`).
+- Закрытие: срок набора (лениво у команды ученика и tick) или итог дуэли → незаконченная сессия `completed` со счётом
+  по отвеченному → `lesson.session.completed.v1 {kind: duel, duel_id, score, practice_only: true}` (в assessment нет).
+
+**Парная комната (`cooperative_lesson_coach`).** Ученик — `/internal/v1/me/pair-rooms…` (bff.ts «Парный урок»):
+`POST` (приглашение, Idempotency-Key), `GET ?status=active|finished`, `GET /{id}`, `POST /{id}/accept|decline|cancel|
+join|heartbeat|leave|turns|audio`, `GET /{id}/state?after_seq=&locale=` (long-poll), `GET /{id}/report`.
+- Допуск: relations social (`GET /internal/v1/relations/{a}/{b}`) + проекции блокировок и санкций: одна семья —
+  всем, друзья — 14+; дети — только семья и только `choices` (коуча не зовут, голоса нет); 403 `BLOCKED` |
+  `SOCIAL_RESTRICTED {until}` | `PARTNER_NOT_ALLOWED`; ≤ 1 активной комнаты (`room_participants.holds_slot`,
+  частичный UNIQUE) — 409 `ROOM_LIMIT {room_id}`; social недоступен — 503 `UPSTREAM_UNAVAILABLE {service: social}`.
+- Ход: роли A (пригласивший) и B; `turns` — ровно одно из `text` (≤ 300) / `choice_id` / `audio_id`; не свой ход —
+  409 `NOT_YOUR_TURN`; повтор Idempotency-Key — тот же ответ без второго хода. Голос: `POST …/audio` (WAV 0,5..15 с,
+  ≤ 600 000 байт; слой `audio.py` обходит общий лимит тела 256 КиБ) → согласие (identity-consent `/public`,
+  `voice_recording`) → ai-gateway `speech:transcribe` → `audio_id` (5 минут, один раз); аудио не хранится.
+- Коуч: engine `ai` — ai-gateway (session_kind `pair`, session_id = room_id; коуч видит только роли A/B); ответ
+  проверяется (эхо room_id, доказательства — только реплики этой роли); сбой, отказ, бюджет комнаты
+  (`AiBudget.room_cap_usd` — у ai-gateway) → engine `script`: сценарий каталога с выбором реплик A/B по очереди
+  (`ai_degraded`). Ответ коуча не пришёл (409 у шлюза) — ожидание, повтор с тем же request_id через
+  `AI_TIMEOUT_SECONDS + 5`. Коуча ждёт только собственная команда (ход, вход); повтор и напоминание при молчании,
+  найденные лентой, heartbeat или карточкой, — фоновой задачей (запрос отдаёт текущее состояние). Суточный лимит —
+  `PAIR_AI_ROOMS_PER_DAY` комнат с коучем на ученика; сверх — сценарий с выбором реплик. Коуч получает только
+  английский текст сценария (в каталоге нет английских title/task/role/criteria — они собираются из английских
+  данных: id, имена персонажей, line_en).
+- Планировщик обслуживает только комнаты со сроком `due_at ≤ now` (срок следующего действия пересчитывается после
+  каждой команды); приглашение и принятие сначала обслуживают свои просроченные комнаты.
+- Присутствие: без heartbeat 30 с — offline (в свой ход — пауза); возврат ≤ 3 мин — та же комната и сессия
+  (`session_id = uuid5(room_id, str(user_id))`), время по часам — минуты не удваиваются; дольше — соло для
+  оставшегося (`abandoned`, `participant_left`); 10 минут без ходов — `inactivity`; 20 минут — `completed`.
+- Итог: `lesson.pair.completed.v1` + по каждому вошедшему `lesson.session.completed.v1 {kind: pair, session_id,
+  room_id, minutes}` (минуты учитываются, не списываются); участникам с вкладом — `POST assessment /evaluations`
+  (`kind scenario`, своя сессия, только свои реплики и реплики коуча) фоном после фиксации, недошедшие — tick.
+  Отчёт — только свой.
+- Админ (`/internal/v1/admin/pair-rooms`): список и карточка без текстов (`room.read`), `stop {reason}`
+  (`room.manage` + step-up `X-Step-Up: ok`, аудит `pair_room.stopped`), `stats?period` (`dashboard.read | room.read`).
+- События: публикует `lesson.pair.invited.v1`, `lesson.pair.starting.v1` (tick за 5 мин), `lesson.pair.completed.v1`;
+  потребляет `social.profile.updated.v1`, `social.block.changed.v1` (отмена приглашений между учениками),
+  `social.sanction.changed.v1` (отмена неотвеченных приглашений) — только от social; `game.duel.finished.v1` — только
+  от gamification.
+- Данные (миграция 0003): `duel_sets`, `pair_rooms`, `room_participants`, `room_events` (неизменяемы, кроме стирания
+  текста — триггер), `room_audio`, `community_members`, `social_blocks`, `social_sanctions`; `sessions.duel_id`.
+- Сага: наборы дуэлей и начатые комнаты обезличиваются (сторона без user_id, отчёта, доказательств; свои реплики
+  стёрты; реплики коуча в ответ ему или цитирующие его стёрты; из состояния комнаты убраны подсказка его роли,
+  описание роли и подсказки отчёта для неё; отчёт и реплики партнёра не трогаются), неначатые комнаты и проекции
+  удаляются; идущая комната — партнёр доигрывает соло. События social и gamification после саги не воскрешают
+  данные: обработчики берут блокировки учеников и проверяют удаление после них. Порядок блокировок везде —
+  ученики, затем строки (комнаты, наборы); сага держит блокировку удаляемого.
+- Разовая загрузка проекций не нужна: семья, дружба, блокировка и санкция проверяются синхронно через relations
+  social (приглашение и принятие), уровень набора дуэли передаёт gamification; проекции social (ник, блокировки,
+  санкции) — новые в спринте 7 и служат для отмены приглашений по событиям и ника в карточке.

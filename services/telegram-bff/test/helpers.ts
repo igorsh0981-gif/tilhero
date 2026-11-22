@@ -31,6 +31,7 @@ import type { App } from "../src/http.js";
 import { signInitData } from "../src/telegramAuth.js";
 import { FakeContent } from "./fakeContent.js";
 import { FakeGame } from "./fakeGame.js";
+import { FakeSocial, memberIdOf } from "./fakeSocial.js";
 import { FakeLessons } from "./fakeLessons.js";
 import { FakeMemory, FakeReading } from "./fakeMemory.js";
 
@@ -154,6 +155,8 @@ export interface Req {
   headers: Record<string, string>;
   claims: Record<string, unknown>;
   rawBody: Buffer | null;
+  /** сигнал отмены запроса BFF (таймаут, закрытие соединения клиентом — long-poll спринта 7) */
+  signal?: AbortSignal | null;
 }
 
 export type Handler = (r: Req) => Response | Promise<Response>;
@@ -204,7 +207,7 @@ export const DEFAULT_EXPERIENCE: ExperienceConfig = {
 
 const DEFAULT_SETTINGS = (): NotificationSettings => ({
   enabled: true,
-  categories: { reminders: false, missed: false, social: false, support: true, product: false },
+  categories: { reminders: false, missed: false, social: false, support: true, product: false, game: true },
   quiet_hours: { start: "22:00", end: "08:00" },
   timezone: "Asia/Tashkent",
 });
@@ -272,6 +275,8 @@ export class FakeDomains {
   readonly reading = new FakeReading();
   /** Спринт 6: gamification — test/fakeGame.ts. */
   readonly game = new FakeGame();
+  /** Спринт 7: social (сообщество, друзья, жалобы, рефералы), лиги и дуэли, задания дуэли и парные комнаты — test/fakeSocial.ts. */
+  readonly social7 = new FakeSocial(this.game);
   private readonly overrides = new Map<string, Handler>();
   private ticketSeq = 3000;
 
@@ -372,7 +377,7 @@ export class FakeDomains {
     const query = Object.fromEntries(url.searchParams);
     const claims = decodeJwt(headers["x-internal-token"] ?? "") as Record<string, unknown>;
     this.calls.push({ service, method, path: url.pathname, query, subject, body, headers, claims, rawBody });
-    const req: Req = { method, path: url.pathname, query, subject, body, headers, claims, rawBody };
+    const req: Req = { method, path: url.pathname, query, subject, body, headers, claims, rawBody, signal: init?.signal ?? null };
     if (this.failAll && !this.failAll.except.has(service)) return domainError(this.failAll.status, this.failAll.code, { from: service });
     const ov = this.overrides.get(`${service} ${method} ${url.pathname}`);
     // таймаут BFF (AbortSignal) действует и на подделку: медленный обработчик прерывается как настоящий запрос
@@ -407,7 +412,7 @@ export class FakeDomains {
       case "notifications":
         return this.notificationsRoute(r);
       case "social":
-        return this.social(r);
+        return this.social7.social(r) ?? this.social(r);
       case "support":
         return this.support(r);
       case "experience":
@@ -417,7 +422,7 @@ export class FakeDomains {
       case "diagnostics":
         return this.content.diagnostics(r);
       case "lessons":
-        return this.reading.lessons(r) ?? this.lessons.lessons(r);
+        return this.social7.lessonsRoute(r) ?? this.reading.lessons(r) ?? this.lessons.lessons(r);
       case "assessment":
         return this.lessons.assessment(r);
       case "tts":
@@ -425,7 +430,7 @@ export class FakeDomains {
       case "memory":
         return this.memory.memory(r);
       case "gamification":
-        return this.game.route(r);
+        return this.social7.gameRoute(r) ?? this.game.route(r);
     }
   }
 
@@ -992,14 +997,14 @@ export class FakeDomains {
             f = {
               family_id: randomUUID(),
               members: [
-                { user_id: rec.inviter, display_name: inviter.summary.display_name, role: "owner", is_me: false },
-                ...inviter.children.map((c) => ({ user_id: c, display_name: this.children.get(c)!.display_name, role: "child" as const, is_me: false })),
+                { user_id: rec.inviter, member_id: memberIdOf(rec.inviter), display_name: inviter.summary.display_name, role: "owner", is_me: false },
+                ...inviter.children.map((c) => ({ user_id: c, member_id: memberIdOf(c), display_name: this.children.get(c)!.display_name, role: "child" as const, is_me: false })),
               ],
             };
             this.families.set(rec.inviter, f);
           }
           if (!f.members.some((m) => m.user_id === me)) {
-            f.members.push({ user_id: me, display_name: this.accounts.get(me)?.summary.display_name ?? "?", role: "adult", is_me: false });
+            f.members.push({ user_id: me, member_id: memberIdOf(me), display_name: this.accounts.get(me)?.summary.display_name ?? "?", role: "adult", is_me: false });
           }
           rec.invite = { ...rec.invite, status: "accepted", accepted_count: 1 };
           family = { ...f, members: f.members.map((m) => ({ ...m, is_me: m.user_id === me })) };
@@ -1202,3 +1207,5 @@ export async function switchTo(h: Harness, s: LoggedIn, learnerId: string, pin?:
 
 export const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 export const idem = () => ({ "idempotency-key": randomUUID() });
+
+export { memberIdOf };

@@ -190,12 +190,12 @@ async def test_p2_2_other_privileged_roles_and_direct_paths(env: Env, root: Pers
     p = (await env.principal(ops.staff_id)).json()
     assert (p["status"], p["staff"]["role"], p["mfa_enabled"]) == ("ACTIVE", "support", False)
     # непривилегированный → привилегированный при включении: тоже заявка (покрывает повышение)
-    sup = await env.onboard(root.actor, new_email("sup"), "support")
+    sup = await env.onboard(root.actor, new_email("sup"), "analyst")
     assert (await env.patch(root.actor, sup.staff_id, {"status": "DISABLED", "reason": "Отпуск"})).status_code == 200
     r = await env.patch(root.actor, sup.staff_id, {"status": "ACTIVE", "role": "communications", "reason": "Повыш."})
     assert r.status_code == 202 and r.json()["approval"]["kind"] == "staff.reactivate_privileged"
     # объект изменился до решения (роль сменили напрямую в БД) — применить нельзя
-    await env.sql("UPDATE staff SET role = 'analyst' WHERE staff_id = :i RETURNING staff_id", i=sup.staff_id)
+    await env.sql("UPDATE staff SET role = 'read_only' WHERE staff_id = :i RETURNING staff_id", i=sup.staff_id)
     assert _err(await env.approve(root2.actor, r.json()["approval"]["approval_id"])) == (
         409, "APPROVAL_NOT_APPLICABLE")
     # непривилегированного включают сразу

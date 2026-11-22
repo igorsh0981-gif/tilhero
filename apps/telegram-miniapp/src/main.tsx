@@ -3,6 +3,7 @@ import "./styles/content.css";
 import "./styles/lessons.css";
 import "./styles/memory.css";
 import "./styles/game.css";
+import "./styles/social.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";

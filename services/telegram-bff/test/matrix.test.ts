@@ -3,12 +3,15 @@
  *  - защищённые маршруты без токена → 401 UNAUTHORIZED, с мусором → 401 TOKEN_INVALID, домены не вызываются;
  *  - 4xx домена пробрасывается клиенту как ErrorBody {code, message, trace_id = X-Trace-Id запроса, details};
  *  - 5xx домена → 503 UPSTREAM_UNAVAILABLE {service}; игра (спринт 6) — 503 GAME_UNAVAILABLE {service: gamification},
- *    картинки игры: 4xx домена → 404 ASSET_NOT_FOUND.
+ *    картинки игры: 4xx домена → 404 ASSET_NOT_FOUND;
+ *  - спринт 7: social и lessons от имени ученика (полоса — из identity, она работает) — ошибка и сбой именно этого домена;
+ *    лиги и дуэли — как игра (GAME_UNAVAILABLE).
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bearer, closeRedis, initDataFor, login, makeHarness, type Harness, type LoggedIn, type Service } from "./helpers.js";
 import { makeWav } from "./wavFixture.js";
+import { OTHER_MEMBER } from "./fakeSocial.js";
 
 let h: Harness;
 let s: LoggedIn;
@@ -43,6 +46,8 @@ type Sample = {
   /** спринт 6: маршрут игры (сбой gamification → 503 GAME_UNAVAILABLE); asset — публичная картинка (4xx домена → 404) */
   game?: boolean;
   asset?: boolean;
+  /** спринт 7: маршрут social / lessons от имени ученика — ошибку отвечает этот домен (identity — для полосы — работает) */
+  domain?: "social" | "lessons";
 };
 
 /** Пример корректного запроса для каждого маршрута: ключ — "METHOD /openapi/path". */
@@ -183,6 +188,50 @@ const SAMPLES: Record<string, Sample> = {
   "patch /v1/game/settings": { game: true, payload: { auto_freeze: false } },
   "post /v1/game/shop/purchases": { game: true, payload: { item_code: "streak_freeze" }, idem: true },
   "get /v1/game/assets/{asset_id}/{sha256}": { game: true, asset: true, params: { asset_id: "a-robot_0-1", sha256: "a".repeat(64) } },
+  // спринт 7: social
+  "get /v1/community": { domain: "social" },
+  "patch /v1/community": { domain: "social", payload: { game_profile_hidden: true } },
+  "put /v1/community/nickname": { domain: "social", payload: { nickname: "Igor_7" } },
+  "post /v1/community/friend-code/rotate": { domain: "social" },
+  "get /v1/friends/search": { domain: "social", query: "q=Anvar_77" },
+  "post /v1/friends/requests": { domain: "social", payload: { member_id: OTHER_MEMBER }, idem: true },
+  "get /v1/friends/requests": { domain: "social", query: "direction=in" },
+  "post /v1/friends/requests/{request_id}/accept": { domain: "social" },
+  "post /v1/friends/requests/{request_id}/decline": { domain: "social" },
+  "post /v1/friends/requests/{request_id}/cancel": { domain: "social" },
+  "get /v1/friends": { domain: "social" },
+  "delete /v1/friends/{member_id}": { domain: "social", params: { member_id: OTHER_MEMBER } },
+  "post /v1/blocks": { domain: "social", payload: { member_id: OTHER_MEMBER } },
+  "get /v1/blocks": { domain: "social" },
+  "delete /v1/blocks/{member_id}": { domain: "social", params: { member_id: OTHER_MEMBER } },
+  "post /v1/complaints": { domain: "social", payload: { member_id: OTHER_MEMBER, subject_kind: "user", subject_id: null, reason: "spam" }, idem: true },
+  "get /v1/sanctions": { domain: "social" },
+  "post /v1/sanctions/{sanction_id}/appeal": { domain: "social", payload: { text: "Прошу пересмотреть решение" }, idem: true },
+  "get /v1/referrals": { domain: "social" },
+  // спринт 7: лиги и дуэли (gamification)
+  "get /v1/game/leagues": { game: true },
+  "get /v1/game/leagues/history": { game: true },
+  "post /v1/game/duels": { game: true, payload: { opponent_member_id: OTHER_MEMBER }, idem: true },
+  "get /v1/game/duels": { game: true },
+  "get /v1/game/duels/{duel_id}": { game: true },
+  "post /v1/game/duels/{duel_id}/accept": { game: true },
+  "post /v1/game/duels/{duel_id}/decline": { game: true },
+  // спринт 7: задания дуэли и парные комнаты (lessons)
+  "post /v1/duel-sessions": { domain: "lessons", payload: { duel_id: ID }, idem: true },
+  "get /v1/duel-sessions/{session_id}/review": { domain: "lessons" },
+  "post /v1/pair-rooms": { domain: "lessons", payload: { partner_member_id: OTHER_MEMBER, pair_id: "ru-en", scenario_id: "sc-cafe-order", start: "now" }, idem: true },
+  "get /v1/pair-rooms": { domain: "lessons" },
+  "get /v1/pair-rooms/{room_id}": { domain: "lessons" },
+  "post /v1/pair-rooms/{room_id}/accept": { domain: "lessons" },
+  "post /v1/pair-rooms/{room_id}/decline": { domain: "lessons" },
+  "post /v1/pair-rooms/{room_id}/cancel": { domain: "lessons" },
+  "post /v1/pair-rooms/{room_id}/leave": { domain: "lessons" },
+  "post /v1/pair-rooms/{room_id}/join": { domain: "lessons" },
+  "post /v1/pair-rooms/{room_id}/heartbeat": { domain: "lessons" },
+  "get /v1/pair-rooms/{room_id}/state": { domain: "lessons", query: "after_seq=0" },
+  "post /v1/pair-rooms/{room_id}/turns": { domain: "lessons", payload: { choice_id: "c1" }, idem: true },
+  "post /v1/pair-rooms/{room_id}/audio": { domain: "lessons", raw: { body: makeWav(), contentType: "audio/wav" } },
+  "get /v1/pair-rooms/{room_id}/report": { domain: "lessons" },
 };
 
 interface Op {
@@ -255,8 +304,8 @@ describe("матрица маршрутов /v1", () => {
       if (sample.noDomain) continue;
       // refresh без живой сессии не дойдёт до домена — свежая сессия на каждый маршрут
       s = await login(h);
-      // игра: ошибку отвечает gamification (identity — для полосы ученика — работает)
-      h.fake.failAll = { status: 409, code: "DOMAIN_SAYS_NO", except: new Set<Service>(sample.game ? ["identity"] : []) };
+      // игра и спринт 7: ошибку отвечает домен маршрута (identity — для полосы ученика — работает)
+      h.fake.failAll = { status: 409, code: "DOMAIN_SAYS_NO", except: new Set<Service>(sample.game || sample.domain ? ["identity"] : []) };
       const res = await call(op, bearer(s.access));
       h.fake.failAll = null;
       if (op.key === "post /v1/session/telegram") {
@@ -277,7 +326,7 @@ describe("матрица маршрутов /v1", () => {
         code: "DOMAIN_SAYS_NO",
         message: "domain says DOMAIN_SAYS_NO",
         trace_id: res.headers["x-trace-id"],
-        details: { from: expect.any(String) },
+        details: { from: sample.domain ?? expect.any(String) },
       });
     }
   });
@@ -287,12 +336,13 @@ describe("матрица маршрутов /v1", () => {
       const sample = SAMPLES[op.key]!;
       if (sample.noDomain) continue;
       s = await login(h);
-      h.fake.failAll = { status: 500, code: "BOOM", except: new Set<Service>(sample.game ? ["identity"] : []) };
+      h.fake.failAll = { status: 500, code: "BOOM", except: new Set<Service>(sample.game || sample.domain ? ["identity"] : []) };
       const res = await call(op, bearer(s.access));
       h.fake.failAll = null;
       expect(res.statusCode, `${op.key}: ${res.body}`).toBe(503);
       expect(res.json().code, op.key).toBe(sample.speech ? "SPEECH_UNAVAILABLE" : sample.game ? "GAME_UNAVAILABLE" : "UPSTREAM_UNAVAILABLE");
       if (sample.game) expect(res.json().details, op.key).toEqual({ service: "gamification" });
+      if (sample.domain) expect(res.json().details, op.key).toEqual({ service: sample.domain });
       expect(typeof res.json().details.service, op.key).toBe("string");
       expect(res.body, op.key).not.toContain("BOOM");
     }

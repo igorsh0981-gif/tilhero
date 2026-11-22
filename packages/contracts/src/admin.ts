@@ -31,7 +31,9 @@
  * по сотрудникам, ролям и заявкам four-eyes. Спринт 3: публикация, снятие и откат версии контента; подтверждение прав
  * медиа; решение по заявке ученика на песню/фильм; правка языков и языковых пар; публикация версии теста диагностики.
  * Спринт 4: публикация, канарейка и откат версии агента; правка моделей и цен; бюджет и аварийная остановка ИИ;
- * переоценка; решение по апелляции. Спринт 5: ручная правка карточки памяти ученика.
+ * переоценка; решение по апелляции. Спринт 5: ручная правка карточки памяти ученика. Спринт 6: активация и откат
+ * правил игры, публикация героев, предметов и событий, ручные операции с кошельком. Спринт 7: санкция social_ban
+ * больше 7 дней и бессрочная, активация реферальной кампании, переоценка лиги и дуэли, остановка парной комнаты.
  */
 
 import type {
@@ -40,6 +42,9 @@ import type {
 } from "./content.js";
 import type {
   GameAction, GameCurrency, GameReason, HeroLine, HeroStage, QuestKind, ShopItemKind,
+  ComplaintReason, ComplaintSubjectKind, DuelScore, DuelStatus, FriendRequestStatus, LeagueLevelBand, PairEndReason,
+  PairRole, PairRoomEventKind, PairRoomMode, PairRoomStatus, ReferralRejectCode, ReferralReward,
+  ReferralRewardOutcome, ReferralStatus, SanctionAppealStatus, SanctionKind,
 } from "./bff.js";
 import type {
   Agent, AgentId, AgentRollout, AgentVersion, AiBudget, AiModel, AiProviderStatus, ConfirmedError, GoldenCase,
@@ -113,7 +118,16 @@ export type Permission =
   | "game.read" // правила, герои, магазин, события, кошельки учеников — чтение
   | "game.manage" // черновики правил, герои и картинки, предметы магазина, события недели
   | "game.publish" // активация и откат правил, публикация героев, предметов и событий (step-up)
-  | "wallet.adjust"; // ручное начисление и списание, обратная запись, возврат покупки (step-up, причина)
+  | "wallet.adjust" // ручное начисление и списание, обратная запись, возврат покупки (step-up, причина)
+  // спринт 7 — социальное
+  | "social.read" // профиль сообщества, друзья, заявки, блокировки, дела и санкции ученика — без переписки
+  | "moderation.manage" // дела модерации, санкции (step-up: social_ban > 7 дней и бессрочный), обжалования
+  | "referral.read" // реферальные кампании, очередь проверки, статистика
+  | "referral.manage" // черновик и активация кампании (step-up), одобрение и отклонение реферала (причина)
+  | "league.read" // лиги недели (группы, итоги, аномалии) и дуэли
+  | "league.manage" // переоценка лиги и дуэли (step-up), снятие удержания призов
+  | "room.read" // мониторинг парных комнат — без реплик и оценок
+  | "room.manage"; // остановка парной комнаты (step-up, причина)
 
 export const PERMISSIONS: readonly Permission[] = [
   "dashboard.read", "users.read", "users.sensitive.read", "support.read", "support.reply", "support.manage",
@@ -123,6 +137,8 @@ export const PERMISSIONS: readonly Permission[] = [
   "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "costs.read", "costs.manage",
   "memory.read", "memory.manage", "glossary.manage",
   "game.read", "game.manage", "game.publish", "wallet.adjust",
+  "social.read", "moderation.manage", "referral.read", "referral.manage", "league.read", "league.manage", "room.read",
+  "room.manage",
 ];
 
 export type RoleCode =
@@ -332,7 +348,8 @@ export type LearnerStatus = "ACTIVE" | "DISABLED" | "DELETION_REQUESTED" | "DELE
 export type Goal = "work" | "career" | "travel" | "daily" | "study" | "exam";
 export type LevelSelf = "zero" | "beginner" | "some" | "confident";
 export type SchedulePreset = "daily" | "weekdays" | "three_per_week" | "custom";
-export type NotificationCategory = "reminders" | "missed" | "social" | "support" | "product" | "service";
+/** game (спринт 7) — игра и лиги: значки, рост героя, спасённая серия, итоги лиги, дуэли */
+export type NotificationCategory = "reminders" | "missed" | "social" | "support" | "product" | "service" | "game";
 /** Цели согласия (identity-consent): обязательные и необязательные (social, product_news, voice_recording). */
 export type ConsentPurpose = string;
 
@@ -476,6 +493,8 @@ export interface Dashboard {
   memory: DashboardBlock<MemoryStats>;
   /** спринт 6 */
   game: DashboardBlock<GameStats>;
+  /** спринт 7: источник — social (дуэли — gamification, комнаты — lessons: при их недоступности поля null) */
+  social: DashboardBlock<SocialStats>;
 }
 
 // =====================================================================================================================
@@ -697,7 +716,9 @@ export type ReleaseNoteRoute =
   // спринт 3
   | "diagnostics" | "plan" | "skills" | "scenarios" | "media" | "media_requests" | "languages"
   // релиз 6.1: игра — герои, магазин, значки, история, настройки; словарь и чтение
-  | "heroes" | "shop" | "badges" | "game_history" | "game_settings" | "dictionary" | "reading";
+  | "heroes" | "shop" | "badges" | "game_history" | "game_settings" | "dictionary" | "reading"
+  // спринт 7: друзья (заявки, блокировки, санкции), лиги недели, дуэли, рефералы (как bff.ts и release-notes.json)
+  | "friends" | "leagues" | "duels" | "referrals";
 export type ReleaseNoteIcon =
   | "spark" | "hero" | "calendar" | "clock" | "bell" | "book" | "chat" | "mic" | "star" | "flame" | "users" | "gift"
   | "shield" | "globe" | "trophy" | "news";
@@ -1712,9 +1733,20 @@ export interface GameRules {
   /** пороги подтверждённых навыков для ступеней 1–3, первый 0 */
   hero: { stage_thresholds: [number, number, number] };
   freeze: { price_til: number; max_stock: number };
+  /** referral_freeze и referral_monthly_cap со спринта 7 не используются: награды за рефералов задаёт реферальная
+   *  кампания social (ReferralCampaignPayload); поля остаются ради прежних версий */
   bonuses: { registration_freeze: number; referral_freeze: number; referral_monthly_cap: number };
   quests: { per_day: number; all_done_bonus: GameAmount; templates: QuestTemplate[] };
   badges: { streak: number[]; skills: number[]; reviews_cards: number[]; readings: number[] };
+  /** спринт 7 (версия 3 миграцией) — обязательны в черновике (валидатор), в версиях 1–2 отсутствуют.
+   *  league: призы тилами за 1–3 места (по умолчанию [50, 30, 20]), размер группы [20, 30], аномалия — XP недели
+   *  больше median_factor × медиана группы и больше min_xp (5, 1500) */
+  league?: { prizes: number[]; group_size: [number, number]; anomaly: { median_factor: number; min_xp: number } };
+  /** XP за дуэль: победа 30, ничья 15, участие 10; не больше daily_cap (3) наградных дуэлей в день на ученика */
+  duel?: { win: number; draw: number; participation: number; daily_cap: number };
+  /** XP участнику урока вдвоём, доведённого до цели (`finished`), при ≥ min_turns своих ходов (25 XP, 1 ход);
+   *  не больше daily_cap (3) награждаемых уроков в день на ученика — повторное ревью спринта 7, Н4 */
+  pair_lesson?: { xp: number; min_turns: number; daily_cap: number };
 }
 
 export type RulesStatus = "draft" | "active" | "archived";
@@ -1930,4 +1962,431 @@ export interface GameStats {
   freezes_used: number;
   quests_completed: number;
   active_event: { title: ContentLocalized; ends_at: string } | null;
+}
+
+// =====================================================================================================================
+// Социальное (спринт 7): ADM-SOC-01 друзья и жалобы, ADM-SOC-02 парные комнаты, ADM-SOC-03 модерация,
+// ADM-REF-01 реферальные кампании, ADM-REF-02 реферальный антифрод, ADM-GAME-02 лиги и дуэли.
+// Источники через admin-bff: social (/admin/v1/social/*, /admin/v1/moderation/*, /admin/v1/referrals/*),
+// gamification (/admin/v1/game/leagues*, /admin/v1/game/duels*), lessons (/admin/v1/pair-rooms*).
+// Права: social.read; moderation.manage (step-up — social_ban больше 7 дней и бессрочный); referral.read,
+// referral.manage (активация кампании — step-up); league.read, league.manage (переоценка лиги и дуэли — step-up);
+// room.read, room.manage (остановка комнаты — step-up). Каждая команда — аудит; причина, основание и комментарий —
+// 10..500 символов. Модератор не видит переписку, реплики и ответы учеников: только предмет жалобы, статусы, даты и
+// счётчики; личные оценки участников комнат изолированы. Итоги лиг и результаты дуэлей неизменяемы: переоценка создаёт
+// новую версию, прежняя сохраняется.
+// Меню (experience-config ADMIN_MENU): friends, moderation, referrals, leagues, pair_rooms.
+// Коды: 404 SOCIAL_PROFILE_NOT_FOUND | CASE_NOT_FOUND | SANCTION_NOT_FOUND | APPEAL_NOT_FOUND | REFERRAL_NOT_FOUND |
+// CAMPAIGN_VERSION_NOT_FOUND | GROUP_NOT_FOUND | DUEL_NOT_FOUND | ROOM_NOT_FOUND; 409 CASE_STATE {status};
+// 409 SANCTION_STATE; 409 APPEAL_STATE {status}; 409 REFERRAL_STATE {status}; 409 RESULT_STATE {status} (группа не
+// закрыта, призы не удержаны, дуэль не завершена); 422 CAMPAIGN_INVALID {errors: [{path, code}]};
+// 409 CAMPAIGN_NOT_VALIDATED; 409 DRAFT_CONFLICT; 409 ROOM_NOT_ACTIVE {status}; 403 STEP_UP_REQUIRED.
+// =====================================================================================================================
+
+// ---------- Друзья и жалобы (ADM-SOC-01) ----------
+
+/** GET /admin/v1/social/users/{user_id} (social.read) → AdminSocialCard. Ученика, который ни разу не открывал
+ *  «Друзья», social тоже знает (member_id есть у всех): профиль без ника, нули. */
+export interface AdminSocialCard {
+  user_id: string;
+  member_id: string;
+  nickname: string | null;
+  /** null — профиль сообщества ещё не создан. Решение по F7-20 (ревью спринта 7): код друга — ключ поиска ученика,
+   *  поэтому сотруднику без `moderation.manage` admin-bff отдаёт маску `TH-••••-XXXX` (видны последние 4 символа),
+   *  с `moderation.manage` — полностью. Маскирует сервер (admin-bff, по эффективным правам сессии), не UI; то же
+   *  правило — для любого ответа admin-bff с кодом друга. */
+  friend_code: string | null;
+  game_profile_hidden: boolean;
+  nickname_changed_at: string | null;
+  friends: number;
+  /** последние 50 заявок ученика: статусы и даты, без ника и id второй стороны */
+  requests: Array<{ request_id: string; direction: "in" | "out"; status: FriendRequestStatus; created_at: string;
+                    decided_at: string | null }>;
+  blocks: { given: number; received: number };
+  /** дела, где ученик — жалобщик или цель (последние 20) */
+  cases: { as_reporter: number; as_target: number; open_as_target: number; recent: AdminCaseRow[] };
+  sanctions: AdminSanction[];
+  restrictions: { social_ban: boolean; social_ban_until: string | null };
+}
+
+// ---------- Модерация (ADM-SOC-03, moderation.manage) ----------
+
+export type CaseStatus = "open" | "resolved" | "dismissed";
+export type ModerationAction = "dismiss" | "warning" | "social_ban" | "nickname_reset";
+
+export interface AdminCaseRow {
+  case_id: string;
+  status: CaseStatus;
+  /** null — обезличено сагой удаления */
+  reporter_user_id: string | null;
+  target_user_id: string | null;
+  /** текущий ник цели */
+  target_nickname: string | null;
+  subject_kind: ComplaintSubjectKind;
+  subject_id: string | null;
+  reason: ComplaintReason;
+  /** жалоб на эту цель за 30 дней (все дела) */
+  target_complaints_30d: number;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface AdminCase extends AdminCaseRow {
+  /** комментарий жалобщика (≤ 500) — текст самой жалобы */
+  comment: string | null;
+  /** предмет жалобы без переписки: ник цели на момент жалобы; статус заявки, приглашения, дуэли или комнаты (если
+   *  social его знает: заявка — своя; дуэль и комната — ссылка на карточку в «Лигах и дуэлях» и «Парных комнатах») */
+  subject: { nickname_at_report: string | null; status: string | null };
+  resolution: {
+    action: ModerationAction;
+    sanction_id: string | null;
+    basis: string;
+    resolved_by: StaffRef;
+  } | null;
+  /** история санкций цели */
+  target_sanctions: AdminSanction[];
+}
+
+/** GET /admin/v1/moderation/cases?status=open|resolved|dismissed&cursor= → Page<AdminCaseRow> (open — старые сверху)
+ *  GET /admin/v1/moderation/cases/{case_id} → AdminCase
+ *  POST /admin/v1/moderation/cases/{case_id}/resolve CaseResolveRequest → AdminCase. Только open: иначе 409
+ *  CASE_STATE. social_ban с days > 7 или null (бессрочно) — step-up. nickname_reset сбрасывает ник цели в null.
+ *  Решение фиксирует основание, исполнителя и срок; цель получает уведомление sanction_applied, жалобщик —
+ *  complaint_resolved (без подробностей). */
+export interface CaseResolveRequest {
+  action: ModerationAction;
+  /** social_ban: 1..30 дней или null — бессрочно; для остальных действий — null */
+  days: number | null;
+  /** основание: 10..500; ученик видит его в своих санкциях */
+  basis: string;
+}
+
+export interface AdminSanction {
+  sanction_id: string;
+  user_id: string;
+  kind: SanctionKind;
+  /** social_ban: конец запрета, null — бессрочно */
+  until: string | null;
+  active: boolean;
+  basis: string;
+  case_id: string | null;
+  decided_by: StaffRef;
+  decided_at: string;
+  revoked_at: string | null;
+  revoked_by: StaffRef | null;
+  revoke_reason: string | null;
+  appeal: { appeal_id: string; status: SanctionAppealStatus } | null;
+}
+/** GET /admin/v1/moderation/sanctions?user_id=&active=true|false&cursor= → Page<AdminSanction>
+ *  POST /admin/v1/moderation/sanctions/{sanction_id}/revoke SanctionRevokeRequest → AdminSanction. Уже снята — 409
+ *  SANCTION_STATE. */
+export interface SanctionRevokeRequest {
+  reason: string; // 10..500
+}
+
+export interface AdminSanctionAppeal {
+  appeal_id: string;
+  sanction: AdminSanction;
+  /** текст ученика (≤ 1000) */
+  text: string;
+  status: SanctionAppealStatus;
+  created_at: string;
+  decided_by: StaffRef | null;
+  decided_at: string | null;
+  decision_note: string | null;
+}
+/** GET /admin/v1/moderation/appeals?status=open|upheld|overturned&cursor= → Page<AdminSanctionAppeal> (open — старые
+ *  сверху)
+ *  POST /admin/v1/moderation/appeals/{appeal_id}/decide SanctionAppealDecision → AdminSanctionAppeal. overturned
+ *  снимает санкцию; уже решено — 409 APPEAL_STATE. Ученик получает appeal_decided (note видит). */
+export interface SanctionAppealDecision {
+  decision: "upheld" | "overturned";
+  note: string; // 10..500
+}
+
+// ---------- Реферальные кампании (ADM-REF-01) ----------
+
+/** Payload версии кампании. Ограничения валидатора: min_lessons 1..10; min_days 1..min_lessons; window_days 7..90;
+ *  награды freeze 0..5, til 0..1000; monthly_cap 1..100; velocity_per_day 1..50; min_lesson_minutes 1..20. */
+export interface ReferralCampaignPayload {
+  require_diagnostic: boolean;
+  min_lessons: number;
+  min_days: number;
+  window_days: number;
+  inviter_reward: ReferralReward;
+  invitee_reward: ReferralReward;
+  /** квалификаций пригласившего за календарный месяц (Asia/Tashkent); сверх — capped без награды */
+  monthly_cap: number;
+  /** пороги проверки (ученику не показываются): больше velocity_per_day квалификаций пригласившего за сутки; больше
+   *  половины уроков короче min_lesson_minutes → review */
+  review: { velocity_per_day: number; min_lesson_minutes: number };
+}
+
+export type ReferralCampaignStatus = "draft" | "active" | "archived";
+export interface ReferralCampaignSummary {
+  version: number;
+  status: ReferralCampaignStatus;
+  comment: string | null;
+  based_on: number | null;
+  created_by: StaffRef | null; // null — версия 1 из миграции
+  created_at: string;
+  validated_at: string | null;
+  activated_by: StaffRef | null;
+  activated_at: string | null;
+}
+export interface ReferralCampaignVersion extends ReferralCampaignSummary {
+  payload: ReferralCampaignPayload;
+  /** отличия от активной версии */
+  diff: Array<{ path: string; from: unknown; to: unknown }>;
+  updated_at: string;
+}
+/** GET /admin/v1/referrals/campaigns (referral.read) → {items: ReferralCampaignSummary[]} (новые сверху)
+ *  GET /admin/v1/referrals/campaigns/{version} → ReferralCampaignVersion
+ *  PUT /admin/v1/referrals/campaigns/draft (referral.manage; If-Match: <updated_at> черновика) ReferralCampaignDraft
+ *    → ReferralCampaignVersion; 409 DRAFT_CONFLICT
+ *  DELETE /admin/v1/referrals/campaigns/draft (referral.manage) → 204
+ *  POST /admin/v1/referrals/campaigns/draft/validate (referral.manage) → RulesValidation
+ *  POST /admin/v1/referrals/campaigns/draft/activate (referral.manage, step-up) {comment} → ReferralCampaignVersion;
+ *    409 CAMPAIGN_NOT_VALIDATED. Активная одна; прежняя → archived. Рефералы остаются на версии, по которой приняты.
+ *  GET /admin/v1/referrals/campaigns/stats (referral.read) → {items: ReferralCampaignStats[]} */
+export interface ReferralCampaignDraft {
+  payload: ReferralCampaignPayload;
+  comment: string | null;
+  based_on: number | null;
+}
+export interface ReferralCampaignStats {
+  version: number;
+  invited: number;
+  in_progress: number; // invited, diagnostic_done, learning
+  in_review: number;
+  qualified: number; // qualified + rewarded
+  rejected: number;
+  expired: number;
+  capped: number;
+  rewards: { inviter: ReferralReward; invitee: ReferralReward }; // выдано суммарно
+}
+
+// ---------- Очередь проверки рефералов (ADM-REF-02) ----------
+
+/** velocity — пригласивший получил больше velocity_per_day квалификаций за сутки; short_lessons — больше половины
+ *  уроков короче min_lesson_minutes; activity_before_accept — занятия приглашённого раньше принятия приглашения;
+ *  family_member — приглашённый в семье пригласившего */
+export type ReferralRiskFlag = "velocity" | "short_lessons" | "activity_before_accept" | "family_member";
+
+export interface AdminReferralRow {
+  referral_id: string;
+  /** null — обезличено сагой удаления */
+  inviter_user_id: string | null;
+  invitee_user_id: string | null;
+  campaign_version: number;
+  status: ReferralStatus;
+  accepted_at: string;
+  diagnostic_at: string | null;
+  lessons: number;
+  days: number;
+  minutes_total: number;
+  risk_flags: ReferralRiskFlag[];
+  reject_code: ReferralRejectCode | null;
+  /** исход ack gamification: rewarded — награда кампании; legacy — выдана раньше по правилу спринта 6;
+   *  inviter_capped — пригласивший упёрся в месячный лимит gamification (status capped); null — подтверждения нет */
+  reward_outcome: ReferralRewardOutcome | null;
+  qualified_at: string | null;
+  decided_by: StaffRef | null;
+  decided_at: string | null;
+}
+export interface AdminReferral extends AdminReferralRow {
+  /** зачётные уроки приглашённого (без содержания) */
+  lessons_log: Array<{ local_date: string; minutes: number }>;
+  /** квалификации пригласившего в месяце принятия против лимита кампании */
+  inviter_month: { qualified: number; cap: number };
+  /** решения операторов: при пересмотре прежнее сохраняется */
+  decision_history: Array<{ decision: "approved" | "rejected"; reject_code: ReferralRejectCode | null; note: string;
+                            by: StaffRef; at: string }>;
+  /** можно пересмотреть (rejected → одобрить один раз) */
+  can_redecide: boolean;
+}
+/** GET /admin/v1/referrals?status=&cursor= (referral.read) → Page<AdminReferralRow> (review — старые сверху)
+ *  GET /admin/v1/referrals/{referral_id} → AdminReferral
+ *  POST /admin/v1/referrals/{referral_id}/approve (referral.manage) ReferralApproveRequest → AdminReferral: review или
+ *    rejected (пересмотр, один раз) → qualified → проверка лимита месяца → capped или награда; иначе 409 REFERRAL_STATE
+ *  POST /admin/v1/referrals/{referral_id}/reject (referral.manage) ReferralRejectRequest → AdminReferral: только review.
+ *    Выданную награду отменяет обратная запись в кошельке (wallet.adjust), не отклонение реферала. */
+export interface ReferralApproveRequest {
+  note: string; // 10..500
+}
+export interface ReferralRejectRequest {
+  reject_code: Exclude<ReferralRejectCode, "window_expired" | "monthly_cap">;
+  note: string; // 10..500
+}
+
+// ---------- Лиги и дуэли (ADM-GAME-02) ----------
+
+/** open — неделя идёт; closed — итоги закрыты, призы начислены; held — закрыты, призы удержаны (аномалия) */
+export type LeagueGroupStatus = "open" | "closed" | "held";
+
+export interface AdminLeagueGroupRow {
+  group_id: string;
+  week: string; // понедельник, YYYY-MM-DD
+  pair_id: string;
+  level_band: LeagueLevelBand;
+  group_no: number;
+  size: number;
+  status: LeagueGroupStatus;
+  /** последняя версия итогов; null — не закрыта */
+  version: number | null;
+  anomalies: number;
+  closed_at: string | null;
+}
+export interface AdminLeagueWeek {
+  week: string;
+  starts_at: string;
+  ends_at: string;
+  status: "open" | "closed";
+  participants: number;
+  /** призов начислено за неделю (тилы) */
+  prizes_til: number;
+  groups: AdminLeagueGroupRow[];
+}
+export interface AdminLeagueMember {
+  user_id: string;
+  member_id: string;
+  nickname: string | null;
+  xp: number;
+  /** null — исключён переоценкой */
+  place: number | null;
+  prize_til: number;
+  anomaly: boolean;
+  excluded: boolean;
+  joined_at: string;
+}
+export interface AdminLeagueResult {
+  version: number;
+  standings: Array<{ user_id: string | null; place: number; xp: number; prize_til: number }>;
+  prizes_held: boolean;
+  excluded_user_ids: string[];
+  closed_at: string;
+  /** null — система (tick закрытия недели) */
+  closed_by: StaffRef | null;
+  reason: string | null;
+}
+export interface AdminLeagueGroup extends AdminLeagueGroupRow {
+  members: AdminLeagueMember[];
+  /** все версии итогов, новые сверху */
+  results: AdminLeagueResult[];
+}
+/** GET /admin/v1/game/leagues?week=YYYY-MM-DD (league.read; понедельник, по умолчанию текущая) → AdminLeagueWeek
+ *  GET /admin/v1/game/leagues/{group_id} → AdminLeagueGroup
+ *  POST /admin/v1/game/leagues/{group_id}/reevaluate (league.manage, step-up) LeagueReevaluateRequest →
+ *    AdminLeagueGroup: только закрытая группа (иначе 409 RESULT_STATE); версия + 1, прежняя хранится; разница призов —
+ *    обратными записями и новыми операциями; событие game.league.closed.v1 с новой версией
+ *  POST /admin/v1/game/leagues/{group_id}/release-prizes (league.manage) {reason} → AdminLeagueGroup: только held */
+export interface LeagueReevaluateRequest {
+  exclude_user_ids: string[]; // ≤ 30
+  reason: string; // 10..500
+}
+export interface LeagueReleaseRequest {
+  reason: string; // 10..500
+}
+
+/** challenger | opponent — победитель; draw — ничья; none — никто не сыграл (cancelled) */
+export type DuelResult = "challenger" | "opponent" | "draw" | "none";
+
+export interface AdminDuelRow {
+  duel_id: string;
+  status: DuelStatus;
+  /** null — обезличено сагой удаления */
+  challenger_user_id: string | null;
+  opponent_user_id: string | null;
+  pair_id: string;
+  level_band: LeagueLevelBand;
+  scores: { challenger: DuelScore | null; opponent: DuelScore | null };
+  result: DuelResult | null;
+  /** техническая победа: один не сыграл до дедлайна */
+  technical: boolean;
+  result_version: number;
+  created_at: string;
+  finished_at: string | null;
+}
+export interface AdminDuel extends AdminDuelRow {
+  set_id: string | null;
+  accept_deadline: string;
+  play_deadline: string | null;
+  /** операции XP по дуэли (в т. ч. обратные записи переоценки) */
+  rewards: Array<{ user_id: string | null; op_id: string; amount: number; status: "confirmed" | "reversed";
+                   result_version: number }>;
+  /** прежние результаты (переоценка сохраняет предыдущий) */
+  history: Array<{ version: number; result: DuelResult; reason: string | null; by: StaffRef | null; at: string }>;
+}
+/** GET /admin/v1/game/duels?status=&cursor= (league.read) → Page<AdminDuelRow>
+ *  GET /admin/v1/game/duels/{duel_id} → AdminDuel
+ *  POST /admin/v1/game/duels/{duel_id}/reevaluate (league.manage, step-up) DuelReevaluateRequest → AdminDuel: только
+ *    finished (иначе 409 RESULT_STATE); result_version + 1; награды исправляются обратными записями; событие
+ *    game.duel.finished.v1 с новой версией */
+export interface DuelReevaluateRequest {
+  result: Exclude<DuelResult, "none">;
+  reason: string; // 10..500
+}
+
+// ---------- Парные комнаты (ADM-SOC-02) ----------
+
+export interface AdminPairRoomParticipant {
+  /** null — обезличено сагой удаления */
+  user_id: string | null;
+  side: "inviter" | "invitee";
+  role: PairRole | null;
+  turns: number;
+  speaking_seconds: number;
+  /** учтённые минуты (не списываются до спринта 8) */
+  minutes: number;
+  contributed: boolean;
+  network: "online" | "offline" | null;
+  joined_at: string | null;
+}
+export interface AdminPairRoomRow {
+  room_id: string;
+  status: PairRoomStatus;
+  pair_id: string;
+  scenario_id: string;
+  scenario_title: Localized;
+  mode: PairRoomMode;
+  participants: AdminPairRoomParticipant[];
+  created_at: string;
+  start_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_s: number;
+  end_reason: PairEndReason | null;
+  ai_cost_usd: number;
+}
+export interface AdminPairRoom extends AdminPairRoomRow {
+  /** ход событий без текстов реплик и без оценок */
+  timeline: Array<{ seq: number; kind: PairRoomEventKind; role: PairRole | null; at: string }>;
+  stopped_by: StaffRef | null;
+  stop_reason: string | null;
+}
+/** GET /admin/v1/pair-rooms?status=&from=&to=&cursor= (room.read) → Page<AdminPairRoomRow> (новые сверху)
+ *  GET /admin/v1/pair-rooms/{room_id} → AdminPairRoom
+ *  POST /admin/v1/pair-rooms/{room_id}/stop (room.manage, step-up) PairRoomStopRequest → AdminPairRoom: → stopped,
+ *    участникам — событие в ленте и уведомление pair_stopped, отчёт по сделанному; уже завершена — 409
+ *    ROOM_NOT_ACTIVE */
+export interface PairRoomStopRequest {
+  reason: string; // 10..500
+}
+
+// ---------- Обзор ----------
+/** Блок главной админки (dashboard.read): счётчики за период и текущие очереди */
+export interface SocialStats {
+  period: Period;
+  friend_requests: number;
+  friendships_added: number;
+  /** дуэлей завершено (gamification); null — источник недоступен */
+  duels_finished: number | null;
+  /** парных уроков завершено (lessons); null — источник недоступен */
+  pair_rooms_finished: number | null;
+  /** рефералы на проверке оператора сейчас */
+  referrals_in_review: number;
+  /** дел модерации открыто за период */
+  cases_opened: number;
+  /** открытых дел сейчас */
+  cases_open: number;
 }

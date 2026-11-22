@@ -44,7 +44,11 @@
     "game_history",
     "game_settings",
     "dictionary",
-    "reading"
+    "reading",
+    "friends",
+    "leagues",
+    "duels",
+    "referrals"
   ],
   "icons": [
     "spark",
@@ -72,6 +76,16 @@
     },
     {
       "key": "s6-heroes",
+      "width": 1200,
+      "height": 675
+    },
+    {
+      "key": "s7-social",
+      "width": 1200,
+      "height": 675
+    },
+    {
+      "key": "s7-family",
       "width": 1200,
       "height": 675
     }

@@ -76,7 +76,7 @@ export interface Config {
   notificationsUrl: string;
   /** experience-config (8106): конфигурация Mini App, «Что нового», лента новостей. */
   experienceUrl: string;
-  /** social (8109): приглашения и семья. */
+  /** social (8109): приглашения и семья; спринт 7 — профиль сообщества, друзья, блокировки, жалобы, санкции, рефералы. */
   socialUrl: string;
   /** catalog (8110, спринт 3): языки и пары, снимок курса, сценарии, медиатека, заявки на песни и фильмы. */
   catalogUrl: string;
@@ -91,6 +91,12 @@ export interface Config {
   lessonsTimeoutMs: number;
   /** Таймаут завершения урока, мс (45 000): lessons ждёт оценку assessment до 32 с плюс вспомогательные вызовы. */
   lessonsFinishTimeoutMs: number;
+  /** Спринт 7: таймаут long-poll ленты парной комнаты (GET /v1/pair-rooms/{id}/state), мс (30 000): lessons держит запрос
+   *  до 25 с — таймаут BFF обязан быть больше (в stage/prod — > 25 000), иначе пустой ответ ожидания станет 503. */
+  pairRoomPollTimeoutMs: number;
+  /** Спринт 7: таймаут команд парной комнаты, которые синхронно ждут ИИ-коуча (join, turns, leave), мс (30 000; в stage/prod
+   *  ≥ 25 000), без повторов — иначе ученик получит 503, хотя lessons ход уже сохранил (как R2-02 уроков). */
+  pairRoomCoachTimeoutMs: number;
   /** memory (8116, спринт 5): словарь, «Повторение дня», журнал ошибок, перевод по тапу, произношение. */
   memoryUrl: string;
   /** Таймаут вызовов memory, мс (10 000; INTERNAL_API §8). */
@@ -329,6 +335,17 @@ export function loadConfig(env: Env = process.env): Config {
   if (rlEnabledRaw !== undefined && !["true", "false", "1", "0"].includes(rlEnabledRaw)) {
     problems.push(`RATE_LIMITS_ENABLED=${JSON.stringify(rlEnabledRaw)}: допустимо true|false`);
   }
+  // ---- спринт 7: long-poll парной комнаты — lessons ждёт до 25 с, BFF ждёт дольше (в dev/test меньше — для тестов)
+  const pairRoomPollTimeoutMs = int("PAIR_ROOM_POLL_TIMEOUT_MS", 30_000, 1000, 120_000);
+  if (isSecure && pairRoomPollTimeoutMs <= 25_000) {
+    problems.push(`PAIR_ROOM_POLL_TIMEOUT_MS=${pairRoomPollTimeoutMs}: в stage/prod больше 25000 (long-poll lessons — до 25 с)`);
+  }
+
+  const pairRoomCoachTimeoutMs = int("PAIR_ROOM_COACH_TIMEOUT_MS", 30_000, 1000, 120_000);
+  if (isSecure && pairRoomCoachTimeoutMs < 25_000) {
+    problems.push(`PAIR_ROOM_COACH_TIMEOUT_MS=${pairRoomCoachTimeoutMs}: в stage/prod не меньше 25000 (вход и ход ждут ИИ-коуча)`);
+  }
+
   const rlKeyPrefix = raw("RATE_LIMIT_KEY_PREFIX");
   const redisKeyPrefix = raw("REDIS_KEY_PREFIX") ?? "bff:";
 
@@ -368,6 +385,8 @@ export function loadConfig(env: Env = process.env): Config {
     assessmentUrl: url("ASSESSMENT_URL"),
     lessonsTimeoutMs: int("LESSONS_TIMEOUT_MS", 25_000, 1000, 60_000),
     lessonsFinishTimeoutMs: int("LESSONS_FINISH_TIMEOUT_MS", 45_000, 5000, 120_000),
+    pairRoomPollTimeoutMs,
+    pairRoomCoachTimeoutMs,
     memoryUrl: url("MEMORY_URL"),
     memoryTimeoutMs: int("MEMORY_TIMEOUT_MS", 10_000, 1000, 60_000),
     memoryTranslateTimeoutMs: int("MEMORY_TRANSLATE_TIMEOUT_MS", 12_000, 1000, 60_000),

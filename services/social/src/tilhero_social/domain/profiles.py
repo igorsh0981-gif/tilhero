@@ -3,16 +3,36 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tilhero_common.messaging import emit
 from tilhero_social.domain import family as fam
-from tilhero_social.models import DeletedUser, Family, FamilyMember, Friendship, Invite, InviteRedemption, Profile
+from tilhero_social.domain import friends
+from tilhero_social.models import (
+    Appeal,
+    Block,
+    Case,
+    CommunityProfile,
+    DeletedUser,
+    Family,
+    FamilyMember,
+    FriendRequest,
+    Invite,
+    InviteRedemption,
+    LearnerActivity,
+    LearnerIdempotency,
+    MemberId,
+    NicknameStop,
+    Profile,
+    Referral,
+    ReferralLesson,
+    Sanction,
+)
 
 DOMAIN_DELETED = "user.domain.deleted.v1"
 DELETION_DOMAIN = "social"
@@ -75,6 +95,37 @@ async def on_profile_updated(session: AsyncSession, payload: dict[str, Any], now
         await _upsert(session, user_id, values, now)
 
 
+async def _delete_social(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Спринт 7 (§1.5): профиль сообщества, member_id, заявки, блокировки, санкции (обжалования — каскадом),
+    проекция активности и ключи идемпотентности — удаляются; дела модерации обезличиваются (жалобщик/цель → null,
+    комментарий удалённого жалобщика и его ник на момент жалобы — тоже; решение и основание остаются); рефералы —
+    обезличиваются (invitee/inviter → null, статус сохраняется; уроки приглашённого удаляются)."""
+    await session.execute(delete(CommunityProfile).where(CommunityProfile.user_id == user_id))
+    await session.execute(delete(MemberId).where(MemberId.user_id == user_id))
+    await session.execute(delete(FriendRequest).where(or_(FriendRequest.from_user == user_id,
+                                                          FriendRequest.to_user == user_id)))
+    await session.execute(delete(Block).where(or_(Block.blocker == user_id, Block.blocked == user_id)))
+    sanction_ids = (await session.execute(delete(Sanction).where(Sanction.user_id == user_id)
+                                          .returning(Sanction.sanction_id))).scalars().all()
+    await session.execute(delete(Appeal).where(Appeal.user_id == user_id))
+    if sanction_ids:
+        await session.execute(update(Case).where(Case.sanction_id.in_(sanction_ids)).values(sanction_id=None))
+    await session.execute(update(Case).where(Case.reporter_user_id == user_id)
+                          .values(reporter_user_id=None, comment=None))
+    await session.execute(update(Case).where(Case.target_user_id == user_id)
+                          .values(target_user_id=None, target_nickname_at_report=None))
+    as_invitee = (await session.execute(update(Referral).where(Referral.invitee_user_id == user_id)
+                                        .values(invitee_user_id=None).returning(Referral.referral_id))
+                  ).scalars().all()
+    if as_invitee:
+        await session.execute(delete(ReferralLesson).where(ReferralLesson.referral_id.in_(as_invitee)))
+    await session.execute(update(Referral).where(Referral.inviter_user_id == user_id).values(inviter_user_id=None))
+    await session.execute(delete(LearnerActivity).where(LearnerActivity.user_id == user_id))
+    await session.execute(delete(LearnerIdempotency).where(LearnerIdempotency.user_id == user_id))
+    # стоп-лист сброшенных ников остаётся (ключ — не данные ученика), связь с учеником — нет
+    await session.execute(update(NicknameStop).where(NicknameStop.user_id == user_id).values(user_id=None))
+
+
 async def delete_user_data(session: AsyncSession, user_id: uuid.UUID, request_id: uuid.UUID,
                            causation_id: str | None, producer: str) -> None:
     """Сага удаления (TG-FR-006): приглашения пользователя (с ответами на них), его ответы на чужие приглашения,
@@ -83,7 +134,11 @@ async def delete_user_data(session: AsyncSession, user_id: uuid.UUID, request_id
     await fam.lock_users(session, [user_id])
     await session.execute(delete(Invite).where(Invite.inviter_user_id == user_id))  # ответы — каскадом
     await session.execute(delete(InviteRedemption).where(InviteRedemption.invitee_user_id == user_id))
-    await session.execute(delete(Friendship).where(or_(Friendship.user_a == user_id, Friendship.user_b == user_id)))
+    # спринт 7: дружбы — с событием removed второму (source deletion)
+    now = datetime.now(UTC)
+    for other, _ in await friends.friend_ids(session, user_id):
+        await friends.remove_friendship(session, user_id, other, now, source="deletion")
+    await _delete_social(session, user_id)
     owned = (await session.execute(
         select(Family).where(Family.owner_user_id == user_id).with_for_update())).scalar_one_or_none()
     if owned is not None:

@@ -34,6 +34,33 @@
   badge_earned:<user>:<badge> (значок выдаётся один раз), hero_stage_reached:<user>:<stage> (ступень не
   понижается). Заморозка — после 22:00 следующего дня только центр; значок и ступень — позже события +
   GAME_STALE_HOURS только центр;
+- спринт 7 (INTERNAL_API §5; издатель проверяется: social.* — только social, game.duel.*/game.league.closed — только
+  gamification, lesson.pair.* — только lessons; чужой — WARNING без user_id и без записи). Детям 6–13 — только центр
+  детского профиля (kid_in_app_only), тексты *.kid — родителю; ник — из события (неподходящий → «Друг»):
+  - social.friend_request.created.v1 → friend_request → to_user_id (friend_request:<request>), social;
+  - social.friendship.changed.v1 (added + source request) → friend_accepted → requester_user_id
+    (friend_accepted:<requester>:<accepter>:<at>), social;
+  - game.duel.challenged.v1 → duel_challenged → сопернику (duel_challenged:<duel>), game; после срока принятия —
+    только центр;
+  - game.duel.finished.v1 (status finished) → duel_finished → обоим: свой исход и свой счёт
+    (duel_finished:<duel>:<user>:<result_version> — переоценка даёт новое сообщение), game;
+  - game.league.closed.v1 (каждая версия) → league_closed → каждому из standings
+    (league_closed:<group>:<user>:<place>:<prize_til> — без изменений места и приза повтор не уходит), game;
+  - lesson.pair.invited.v1 → pair_invited → приглашённому (pair_invited:<room>), social; после start_at + 15 мин —
+    только центр; lesson.pair.starting.v1 → pair_starting → обоим (pair_starting:<room>:<user>), после начала —
+    только центр; lesson.pair.completed.v1 (end_reason stopped) → pair_stopped → участникам
+    (pair_stopped:<room>:<user>), social;
+  - game.referral.rewarded.v1 (только от gamification; outcome нет или rewarded, inviter_reward не null) →
+    referral_qualified → пригласившему, награда — из inviter_reward (referral_qualified:<referral>), social. legacy и
+    inviter_capped — без сообщения (пригласившему ничего не начислено; при лимите месяца social публикует
+    social.referral.rejected.v1 monthly_cap). social.referral.qualified.v1 не слушается: квалификация — ещё не награда
+    (лимит месяца и награда по правилу спринта 6 решаются в gamification);
+  - social.referral.rejected.v1 → referral_rejected → пригласившему (referral_rejected:<referral>), social; причина —
+    публичный код (в т. ч. monthly_cap);
+  - social.sanction.changed.v1 (change applied) → sanction_applied (sanction_applied:<sanction>) и
+    social.appeal.decided.v1 → sanction_appeal_decided (sanction_appeal_decided:<appeal>) — категория service
+    (не выключается настройкой категорий); social.case.resolved.v1 → complaint_resolved жалобщику
+    (complaint_resolved:<case>), social, без подробностей;
 - user.deletion.requested.v1 (только от identity-consent) → удаление → user.domain.deleted.v1 {domain: notifications};
 - user.status.changed / consent.revoked / user.notification_settings.changed / user.profile.updated — сброс кэша
   адресации.
@@ -61,7 +88,7 @@ from tilhero_notifications.delivery import forget
 from tilhero_notifications.dispatcher import Dispatcher
 from tilhero_notifications.domain.policy import at_local, zone
 from tilhero_notifications.settings import Settings
-from tilhero_notifications.templates import TEMPLATES, TemplateError
+from tilhero_notifications.templates import TEMPLATES, TemplateError, valid_nickname
 
 log = logging.getLogger("tilhero.notifications.consumers")
 
@@ -92,6 +119,27 @@ BADGE_EARNED = "game.badge.earned.v1"
 HERO_STAGE_REACHED = "game.hero.stage_reached.v1"
 # События игры публикует только gamification (спринт 6)
 GAME_PRODUCERS = frozenset({"gamification"})
+# Спринт 7: социальное — только social; дуэли и лиги — только gamification; парные комнаты — только lessons
+FRIEND_REQUEST = "social.friend_request.created.v1"
+FRIENDSHIP_CHANGED = "social.friendship.changed.v1"
+SANCTION_CHANGED = "social.sanction.changed.v1"
+CASE_RESOLVED = "social.case.resolved.v1"
+SANCTION_APPEAL_DECIDED = "social.appeal.decided.v1"
+REFERRAL_REJECTED = "social.referral.rejected.v1"
+COMMUNITY_EVENTS = [FRIEND_REQUEST, FRIENDSHIP_CHANGED, SANCTION_CHANGED, CASE_RESOLVED, SANCTION_APPEAL_DECIDED,
+                    REFERRAL_REJECTED]
+# награда за приглашение решена в gamification (лимит месяца, правило спринта 6) — только от gamification
+REFERRAL_REWARDED = "game.referral.rewarded.v1"
+SOCIAL_PRODUCERS = frozenset({"social"})
+DUEL_CHALLENGED = "game.duel.challenged.v1"
+DUEL_FINISHED = "game.duel.finished.v1"
+LEAGUE_CLOSED = "game.league.closed.v1"
+PAIR_INVITED = "lesson.pair.invited.v1"
+PAIR_STARTING = "lesson.pair.starting.v1"
+PAIR_COMPLETED = "lesson.pair.completed.v1"
+LESSONS_PRODUCERS = frozenset({"lessons"})
+PAIR_INVITE_TTL = timedelta(minutes=15)  # без ответа приглашение истекает через start_at + 15 мин (§3.2)
+SCHEDULED_AFTER = timedelta(minutes=1)  # start_at позже приглашения больше чем на минуту — запланированная комната
 CACHE_EVENTS = [
     "user.status.changed.v1",
     "consent.revoked.v1",
@@ -216,6 +264,153 @@ class HeroStageReached(_Payload):
     confirmed_skills: Annotated[int, Field(ge=0)]
     notify: bool
     reached_at: AwareDatetime
+
+
+# ---------------------------------------------------------------- спринт 7: социальное
+
+
+class FriendRequestCreated(_Payload):
+    request_id: uuid.UUID
+    from_user_id: uuid.UUID
+    to_user_id: uuid.UUID
+    from_nickname: str | None = None
+
+
+class FriendshipChanged(_Payload):
+    user_a: uuid.UUID
+    user_b: uuid.UUID
+    status: Literal["added", "removed"]
+    source: str
+    requester_user_id: uuid.UUID | None = None
+    accepter_nickname: str | None = None
+    at: AwareDatetime
+
+
+class DuelChallenged(_Payload):
+    duel_id: uuid.UUID
+    challenger_user_id: uuid.UUID
+    opponent_user_id: uuid.UUID
+    challenger_nickname: str | None = None
+    accept_deadline: AwareDatetime
+
+
+class DuelScore(_Payload):
+    correct: Annotated[int, Field(ge=0, le=50)]
+    total: Annotated[int, Field(ge=1, le=50)]
+
+
+class DuelScores(_Payload):
+    challenger: DuelScore | None = None
+    opponent: DuelScore | None = None
+
+
+class DuelFinished(_Payload):
+    duel_id: uuid.UUID
+    challenger_user_id: uuid.UUID
+    opponent_user_id: uuid.UUID
+    status: Literal["finished", "cancelled"]
+    result: Literal["challenger", "opponent", "draw", "none"]
+    technical: bool
+    result_version: Annotated[int, Field(ge=1)]
+    scores: DuelScores
+    finished_at: AwareDatetime
+
+
+class Standing(_Payload):
+    user_id: uuid.UUID
+    place: Annotated[int, Field(ge=1, le=100)]
+    xp: Annotated[int, Field(ge=0)]
+    prize_til: Annotated[int, Field(ge=0, le=10_000)]
+
+
+class LeagueClosed(_Payload):
+    week: date
+    group_id: uuid.UUID
+    version: Annotated[int, Field(ge=1)]
+    standings: Annotated[list[Standing], Field(max_length=50)]
+    closed_at: AwareDatetime
+
+
+class PairInvited(_Payload):
+    room_id: uuid.UUID
+    inviter_user_id: uuid.UUID
+    invitee_user_id: uuid.UUID
+    inviter_nickname: str | None = None
+    start_at: AwareDatetime
+    invited_at: AwareDatetime
+
+
+class PairStarting(_Payload):
+    room_id: uuid.UUID
+    user_ids: Annotated[list[uuid.UUID], Field(min_length=1, max_length=2)]
+    start_at: AwareDatetime
+
+
+class PairParticipant(_Payload):
+    user_id: uuid.UUID
+
+
+class PairCompleted(_Payload):
+    room_id: uuid.UUID
+    status: str
+    end_reason: Literal["completed", "participant_left", "inactivity", "stopped"]
+    participants: Annotated[list[PairParticipant], Field(min_length=1, max_length=2)]
+    ended_at: AwareDatetime
+
+
+class Reward(_Payload):
+    freeze: Annotated[int, Field(ge=0, le=10)]
+    til: Annotated[int, Field(ge=0, le=10_000)]
+
+
+class ReferralRewarded(_Payload):
+    """game.referral.rewarded.v1: outcome нет — rewarded (издатель до поля outcome); inviter_reward — что начислено
+    пригласившему (null — ничего)."""
+
+    referral_id: uuid.UUID
+    inviter_user_id: uuid.UUID
+    outcome: Literal["rewarded", "legacy", "inviter_capped"] | None = None
+    inviter_reward: Reward | None = None
+
+
+class ReferralRejected(_Payload):
+    referral_id: uuid.UUID
+    inviter_user_id: uuid.UUID
+    reject_code: Literal["not_new_user", "family_member", "window_expired", "review_rejected", "monthly_cap"]
+
+
+class SanctionChanged(_Payload):
+    user_id: uuid.UUID
+    sanction_id: uuid.UUID
+    kind: Literal["warning", "social_ban", "nickname_reset"]
+    until: AwareDatetime | None = None
+    change: Literal["applied", "expired", "revoked", "overturned"]
+
+
+class SanctionAppealDecided(_Payload):
+    appeal_id: uuid.UUID
+    user_id: uuid.UUID
+    decision: Literal["upheld", "overturned"]
+
+
+class CaseResolved(_Payload):
+    case_id: uuid.UUID
+    reporter_user_id: uuid.UUID
+    outcome: Literal["action_taken", "dismissed"]
+
+
+def duel_outcome(d: DuelFinished, user_id: uuid.UUID) -> tuple[str | None, DuelScore | None]:
+    """Исход дуэли для участника (win | loss | draw | technical_win | technical_loss) и его собственный счёт."""
+    role = "challenger" if user_id == d.challenger_user_id else "opponent"
+    score = d.scores.challenger if role == "challenger" else d.scores.opponent
+    if d.result == "none":
+        return None, score
+    if d.result == "draw":
+        return "draw", score
+    won = d.result == role
+    if d.technical:
+        return ("technical_win" if won else "technical_loss"), score
+    return ("win" if won else "loss"), score
 
 
 Accept = Callable[..., Awaitable[str]]
@@ -582,6 +777,144 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
             stale_after=h.reached_at + stale,
         )
 
+    # ---------------------------------------------------------------- спринт 7: социальное
+
+    def foreign(env: Envelope, allowed: frozenset[str]) -> bool:
+        if env.producer in allowed:
+            return False
+        log.warning("social event from unexpected producer ignored",
+                    extra={"event_type": env.event_type, "producer": env.producer[:64]})
+        return True
+
+    async def on_community(session: AsyncSession, env: Envelope) -> None:
+        """Друзья, рефералы и модерация (social, AT-73, AT-78, AT-79)."""
+        if foreign(env, SOCIAL_PRODUCERS):
+            return
+        if env.event_type == FRIEND_REQUEST:
+            fr = FriendRequestCreated.model_validate(env.payload)
+            if fr.from_user_id == fr.to_user_id:
+                return
+            await accept(session, env, user_id=fr.to_user_id, template="friend_request",
+                         params={"request_id": str(fr.request_id), "nickname": valid_nickname(fr.from_nickname)},
+                         dedup_key=f"friend_request:{fr.request_id}", subject_user_id=fr.from_user_id)
+        elif env.event_type == FRIENDSHIP_CHANGED:
+            fc = FriendshipChanged.model_validate(env.payload)
+            requester = fc.requester_user_id
+            if fc.status != "added" or fc.source != "request" or requester not in (fc.user_a, fc.user_b):
+                return
+            accepter = fc.user_b if requester == fc.user_a else fc.user_a
+            await accept(session, env, user_id=requester, template="friend_accepted",
+                         params={"nickname": valid_nickname(fc.accepter_nickname)},
+                         dedup_key=f"friend_accepted:{requester}:{accepter}:{fc.at.isoformat()}",
+                         subject_user_id=accepter)
+        elif env.event_type == REFERRAL_REJECTED:
+            rr = ReferralRejected.model_validate(env.payload)
+            await accept(session, env, user_id=rr.inviter_user_id, template="referral_rejected",
+                         params={"referral_id": str(rr.referral_id), "reject_code": rr.reject_code},
+                         dedup_key=f"referral_rejected:{rr.referral_id}")
+        elif env.event_type == SANCTION_CHANGED:
+            sc = SanctionChanged.model_validate(env.payload)
+            if sc.change != "applied":
+                return  # истечение, снятие и отмена по обжалованию — без сообщения (обжалование — своё сообщение)
+            await accept(session, env, user_id=sc.user_id, template="sanction_applied",
+                         params={"sanction_id": str(sc.sanction_id), "kind": sc.kind,
+                                 "until": sc.until.isoformat() if sc.until is not None else None},
+                         dedup_key=f"sanction_applied:{sc.sanction_id}")
+        elif env.event_type == SANCTION_APPEAL_DECIDED:
+            ad = SanctionAppealDecided.model_validate(env.payload)
+            await accept(session, env, user_id=ad.user_id, template="sanction_appeal_decided",
+                         params={"appeal_id": str(ad.appeal_id), "decision": ad.decision},
+                         dedup_key=f"sanction_appeal_decided:{ad.appeal_id}")
+        elif env.event_type == CASE_RESOLVED:
+            cr = CaseResolved.model_validate(env.payload)
+            await accept(session, env, user_id=cr.reporter_user_id, template="complaint_resolved",
+                         params={"case_id": str(cr.case_id), "outcome": cr.outcome},
+                         dedup_key=f"complaint_resolved:{cr.case_id}")
+
+    async def on_referral_rewarded(session: AsyncSession, env: Envelope) -> None:
+        """Награда пригласившему начислена (gamification, AT-78) → «Приглашение засчитано» с наградой из события.
+        legacy / inviter_capped — пригласившему ничего, сообщения нет (о лимите месяца — referral_rejected)."""
+        if foreign(env, GAME_PRODUCERS):
+            return
+        rr = ReferralRewarded.model_validate(env.payload)
+        if rr.outcome not in (None, "rewarded"):
+            return
+        if rr.inviter_reward is None:
+            log.warning("referral rewarded without inviter_reward: no message",
+                        extra={"event_type": env.event_type, "event_id": env.event_id})
+            return
+        if rr.inviter_reward.freeze <= 0 and rr.inviter_reward.til <= 0:
+            return  # кампания ничего не дала пригласившему — «вы получили» не пишем
+        await accept(session, env, user_id=rr.inviter_user_id, template="referral_qualified",
+                     params={"referral_id": str(rr.referral_id), "freeze": rr.inviter_reward.freeze,
+                             "til": rr.inviter_reward.til},
+                     dedup_key=f"referral_qualified:{rr.referral_id}")
+
+    async def on_duels_leagues(session: AsyncSession, env: Envelope) -> None:
+        """Дуэли и итоги общей лиги (gamification, AT-74, AT-75): категория game."""
+        if foreign(env, GAME_PRODUCERS):
+            return
+        stale = timedelta(hours=settings.game_stale_hours)
+        if env.event_type == DUEL_CHALLENGED:
+            dc = DuelChallenged.model_validate(env.payload)
+            await accept(session, env, user_id=dc.opponent_user_id, template="duel_challenged",
+                         params={"duel_id": str(dc.duel_id), "nickname": valid_nickname(dc.challenger_nickname),
+                                 "accept_deadline": dc.accept_deadline.isoformat()},
+                         dedup_key=f"duel_challenged:{dc.duel_id}", subject_user_id=dc.challenger_user_id,
+                         stale_after=dc.accept_deadline)
+        elif env.event_type == DUEL_FINISHED:
+            df = DuelFinished.model_validate(env.payload)
+            if df.status != "finished":
+                return  # никто не сыграл — дуэль отменена, итога нет
+            for user_id in (df.challenger_user_id, df.opponent_user_id):
+                outcome, score = duel_outcome(df, user_id)
+                if outcome is None:
+                    continue
+                await accept(session, env, user_id=user_id, template="duel_finished",
+                             params={"duel_id": str(df.duel_id), "outcome": outcome,
+                                     "result_version": df.result_version,
+                                     "correct": score.correct if score else None,
+                                     "total": score.total if score else None},
+                             dedup_key=f"duel_finished:{df.duel_id}:{user_id}:{df.result_version}",
+                             stale_after=df.finished_at + stale)
+        else:
+            lc = LeagueClosed.model_validate(env.payload)
+            for st in lc.standings:
+                await accept(session, env, user_id=st.user_id, template="league_closed",
+                             params={"week": lc.week.isoformat(), "place": st.place, "xp": st.xp,
+                                     "prize_til": st.prize_til},
+                             dedup_key=f"league_closed:{lc.group_id}:{st.user_id}:{st.place}:{st.prize_til}",
+                             stale_after=lc.closed_at + stale)
+
+    async def on_pair(session: AsyncSession, env: Envelope) -> None:
+        """Парные уроки (lessons, AT-76): приглашение, скорый старт, остановка администратором."""
+        if foreign(env, LESSONS_PRODUCERS):
+            return
+        if env.event_type == PAIR_INVITED:
+            pi = PairInvited.model_validate(env.payload)
+            if pi.inviter_user_id == pi.invitee_user_id:
+                return
+            await accept(session, env, user_id=pi.invitee_user_id, template="pair_invited",
+                         params={"room_id": str(pi.room_id), "nickname": valid_nickname(pi.inviter_nickname),
+                                 "start_at": pi.start_at.isoformat(),
+                                 "scheduled": pi.start_at - pi.invited_at > SCHEDULED_AFTER},
+                         dedup_key=f"pair_invited:{pi.room_id}", subject_user_id=pi.inviter_user_id,
+                         stale_after=pi.start_at + PAIR_INVITE_TTL)
+        elif env.event_type == PAIR_STARTING:
+            ps = PairStarting.model_validate(env.payload)
+            for user_id in dict.fromkeys(ps.user_ids):
+                await accept(session, env, user_id=user_id, template="pair_starting",
+                             params={"room_id": str(ps.room_id)}, dedup_key=f"pair_starting:{ps.room_id}:{user_id}",
+                             stale_after=ps.start_at)
+        else:
+            pc = PairCompleted.model_validate(env.payload)
+            if pc.end_reason != "stopped":
+                return
+            for user_id in dict.fromkeys(p.user_id for p in pc.participants):
+                await accept(session, env, user_id=user_id, template="pair_stopped",
+                             params={"room_id": str(pc.room_id)}, dedup_key=f"pair_stopped:{pc.room_id}:{user_id}",
+                             stale_after=pc.ended_at + timedelta(hours=settings.game_stale_hours))
+
     # ---------------------------------------------------------------- identity-consent
 
     async def on_user_deleted(session: AsyncSession, env: Envelope) -> None:
@@ -618,6 +951,10 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
         "notifications.assessment": ([APPEAL_DECIDED], on_assessment),
         "notifications.memory": ([REVIEWS_DUE], on_memory),
         "notifications.game": ([STREAK_FROZEN, BADGE_EARNED, HERO_STAGE_REACHED], on_game),
+        "notifications.community": (COMMUNITY_EVENTS, on_community),
+        "notifications.duels_leagues": ([DUEL_CHALLENGED, DUEL_FINISHED, LEAGUE_CLOSED], on_duels_leagues),
+        "notifications.referral_rewards": ([REFERRAL_REWARDED], on_referral_rewarded),
+        "notifications.pair_rooms": ([PAIR_INVITED, PAIR_STARTING, PAIR_COMPLETED], on_pair),
         "notifications.user_deleted": ([DELETION_REQUESTED], on_user_deleted),
         "notifications.delivery_cache": (CACHE_EVENTS, on_user_changed),
     }

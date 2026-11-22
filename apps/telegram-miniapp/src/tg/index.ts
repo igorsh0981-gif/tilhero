@@ -12,3 +12,4 @@ export * from "./homeScreen";
 export * from "./speech";
 export * from "./tts";
 export type * from "./types";
+export * from "./visibility";

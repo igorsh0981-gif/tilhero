@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tilhero_common.messaging import emit
+from tilhero_notifications.domain.policy import INVITE_TEMPLATES, SENDER_COUNTED_INVITES
 from tilhero_notifications.models import (
     Broadcast,
     CampaignRecipient,
@@ -232,7 +233,8 @@ async def save_render(
 
 async def count_limit(session: AsyncSession, user_id: uuid.UUID, day: date, *, exclude: uuid.UUID) -> int:
     """Сообщения, засчитанные в лимит местных суток: отправленные и зарезервированные к отправке (в т.ч. ждущие
-    повтора). Обрабатываемая запись (`exclude`) не считается — её повтор не упирается в собственный резерв."""
+    повтора). Обрабатываемая запись (`exclude`) не считается — её повтор не упирается в собственный резерв.
+    Приглашения (policy.INVITE_TEMPLATES) в общий лимит не входят — у них свой (count_invites)."""
     return int(
         (
             await session.execute(
@@ -243,10 +245,27 @@ async def count_limit(session: AsyncSession, user_id: uuid.UUID, day: date, *, e
                     Notification.limit_day == day,
                     Notification.telegram_status.in_(("scheduled", "sent")),
                     Notification.notification_id != exclude,
+                    Notification.template.notin_(INVITE_TEMPLATES),
                 )
             )
         ).scalar_one()
     )
+
+
+async def count_invites(session: AsyncSession, user_id: uuid.UUID, day: date, *, exclude: uuid.UUID,
+                        sender: uuid.UUID | None = None) -> int:
+    """Приглашения получателю, засчитанные в их лимит местных суток (отправленные и зарезервированные); с `sender` —
+    только от этого отправителя (pair_invited, duel_challenged)."""
+    conditions = [
+        Notification.user_id == user_id,
+        Notification.limit_day == day,
+        Notification.telegram_status.in_(("scheduled", "sent")),
+        Notification.notification_id != exclude,
+        Notification.template.in_(INVITE_TEMPLATES),
+    ]
+    if sender is not None:
+        conditions += [Notification.subject_user_id == sender, Notification.template.in_(SENDER_COUNTED_INVITES)]
+    return int((await session.execute(select(func.count()).select_from(Notification).where(*conditions))).scalar_one())
 
 
 async def reserve_limit(session: AsyncSession, notification_id: uuid.UUID, day: date) -> None:

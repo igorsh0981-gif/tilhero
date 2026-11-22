@@ -219,8 +219,19 @@ const THRESHOLDS = C.custom<[number, number, number]>({ type: "array", items: { 
   return a.length === 3 ? [a[0]!, a[1]!, a[2]!] : bad(p);
 });
 type Earn = GameRules["earn"];
-/** Правила игры (INTERNAL_API спринта 6 §1.3) строго: ровно ключи admin.ts, целые ≥ 0, известные виды заданий. */
-export const GAME_RULES: Codec<GameRules> = C.obj<GameRules>({
+type League = NonNullable<GameRules["league"]>;
+/** Размер группы лиги [мин, макс]: два целых ≥ 1, мин ≤ макс. */
+const GROUP_SIZE = C.custom<[number, number]>({ type: "array", items: { type: "integer" } }, (v, p) => {
+  const a = C.arr(C.int(1, 1000), 2).parse(v, p);
+  return a.length === 2 && a[0]! <= a[1]! ? [a[0]!, a[1]!] : bad(p);
+});
+/**
+ * Правила игры (INTERNAL_API спринта 6 §1.3) строго: ровно ключи admin.ts, целые ≥ 0, известные виды заданий.
+ * Спринт 7 (версия 3): `league`, `duel`, `pair_lesson` — необязательные ключи (в версиях 1–2 их нет; в черновике
+ * обязательность проверяет валидатор gamification): нет у домена — нет и в ответе.
+ */
+export const GAME_RULES: Codec<GameRules> = C.obj<GameRules>(
+  {
   earn: C.obj<Earn>({
     lesson: AMOUNT,
     lesson_passed_bonus: AMOUNT,
@@ -240,7 +251,18 @@ export const GAME_RULES: Codec<GameRules> = C.obj<GameRules>({
   bonuses: C.obj<GameRules["bonuses"]>({ registration_freeze: COUNT, referral_freeze: COUNT, referral_monthly_cap: COUNT }),
   quests: C.obj<GameRules["quests"]>({ per_day: COUNT, all_done_bonus: AMOUNT, templates: C.arr(TEMPLATE, 100) }),
   badges: C.obj<GameRules["badges"]>({ streak: C.arr(COUNT, 20), skills: C.arr(COUNT, 20), reviews_cards: C.arr(COUNT, 20), readings: C.arr(COUNT, 20) }),
-});
+  league: C.obj<League>({
+    prizes: C.arr(COUNT, 30),
+    group_size: GROUP_SIZE,
+    anomaly: C.obj<League["anomaly"]>({ median_factor: C.num(0, 1000), min_xp: COUNT }),
+  }),
+  duel: C.obj<NonNullable<GameRules["duel"]>>({ win: COUNT, draw: COUNT, participation: COUNT, daily_cap: COUNT }),
+  pair_lesson: C.obj<NonNullable<GameRules["pair_lesson"]>>({ xp: COUNT, min_turns: COUNT, daily_cap: COUNT }),
+  },
+  "league",
+  "duel",
+  "pair_lesson",
+);
 
 const SUMMARY_PROPS = {
   version: C.int(1),

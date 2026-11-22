@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TilHero — сквозной локальный стенд спринтов 1–5: все сервисы на реальных PG/Redis/NATS + мок Telegram Bot API.
+# TilHero — сквозной локальный стенд спринтов 1–7: все сервисы на реальных PG/Redis/NATS + мок Telegram Bot API.
 # Перенесён из aievent (infra/e2e/run_local.sh) — только то, что нужно TilHero, без туристического контура.
 #
 #   infra/e2e/run_local.sh up        — ключи внутреннего JWT (Ed25519 на издателя, как в prod), bootstrap ролей БД
@@ -8,7 +8,7 @@
 #   infra/e2e/run_local.sh test [аргументы scenario.py] — сброс учёток admin-identity + up + infra/e2e/scenario.py
 #                                      (спринт 1, Mini App) + infra/e2e/scenario_admin.py (спринт 2, админка через
 #                                      admin-bff) + scenario_content.py (3) + scenario_lessons.py (4) + scenario_memory.py
-#                                      (5, последним); у каждого — PASS/FAIL по шагам и «Итого: N/M PASS»
+#                                      (5) + scenario_game.py (6) + scenario_social.py (7, последним); у каждого — PASS/FAIL по шагам и «Итого: N/M PASS»
 #   infra/e2e/run_local.sh admin     — сброс учёток admin-identity + up + только infra/e2e/scenario_admin.py
 #   infra/e2e/run_local.sh content   — сброс учёток admin-identity + up + только infra/e2e/scenario_content.py
 #                                      (спринт 3: контент, диагностика, план, практика — Mini App и админка)
@@ -17,6 +17,9 @@
 #   infra/e2e/run_local.sh memory    — сброс учёток admin-identity + up + только infra/e2e/scenario_memory.py (спринт 5: словарь, «Повторение дня» и FSRS,
 #                                      проверки удержания, чтение и перевод по тапу, произношение, вечернее напоминание,
 #                                      «Память» и словарь курса в админке, сага; ИИ и речь — fake)
+#   infra/e2e/run_local.sh game      — сброс учёток admin-identity + up + только infra/e2e/scenario_game.py (спринт 6)
+#   infra/e2e/run_local.sh social    — сброс учёток admin-identity + up + только infra/e2e/scenario_social.py (спринт 7:
+#                                      друзья → лига → дуэль → парный урок → реферал → жалоба и санкция → удаление)
 #   infra/e2e/run_local.sh ui [TGID] — дополнительно Mini App (vite :5173) с VITE_DEV_INIT_DATA для Telegram ID TGID
 #   infra/e2e/run_local.sh status    — состояние процессов и /health/ready
 #   infra/e2e/run_local.sh restart [name] — перезапустить один сервис (после правки кода) или всё
@@ -32,6 +35,8 @@
 # память (спринт 5): memory 8116; memory:tick (истечение сессий, вечернее напоминание, проверки удержания) на стенде
 # вызывает сценарий с E2E_SCHEDULER_TOKEN, как n8n `memory-tick`. Окно напоминания — как prod (19:00–22:00 по поясу
 # плана, REMINDER_HOUR / REMINDER_UNTIL_HOUR): сценарий выбирает пояс плана, где сейчас 19:xx–20:xx.
+# игра (спринт 6): gamification 8117; социальное (спринт 7): MEMBER_ID_KEY — общий ключ member_id у social, gamification
+# и lessons; gamification → social, lessons; lessons → social, identity-consent; admin-bff → social.
 # Сценарий спринта 2 входит bootstrap-учёткой admin-identity (временный пароль → смена → TOTP), а bootstrap срабатывает
 # только при старте admin-identity и только без активного super_admin, — поэтому `test` и `admin` перед прогоном
 # сбрасывают сотрудников и заявки admin-identity (матрица ролей — сид миграции — остаётся) и их ключи Redis (reset_admin).
@@ -62,6 +67,8 @@ export E2E_INTERNAL_JWT_SECRET="${E2E_INTERNAL_JWT_SECRET:-e2e-internal-secret-0
 export E2E_SESSION_JWT_SECRET="${E2E_SESSION_JWT_SECRET:-e2e-session-secret-0123456789abcdef-local-xyz}"
 export E2E_WEBHOOK_SECRET="${E2E_WEBHOOK_SECRET:-e2e-webhook-secret-0123456789abcdefXYZ}"
 export E2E_INVITE_TOKEN_KEY="${E2E_INVITE_TOKEN_KEY:-e2e-invite-token-key-0123456789abcdef-local}"
+# спринт 7: member_id ученика в социальном API — один ключ на social, gamification, lessons
+export E2E_MEMBER_ID_KEY="${E2E_MEMBER_ID_KEY:-e2e-member-id-key-0123456789abcdef-local}"
 export E2E_SCHEDULER_TOKEN="${E2E_SCHEDULER_TOKEN:-e2e-scheduler-token-0123456789abcdef-local}"
 export E2E_MINIAPP_URL="${E2E_MINIAPP_URL:-https://miniapp.e2e.local}"
 export E2E_MINIAPP_ORIGIN="${E2E_MINIAPP_ORIGIN:-http://127.0.0.1:5173}"
@@ -162,15 +169,20 @@ svc_env() {
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 AI_GATEWAY_URL=http://127.0.0.1:8114" ;;
     lessons)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 AI_GATEWAY_URL=http://127.0.0.1:8114"
-      env="$env ASSESSMENT_URL=http://127.0.0.1:8113 LEARNING_PLAN_URL=http://127.0.0.1:8102 DIAGNOSTICS_URL=http://127.0.0.1:8111" ;;
+      env="$env ASSESSMENT_URL=http://127.0.0.1:8113 LEARNING_PLAN_URL=http://127.0.0.1:8102 DIAGNOSTICS_URL=http://127.0.0.1:8111"
+      # спринт 7: дуэли и парные комнаты — связь учеников (social), согласие на голос (identity-consent), member_id
+      env="$env SOCIAL_URL=http://127.0.0.1:8109 IDENTITY_CONSENT_URL=http://127.0.0.1:8101 MEMBER_ID_KEY=$E2E_MEMBER_ID_KEY" ;;
     memory)  # спринт 5: SCHEDULER_TOKEN — вход n8n memory-tick (на стенде tick вызывает сценарий)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 ASSESSMENT_URL=http://127.0.0.1:8113"
       env="$env AI_GATEWAY_URL=http://127.0.0.1:8114 IDENTITY_CONSENT_URL=http://127.0.0.1:8101" ;;
     gamification)  # спринт 6: SCHEDULER_TOKEN — вход n8n game-tick (на стенде tick вызывает сценарий)
-      env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN" ;;
+      env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN"
+      # спринт 7: лиги и дуэли — связь учеников (social), набор заданий дуэли (lessons), member_id
+      env="$env SOCIAL_URL=http://127.0.0.1:8109 LESSONS_URL=http://127.0.0.1:8112 MEMBER_ID_KEY=$E2E_MEMBER_ID_KEY" ;;
     social)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN INVITE_TOKEN_KEY=$E2E_INVITE_TOKEN_KEY"
-      env="$env TELEGRAM_APP_LINK=$E2E_TELEGRAM_APP_LINK IDENTITY_CONSENT_URL=http://127.0.0.1:8101" ;;
+      env="$env TELEGRAM_APP_LINK=$E2E_TELEGRAM_APP_LINK IDENTITY_CONSENT_URL=http://127.0.0.1:8101"
+      env="$env MEMBER_ID_KEY=$E2E_MEMBER_ID_KEY" ;;  # спринт 7
     notifications)
       # bot-gateway: только ВНУТРЕННИЙ порт (публичный 8107 отдаёт лишь webhook и health)
       env="$env IDENTITY_CONSENT_URL=http://127.0.0.1:8101 BOTGW_URL=http://127.0.0.1:$BOTGW_INTERNAL_PORT"
@@ -302,7 +314,7 @@ up() {
     AUDIT_URL=http://127.0.0.1:8105 EXPERIENCE_URL=http://127.0.0.1:8106 \
     CATALOG_URL=http://127.0.0.1:8110 DIAGNOSTICS_URL=http://127.0.0.1:8111 \
     AI_GATEWAY_URL=http://127.0.0.1:8114 LESSONS_URL=http://127.0.0.1:8112 ASSESSMENT_URL=http://127.0.0.1:8113 \
-    MEMORY_URL=http://127.0.0.1:8116 GAMIFICATION_URL=http://127.0.0.1:8117 \
+    MEMORY_URL=http://127.0.0.1:8116 GAMIFICATION_URL=http://127.0.0.1:8117 SOCIAL_URL=http://127.0.0.1:8109 \
     RATE_LIMIT_LOGIN_IP_PER_MIN="${E2E_RATE_LIMIT_LOGIN_IP_PER_MIN:-60}" \
     RATE_LIMIT_AUTH_STEP_IP_PER_MIN="${E2E_RATE_LIMIT_AUTH_STEP_IP_PER_MIN:-120}" \
     npx tsx src/main.ts
@@ -407,22 +419,27 @@ case "${1:-up}" in
     if [ -f infra/e2e/scenario_lessons.py ]; then
       echo; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_lessons.py || rc=1
     fi
-    # сценарий спринта 5 — последним, тоже со свежей bootstrap-учёткой
+    # сценарий спринта 5 — тоже со свежей bootstrap-учёткой
     if [ -f infra/e2e/scenario_memory.py ]; then
       echo; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_memory.py || rc=1
     fi
     if [ -f infra/e2e/scenario_game.py ]; then
       echo; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_game.py || rc=1
     fi
+    # сценарий спринта 7 — тоже со свежей bootstrap-учёткой
+    if [ -f infra/e2e/scenario_social.py ]; then
+      echo; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_social.py || rc=1
+    fi
     exit $rc ;;
   content) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_content.py "$@" ;;
   lessons) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_lessons.py "$@" ;;  # уборка — в шаге L00
   memory) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_memory.py "$@" ;;  # уборка — в шаге M00
   game) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_game.py "$@" ;;  # спринт 6
+  social) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_social.py "$@" ;;  # спринт 7
   admin) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_admin.py "$@" ;;  # уборка — в шаге A00
   stop|down) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi ;;
   restart) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi; up ;;
   status) status ;;
-  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|content [аргументы]|lessons [аргументы]|memory [аргументы]|game [аргументы]|ui [tg_id]|status|stop [name]|restart [name]"
+  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|content [аргументы]|lessons [аргументы]|memory [аргументы]|game [аргументы]|social [аргументы]|ui [tg_id]|status|stop [name]|restart [name]"
      exit 2 ;;
 esac

@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lesson.pair.completed.v1.schema.json",
+  "title": "lesson.pair.completed.v1",
+  "type": "object",
+  "required": [
+    "room_id",
+    "scenario_id",
+    "pair_id",
+    "status",
+    "end_reason",
+    "team_goal_reached",
+    "participants",
+    "ended_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "room_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "scenario_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "pair_id": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "finished",
+        "abandoned",
+        "stopped"
+      ]
+    },
+    "end_reason": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "participant_left",
+        "inactivity",
+        "stopped"
+      ]
+    },
+    "team_goal_reached": {
+      "type": "boolean"
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "user_id",
+          "role",
+          "contributed",
+          "turns",
+          "speaking_seconds",
+          "minutes"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "A",
+              "B",
+              null
+            ]
+          },
+          "contributed": {
+            "type": "boolean"
+          },
+          "turns": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 500
+          },
+          "speaking_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7200
+          },
+          "minutes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 240
+          }
+        }
+      },
+      "maxItems": 2,
+      "minItems": 1
+    },
+    "ended_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

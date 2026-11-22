@@ -71,6 +71,10 @@ admin.ts, `*_name` сотрудников — `null` (заполняет admin-b
 | `notifications.assessment` | `assessment.appeal.decided.v1` (спринт 4, только от `assessment`: от другого издателя — WARNING без `user_id`, без записи) | `appeal_decided` → ученику (ребёнку 6–13 — `appeal_decided.kid` опекуну), `support` (всегда включена), ключ `appeal_decided:<appeal_id>` — **одно уведомление на апелляцию** (повтор события и повторная публикация — без дубля); параметры — только `appeal_id`, `evaluation_id`, `decision`; текст решения сотрудника не принимается; дальше — общая политика (выключатель, тихие часы, окно детей) |
 | `notifications.memory` | `memory.reviews.due.v1` (спринт 5, только от `memory`: от другого издателя — WARNING без `user_id`, без записи) | `reviews_due` → ученику (ребёнку 6–13 — `reviews_due.kid` опекуну: имя ребёнка, мягко, без серии), `reminders`, ключ `reviews_due:<user>:<local_date>` — **одно в местный день**; параметры — только `local_date`, `due_count` (слов ученика нет); текст «Пора повторить слова: {due_count}. Это займёт около {review_minutes} минут» (`review_minutes` = ceil(due_count × 0,4), 2..15), кнопка «Повторить» → `route_review`; дальше — как у `lesson.reminder`: категория, выключатель, тихие часы, окно детей 08:00–20:00, лимит дня; позже 19:00 + `REMINDER_STALE_HOURS` (по поясу из события) — только центр. Шаблоны редактируются в админке, как остальные (`{due_count}`, `{review_minutes}`, у детского — ещё `{learner_name}`) |
 | `notifications.game` | `game.streak.frozen.v1`, `game.badge.earned.v1`, `game.hero.stage_reached.v1` (спринт 6, только от `gamification`: от другого издателя — WARNING без `user_id`, без записи) | `streak_frozen` / `badge_earned` / `hero_stage_reached` → ученику (ребёнку 6–13 — `*.kid`, **только центр детского профиля**: опекуну «в сводке», без Telegram), категория **`game`** (см. «Политика»). Ключи: `streak_frozen:<user>:<local_date>` — одно на день; `badge_earned:<user>:<badge_code>` — значок выдаётся один раз; `hero_stage_reached:<user>:<stage>` — ступень не понижается, смена героя нового уведомления не даёт. Значок и ступень с `notify=false` (у ученика выключены `game_notifications`) — **без записи**; заморозка — всегда (информация о серии). Параметры — только коды и числа (`local_date`, `freeze_left`; `badge_code`; `hero_code`, `stage`), `op_id` и тексты ученика не принимаются. Заморозка: позже 22:00 следующего дня (`MISSED_STALE_TIME`, пояс по умолчанию — в событии пояса нет) — только центр; значок и ступень: позже события + `GAME_STALE_HOURS` (12) — только центр |
+| `notifications.community` | `social.friend_request.created.v1`, `social.friendship.changed.v1`, `social.referral.rejected.v1`, `social.sanction.changed.v1`, `social.appeal.decided.v1`, `social.case.resolved.v1` (спринт 7, только от `social`: от другого издателя — WARNING без `user_id`, без записи) | `friend_request` → получателю (`friend_request:<request>`); `friend_accepted` → отправителю заявки, только `added` + `source request` (`friend_accepted:<requester>:<accepter>:<at>`); `referral_rejected` → пригласившему (`referral_rejected:<referral>`; причина — публичный код, в т. ч. `monthly_cap`); `sanction_applied` (только `change applied`, `sanction_applied:<sanction>`) и `sanction_appeal_decided` (`sanction_appeal_decided:<appeal>`) — категория **service** (не выключается); `complaint_resolved` → жалобщику без подробностей и без кнопки (`complaint_resolved:<case>`). Ник — из события (3–20 букв, цифр, `_`; иначе «Друг»), `subject_user_id` — отправитель/принявший (сага удалит их записи) |
+| `notifications.duels_leagues` | `game.duel.challenged.v1`, `game.duel.finished.v1`, `game.league.closed.v1` (спринт 7, только от `gamification`) | `duel_challenged` → сопернику (`duel_challenged:<duel>`, после срока принятия — только центр); `duel_finished` → обоим, только `status finished`: свой исход (победа, ничья, поражение, техническая) и свой счёт, без счёта соперника (`duel_finished:<duel>:<user>:<result_version>` — переоценка даёт новое сообщение); `league_closed` → каждому из standings (`league_closed:<group>:<user>:<place>:<prize_til>` — новая версия без изменения места и приза не уходит). Категория **game** |
+| `notifications.referral_rewards` | `game.referral.rewarded.v1` (спринт 7, только от `gamification`) | `referral_qualified` → пригласившему, только `outcome` нет или `rewarded` и `inviter_reward` не `null` (награда — из него; `null` — WARNING без `user_id`, без записи); `legacy`, `inviter_capped` — без сообщения (о лимите месяца — `referral_rejected` `monthly_cap`). Ключ `referral_qualified:<referral>`. `social.referral.qualified.v1` не слушается: квалификация — ещё не награда. Категория **social** |
+| `notifications.pair_rooms` | `lesson.pair.invited.v1`, `lesson.pair.starting.v1`, `lesson.pair.completed.v1` (спринт 7, только от `lessons`) | `pair_invited` → приглашённому (`pair_invited:<room>`, «сейчас» или время начала; после `start_at` + 15 мин — только центр); `pair_starting` → обоим (`pair_starting:<room>:<user>`, после начала — только центр); `pair_stopped` → участникам, только `end_reason stopped` (`pair_stopped:<room>:<user>`). Категория **social**, кнопка `room_<room_id>` |
 | `notifications.user_deleted` | `user.deletion.requested.v1` (только от `identity-consent`, ревью P-7: от другого издателя — предупреждение в логе с типом события и издателем, без `user_id`; подтверждение шине без удаления и без ACK) | `deleted_users` + удаление журнала/центра ученика, записей других учеников с его именем (`subject_user_id`), `missed_state`, `inbox_state`, проекции семьи, кэшей → `user.domain.deleted.v1 {domain: notifications, mode: deleted}`; запоздавшие события для удалённого — без записи |
 | `notifications.delivery_cache` | `user.status.changed.v1`, `consent.revoked.v1`, `user.notification_settings.changed.v1`, `user.profile.updated.v1` | сброс кэша адресации и имени |
 
@@ -95,15 +99,20 @@ scheduled | unscheduled | stopped | finished | failed | test_sent` (object_type 
 4. **дети 6–13** (`kind=child` или `is_minor` и `age_band` 6-9/10-13) → окно 08:00–20:00 местного (иначе до 08:00),
    адресат — опекун (`recipient_telegram_user_id`), шаблон `*.kid` с именем ребёнка;
 5. **лимит** ≤ 3 сообщений `reminders`+`missed`+`social`+`game` (спринт 6) в местные сутки на **ученика** (под
-   advisory-блокировкой ученика; засчитываются отправленные и зарезервированные) → сверх — `in_app_only daily_limit`;
+   advisory-блокировкой ученика; засчитываются отправленные и зарезервированные) → сверх — `in_app_only daily_limit`.
+   **Приглашения** (спринт 7, решение владельца) — `pair_invited`, `pair_starting`, `duel_challenged` — вне этого
+   лимита и его не тратят; свой лимит против спама: ≤ `INVITE_DAILY_LIMIT` (5) получателю в местные сутки и
+   ≤ `INVITE_PER_SENDER_LIMIT` (2) от одного отправителя (`subject_user_id`; у `pair_starting` не учитывается) → сверх —
+   `in_app_only invite_limit`; тихие часы, окно детей, категория и устаревание — как у остальных;
 6. **дедупликация** — `dedup_key` UNIQUE при приёме.
 
-**Категория `game` (спринт 6).** В журнале и шаблонах — своя категория (миграция 0004), в лимите дня — как
-`reminders`. Выключатель: пока `game` нет в настройках ученика (bff.ts `NotificationCategories`, identity-consent
-`CATEGORIES`), её включает выключатель `reminders` — `GAME_CATEGORY_GATE=reminders` (`Rules.category_gates`); когда
-категория появится в настройках — `GAME_CATEGORY_GATE=game`. В публичных ответах (центр `InboxItem.category`, карточка
-шаблона `TemplateInfo.category`) — `reminders` (`templates.PUBLIC_CATEGORY`): в контрактах bff.ts и admin.ts категории
-`game` пока нет, а admin-bff проверяет категорию строго. Детям 6–13 (`TemplateSpec.kid_in_app_only`) — после проверки
+**Категория `game` (спринт 6, полноценная — спринт 7).** В журнале и шаблонах — своя категория (миграция 0004), в
+лимите дня — как `reminders`. Спринт 7: `game` есть в bff.ts/admin.ts `NotificationCategory` и в настройках ученика
+(identity-consent, по умолчанию включена) — выключатель собственный, `GAME_CATEGORY_GATE=game` (по умолчанию;
+`reminders` — поведение спринта 6 для отката); в центре и карточке шаблона — `game`. Выключенная категория — запись в
+центре без Telegram (`category_disabled_center`), как в спринте 6. Шаблоны категории `service` (санкции и обжалования)
+в админке не выводятся и не правятся (`TemplateSpec.staff_editable=False`): admin.ts `TemplateInfo.category` не
+допускает `service`. Детям 6–13 (`TemplateSpec.kid_in_app_only`) — после проверки
 категории сразу `in_app_only kid_summary`: запись в центре детского профиля, без Telegram (дайджеста опекуну в сервисе
 нет — «сводка» = центр детского профиля).
 
@@ -129,6 +138,13 @@ scheduled | unscheduled | stopped | finished | failed | test_sent` (object_type 
 | `reviews_due`, `reviews_due.kid` (спринт 5) | reminders | `route_review` |
 | `streak_frozen`, `streak_frozen.kid`, `hero_stage_reached`, `hero_stage_reached.kid` (спринт 6) | game | `route_home` |
 | `badge_earned`, `badge_earned.kid` (спринт 6) | game | `route_progress` |
+| `friend_request`, `friend_accepted` (спринт 7) | social | `route_friends` |
+| `duel_challenged`, `duel_finished` (+ `.kid`) | game | `duel_<duel_id>` |
+| `league_closed` | game | `route_leagues` |
+| `pair_invited`, `pair_starting`, `pair_stopped` (+ `.kid`) | social | `room_<room_id>` |
+| `referral_qualified`, `referral_rejected` | social | `route_referrals` |
+| `sanction_applied`, `sanction_appeal_decided` (+ `.kid`; не редактируются) | service | `route_friends` |
+| `complaint_resolved` (+ `.kid`) | social | — |
 | `pin.reset_code` (только синхронный HTTP, не в центре) | service | — |
 
 Детские тексты — родителю, с именем ребёнка, мягкие: без «потери серии», «провала», давления (тест

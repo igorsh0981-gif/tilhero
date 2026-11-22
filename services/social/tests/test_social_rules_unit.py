@@ -12,7 +12,7 @@ import pytest
 from tilhero_common.errors import ApiError
 from tilhero_social.domain import rules
 from tilhero_social.identity import Person
-from tilhero_social.settings import DEV_TELEGRAM_APP_LINK, Settings
+from tilhero_social.settings import DEV_MEMBER_ID_KEY, DEV_TELEGRAM_APP_LINK, Settings
 
 NOW = datetime(2026, 11, 16, 8, 0, tzinfo=UTC)
 
@@ -36,8 +36,25 @@ def test_token_is_hmac_of_invite_id_and_only_hash_is_stored() -> None:
         assert not rules.is_token(bad)
 
 
-PROD = {"internal_jwt_secret": "p" * 40, "internal_jwt_private_key": "A" * 43}
+PROD = {"internal_jwt_secret": "p" * 40, "internal_jwt_private_key": "A" * 43, "member_id_key": "m" * 32}
 PROD_LINK = "https://t.me/tilhero_bot/app"
+
+
+def test_member_id_key_dev_constant_and_prod_guard() -> None:
+    """Решение координатора: без MEMBER_ID_KEY в dev/test — общая константа social, gamification и lessons (не
+    производная от INTERNAL_JWT_SECRET); в stage/prod ключ обязателен, ≥ 32 символов и не равен dev-константе."""
+    for env_name in ("dev", "test"):
+        for secret in ("t" * 40, "x" * 40):
+            dev = Settings(env=env_name, internal_jwt_secret=secret)
+            assert dev.member_key_bytes() == DEV_MEMBER_ID_KEY.encode() == b"dev-member-id-key-change-me-0000000000"
+        assert Settings(env=env_name, member_id_key="  ").member_key_bytes() == DEV_MEMBER_ID_KEY.encode()
+        assert Settings(env=env_name, member_id_key="k" * 40).member_key_bytes() == b"k" * 40
+    base = {**PROD, "invite_token_key": "k" * 32, "telegram_app_link": PROD_LINK}
+    for env_name in ("stage", "prod"):
+        for bad in (None, "", "m" * 31, DEV_MEMBER_ID_KEY):
+            with pytest.raises(ValueError, match="MEMBER_ID_KEY"):
+                Settings(env=env_name, **{**base, "member_id_key": bad})
+        assert Settings(env=env_name, **base).member_key_bytes() == b"m" * 32
 
 
 def test_settings_guard_invite_key_and_link() -> None:

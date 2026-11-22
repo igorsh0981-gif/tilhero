@@ -38,10 +38,14 @@ def texts(ru_title: str = "Заголовок", ru_body: str = "Текст", uz_
 
 def test_editable_registry_excludes_service_templates() -> None:
     assert "pin.reset_code" not in EDITABLE and "pin.reset_scheduled" not in EDITABLE
-    assert set(EDITABLE) == {n for n in TEMPLATES if not n.startswith("pin.")}
+    # спринт 7: санкции и обжалования — service, не редактируются (admin.ts TemplateInfo.category без service)
+    assert set(EDITABLE) == {n for n in TEMPLATES if not n.startswith(("pin.", "sanction_"))}
+    assert all(TEMPLATES[n].category != "service" for n in EDITABLE)
     kids = {n for n in EDITABLE if TEMPLATES[n].kid}
     assert kids == {"lesson.reminder.kid", "lesson.missed.kid", "lesson.comeback.kid", "appeal_decided.kid",
-                    "reviews_due.kid", "streak_frozen.kid", "badge_earned.kid", "hero_stage_reached.kid"}
+                    "reviews_due.kid", "streak_frozen.kid", "badge_earned.kid", "hero_stage_reached.kid",
+                    "duel_challenged.kid", "duel_finished.kid", "pair_invited.kid", "pair_starting.kid",
+                    "pair_stopped.kid", "complaint_resolved.kid"}
 
 
 @pytest.mark.parametrize("name", EDITABLE)

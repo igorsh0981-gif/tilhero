@@ -46,6 +46,9 @@ class Settings(ServiceSettings):
 
     # Политика (INTERNAL_API §4, PLAN «Правила напоминаний»)
     daily_limit: int = Field(default=3, ge=1, le=20)  # reminders + missed + social + game в местные сутки
+    # приглашения (pair_invited, pair_starting, duel_challenged) — вне daily_limit, свой лимит против спама
+    invite_daily_limit: int = Field(default=5, ge=1, le=20)  # на получателя в местные сутки
+    invite_per_sender_limit: int = Field(default=2, ge=1, le=20)  # от одного отправителя одному получателю в сутки
     reminder_stale_hours: int = Field(default=3, ge=1, le=24)  # напоминание позже слота + 3 ч → только центр
     missed_stale_time: str = "22:00"  # пропуск: на следующий день после этого времени — только центр
     comeback_min_days: int = Field(default=7, ge=1, le=60)  # consecutive_missed ≥ 4 — не чаще раза в 7 дней
@@ -53,10 +56,10 @@ class Settings(ServiceSettings):
     kid_window_end: str = "20:00"
     retention_days: int = Field(default=90, ge=1, le=365)  # журнал = центр уведомлений
 
-    # Спринт 6 — уведомления игры (INTERNAL_API спринта 6 §3)
-    # Какой выключатель настроек ученика включает категорию game: пока её нет в bff.ts NotificationCategories и
-    # identity-consent — reminders; когда появится — game
-    game_category_gate: Literal["reminders", "game"] = "reminders"
+    # Спринт 6 — уведомления игры (INTERNAL_API спринта 6 §3); спринт 7 (INTERNAL_API §5): категория game — в bff.ts
+    # NotificationCategories и identity-consent (по умолчанию включена), её включает собственный выключатель game.
+    # reminders — прежнее поведение спринта 6 (откат, пока identity-consent не выдаёт game)
+    game_category_gate: Literal["reminders", "game"] = "game"
     # значок и ступень героя позже момента события + N ч (тихие часы до утра и т. п.) — только центр
     game_stale_hours: int = Field(default=12, ge=1, le=48)
 

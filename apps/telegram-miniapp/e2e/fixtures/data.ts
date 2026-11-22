@@ -54,7 +54,7 @@ export function consent(accepted: boolean, purposes: string[] = ["terms", "priva
 export function settings(over: Partial<NotificationSettings> = {}): NotificationSettings {
   return {
     enabled: true,
-    categories: { reminders: false, missed: false, social: false, support: true, product: false },
+    categories: { reminders: false, missed: false, social: false, support: true, product: false, game: true },
     quiet_hours: { start: "22:00", end: "08:00" },
     timezone: "Asia/Tashkent",
     ...over,

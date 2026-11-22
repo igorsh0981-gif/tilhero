@@ -132,6 +132,17 @@ describe("config", () => {
     expect(Object.values(DOMAIN_URL_VARS)).not.toContain("GAMIFICATION_URL");
   });
 
+  it("спринт 7: SOCIAL_URL — как GAMIFICATION_URL: необязательна везде, нет — null (social выключен); только http(s)", () => {
+    expect(loadConfig({}).socialUrl).toBeNull();
+    expect(loadConfig(PROD).socialUrl).toBeNull();
+    expect(loadConfig({ ...PROD, SOCIAL_URL: "http://social.railway.internal:8109/" }).socialUrl).toBe("http://social.railway.internal:8109");
+    expect(loadConfig({ SOCIAL_URL: "  " }).socialUrl).toBeNull();
+    expect(problems({ ...PROD, SOCIAL_URL: "social:8109" })).toEqual([expect.stringMatching(/^SOCIAL_URL=/)]);
+    // обе ошибки перечисляются разом
+    expect(problems({ SOCIAL_URL: "ftp://social", GAMIFICATION_URL: "ftp://game" })).toHaveLength(2);
+    expect(Object.values(DOMAIN_URL_VARS)).not.toContain("SOCIAL_URL");
+  });
+
   it("prod: полный набор — ок, без dev-деривации и без имперсонации; NODE_ENV=production тоже защищённое", () => {
     const c = loadConfig(PROD);
     expect(c.isSecure).toBe(true);

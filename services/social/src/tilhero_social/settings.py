@@ -8,6 +8,9 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 
 from tilhero_common.settings import ServiceSettings
 
+# dev/test без MEMBER_ID_KEY: единая константа social, gamification и lessons (решение координатора спринта 7) —
+# member_id на локальном стенде совпадают; в stage/prod запрещена
+DEV_MEMBER_ID_KEY = "dev-member-id-key-change-me-0000000000"
 # dev/test: совпадает с telegram-bff (config.ts DEV_DEFAULTS.TELEGRAM_APP_LINK) — ссылки приглашений и согласия
 # родителя ведут в одно приложение; в stage/prod значение по умолчанию запрещено
 DEV_TELEGRAM_APP_LINK = "https://t.me/tilhero_dev_bot/app"
@@ -44,6 +47,24 @@ class Settings(ServiceSettings):
     invite_reminder_max_age_days: int = Field(default=7, ge=1, le=60)
     tick_batch_size: int = Field(default=1000, ge=10, le=10000)
 
+    # ---- спринт 7: социальное (INTERNAL_API спринта 7 §0, §1)
+    # member_id = "mb_" + base64url(HMAC-SHA256(MEMBER_ID_KEY, str(user_id))[:16]) — один ключ у social, gamification
+    # и lessons. Обязателен в stage/prod (≥ 32 символов, не DEV_MEMBER_ID_KEY); dev/test без него — DEV_MEMBER_ID_KEY.
+    # Смена ключа меняет все member_id.
+    member_id_key: SecretStr | None = None
+    friends_max: int = Field(default=200, ge=1, le=10000)
+    friend_requests_per_day: int = Field(default=20, ge=1, le=1000)
+    friend_request_ttl_days: int = Field(default=30, ge=1, le=365)
+    nickname_cooldown_days: int = Field(default=7, ge=0, le=90)
+    friend_code_rotations_per_day: int = Field(default=3, ge=1, le=50)
+    complaints_per_day: int = Field(default=10, ge=1, le=1000)
+    # календарный месяц лимита рефералов, «сегодня» статистики
+    social_timezone: str = "Asia/Tashkent"
+    # ключи идемпотентности команд ученика хранятся N дней (tick чистит)
+    idempotency_days: int = Field(default=7, ge=1, le=90)
+    # реферал: «не новый ученик» — зарегистрирован раньше чем за N часов до первого открытия приглашения
+    referral_new_user_hours: int = Field(default=48, ge=1, le=720)
+
     @field_validator("scheduler_token", mode="before")
     @classmethod
     def _strip_token(cls, v: object) -> object:
@@ -65,12 +86,23 @@ class Settings(ServiceSettings):
             raise ValueError("TELEGRAM_APP_LINK must be https://t.me/<bot>/<app> without query")
         return v
 
+    @field_validator("member_id_key", mode="before")
+    @classmethod
+    def _empty_member_key(cls, v: object) -> object:
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
+
     @model_validator(mode="after")
     def _invite_key_guard(self) -> Settings:
         if self.is_secure_env:
             key = self.invite_token_key.get_secret_value() if self.invite_token_key else ""
             if len(key) < 32:
                 raise ValueError("INVITE_TOKEN_KEY must be set (>=32 chars) in stage/prod")
+            member_key = self.member_id_key.get_secret_value() if self.member_id_key else ""
+            if len(member_key) < 32 or member_key == DEV_MEMBER_ID_KEY:
+                raise ValueError("MEMBER_ID_KEY must be set (>=32 chars, not the dev key) in stage/prod")
             if not self.telegram_app_link:
                 raise ValueError("TELEGRAM_APP_LINK must be set in stage/prod (https://t.me/<bot>/<app>)")
             token = self.scheduler_token.get_secret_value()
@@ -86,6 +118,12 @@ class Settings(ServiceSettings):
         # dev/test: детерминированно из секрета сервиса (в stage/prod запрещено валидатором выше)
         return hmac.new(self.internal_jwt_secret.get_secret_value().encode("utf-8"), b"tilhero-invite-token-key",
                         hashlib.sha256).digest()
+
+    def member_key_bytes(self) -> bytes:
+        """Ключ member_id в UTF-8 (§0). dev/test без MEMBER_ID_KEY — DEV_MEMBER_ID_KEY (как у gamification и lessons;
+        в stage/prod запрещено валидатором)."""
+        key = self.member_id_key.get_secret_value() if self.member_id_key is not None else DEV_MEMBER_ID_KEY
+        return key.encode("utf-8")
 
 
 @lru_cache
