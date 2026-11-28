@@ -117,6 +117,14 @@ class Settings(ServiceSettings):
     pair_starting_minutes: int = Field(default=5, ge=1, le=60)
     identity_timeout_seconds: float = Field(default=3.0, gt=0, le=30)
 
+    # ---------------------------------------------------------------- спринт 8: деньги (INTERNAL_API спринта 8 §5)
+    # billing (8118): POST /internal/v1/holds (удержание минут при старте урока с ИИ и урока вдвоём с коучем),
+    # GET /internal/v1/access/{user_id} (приглашение в урок вдвоём). Нет ответа за N с — занятие без ИИ (учёба не
+    # зависит от денег); BILLING_ENFORCED=false (по умолчанию) — пэйвол выключен, billing не вызывается (спринт 7)
+    billing_url: str = "http://127.0.0.1:8118"
+    billing_enforced: bool = False
+    billing_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
+
     @field_validator("member_id_key", mode="before")
     @classmethod
     def _member_key(cls, v: object) -> object:
@@ -151,6 +159,12 @@ class Settings(ServiceSettings):
                 raise ValueError(f"{name.upper()} is required in stage/prod")
             if not value.startswith(("http://", "https://")):
                 raise ValueError(f"{name.upper()} must be an http(s) URL")
+        # спринт 8: адрес billing обязателен в stage/prod, когда пэйвол включён (выключен — billing не вызывается)
+        if self.is_secure_env and self.billing_enforced and (
+                "billing_url" not in self.model_fields_set or not self.billing_url.strip()):
+            raise ValueError("BILLING_URL is required in stage/prod when BILLING_ENFORCED=true")
+        if not self.billing_url.startswith(("http://", "https://")):
+            raise ValueError("BILLING_URL must be an http(s) URL")
         # от tick зависят сроки хранения ПДн (стирание текстов через 90 дней) — в stage/prod токен обязателен (R3-05)
         token = self.scheduler_token.get_secret_value()
         if self.is_secure_env and len(token) < MIN_SCHEDULER_TOKEN_LEN:

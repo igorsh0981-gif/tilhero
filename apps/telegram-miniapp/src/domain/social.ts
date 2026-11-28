@@ -308,6 +308,13 @@ export function socialErrorText(e: unknown, t: T, fmt: { dateTime(iso: string): 
       return e.details.who === "guardian" ? t("pair.room.voiceGuardian") : t("pair.room.voiceConsent");
     case "SPEECH_UNAVAILABLE":
       return t("pair.room.voiceOff");
+    // sprint 8: the invitation to a pair lesson — the subscription could not be checked (learning works)
+    case "BILLING_UNAVAILABLE":
+      return t("bill.pair.unavailable");
+    case "SUBSCRIPTION_REQUIRED": {
+      const r = e.details.reason;
+      return t(r === "feature_not_in_plan" || r === "minutes_exhausted" || r === "kids" ? (`bill.pair.${r}` as MessageKey) : "bill.pair.no_subscription");
+    }
     case "APPEAL_EXISTS":
       return t("san.appealExists");
     case "AUDIO_INVALID": {

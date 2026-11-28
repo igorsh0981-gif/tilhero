@@ -30,7 +30,9 @@ TABLES = ("ledger", "wallets", "learners", "skill_states", "referrals", "ownersh
           # спринт 7
           "social_friends", "social_blocks", "community", "family_members", "sanctions", "learner_levels",
           "league_weeks", "league_groups", "league_members", "league_results", "duels", "duel_results_history",
-          "referral_rewards", "pair_awards", "projection_loads")
+          "referral_rewards", "pair_awards", "projection_loads",
+          # спринт 8
+          "til_orders")
 
 
 async def test_models_match_migrations_and_runtime_role() -> None:
@@ -62,6 +64,18 @@ async def test_models_match_migrations_and_runtime_role() -> None:
                 assert r.status_code == 409 and r.json()["code"] == "INSUFFICIENT_TILS"
                 r = await c.post("/internal/v1/game:tick", headers={"Authorization": f"Bearer {'s' * 40}"})
                 assert r.status_code == 200, r.text
+                # спринт 8: пакет тилов по заказу billing и пред-проверка возврата — под ролью сервиса
+                order = uuid.uuid4()
+                await bus.publish(make_envelope("billing.order.paid.v1", {
+                    "order_id": str(order), "order_no": 100001, "account_id": str(user),
+                    "beneficiary_user_id": str(user), "channel": "miniapp", "product_kind": "til_pack",
+                    "product_code": "til_100", "product_title": {"ru": "100 тилов", "uz": "100 til"},
+                    "currency": "XTR", "amount_tiyin": None, "amount_stars": 25, "provider": "telegram_stars",
+                    "til": 100, "period": None, "paid_at": "2026-11-20T05:00:00Z"}, producer="billing"))
+                billing = {HEADER: issue_token(settings.internal_jwt_secret.get_secret_value(), issuer="billing",
+                                               audience="gamification")}
+                r = await c.get(f"/internal/v1/game/purchases/by-order/{order}", headers=billing)
+                assert r.status_code == 200 and r.json()["til"] == 100, r.text
                 await bus.publish(make_envelope(
                     "user.deletion.requested.v1",
                     {"user_id": str(user), "request_id": str(uuid.uuid4()), "requested_at": "2026-11-20T10:00:00Z"},

@@ -81,7 +81,8 @@ def test_illustration_in_catalog() -> None:
     """s7-social — взрослым (друзья, лиги, дуэли); s7-family — детям (семья вместе, без пьедестала: у детей нет
     призовых мест). Файлы и размеры сверяет test_release_notes::test_catalog_matches_contract."""
     assert rn.ILLUSTRATIONS["s7-social"] == rn.ILLUSTRATIONS["s7-family"] == (1200, 675)
-    assert list(rn.ILLUSTRATIONS)[-2:] == ["s7-social", "s7-family"]
+    keys = list(rn.ILLUSTRATIONS)
+    assert keys.index("s7-family") == keys.index("s7-social") + 1  # спринт 8 дописывает свои после них
     assert {"s7-social", "s7-family"} <= set(rn.Illustration.__args__)  # type: ignore[attr-defined]
     assert {"friends", "leagues", "duels", "referrals"} <= set(rn.ROUTES)
 

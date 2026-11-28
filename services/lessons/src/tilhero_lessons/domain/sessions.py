@@ -5,6 +5,13 @@
 Транзакции короткие: контент catalog (версии неизменяемы, кеш) и вызовы ИИ/assessment выполняются ВНЕ транзакции
 с блокировкой ученика; команда затем перепроверяет состояние под блокировкой (повтор/гонка — идемпотентно).
 Перед каждой командой ученика — «уборка» его незавершённой сессии (авто-пауза после бездействия, истечение).
+
+Спринт 8 (INTERNAL_API §5, BILLING_ENFORCED): урок и сценарий 14+ стартуют в два шага — сессия создаётся «вариантами»
+с отметкой `billing.pending` (на случай сбоя — «billing недоступен»), затем ВНЕ транзакции — удержание минут billing
+(ref session_id, идемпотентно) и статус ai-gateway, затем под блокировкой — режим: удержано и ИИ для подписчика
+доступен → full; удержано, но ИИ недоступен → «варианты» с деградацией (удержание закроется событием с 0); отказ →
+«варианты» с плашкой `ai_locked {reason}`. Так 409 SESSION_ACTIVE и повтор ключа не оставляют удержаний без сессии.
+Повтор старта той же сессии доводит незавершённое решение (удержание то же). BILLING_ENFORCED=false — как в спринте 7.
 """
 
 from __future__ import annotations
@@ -68,6 +75,7 @@ RETRIEVAL_MAX = 3
 KEYS_SEEN_SESSIONS = 50  # прошлых сессий урока, итоги которых просматриваются (R2-01)
 MEDIA_TZ = "Asia/Tashkent"
 PRACTICE_ONLY_KINDS = frozenset({"review", "reading"})  # без влияния на освоение навыков
+LOCK_REASONS = frozenset({"no_subscription", "feature_not_in_plan", "minutes_exhausted", "billing_unavailable"})
 NO_AI_KINDS = frozenset({"review", "reading"})  # ИИ не нужен: «варианты» — норма, а не упрощённый режим
 READING_RESULTS_MAX = 50
 
@@ -100,7 +108,17 @@ def session_view(s: Session, settings: Settings) -> dict[str, Any]:
         "ai_degraded": s.ai_degraded, "started_at": iso(s.started_at), "paused_at": iso(s.paused_at),
         "finished_at": iso(s.finished_at), "expires_at": iso(machine.expires_at(s, settings)),
         "minutes": s.minutes if s.status in machine.TERMINAL else machine.minutes_of(s),
+        # спринт 8: урок без ИИ по тарифу (плашка) и остаток ИИ-минут после удержания на это занятие
+        "ai_locked": {"reason": s.ai_lock_reason} if s.ai_lock_reason else None,
+        "ai_minutes_left": _minutes_left(s),
     }
+
+
+def _minutes_left(s: Session) -> int | None:
+    if s.billing_hold_id is None:
+        return None
+    left = (flow.st(s).get("billing") or {}).get("minutes_left")
+    return left if isinstance(left, int) and not isinstance(left, bool) else None
 
 
 def history_item(s: Session) -> dict[str, Any]:
@@ -419,7 +437,7 @@ async def start_lesson(ctx: Ctx, lesson_id: str, pair_id: str, hint: str | None,
     rhash = _request_hash("lesson", lesson_id, pair_id)
     existing = await _replay(ctx, key, rhash)
     if existing is not None:
-        return existing, True
+        return await _billed(ctx, existing), True
     await housekeep(ctx)
     available_pair, course = await _course(ctx, pair_id)
     if not available_pair:
@@ -449,7 +467,8 @@ async def start_lesson(ctx: Ctx, lesson_id: str, pair_id: str, hint: str | None,
                                                  audience=audience, seed=seed)
     if retrieval_refs:
         cv["retrieval"] = retrieval_refs
-    ai_mode = await _ai_mode(ctx, audience)
+    billable = _billable(ctx, "lesson", audience)
+    ai_mode = "choices" if billable else await _ai_mode(ctx, audience)
     meaning = _meaning_unit(lesson, seed, locale)
     seen = await _keys_seen(ctx, lesson_id)
     assessment: list[dict[str, Any]] = [{"t": "item", "src": "lesson", "item_id": c["item_id"],
@@ -468,7 +487,10 @@ async def start_lesson(ctx: Ctx, lesson_id: str, pair_id: str, hint: str | None,
                      title=lesson["title"], level=lesson.get("level"), duration=int(lesson["duration_min"]), cv=cv,
                      plan=plan, seed=seed, ai_mode=ai_mode, lesson_id=lesson_id,
                      scenario_id=lesson.get("scenario_id") if scenario else None)
-    return await _insert(ctx, s, key, rhash)
+    if billable:
+        _billing_pending(s)
+    created, replayed = await _insert(ctx, s, key, rhash)
+    return await _billed(ctx, created), replayed
 
 
 async def _bounded[T](call: Awaitable[T], seconds: float, fallback: T, what: str) -> T:
@@ -494,13 +516,83 @@ async def _ai_mode(ctx: Ctx, audience: str) -> str:
     return "full" if available else "choices"
 
 
+# ---------------------------------------------------------------- спринт 8: удержание минут при старте
+
+
+def _billable(ctx: Ctx, kind: str, audience: str) -> bool:
+    """Урок с ИИ — платная функция: пэйвол включён, урок или сценарий, не ребёнок 6–13 (детям ИИ не включается)."""
+    return ctx.settings.billing_enforced and kind in machine.BILLABLE_KINDS and audience != "kids"
+
+
+def _billing_pending(s: Session) -> None:
+    """Сессия создаётся «вариантами» с решением billing «в работе»: сбой до решения — «billing недоступен» (без ИИ,
+    без списания)."""
+    s.ai_degraded = False
+    s.ai_lock_reason = "billing_unavailable"
+    flow.put(s, billing={"pending": True})
+
+
+def _pending(s: Session) -> bool:
+    return bool((flow.st(s).get("billing") or {}).get("pending"))
+
+
+def _with_open_answer(s: Session) -> None:
+    """Режим full на старте урока: открытое задание для оценщика в конце этапа «проверка» (как в спринте 4)."""
+    if s.kind != "lesson":
+        return
+    stages_ = [dict(x) for x in flow.stages(s)]
+    for stage in stages_:
+        units = list(stage.get("units") or [])
+        if stage.get("type") == "assessment" and not any(u.get("t") == "open_answer" for u in units):
+            stage["units"] = [*units, {"t": "open_answer"}]
+    s.plan = {**(s.plan or {}), "stages": stages_}
+
+
+async def _billed(ctx: Ctx, s: Session) -> Session:
+    """Довести решение billing по сессии (повтор старта — то же удержание по (session, session_id))."""
+    if not _pending(s):
+        return s
+    minutes = min(120, 2 * int(s.duration_min))
+    hold, ai_ok = await asyncio.gather(
+        clients.create_hold(ctx.rt, user_id=s.user_id, feature="ai_lessons", ref_kind="session", ref_id=s.session_id,
+                            minutes_planned=minutes),
+        _bounded(clients.paid_ai_available(ctx.rt), ctx.settings.ai_status_timeout_seconds, True, "ai_status"))
+    async with ctx.rt.transaction() as db:
+        fresh = await own(db, ctx.learner, s.session_id, lock=True)
+        if not _pending(fresh):
+            return fresh  # решение уже принято параллельным повтором
+        fresh_ready = fresh.status == "ready" and fresh.step_index == 0
+        info: dict[str, Any] = {"pending": False}
+        if hold.allowed and hold.hold_id is not None:
+            fresh.billing_hold_id = hold.hold_id
+            info.update(minutes_left=hold.minutes_left, minutes_held=hold.minutes_held)
+            fresh.ai_lock_reason = None
+            if fresh_ready:
+                fresh.ai_mode = "full" if ai_ok else "choices"
+                fresh.ai_degraded = not ai_ok  # ИИ недоступен — «варианты» без плашки тарифа; удержание закроется с 0
+                if ai_ok:
+                    _with_open_answer(fresh)
+            else:
+                # сессия уже пошла «вариантами» (гонка с первым шагом): режим не меняется, ИИ-секунд нет — списание 0
+                fresh.ai_degraded = True
+        elif hold.reason == "kids":
+            # billing считает ученика ребёнком 6–13: «варианты» — норма, без плашки тарифа
+            fresh.ai_lock_reason = None
+        else:
+            fresh.ai_lock_reason = hold.reason if hold.reason in LOCK_REASONS else "billing_unavailable"
+        info["outcome"] = "held" if fresh.billing_hold_id else (hold.reason or "billing_unavailable")
+        flow.put(fresh, billing=info)
+        await db.flush()
+        return fresh
+
+
 async def start_scenario(ctx: Ctx, scenario_id: str, pair_id: str, hint: str | None, locale: str,
                          key: str) -> tuple[Session, bool]:
     """Практика «Разыграть» (AT-48): только ролевая ситуация → оценка по рубрике сценария → итоги."""
     rhash = _request_hash("scenario", scenario_id, pair_id)
     existing = await _replay(ctx, key, rhash)
     if existing is not None:
-        return existing, True
+        return await _billed(ctx, existing), True
     await housekeep(ctx)
     available_pair, course = await _course(ctx, pair_id)
     if not available_pair:
@@ -515,11 +607,15 @@ async def start_scenario(ctx: Ctx, scenario_id: str, pair_id: str, hint: str | N
         raise lesson_not_available()
     cv = {"scenario": ref(scenario_id, version), "rubric": ref(scenario["rubric_id"], rubric[0])}
     plan = [{"type": "roleplay", "units": [{"t": "roleplay"}]}, {"type": "summary", "units": [{"t": "done"}]}]
+    billable = _billable(ctx, "scenario", audience)
     s = _new_session(ctx, kind="scenario", pair_id=pair_id, course_id=course or None, audience=audience,
                      locale=locale, title=scenario["title"], level=scenario.get("level"),
                      duration=ctx.settings.practice_duration_min, cv=cv, plan=plan, seed=ctx.seed_factory(),
-                     ai_mode=await _ai_mode(ctx, audience), scenario_id=scenario_id)
-    return await _insert(ctx, s, key, rhash)
+                     ai_mode="choices" if billable else await _ai_mode(ctx, audience), scenario_id=scenario_id)
+    if billable:
+        _billing_pending(s)
+    created, replayed = await _insert(ctx, s, key, rhash)
+    return await _billed(ctx, created), replayed
 
 
 def _rights_ok(media: dict[str, Any], today: date) -> bool:

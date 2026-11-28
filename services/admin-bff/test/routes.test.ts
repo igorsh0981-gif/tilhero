@@ -61,6 +61,14 @@ import {
   TARGET_USER_ID,
   WEEK,
   campaignPayload,
+  ORDER_ID,
+  CHILD_ID,
+  REFUND_ID,
+  ADJUSTMENT_ID,
+  RECON_ITEM_ID,
+  PERIOD_ID,
+  ACCOUNT_ID,
+  catalogPayload,
   type Harness,
   type Service,
 } from "./helpers.js";
@@ -95,6 +103,8 @@ const IK = (k: string) => ({ "idempotency-key": `matrix-${k}-0001` });
 
 const GM = "/admin/v1/game";
 const GI = "/internal/v1/admin/game";
+const BB = "/admin/v1/billing";
+const IB = "/internal/v1/admin/billing";
 const IA = "/internal/v1/admin";
 const L = (ru: string, uz: string) => ({ ru, uz });
 const HERO_DRAFT_BODY = {
@@ -948,6 +958,112 @@ const CASES: Record<string, Case> = {
     status: 200,
     domain: ["lessons", "POST", `${IA}/pair-rooms/${ROOM_ID}/stop`],
   },
+  // ---------------------------------------------------------------- спринт 8: деньги, финансовый обзор, контроль ИИ
+  "GET /admin/v1/billing/catalog": { url: `${BB}/catalog`, status: 200, domain: ["billing", "GET", `${IB}/catalog`] },
+  "GET /admin/v1/billing/catalog/:version": { url: `${BB}/catalog/2`, status: 200, domain: ["billing", "GET", `${IB}/catalog/2`] },
+  "PUT /admin/v1/billing/catalog/draft": {
+    url: `${BB}/catalog/draft`,
+    payload: { payload: catalogPayload(), comment: "Цены в Stars по решению О1" },
+    headers: { "if-match": "2026-11-20T10:00:00.000Z" },
+    status: 200,
+    domain: ["billing", "PUT", `${IB}/catalog/draft`],
+  },
+  "DELETE /admin/v1/billing/catalog/draft": { url: `${BB}/catalog/draft`, status: 204, domain: ["billing", "DELETE", `${IB}/catalog/draft`] },
+  "POST /admin/v1/billing/catalog/draft/validate": { url: `${BB}/catalog/draft/validate`, status: 200, domain: ["billing", "POST", `${IB}/catalog/draft/validate`] },
+  "POST /admin/v1/billing/catalog/draft/activate": {
+    url: `${BB}/catalog/draft/activate`,
+    payload: { comment: "Цены в Stars с 01.12" },
+    headers: IK("catalog-activate"),
+    status: 200,
+    domain: ["billing", "POST", `${IB}/catalog/draft/activate`],
+  },
+  "POST /admin/v1/billing/catalog/:version/rollback": {
+    url: `${BB}/catalog/1/rollback`,
+    payload: { comment: "Возврат к ценам версии 1" },
+    status: 200,
+    domain: ["billing", "POST", `${IB}/catalog/1/rollback`],
+  },
+  "POST /admin/v1/billing/trials::grant-all": {
+    url: `${BB}/trials:grant-all`,
+    payload: { reason: "Включение пэйвола, решение В4" },
+    status: 200,
+    domain: ["billing", "POST", `${IB}/trials:grant-all`],
+  },
+  "GET /admin/v1/billing/orders": { url: `${BB}/orders?channel=web&provider=payme&status=fulfilled`, status: 200, domain: ["billing", "GET", `${IB}/orders`] },
+  "GET /admin/v1/billing/orders/:orderId": { url: `${BB}/orders/${ORDER_ID}`, status: 200, domain: ["billing", "GET", `${IB}/orders/${ORDER_ID}`] },
+  "POST /admin/v1/billing/orders/:orderId/refunds": {
+    url: `${BB}/orders/${ORDER_ID}/refunds`,
+    payload: { reason: "Оплатил дважды по ошибке" },
+    headers: IK("refund"),
+    status: 201,
+    domain: ["billing", "POST", `${IB}/orders/${ORDER_ID}/refunds`],
+  },
+  "GET /admin/v1/billing/refunds": { url: `${BB}/refunds?status=awaiting_provider`, status: 200, domain: ["billing", "GET", `${IB}/refunds`] },
+  "POST /admin/v1/billing/refunds/:refundId/fail": {
+    url: `${BB}/refunds/${REFUND_ID}/fail`,
+    payload: { note: "Payme отказал в отмене, закрываем" },
+    status: 200,
+    domain: ["billing", "POST", `${IB}/refunds/${REFUND_ID}/fail`],
+  },
+  "GET /admin/v1/billing/accounts/:accountId": { url: `${BB}/accounts/${ACCOUNT_ID}`, status: 200, domain: ["billing", "GET", `${IB}/accounts/${ACCOUNT_ID}`] },
+  "GET /admin/v1/billing/accounts/:accountId/ledger": { url: `${BB}/accounts/${ACCOUNT_ID}/ledger`, status: 200, domain: ["billing", "GET", `${IB}/accounts/${ACCOUNT_ID}/ledger`] },
+  "POST /admin/v1/billing/accounts/:accountId/adjustments": {
+    url: `${BB}/accounts/${ACCOUNT_ID}/adjustments`,
+    payload: { kind: "minutes", minutes: 30, period_id: PERIOD_ID, reason: "Сбой урока 21.11, компенсация" },
+    headers: IK("adjust"),
+    status: 202,
+    domain: ["billing", "POST", `${IB}/accounts/${ACCOUNT_ID}/adjustments`],
+  },
+  "GET /admin/v1/billing/adjustments": { url: `${BB}/adjustments?status=pending`, status: 200, domain: ["billing", "GET", `${IB}/adjustments`] },
+  "POST /admin/v1/billing/adjustments/:adjustmentId/approve": {
+    url: `${BB}/adjustments/${ADJUSTMENT_ID}/approve`,
+    payload: {},
+    status: 200,
+    domain: ["billing", "POST", `${IB}/adjustments/${ADJUSTMENT_ID}/approve`],
+  },
+  "POST /admin/v1/billing/adjustments/:adjustmentId/reject": {
+    url: `${BB}/adjustments/${ADJUSTMENT_ID}/reject`,
+    payload: { note: "Сбой не подтверждён логами" },
+    status: 200,
+    domain: ["billing", "POST", `${IB}/adjustments/${ADJUSTMENT_ID}/reject`],
+  },
+  "POST /admin/v1/billing/adjustments/:adjustmentId/cancel": { url: `${BB}/adjustments/${ADJUSTMENT_ID}/cancel`, status: 200, domain: ["billing", "POST", `${IB}/adjustments/${ADJUSTMENT_ID}/cancel`] },
+  "GET /admin/v1/billing/reconciliation/items": { url: `${BB}/reconciliation/items?status=open&kind=stale_created`, status: 200, domain: ["billing", "GET", `${IB}/reconciliation/items`] },
+  "POST /admin/v1/billing/reconciliation/runs": { url: `${BB}/reconciliation/runs`, status: 202, domain: ["billing", "POST", `${IB}/reconciliation/runs`] },
+  "POST /admin/v1/billing/reconciliation/items/:itemId/resolve": {
+    url: `${BB}/reconciliation/items/${RECON_ITEM_ID}/resolve`,
+    payload: { status: "resolved", note: "Click провёл позже, сверено" },
+    status: 200,
+    domain: ["billing", "POST", `${IB}/reconciliation/items/${RECON_ITEM_ID}/resolve`],
+  },
+  "GET /admin/v1/billing/reports/summary": { url: `${BB}/reports/summary?period=week`, status: 200, domain: ["billing", "GET", `${IB}/reports/summary`] },
+  "GET /admin/v1/billing/reports/daily": { url: `${BB}/reports/daily?from=2026-11-01&to=2026-11-21`, status: 200, domain: ["billing", "GET", `${IB}/reports/daily`] },
+  "GET /admin/v1/billing/fx": { url: `${BB}/fx`, status: 200, domain: ["billing", "GET", `${IB}/fx`] },
+  "PUT /admin/v1/billing/fx": {
+    url: `${BB}/fx`,
+    payload: { usd_in_tiyin: 1_290_000, valid_from: "2026-12-01", reason: "Курс ЦБ на 01.12" },
+    status: 200,
+    domain: ["billing", "PUT", `${IB}/fx`],
+  },
+  "GET /admin/v1/billing/star-rate": { url: `${BB}/star-rate`, status: 200, domain: ["billing", "GET", `${IB}/star-rate`] },
+  "PUT /admin/v1/billing/star-rate": {
+    url: `${BB}/star-rate`,
+    payload: { star_in_tiyin: 17_500, valid_from: "2026-12-01", reason: "Оценка по выплате за ноябрь" },
+    status: 200,
+    domain: ["billing", "PUT", `${IB}/star-rate`],
+  },
+  "GET /admin/v1/billing/providers": { url: `${BB}/providers`, status: 200, domain: ["billing", "GET", `${IB}/providers`] },
+  // другой ученик, чем у карточки: 5xx-проход переопределяет ответ user-admin для карточки LEARNER_ID
+  "GET /admin/v1/learners/:id/billing": { url: `/admin/v1/learners/${CHILD_ID}/billing`, status: 200, domain: ["billing", "GET", `${IB}/accounts/${CHILD_ID}`] },
+  "GET /admin/v1/finance/overview": { url: "/admin/v1/finance/overview?period=week", status: 200, domain: ["billing", "GET", `${IB}/reports/summary`] },
+  "GET /admin/v1/ai/degradation": { url: "/admin/v1/ai/degradation", status: 200, domain: ["aiGateway", "GET", "/admin/v1/ai/degradation"] },
+  "PUT /admin/v1/ai/degradation": {
+    url: "/admin/v1/ai/degradation",
+    payload: { mode: "manual", manual_level: "paid_only", economy_at_percent: 80, paid_only_at_percent: 90, reason: "Расход месяца 88 %, бережём ИИ" },
+    status: 200,
+    domain: ["aiGateway", "PUT", "/admin/v1/ai/degradation"],
+  },
+  "GET /admin/v1/ai/unit-costs": { url: "/admin/v1/ai/unit-costs?period=week", status: 200, domain: ["aiGateway", "GET", "/admin/v1/ai/unit-costs"] },
 };
 
 let h: Harness;
@@ -1022,7 +1138,13 @@ describe("матрица маршрутов", () => {
     // api.test.ts и ai.test.ts)
     const proxied = Object.entries(CASES).filter(
       ([k, c]) =>
-        c.domain && c.domain[0] !== "adminIdentity" && k !== "GET /admin/v1/dashboard" && k !== "GET /admin/v1/qa/sessions/:id" && !k.includes("/auth/"),
+        c.domain &&
+        c.domain[0] !== "adminIdentity" &&
+        k !== "GET /admin/v1/dashboard" &&
+        k !== "GET /admin/v1/qa/sessions/:id" &&
+        // финансовый обзор собирается из независимых блоков (ошибка источника → его блок null, ответ 200 — billing.test.ts)
+        k !== "GET /admin/v1/finance/overview" &&
+        !k.includes("/auth/"),
     );
     expect(proxied.length).toBeGreaterThan(70);
     // лимит команд — 60/мин на сотрудника: новый сотрудник на каждые 40 команд

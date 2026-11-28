@@ -18,19 +18,21 @@ test("support sees overview, learners, support and the game (game.read, sprint 6
 test("communications: «news» with the three tabs; the 15 menu ids and groups of the prototype for super admin", async ({ page }) => {
   await openAs(page, "comms@tilhero.local", "#/news");
   const ids = await menu(page);
-  // sprint 5: «memory» (forgetting analytics) opens with dashboard.read
-  expect(ids.filter((x) => !["content", "agents", "qa", "costs", "heroes", "game", "events", "langs"].includes(x!))).toEqual(["overview", "memory", "news"]);
+  // sprint 5: «memory» (forgetting analytics) opens with dashboard.read; sprint 8: «Финансовый обзор» too
+  expect(ids.filter((x) => !["content", "agents", "qa", "costs", "heroes", "game", "events", "langs"].includes(x!))).toEqual(["overview", "memory", "news", "finance"]);
   await expect(page.getByTestId("news-tab-whatsnew")).toBeVisible();
   await expect(page.getByTestId("news-tab-templates")).toBeVisible();
   await expect(page.getByTestId("news-tab-campaigns")).toBeVisible();
 });
 
-test("super admin: 15 sections + «memory» (sprint 5) + «Сообщество» (sprint 7) in 6 groups; the game sections are live (sprint 6), so are content and languages (sprint 3)", async ({ page }) => {
+test("super admin: 15 sections + «memory» (sprint 5) + «Сообщество» (sprint 7) + «Деньги» (sprint 8) in 7 groups; the game sections are live (sprint 6), so are content and languages (sprint 3)", async ({ page }) => {
   await openAs(page, "admin@tilhero.local");
-  // the five sections of sprint 7 are not in the admin config 1.0.0: they follow its sections, in their own group
-  expect(await menu(page)).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit", "friends", "moderation", "referrals", "leagues", "pair_rooms"]);
-  await expect(page.locator(".sn-group")).toHaveCount(6);
+  // the five sections of sprint 7 and the five of sprint 8 («Деньги») are not in the admin config 1.0.0: they follow its
+  // sections, each in its own group
+  expect(await menu(page)).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit", "friends", "moderation", "referrals", "leagues", "pair_rooms", "tariffs", "payments", "adjustments", "reconciliation", "finance"]);
+  await expect(page.locator(".sn-group")).toHaveCount(7);
   await expect(page.locator('.sn-group[data-group="social"] [data-nav]')).toHaveCount(5);
+  await expect(page.locator('.sn-group[data-group="money"] [data-nav]')).toHaveCount(5);
   await expect(page.locator(".sn-tag")).toHaveCount(0);
   await page.locator('[data-nav="heroes"]').click();
   await expect(page.getByTestId("heroes")).toBeVisible();
@@ -77,8 +79,9 @@ test("the admin theme from experience-config is applied without a build; its fai
 
 test("experience-config down → the built-in menu and theme", async ({ page }) => {
   await openAs(page, "admin@tilhero.local", "#/overview", { adminConfigDown: true });
-  // the built-in order: «Сообщество» after the game
-  expect(await menu(page)).toHaveLength(21);
+  // the built-in order: «Сообщество» after the game, «Деньги» after «Сообщество»
+  expect(await menu(page)).toHaveLength(26);
   expect((await menu(page)).slice(10, 15)).toEqual(["friends", "moderation", "referrals", "leagues", "pair_rooms"]);
+  expect((await menu(page)).slice(15, 20)).toEqual(["tariffs", "payments", "adjustments", "reconciliation", "finance"]);
   await expect(page.locator("html")).not.toHaveAttribute("style", /--pen/);
 });

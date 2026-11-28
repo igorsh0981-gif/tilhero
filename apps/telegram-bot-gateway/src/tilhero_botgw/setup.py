@@ -1,9 +1,10 @@
 """Настройка бота в Telegram. В prod — автоматически при каждом запуске (BOT_AUTO_SETUP=true, см. auto_setup);
 вручную — `python -m tilhero_botgw.setup` (со сбросом ожидающих обновлений).
 
-setWebhook (url, secret_token, allowed_updates, drop_pending_updates) → setMyCommands: только /start, RU/UZ
+setWebhook (url, secret_token, allowed_updates + pre_checkout_query и subscription, drop_pending_updates) →
+setMyCommands: /start, /paysupport, /support, /terms (спринт 8, требование Telegram для продаж за Stars), RU/UZ
 (+ по умолчанию RU) → setChatMenuButton (web_app на MINIAPP_URL) → setMyDescription / setMyShortDescription RU/UZ
-(+ по умолчанию RU).
+(+ по умолчанию RU). TELEGRAM_TEST_ENV=true — всё в тестовой среде Telegram (…/bot<token>/test/<METHOD>).
 Нужны BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, TELEGRAM_WEBHOOK_URL (https …/telegram/webhook),
 MINIAPP_URL (https).
 """
@@ -20,7 +21,9 @@ from tilhero_botgw.settings import Settings, _is_https, get_settings
 from tilhero_botgw.telegram import TelegramClient, TelegramError, silence_http_logging
 from tilhero_botgw.texts import BOT_COMMANDS, DESCRIPTIONS, Lang
 
-ALLOWED_UPDATES = ["message", "callback_query", "my_chat_member"]
+# Спринт 8 (Stars): pre_checkout_query и subscription (BotSubscriptionUpdated, Bot API 10.2) — явно: при заданном
+# списке Telegram присылает только перечисленные типы; successful_payment и refunded_payment приходят в message
+ALLOWED_UPDATES = ["message", "callback_query", "my_chat_member", "pre_checkout_query", "subscription"]
 DEFAULT_LANG: Lang = "ru"  # язык по умолчанию (клиент Telegram без ru/uz)
 LANGS: tuple[Lang, ...] = ("ru", "uz")
 
@@ -88,6 +91,7 @@ async def run_setup(
         api_base=settings.telegram_api_base,
         timeout=settings.telegram_timeout_seconds,
         transport=transport,
+        test_env=settings.telegram_test_env,
     )
     done: list[str] = []
     try:

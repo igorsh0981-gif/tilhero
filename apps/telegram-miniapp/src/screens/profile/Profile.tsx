@@ -1,4 +1,5 @@
-import type { GameSummary } from "@tilhero/contracts/bff";
+import type { GameSummary, SubscriptionView } from "@tilhero/contracts/bff";
+import { hasAccess } from "../../domain/billing";
 import { useEffect } from "react";
 import { children, initialOf, teenWithoutConsent } from "../../domain/people";
 import { flag } from "../../config/experience";
@@ -20,7 +21,7 @@ import { useSwitchToParent } from "./switching";
 export function Profile() {
   const { bff, session, syncProfile, nav, config } = useApp();
   const plan = usePlan();
-  const { t, tp, l, lang } = useI18n();
+  const { t, tp, l, lang, fmt } = useI18n();
   const profile = useLoad(() => bff.profile(), [session.learner.learner_id]);
   const dx = useLoad(() => bff.diagnosticsState(true), [session.learner.learner_id]);
   useEffect(() => {
@@ -43,6 +44,18 @@ export function Profile() {
   const gameOn = flag(config, "game");
   const game = useLoad<GameSummary | null>(() => (gameOn ? bff.gameSummary(true).catch(() => null) : Promise.resolve(null)), [session.learner.learner_id, gameOn]);
   const g = game.data;
+  // sprint 8: the subscription row (a child profile — only «Подписка семьи активна до …», no prices, no buttons)
+  const billing = useLoad<SubscriptionView | null>(() => bff.billingSubscription(true).catch(() => null), [session.learner.learner_id]);
+  const sub = billing.data;
+  const subValue = !sub
+    ? ""
+    : sub.status === "trial" && sub.period
+      ? t("bill.row.trial", { date: fmt.date(sub.period.ends_at) })
+      : sub.status === "active" && sub.period
+        ? t("bill.row.active", { date: fmt.date(sub.period.ends_at) })
+        : sub.status === "expired"
+          ? t("bill.row.expired")
+          : t("bill.row.none");
   const notif = profile.data?.notifications;
   const notifValue = notif ? (notif.enabled ? t("c.on") : t("c.off")) : "";
 
@@ -87,6 +100,14 @@ export function Profile() {
               testId="row-diagnostics"
             />
             <NavRow title={t("profile.languages")} icon="globe" onClick={() => nav.push({ name: "languages" })} testId="row-languages" />
+            {!kid ? (
+              <NavRow title={t("bill.row")} value={subValue} icon="star" onClick={() => nav.push({ name: "subscription" })} testId="row-subscription" />
+            ) : sub && hasAccess(sub) && sub.period ? (
+              <div className="row" data-testid="row-family-sub">
+                <span className="nic"><Icon name="star" size={20} /></span>
+                <span className="t"><b>{t("bill.kid.active", { date: fmt.date(sub.period.ends_at) })}</b></span>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -96,6 +117,7 @@ export function Profile() {
             <div className="list">
               <NavRow title={t("game.myHero")} value={g.hero ? l(g.hero.name) : t("game.noHero")} icon="hero" onClick={() => nav.push({ name: "heroes" })} testId="row-hero" />
               <NavRow title={t("game.shop")} value={t("game.tilsN", { n: g.til_balance, w: tp("game.tilsWord", g.til_balance) })} icon="bag" onClick={() => nav.push({ name: "shop" })} testId="row-shop" />
+              {g.purchase_available && !kid ? <NavRow title={t("game.buyTils")} icon="coin" onClick={() => nav.push({ name: "tilShop" })} testId="row-buy-tils" /> : null}
               <NavRow title={t("game.badges")} icon="medal" onClick={() => nav.push({ name: "badges" })} testId="row-badges" />
               <NavRow title={t("game.historyLong")} icon="list" onClick={() => nav.push({ name: "gameHistory" })} testId="row-game-history" />
               <NavRow title={t("game.settings")} icon="sliders" onClick={() => nav.push({ name: "gameSettings" })} testId="row-game-settings" />

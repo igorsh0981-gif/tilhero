@@ -8,8 +8,13 @@
 
 Время участника (`active_seconds`) идёт, пока комната `in_progress`, а участник вошёл, не вышел и на связи: копится
 от `clock_at` при каждом изменении (accrue). Повторный вход ничего не удваивает — время считается по часам, а не по
-числу входов; сессия участника одна: `session_id = uuid5(room_id, str(user_id))`. Минуты = ⌈секунды / 60⌉ —
-учитываются, но не списываются (спринт 8).
+числу входов; сессия участника одна: `session_id = uuid5(room_id, str(user_id))`. Минуты участника = ⌈секунды / 60⌉
+— учёт времени ученика.
+
+Спринт 8: время с работающим коучем (`coach_active_seconds` — комната in_progress, engine ai, без деградации; пауза
+не считается) копится тем же accrue; при завершении `billable_minutes = ⌈coach_active_seconds / 60⌉` и, если есть
+удержание, `billing {payer_user_id, hold_id, billable_minutes}` в lesson.pair.completed.v1 — billing списывает минуты
+у пригласившего один раз за комнату (повтор события — без второго списания).
 """
 
 from __future__ import annotations
@@ -237,6 +242,8 @@ def accrue(room: Room, now: datetime) -> None:
         return
     if r.status == "in_progress":
         r.progress_seconds += delta
+        if r.engine == "ai" and not r.ai_degraded:
+            r.coach_active_seconds = (r.coach_active_seconds or 0) + delta
         for p in room.parts.values():
             if present(p):
                 p.active_seconds += delta
@@ -250,6 +257,19 @@ def remaining_seconds(r: PairRoom, settings: Settings, now: datetime) -> int:
 
 def minutes_of(p: RoomParticipant) -> int:
     return min(math.ceil(max(p.active_seconds, 0) / 60), MAX_EVENT_MINUTES)
+
+
+def billable_of(r: PairRoom) -> int:
+    """Спринт 8: ⌈coach_active_seconds / 60⌉ (≤ 240) — к списанию у плательщика комнаты."""
+    return min(math.ceil(max(r.coach_active_seconds or 0, 0) / 60), MAX_EVENT_MINUTES)
+
+
+def billing_of(r: PairRoom) -> dict[str, Any] | None:
+    """Блок billing события завершения: только при удержании (комната без коуча или без пэйвола — null)."""
+    if r.billing_hold_id is None or r.billing_payer_user_id is None:
+        return None
+    return {"payer_user_id": str(r.billing_payer_user_id), "hold_id": str(r.billing_hold_id),
+            "billable_minutes": r.billable_minutes if r.billable_minutes is not None else billable_of(r)}
 
 
 def release_slots(room: Room) -> None:
@@ -524,6 +544,7 @@ async def finish(db: AsyncSession, room: Room, status: str, end_reason: str, now
     r.prompt_at = None
     r.due_at = None
     put(r, pending=None, options=None)
+    r.billable_minutes = billable_of(r)
     add_event(db, room, "stopped" if status == "stopped" else "finished", now)
     release_slots(room)
     joined = [p for p in room.parts.values() if p.joined_at is not None]
@@ -542,7 +563,7 @@ async def finish(db: AsyncSession, room: Room, status: str, end_reason: str, now
             "participants": [{"user_id": str(p.user_id), "role": p.role, "contributed": p.contributed,
                               "turns": min(p.turns, 500), "speaking_seconds": min(p.speaking_seconds, MAX_SPEAKING),
                               "minutes": p.minutes} for p in known],
-            "ended_at": iso(now)}, producer=PRODUCER)
+            "ended_at": iso(now), "billing": billing_of(r)}, producer=PRODUCER)
     for p in known:
         assert p.user_id is not None
         await emit(db, COMPLETED, {
@@ -782,6 +803,10 @@ async def forget_user(db: AsyncSession, user_id: uuid.UUID, now: datetime, setti
             r.inviter = None
         if r.invitee == user_id:
             r.invitee = None
+        if r.billing_payer_user_id == user_id:
+            # спринт 8: плательщик удалён — его удержания снимает сага billing; комната доигрывается без списания
+            r.billing_payer_user_id = None
+            r.billing_hold_id = None
         r.updated_at = now
         await db.execute(update(RoomEvent).where(RoomEvent.room_id == r.room_id, RoomEvent.side == p.side,
                                                  RoomEvent.text.is_not(None)).values(text=None, redacted_at=now))

@@ -14,7 +14,9 @@
 - блок `consent` аккаунта — только собственное согласие (basis=self), детского профиля — согласие опекуна
   (basis=guardian); решение родителя о подростке видно по `guardian_consent` (ревью P2-3);
 - сверка применяет страницу снимков пачкой: одна вставка, одна выборка FOR UPDATE (по возрастанию user_id),
-  один запрос счётчиков новых строк, одно отвязывание обращений удалённых (ревью P2-6).
+  один запрос счётчиков новых строк, одно отвязывание обращений удалённых (ревью P2-6);
+- спринт 8: тариф ученика — billing.access.changed.v1 (только от billing): tier, paid_until, версия — changed_at
+  события (позднее событие тариф не откатывает); удаление стирает тариф.
 PII (username, имя) в логи не попадает: в логах только тип события.
 """
 
@@ -42,6 +44,7 @@ from tilhero_user_admin.models import (
     OPEN_TICKET_STATUSES,
     STATUSES,
     TICKET_STATUSES,
+    TIERS,
     LearnerSummary,
     TicketRef,
 )
@@ -52,6 +55,7 @@ log = logging.getLogger("tilhero.user_admin.projection")
 IDENTITY = "identity-consent"
 LEARNING_PLAN = "learning-plan"
 SUPPORT = "support"
+BILLING = "billing"
 
 EV_PROFILE_CREATED = "user.profile.created.v1"
 EV_PROFILE_UPDATED = "user.profile.updated.v1"
@@ -66,6 +70,7 @@ EV_PLAN_UPDATED = "learning.plan.updated.v1"
 EV_ACTIVITY_RECORDED = "learning.activity.recorded.v1"
 EV_TICKET_CREATED = "support.ticket.created.v1"
 EV_TICKET_STATUS_CHANGED = "support.ticket.status.changed.v1"
+EV_ACCESS_CHANGED = "billing.access.changed.v1"
 
 # Производитель-владелец каждого события: чужой издатель не может переписать read-модель
 PRODUCERS: dict[str, str] = {
@@ -82,6 +87,7 @@ PRODUCERS: dict[str, str] = {
     EV_ACTIVITY_RECORDED: LEARNING_PLAN,
     EV_TICKET_CREATED: SUPPORT,
     EV_TICKET_STATUS_CHANGED: SUPPORT,
+    EV_ACCESS_CHANGED: BILLING,
 }
 EVENT_TYPES = list(PRODUCERS)
 
@@ -243,6 +249,8 @@ def _erase_fields(row: LearnerSummary, at: datetime) -> None:
     row.notifications = None
     row.security = dict(EMPTY_SECURITY)
     row.last_activity_at = None
+    row.tier = None
+    row.paid_until = None
     row.open_tickets = 0
     row.tickets_total = 0
     if row.erased_at is None:
@@ -335,11 +343,27 @@ async def apply_event(session: AsyncSession, env: Envelope) -> Applied:
             _apply_security(row, str(p.get("change")), at)
         case "learning.plan.updated.v1":
             return Applied(True, wake_plans=_apply_plan_event(row, p, at))
+        case "billing.access.changed.v1":
+            _apply_access(row, p, at)
         case "learning.activity.recorded.v1":
             recorded = _aware(p.get("recorded_at")) or at
             if row.last_activity_at is None or recorded > row.last_activity_at:
                 row.last_activity_at = recorded
     return DONE
+
+
+def _apply_access(row: LearnerSummary, p: dict[str, Any], at: datetime) -> None:
+    """billing.access.changed.v1 → тариф (admin.ts AdminLearnerRow.tier): версия — changed_at события."""
+    tier = p.get("tier")
+    if tier not in TIERS:
+        log.warning("access change with unknown tier ignored")
+        return
+    changed = _aware(p.get("changed_at")) or at
+    if not _newer(changed, row.tier_at):
+        return
+    row.tier = str(tier)
+    row.paid_until = _aware(p.get("paid_until")) if tier == "paid" else None
+    row.tier_at = changed
 
 
 def _apply_profile_created(row: LearnerSummary, p: dict[str, Any], at: datetime, created_at: datetime) -> None:

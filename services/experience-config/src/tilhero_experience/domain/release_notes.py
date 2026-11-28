@@ -74,6 +74,8 @@ ROUTES: Final[tuple[str, ...]] = (
     "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
     # спринт 7: друзья, лиги, дуэли, рефералы (парный урок — через «Друзья», отдельного маршрута нет)
     "friends", "leagues", "duels", "referrals",
+    # спринт 8: «Подписка» и «Купить тилы» (за Stars)
+    "subscription", "til_shop",
 )
 ICONS: Final[tuple[str, ...]] = (
     "spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield",
@@ -85,6 +87,9 @@ ILLUSTRATIONS: Final[dict[str, tuple[int, int]]] = {
     "s6-heroes": (1200, 675),
     "s7-social": (1200, 675),  # спринт 7: друзья, лиги, дуэли, урок вдвоём
     "s7-family": (1200, 675),  # спринт 7, детская заметка: семья учится вместе (без пьедестала — у детей нет лиг)
+    # спринт 8: подписка за Stars — взрослым (14+) и детям (6–13, без цен и призывов)
+    "s8-plus": (1200, 675),
+    "s8-plus-kids": (1200, 675),
 }
 ILLUSTRATION_PATTERN = r"^[a-z0-9][a-z0-9-]{0,31}$"
 SLUG_PATTERN = r"^[0-9A-Za-z][0-9A-Za-z.-]{0,31}$"
@@ -100,10 +105,10 @@ UiLang = Literal["ru", "uz"]
 Route = Literal["home", "lessons", "review", "progress", "profile", "schedule", "notifications", "family", "support",
                 "news", "diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages",
                 "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
-                "friends", "leagues", "duels", "referrals"]
+                "friends", "leagues", "duels", "referrals", "subscription", "til_shop"]
 IconName = Literal["spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users",
                    "gift", "shield", "globe", "trophy", "news"]
-Illustration = Literal["welcome", "s6-heroes", "s7-social", "s7-family"]
+Illustration = Literal["welcome", "s6-heroes", "s7-social", "s7-family", "s8-plus", "s8-plus-kids"]
 
 # управляющие C0/C1, разделители строк, невидимые и bidi: U+061C, U+200B–U+200F (ZWSP, ZWNJ, ZWJ, LRM, RLM),
 # U+2028–U+202E (в т. ч. LRE…RLO), U+2060–U+2064, U+2066–U+2069 (изоляты), U+FEFF (BOM)

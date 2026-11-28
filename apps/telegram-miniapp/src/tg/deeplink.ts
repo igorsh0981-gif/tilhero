@@ -1,7 +1,10 @@
 import type { ReleaseNoteRoute } from "@tilhero/contracts/bff";
 
-/** Routes of packages/contracts/release-notes.json (bff.ts ReleaseNoteRoute, sprint 3 routes included). */
-export type AppRoute = ReleaseNoteRoute;
+/** Sprint 8: «Подписка» and «Купить тилы» — routes of packages/contracts/release-notes.json (bff.ts ReleaseNoteRoute
+ *  since the integration); the notifications about payments lead to route_subscription. */
+export type BillingRoute = Extract<ReleaseNoteRoute, "subscription" | "til_shop">;
+/** Routes of packages/contracts/release-notes.json (bff.ts ReleaseNoteRoute, sprint 3 routes included) and sprint 8. */
+export type AppRoute = ReleaseNoteRoute | BillingRoute;
 
 /**
  * Deep links (start_param / ?startapp=, InboxItem.startapp). Telegram allows [A-Za-z0-9_-]{1,64}.
@@ -30,6 +33,8 @@ export const ROUTES: readonly AppRoute[] = [
   "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
   // sprint 7: friends, leagues of the week, duels, referrals
   "friends", "leagues", "duels", "referrals",
+  // sprint 8: the subscription (Telegram Stars) and buying tils for Stars
+  "subscription", "til_shop",
 ];
 const ROUTE_SET: ReadonlySet<string> = new Set(ROUTES);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

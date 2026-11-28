@@ -45,8 +45,9 @@ NO_AI_SESSION_KINDS: Final = frozenset({"duel"})
 COACH_AGENT: Final = "cooperative_lesson_coach"
 AgentImplementation = Literal["llm", "rules", "code"]
 AgentVersionStatus = Literal["draft", "published", "archived"]
+# спринт 8: + degraded — уровень paid_only, ученик без подписки (tier free) не обслуживается (до провайдера, $0)
 AgentUnavailableReason = Literal["ai_disabled", "not_configured", "budget_exceeded", "cost_limit", "provider_error",
-                                 "timeout", "invalid_output"]
+                                 "timeout", "invalid_output", "degraded"]
 AgentRefusedReason = Literal["kids_not_allowed", "agent_not_active"]
 RubricCriterionCode = Literal["task", "vocabulary", "grammar", "independence", "pronunciation", "fluency",
                               "comprehension"]
@@ -584,12 +585,106 @@ class PronunciationResult(BaseModel):
     latency_ms: int = Field(ge=0)
 
 
+# ---------------------------------------------------------------- контроль ИИ (спринт 8, ai.ts, INTERNAL_API §7)
+
+
+def _plain_reason(value: str) -> str:
+    value = value.strip()
+    if CONTROL_RE.search(value):
+        raise ValueError("недопустимые символы")
+    if len(value) < 10:
+        raise ValueError("причина — от 10 символов")
+    return value
+
+
+DegradationLevel = Literal["normal", "economy", "paid_only", "off"]
+DegradationMode = Literal["auto", "manual"]
+DegradationReason = Literal["threshold", "manual", "emergency_stop", "month_reset"]
+LearnerTierLit = Literal["free", "paid"]
+
+
 class AiStatus(BaseModel):
-    """GET /internal/v1/status (ai.ts AiStatus)."""
+    """GET /internal/v1/status (ai.ts AiStatus); спринт 8 — действующий уровень деградации и доступность ИИ ученику
+    без подписки (free_available: normal | economy) и подписчику (paid_available: + paid_only)."""
 
     model_config = _OUT
     ai_available: bool
     speech_available: bool
+    level: DegradationLevel
+    free_available: bool
+    paid_available: bool
+
+
+class DegradationEvent(BaseModel):
+    """ai.ts DegradationEvent — смена действующего уровня (journal degradation_events)."""
+
+    model_config = _OUT
+    seq: int
+    from_: DegradationLevel = Field(alias="from")
+    to: DegradationLevel
+    mode: DegradationMode
+    reason: DegradationReason
+    spent_percent: float = Field(ge=0, le=1000)
+    actor: str | None
+    at: str
+
+
+class AiDegradation(BaseModel):
+    """GET /admin/v1/ai/degradation (costs.read) → ai.ts AiDegradation."""
+
+    model_config = _OUT
+    mode: DegradationMode
+    manual_level: DegradationLevel | None
+    level: DegradationLevel
+    economy_at_percent: int = Field(ge=1, le=100)
+    paid_only_at_percent: int = Field(ge=1, le=100)
+    spent_percent: float = Field(ge=0, le=1000)
+    month: str
+    events: list[DegradationEvent] = Field(max_length=20)
+    updated_at: str
+
+
+class AiDegradationUpdate(BaseModel):
+    """PUT /admin/v1/ai/degradation (costs.manage, step-up) — ai.ts AiDegradationUpdate. Согласованность (пороги,
+    manual_level при manual) проверяет домен: 422 DEGRADATION_INVALID {fields}."""
+
+    model_config = _IN
+    mode: DegradationMode
+    manual_level: DegradationLevel | None
+    economy_at_percent: int
+    paid_only_at_percent: int
+    reason: Annotated[str, AfterValidator(_plain_reason), Field(min_length=10, max_length=500)]
+
+
+class AiUnitCostsKind(BaseModel):
+    """ai.ts AiUnitCostsKind — стоимость занятий одного вида за период; USD — строки с 6 знаками."""
+
+    model_config = _OUT
+    sessions: int = Field(ge=0)
+    ai_sessions: int = Field(ge=0)
+    cost_usd: str
+    cost_per_ai_session_p50_usd: str | None
+    cost_per_ai_session_p95_usd: str | None
+    billable_minutes: int = Field(ge=0)
+    cost_per_billable_minute_usd: str | None
+
+
+class AiUnitCostsByKind(BaseModel):
+    model_config = _OUT
+    lesson: AiUnitCostsKind
+    scenario: AiUnitCostsKind
+    pair: AiUnitCostsKind
+
+
+class AiUnitCosts(BaseModel):
+    """GET /admin/v1/ai/unit-costs?period=week|month (costs.read | dashboard.read) → ai.ts AiUnitCosts."""
+
+    model_config = _OUT
+    period: Literal["week", "month"]
+    from_: str = Field(alias="from")
+    to: str
+    by_kind: AiUnitCostsByKind
+    degraded_sessions_pct: float | None = Field(ge=0, le=100)
 
 
 # ---------------------------------------------------------------- speech:transcribe (спринт 7, ai.ts)

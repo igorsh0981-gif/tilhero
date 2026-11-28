@@ -86,9 +86,12 @@ async def test_internal_status_for_domains_only(env) -> None:
         assert r.status_code == 403 and r.json()["code"] == "CALLER_NOT_ALLOWED", caller
     for caller in ("lessons", "assessment", "memory"):
         r = await env.c.get("/internal/v1/status", headers=env.svc(caller))
-        assert r.status_code == 200 and r.json() == {"ai_available": True, "speech_available": True}, caller
+        assert r.status_code == 200 and r.json() == {
+            "ai_available": True, "speech_available": True, "level": "normal", "free_available": True,
+            "paid_available": True}, caller
     stop = await env.c.post("/admin/v1/ai/emergency-stop", json={"enabled": True, "reason": "Авария"},
                             headers=env.h(OPERATIONS, **{"Idempotency-Key": "stop-status-1"}))
     assert stop.status_code == 200, stop.text
     assert (await env.c.get("/internal/v1/status", headers=env.svc("lessons"))).json() == {
-        "ai_available": False, "speech_available": False}
+        "ai_available": False, "speech_available": False, 
+        "level": "off", "free_available": False, "paid_available": False}

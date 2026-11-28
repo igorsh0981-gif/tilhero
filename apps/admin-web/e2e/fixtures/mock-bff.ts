@@ -31,6 +31,7 @@ import { AiStore, type AiScenario } from "./ai-bff";
 import { MemoryStore, type MemoryScenario } from "./memory-bff";
 import { GameStore, type GameScenario } from "./game-bff";
 import { SocialStore, type SocialScenario } from "./social-bff";
+import { MoneyStore, type MoneyScenario } from "./money-bff";
 import * as CD from "./content-data";
 
 export interface Scenario {
@@ -57,6 +58,8 @@ export interface Scenario {
   game?: GameScenario;
   /** sprint 7: «Сообщество» (the dashboard block or its duel / room counters down, a campaign draft conflict, page size) */
   social?: SocialScenario;
+  /** sprint 8: «Деньги» (billing down, a catalogue draft, a draft conflict, a lost refund answer, no Star rate) */
+  money?: MoneyScenario;
   /** the audit log cannot be written: reveal → 503 AUDIT_UNAVAILABLE */
   auditDown?: boolean;
   /** no ADMIN_TEST_CHAT_IDS in notifications */
@@ -162,6 +165,7 @@ export class MockBff {
   memory: MemoryStore;
   game: GameStore;
   social: SocialStore;
+  money: MoneyStore;
   session: Session | null = null;
   versions: Record<ConfigApp, ConfigVersion[]>;
   activations: Record<ConfigApp, ConfigActivation[]>;
@@ -181,6 +185,9 @@ export class MockBff {
     this.memory = new MemoryStore(sc.memory ?? {});
     this.game = new GameStore(sc.game ?? {});
     this.social = new SocialStore(sc.social ?? {});
+    this.money = new MoneyStore(sc.money ?? {}, (id) => this.learners.find((l) => l.user_id === id), (p) => this.ai.summary(p));
+    // sprint 8 (ADM-USR-01): the tier projection of billing in user-admin — a child shares the guardian's account
+    for (const l of this.learners) l.tier = this.money.accounts[l.kind === "child" ? (l.guardian_user_id ?? "") : l.user_id]?.tier ?? (l.user_id === F.LEARNER.jasur ? null : "free");
     if (sc.singleSuperAdmin) this.accounts = this.accounts.filter((a) => a.staff.staff_id !== F.ID.admin2);
     if (sc.stalled) {
       const c = this.campaigns.find((x) => x.campaign_id === "e1000000-0000-4000-8000-000000000002")!;
@@ -401,8 +408,8 @@ export class MockBff {
       game: ((st) => (st ? blk("game", "gamification", st) : { available: false, data: null, service: "gamification" }))(this.game.stats(period)),
       // sprint 7: the community block (social; duels and rooms counters — null when gamification / lessons are down)
       social: ((st) => (st ? { available: true, data: st } : { available: false, data: null, service: "social" }))(this.social.stats(period)),
-      // sprint 8: the «Деньги» block (billing) — поток F
-      money: { available: false, data: null, service: "billing" },
+      // sprint 8: the «Деньги» block (billing; the AI cap — ai-gateway): today of Tashkent, whatever the period
+      money: ((st) => (st ? { available: true, data: st } : { available: false, data: null, service: "billing" }))(this.money.stats()),
     };
   }
 
@@ -551,6 +558,7 @@ export class MockBff {
             (!q.get("age_band") || x.age_band === q.get("age_band")) &&
             (!q.get("status") || x.status === q.get("status")) &&
             (!q.get("locale") || x.locale === q.get("locale")) &&
+            (!q.get("tier") || (x.tier ?? "free") === q.get("tier")) &&
             (q.get("has_open_tickets") !== "true" || x.open_tickets > 0),
         );
         if (qs) {
@@ -1125,6 +1133,8 @@ export class MockBff {
           err: (st: number, code: string, details?: Record<string, unknown>) => err(st, code, details),
           binary: (st: number, buf: Buffer, ct: string) => route.fulfill({ status: st, contentType: ct, body: buf, headers: { "Cache-Control": "private, max-age=3600" } }),
         };
+        // sprint 8 first: /billing/*, /finance/*, /learners/{id}/billing, /ai/degradation, /ai/unit-costs
+        if (await this.money.handle(method, path, body, q, idemKey, headers, ctx)) return;
         // sprint 7 before the game: /game/leagues* and /game/duels* belong to «Сообщество»
         if (await this.social.handle(method, path, body, q, idemKey, headers, ctx)) return;
         if (await this.game.handle(method, path, body, q, idemKey, req.postDataBuffer(), headers, ctx)) return;

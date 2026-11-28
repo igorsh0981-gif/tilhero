@@ -41,6 +41,9 @@ def test_estimate_is_worst_case() -> None:
 
 
 async def test_monthly_cap(gw) -> None:
+    # спринт 8: пороги деградации 100/100 — уровень normal до 100 %, проверяется сам потолок (уровни — в
+    # test_gw_ai_control.py)
+    await gw.sql("UPDATE budget SET economy_at_percent = 100, paid_only_at_percent = 100")
     await _spend(gw, "19.9999")
     res = await gw.ok()
     assert (res["status"], res["reason"], res["cost_usd"]) == ("unavailable", "budget_exceeded", 0)
@@ -57,7 +60,8 @@ async def test_monthly_cap(gw) -> None:
 async def test_monthly_cap_change_applies(gw) -> None:
     await gw.set_budget(monthly_cap_usd=0)
     assert (await gw.ok())["reason"] == "budget_exceeded"
-    await gw.set_budget(monthly_cap_usd=20)
+    # спринт 8: learner_daily ≤ paid ≤ monthly — при потолке 0 дневные лимиты тоже 0, возвращаются явно
+    await gw.set_budget(monthly_cap_usd=20, learner_daily_cap_usd=0.05, paid_learner_daily_cap_usd=0.3)
     assert (await gw.ok())["status"] == "ok"
 
 

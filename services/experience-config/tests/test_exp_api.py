@@ -57,8 +57,8 @@ async def test_current_miniapp_is_seeded_notebook(env) -> None:
     assert cfg["flags"]["whats_new_on_login"] is True and cfg["flags"]["voice_lesson"] is False
     assert all(isinstance(v, bool) for v in cfg["flags"].values())
     admin = await env.current("admin", issuer="admin-bff")
-    # админка — 1.7.0 (миграция 0008: «Сообщество» после «Игры»), активирована вместо сидовой 1.0.0
-    assert admin.status_code == 200 and admin.json()["version"] == "1.7.0"
+    # админка — 1.8.0 (миграция 0010: «Деньги» после «Сообщества»), активирована поверх 1.7.0 выкладки 7 (0008)
+    assert admin.status_code == 200 and admin.json()["version"] == "1.8.0"
     assert admin.json()["theme"]["id"] == "admin_light" and admin.json()["layout"]["density"] == "compact"
     assert [m["id"] for m in admin.json()["layout"]["menu"]][:3] == ["overview", "users", "content"]
 
@@ -73,10 +73,11 @@ async def test_seed_history(env) -> None:
     acts = (await env.c.get(f"{BASE}/miniapp/activations", headers=env.h(READER))).json()["items"]
     assert [(a["version"], a["previous_version"]) for a in acts] == [("1.0.0", None)]
     admin_state = (await env.c.get(f"{BASE}/admin/state", headers=env.h(READER))).json()
-    assert admin_state["current"]["version"] == "1.7.0" and admin_state["previous_version"] == "1.0.0"
+    assert admin_state["current"]["version"] == "1.8.0" and admin_state["previous_version"] == "1.7.0"
     assert admin_state["current"]["activated_by"] == "system:release"
     acts = (await env.c.get(f"{BASE}/admin/activations", headers=env.h(READER))).json()["items"]
-    assert [(a["version"], a["previous_version"]) for a in acts] == [("1.7.0", "1.0.0"), ("1.0.0", None)]
+    assert [(a["version"], a["previous_version"]) for a in acts] == [("1.8.0", "1.7.0"), ("1.7.0", "1.0.0"),
+                                                                    ("1.0.0", None)]
 
 
 async def test_current_auth_and_errors(env) -> None:
@@ -145,7 +146,7 @@ async def test_current_works_without_cache(env) -> None:
     env.runtime.redis = None  # Redis недоступен — читаем из БД
     try:
         r = await env.current("admin", issuer="admin-bff")
-        assert r.status_code == 200 and r.json()["version"] == "1.7.0"
+        assert r.status_code == 200 and r.json()["version"] == "1.8.0"
     finally:
         env.runtime.redis = redis
 
@@ -377,14 +378,14 @@ async def test_admin_theme_activate_and_rollback_without_build(env) -> None:
     новую конфигурацию сразу после команды (кэш 60 с обновляется в той же команде), откат возвращает прежнюю."""
     admin_current = "/internal/v1/experience/admin/current"
     first = await env.c.get(admin_current, headers=env.h(issuer="admin-bff"))
-    assert first.json()["version"] == "1.7.0" and first.json()["layout"]["density"] == "compact"
-    payload = await env.seed_payload("admin", "1.7.0")
+    assert first.json()["version"] == "1.8.0" and first.json()["layout"]["density"] == "compact"
+    payload = await env.seed_payload("admin", "1.8.0")
     payload["theme"]["version"] = "1.1.0"
     payload["layout"]["density"] = "comfortable"
     created = await env.c.post(f"{BASE}/admin/versions", json=new_version(payload, "1.1.0", "Просторнее"),
                                headers=env.h(EDITOR))
     assert created.status_code == 201, created.text
-    assert (await env.c.get(admin_current, headers=env.h(issuer="admin-bff"))).json()["version"] == "1.7.0"
+    assert (await env.c.get(admin_current, headers=env.h(issuer="admin-bff"))).json()["version"] == "1.8.0"
     act = await env.c.post(f"{BASE}/admin/activate", json={"version": "1.1.0", "reason": "Просторная админка"},
                            headers=env.h(PUBLISHER))
     assert act.status_code == 201, act.text
@@ -394,17 +395,17 @@ async def test_admin_theme_activate_and_rollback_without_build(env) -> None:
     # Mini App не затронута
     assert (await env.current("miniapp")).json()["version"] == "1.0.0"
     rb = await env.c.post(f"{BASE}/admin/rollback", json={"reason": "Вернуть плотную"}, headers=env.h(PUBLISHER))
-    assert rb.status_code == 201 and (rb.json()["version"], rb.json()["previous_version"]) == ("1.7.0", "1.1.0")
+    assert rb.status_code == 201 and (rb.json()["version"], rb.json()["previous_version"]) == ("1.8.0", "1.1.0")
     back = await env.c.get(admin_current, headers=env.h(issuer="admin-bff"))
-    assert back.json()["version"] == "1.7.0" and back.json()["layout"]["density"] == "compact"
+    assert back.json()["version"] == "1.8.0" and back.json()["layout"]["density"] == "compact"
     state = (await env.c.get(f"{BASE}/admin/state", headers=env.h(READER))).json()
     assert state["current"]["kind"] == "rollback" and state["previous_version"] == "1.1.0"
     await env.flush()
     activated = env.events("experience.config.activated.v1")
-    assert [(e.payload["app"], e.payload["version"]) for e in activated] == [("admin", "1.1.0"), ("admin", "1.7.0")]
+    assert [(e.payload["app"], e.payload["version"]) for e in activated] == [("admin", "1.1.0"), ("admin", "1.8.0")]
     audits = [e.payload for e in env.events("admin.audit.recorded.v1")]
     assert [(a["action"], a["object_id"]) for a in audits] == [
-        ("config.create", "admin@1.1.0"), ("config.publish", "admin@1.1.0"), ("config.rollback", "admin@1.7.0")]
+        ("config.create", "admin@1.1.0"), ("config.publish", "admin@1.1.0"), ("config.rollback", "admin@1.8.0")]
     assert [a["reason"] for a in audits[1:]] == ["Просторная админка", "Вернуть плотную"]
     for e in env.events("admin.audit.recorded.v1"):
         assert_event_conforms(e)

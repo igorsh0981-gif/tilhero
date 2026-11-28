@@ -26,6 +26,9 @@ export interface TelegramOptions {
   homeScreen?: { status: "unsupported" | "unknown" | "added" | "missed"; onAdd?: "event" | "silent" };
   /** Bot API 8.0 full screen: insets reported once in full screen; fail — answer fullscreenFailed {error} */
   fullscreen?: { safe: Insets; content: Insets; fail?: "UNSUPPORTED" };
+  /** sprint 8, Bot API 6.1 openInvoice: how the invoice closes (default paid — the mock BFF is told the order is paid,
+   *  POST /__bff/__e2e/invoice); none — the client has no openInvoice. window.__tgInvoiceStatus overrides it at run time. */
+  invoice?: "paid" | "cancelled" | "failed" | "pending" | "none";
 }
 
 /** iPhone 14-ish in Telegram full screen: status bar 47, Telegram's «Закрыть» / «⋯» row 46, home indicator 34. */
@@ -187,6 +190,23 @@ export async function installTelegram(page: Page, opts: TelegramOptions = {}): P
           emit("contentSafeAreaChanged");
         }, 20);
       },
+      ...(o.invoice === "none"
+        ? {}
+        : {
+            openInvoice: (url: string, cb?: (status: string) => void) => {
+              calls.push(["openInvoice", url]);
+              const status = (window as unknown as { __tgInvoiceStatus?: string }).__tgInvoiceStatus ?? o.invoice ?? "paid";
+              const close = () =>
+                setTimeout(() => {
+                  cb?.(status);
+                  emit("invoiceClosed", { url, status });
+                }, 40);
+              // the payment itself happens in Telegram: the mock billing learns of it as of successful_payment
+              void fetch("/__bff/__e2e/invoice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ link: url, status }) })
+                .catch(() => undefined)
+                .then(close);
+            },
+          }),
       ...(o.cloudStorage === false ? {} : { CloudStorage: cloud }),
       ...(o.homeScreen
         ? {

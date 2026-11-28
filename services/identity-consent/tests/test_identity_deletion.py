@@ -171,6 +171,13 @@ async def test_full_deletion_cycle_and_reregistration(env) -> None:
     assert "gamification" not in (await request_of(env, uid)).acked_domains
     await env.bus.publish(ack(uid, request_id, "gamification"))
     await env.flush()
+    # спринт 8: без billing профиль не обезличивается — Telegram ID снимается последним, после ACK billing
+    # (bot-gateway ещё отменяет подписку Stars по account_id, INTERNAL_API спринта 8 §9)
+    req = await request_of(env, uid)
+    assert req.status == "REQUESTED" and "billing" not in req.acked_domains
+    assert (await env.user_row(uid)).telegram_user_id == tg
+    await env.bus.publish(ack(uid, request_id, "billing", "anonymized"))
+    await env.flush()
 
     user = await env.user_row(uid)
     assert user.status == "DELETED" and user.telegram_user_id is None

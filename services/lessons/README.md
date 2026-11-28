@@ -218,7 +218,7 @@ join|heartbeat|leave|turns|audio`, `GET /{id}/state?after_seq=&locale=` (long-po
   (`session_id = uuid5(room_id, str(user_id))`), время по часам — минуты не удваиваются; дольше — соло для
   оставшегося (`abandoned`, `participant_left`); 10 минут без ходов — `inactivity`; 20 минут — `completed`.
 - Итог: `lesson.pair.completed.v1` + по каждому вошедшему `lesson.session.completed.v1 {kind: pair, session_id,
-  room_id, minutes}` (минуты учитываются, не списываются); участникам с вкладом — `POST assessment /evaluations`
+  room_id, minutes}` (минуты участника — учёт; списание — спринт 8, ниже); участникам с вкладом — `POST assessment /evaluations`
   (`kind scenario`, своя сессия, только свои реплики и реплики коуча) фоном после фиксации, недошедшие — tick.
   Отчёт — только свой.
 - Админ (`/internal/v1/admin/pair-rooms`): список и карточка без текстов (`room.read`), `stop {reason}`
@@ -238,3 +238,46 @@ join|heartbeat|leave|turns|audio`, `GET /{id}/state?after_seq=&locale=` (long-po
 - Разовая загрузка проекций не нужна: семья, дружба, блокировка и санкция проверяются синхронно через relations
   social (приглашение и принятие), уровень набора дуэли передаёт gamification; проекции social (ник, блокировки,
   санкции) — новые в спринте 7 и служат для отмены приглашений по событиям и ника в карточке.
+
+## Спринт 8 — уроки с ИИ по подписке (docs/sprint8/INTERNAL_API.md §5)
+
+**Флаг и настройки.** `BILLING_ENFORCED` (false — пэйвол выключен: billing не вызывается, поведение спринта 7),
+`BILLING_URL` (обязателен в stage/prod при включённом пэйволе), `BILLING_TIMEOUT_SECONDS` (2 — общий срок вызова
+billing, без повторов в клиенте; circuit breaker клиента). Учёба не зависит от денег: billing недоступен — занятие
+без ИИ.
+
+**Урок и сценарий 14+ (пэйвол включён).** Старт в два шага: сессия создаётся «вариантами» с отметкой `billing.pending`
+(сбой до решения — «billing недоступен»), затем вне транзакции — `POST billing /internal/v1/holds {user_id = lrn,
+feature: ai_lessons, ref_kind: session, ref_id: session_id, minutes_planned: min(120, 2 × duration_min)}` и статус
+ai-gateway (`paid_available`, у старого шлюза — `ai_available`), затем под блокировкой — режим:
+- удержано и ИИ для подписчика доступен → `full` (+ открытое задание оценщику), `ai_minutes_left` — остаток после
+  удержания;
+- удержано, но ИИ недоступен → `choices`, `ai_degraded: true` (удержание закроется событием с 0);
+- отказ (`no_subscription | feature_not_in_plan | minutes_exhausted`) или billing недоступен/таймаут/ответ не по
+  контракту → `choices`, `ai_degraded: false`, `ai_locked {reason}` (`billing_unavailable`); billing считает ученика
+  ребёнком (`kids`) — «варианты» без плашки.
+409 SESSION_ACTIVE и повтор Idempotency-Key отсекаются до удержания (удержаний без сессии нет); повтор старта той же
+сессии доводит незавершённое решение тем же удержанием (billing идемпотентен по `(ref_kind, ref_id)`). Дети 6–13,
+медиа, повтор ошибок, чтение, дуэль — без billing.
+
+**ИИ-секунды.** `ai_active_seconds` копятся вместе с активным временем (правила бездействия те же), пока урок или
+сценарий в `full` без деградации (`ai_degraded`) и без отказа ИИ до конца занятия (`ai_off all`): деградация и отказ
+ИИ не списывают. При любом итоге `billable_minutes = ⌈ai_active_seconds/60⌉ ≤ minutes (≤ 240)` и `billing_hold_id`
+уходят в `lesson.session.completed.v1` (у сессий без удержания — `billing_hold_id: null`; поля необязательные —
+читатели прежних версий их не видят). Урок не обрывается при исчерпании минут — перерасход учитывает billing.
+
+**Урок вдвоём.** Приглашение 14+ без ребёнка в комнате → `GET billing /internal/v1/access/{inviter}?feature=
+pair_lessons`: не разрешено — 403 `SUBSCRIPTION_REQUIRED {feature, reason}`, billing недоступен — 503
+`BILLING_UNAVAILABLE`; пригласивший — `pair_rooms.billing_payer_user_id`. Приглашённому подписка не нужна (В8).
+Старт с коучем: перед первым вызовом коуча (вне транзакции) — удержание у плательщика `{feature: pair_lessons,
+ref_kind: room, ref_id: room_id, minutes_planned: PAIR_ROOM_MAX_MINUTES}`; переподключение и повтор не создают
+второго удержания. Отказ или billing недоступен — комната без коуча (сценарий с выбором реплик, `ai_degraded`,
+`mode_changed`), в суточный лимит комнат с коучем не идёт. `coach_active_seconds` — время in_progress с работающим
+коучем (пауза и деградация не считаются); при завершении `billable_minutes = ⌈coach_active_seconds/60⌉` и
+`lesson.pair.completed.v1.billing {payer_user_id, hold_id, billable_minutes}` (без удержания — `null`). Комната с
+ребёнком и комната без коуча (лимит, сценарий) — бесплатны, billing не вызывается.
+
+**Данные (миграция 0004).** `sessions` + `ai_active_seconds`, `ai_lock_reason`, `billing_hold_id`, `billable_minutes`;
+`pair_rooms` + `billing_payer_user_id`, `billing_hold_id`, `coach_active_seconds`, `billable_minutes`. Сага: у комнат,
+где удалённый — плательщик, плательщик и удержание обнуляются (удержания снимает сага billing).
+

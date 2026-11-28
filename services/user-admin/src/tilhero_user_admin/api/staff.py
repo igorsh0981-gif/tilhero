@@ -1,6 +1,7 @@
 """Staff API user-admin (вызывает только admin-bff; actor обязателен, права проверяются здесь же).
 
-GET /admin/v1/learners          users.read       Page<AdminLearnerRow>
+GET /admin/v1/learners          users.read       Page<AdminLearnerRow>; спринт 8 — фильтр ?tier=free|paid (тариф —
+                                                 проекция billing.access.changed.v1, NULL считается free)
 GET /admin/v1/learners/stats    dashboard.read   DashboardLearners
 GET /admin/v1/learners/{id}     users.read       AdminLearnerCard без tickets (их добавляет admin-bff); перечитывает
                                                  identity-consent, недоступен — из проекции
@@ -56,6 +57,7 @@ async def list_learners(
     status: str | None = Query(default=None, max_length=80),
     locale: Literal["ru", "uz"] | None = None,
     has_open_tickets: bool | None = None,
+    tier: Literal["free", "paid"] | None = None,
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = Query(default=None, max_length=256),
 ) -> AdminLearnerPage:
@@ -67,7 +69,7 @@ async def list_learners(
             session, q=q, kind=kind, age_bands=bands, statuses=statuses, locale=locale,
             has_open_tickets=has_open_tickets, limit=limit, cursor=cursor,
             can_search_tickets="support.read" in actor.permissions,
-            full_username=SENSITIVE in actor.permissions,
+            full_username=SENSITIVE in actor.permissions, tier=tier,
         )
     return AdminLearnerPage(items=items, next_cursor=nxt)
 

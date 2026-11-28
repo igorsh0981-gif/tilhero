@@ -59,10 +59,13 @@ class TelegramClient:
         api_base: str,
         timeout: float = 5.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        test_env: bool = False,
     ) -> None:
         self._token = token
+        # тестовая среда Telegram (TELEGRAM_TEST_ENV): https://api.telegram.org/bot<token>/test/<METHOD>
+        suffix = "test/" if test_env else ""
         self._client = httpx.AsyncClient(
-            base_url=f"{api_base.rstrip('/')}/bot{token}/",
+            base_url=f"{api_base.rstrip('/')}/bot{token}/{suffix}",
             timeout=timeout,
             transport=transport,
             follow_redirects=False,

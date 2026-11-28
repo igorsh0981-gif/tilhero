@@ -39,7 +39,7 @@ async def test_staff_create_list_lookup(env: Env, root: Person) -> None:
     person = await env.first_login(email.lower(), temp)
     assert person.secret is None and person.principal["permissions"] == [
         "dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read",
-        "game.read", "social.read", "referral.read", "league.read", "room.read"]
+        "game.read", "social.read", "referral.read", "league.read", "room.read", "billing.read"]
     for i in range(3):
         await env.create_staff(root.actor, new_email(f"p{i}"), "analyst", f"Аналитик {i}")
     page1 = (await env.c.get("/admin/v1/staff?limit=2", headers=env.h(root.actor))).json()
@@ -133,7 +133,7 @@ async def test_self_action_and_last_super_admin(env: Env, root: Person) -> None:
                             json={"permissions": ["dashboard.read", "audit.read", "content.read", "ai.read",
                                                   "qa.read", "costs.read", "memory.read", "game.read",
                                                   "social.read", "referral.read", "league.read", "room.read",
-                                                  "staff.manage"],
+                                                  "billing.read", "staff.manage"],
                                   "reason": "Аудитор ведёт учётки"}, headers=env.h(me))
     assert grant.status_code == 202, grant.text
     a = grant.json()["approval"]
@@ -252,9 +252,9 @@ async def test_role_matrix_update_via_approval(env: Env, root: Person, root2: Pe
     analyst = await env.onboard(root.actor, new_email("an"), "analyst")
     roles = (await env.c.get("/admin/v1/roles", headers=env.h(root.actor))).json()
     assert [r["code"] for r in roles["items"]] == ["super_admin", "operations", "communications", "support",
-                                                     "methodist", "content_manager", "qa_analyst", "analyst",
-                                                     "auditor", "read_only"]
-    assert len(roles["permissions"]) == 46
+                                                     "methodist", "content_manager", "qa_analyst", "finance",
+                                                     "analyst", "auditor", "read_only"]
+    assert len(roles["permissions"]) == 52
     by = {r["code"]: r for r in roles["items"]}
     assert by["super_admin"]["staff_count"] == 2 and by["analyst"]["staff_count"] == 1
     # спринт 7: support получила moderation.manage (step-up) — привилегированна
@@ -266,7 +266,10 @@ async def test_role_matrix_update_via_approval(env: Env, root: Person, root2: Pe
                                                "memory.manage", "game.read", "game.manage", "game.publish",
                                                "wallet.adjust", "social.read", "moderation.manage", "referral.read",
                                                "referral.manage", "league.read", "league.manage", "room.read",
-                                               "room.manage"]
+                                               "room.manage", "billing.read", "billing.manage", "billing.publish",
+                                               "billing.approve", "billing.refund", "subscriptions.override"]
+    # спринт 8: finance привилегирована составом прав (billing.publish / approve / refund — step-up)
+    assert by["finance"]["privileged"] is True and by["finance"]["name"] == {"ru": "Финансы", "en": "Finance"}
     assert by["methodist"]["privileged"] is True and by["content_manager"]["privileged"] is True
     assert by["qa_analyst"]["privileged"] is False
     assert by["read_only"]["name"] == {"ru": "Только просмотр", "en": "Read Only"}
@@ -315,7 +318,7 @@ async def test_session_version_grows_and_principal_reflects(env: Env, root: Pers
     assert p["session_version"] == sv + 1 and p["staff"]["role"] == "analyst"
     assert p["permissions"] == ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read",
                                 "memory.read", "game.read", "social.read", "referral.read", "league.read",
-                                "room.read"]
+                                "room.read", "billing.read"]
     name = await env.patch(root.actor, person.staff_id, {"display_name": "Новое имя", "reason": "Имя"})
     assert name.status_code == 200
     assert (await env.principal(person.staff_id)).json()["session_version"] == sv + 1  # имя не отзывает сессии

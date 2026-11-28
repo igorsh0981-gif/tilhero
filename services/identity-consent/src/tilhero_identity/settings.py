@@ -8,8 +8,13 @@ from tilhero_common.settings import ServiceSettings
 # (INTERNAL_API §1, ARCHITECTURE «Данные ученика и удаление»). Новый домен с данными ученика добавляется сюда.
 # Спринт 6: + gamification (реестр XP и тилов, кошелёк, инвентарь, задания, значки, рефералы — INTERNAL_API спринта 6
 # §1.10; обезличенная дневная статистика остаётся).
+# Спринт 8: + billing (INTERNAL_API спринта 8 §1.16, §9) — минуты, периоды и удержания удаляются, заказы и платежи
+# обезличиваются. Порядок удаления Telegram ID: он снимается только при обезличивании (_anonymize), т. е. после ACK
+# всех доменов, в т. ч. billing — до этого bot-gateway по account_id ещё находит Telegram ID и отменяет подписку Stars
+# (GET /internal/v1/accounts/{id}/telegram-user).
 DEFAULT_DELETION_DOMAINS = ("learning-plan", "social", "notifications", "support", "experience-config", "catalog",
-                            "diagnostics", "lessons", "assessment", "ai-gateway", "memory", "gamification")
+                            "diagnostics", "lessons", "assessment", "ai-gateway", "memory", "gamification",
+                            "billing")
 
 
 class Settings(ServiceSettings):

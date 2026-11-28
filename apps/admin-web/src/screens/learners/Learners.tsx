@@ -5,11 +5,13 @@
  * reason (users.sensitive.read, step-up, audit `sensitive.view`) and only for 60 seconds.
  */
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import type { AdminLearnerCard, AdminLearnerRow, AgeBand, LearnerKind, LearnerMemorySummary, LearnerStatus, UiLang } from "@tilhero/contracts/admin";
+import type { AdminLearnerCard, AdminLearnerRow, AgeBand, LearnerKind, LearnerMemorySummary, LearnerStatus, LearnerTier, UiLang } from "@tilhero/contracts/admin";
 import { Learners, Memory, type LearnerFilters } from "../../api/endpoints";
 import { SummaryCard } from "../memory/Summary";
 import { LearnerGameTab } from "../game/LearnerGame";
 import { LearnerSocialTab } from "../social/LearnerSocial";
+import { LearnerBillingTab } from "../money/LearnerBilling";
+import { TIERS } from "../money/model";
 import { ApiError } from "../../api/errors";
 import { useI18n, fmtCountdown } from "../../i18n";
 import { shortId } from "../../lib/ids";
@@ -62,6 +64,8 @@ export function LearnersPage({ openId = null }: { openId?: string | null }) {
   const [status, setStatus] = useState<LearnerStatus | "">("");
   const [locale, setLocale] = useState<UiLang | "">("");
   const [openOnly, setOpenOnly] = useState(false);
+  // sprint 8 (ADM-USR-01): the tier filter (projection of billing in user-admin)
+  const [tier, setTier] = useState<LearnerTier | "">("");
   const [rows, setRows] = useState<AdminLearnerRow[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,7 +88,7 @@ export function LearnersPage({ openId = null }: { openId?: string | null }) {
     }
   }, []);
 
-  const filters: LearnerFilters = { q: q.trim() || undefined, kind, age_band: age, status, locale, has_open_tickets: openOnly || null };
+  const filters: LearnerFilters = { q: q.trim() || undefined, kind, age_band: age, status, locale, has_open_tickets: openOnly || null, tier };
   const fKey = JSON.stringify(filters);
   useEffect(() => {
     const tm = setTimeout(() => void load(JSON.parse(fKey) as LearnerFilters, false), q ? 300 : 0);
@@ -98,6 +102,7 @@ export function LearnersPage({ openId = null }: { openId?: string | null }) {
     setStatus("");
     setLocale("");
     setOpenOnly(false);
+    setTier("");
   };
   const open = (id: string) => navigate("users", id);
   const cardId = openId && UUID.test(openId) ? openId : null;
@@ -114,6 +119,7 @@ export function LearnersPage({ openId = null }: { openId?: string | null }) {
         <Select<AgeBand | ""> id="lr-age" label={t("lr.age")} value={age} onChange={setAge} options={[{ v: "", label: t("lr.allAges") }, ...AGE_BANDS.map((a) => ({ v: a, label: a }))]} />
         <Select<UiLang | ""> id="lr-lang" label={t("lr.lang")} value={locale} onChange={setLocale} options={[{ v: "", label: t("lr.allLangs") }, { v: "ru", label: t("ulang.ru") }, { v: "uz", label: t("ulang.uz") }]} />
         <Select<LearnerStatus | ""> id="lr-status" label={t("col.status")} value={status} onChange={setStatus} options={[{ v: "", label: t("lr.allStatuses") }, ...LEARNER_STATUSES.map((s) => ({ v: s, label: t(`lstatus.${s}`) }))]} />
+        <Select<LearnerTier | ""> id="lr-tier" label={t("lr.tier")} value={tier} onChange={setTier} testId="lr-tier" options={[{ v: "", label: t("lr.allTiers") }, ...TIERS.map((v) => ({ v, label: t(`tier.${v}`) }))]} />
         <label className="check" htmlFor="lr-open">
           <input type="checkbox" id="lr-open" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />
           <span>{t("lr.hasOpen")}</span>
@@ -130,6 +136,7 @@ export function LearnersPage({ openId = null }: { openId?: string | null }) {
                 <th scope="col">ID</th>
                 <th scope="col">{t("lr.col.profile")}</th>
                 <th scope="col">{t("lr.col.lang")}</th>
+                <th scope="col">{t("lr.tier")}</th>
                 <th scope="col">{t("lr.col.consent")}</th>
                 <th scope="col">{t("lr.col.activity")}</th>
                 <th scope="col" className="r">
@@ -155,6 +162,10 @@ export function LearnersPage({ openId = null }: { openId?: string | null }) {
                     </div>
                   </td>
                   <td className="nowrap">{r.locale ? t(`ulang.${r.locale}`) : "—"}</td>
+                  {/* sprint 8 (ADM-USR-01): the tier projection of billing in user-admin; null — no events yet (free) */}
+                  <td className="nowrap" data-testid={`lr-tier-${r.user_id}`} data-tier={r.tier ?? "free"}>
+                    <Pill tone={r.tier === "paid" ? "good" : "neutral"}>{t(r.tier === "paid" ? "tier.paid" : "tier.free")}</Pill>
+                  </td>
                   <td>
                     <Pill tone={CONSENT_TONE[r.guardian_consent]}>{t(`gc.${r.guardian_consent}`)}</Pill>
                   </td>
@@ -172,7 +183,7 @@ export function LearnersPage({ openId = null }: { openId?: string | null }) {
               ))}
               {!loading && !rows.length && !error && (
                 <tr>
-                  <td colSpan={7} className="empty-cell">
+                  <td colSpan={8} className="empty-cell">
                     <Empty icon="users" title={t("common.nothingFound")} text={t("common.changeFilters")} />
                   </td>
                 </tr>
@@ -350,7 +361,7 @@ function LearnerMemoryTab({ id }: { id: string }) {
 
 /* ---------------------------------------------------------------- card */
 
-type Tab = "account" | "consent" | "plan" | "notif" | "tickets" | "memory" | "game" | "social";
+type Tab = "account" | "consent" | "plan" | "notif" | "tickets" | "memory" | "game" | "social" | "billing";
 
 export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () => void; onOpen: (id: string) => void }) {
   const i = useI18n();
@@ -408,6 +419,8 @@ export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () =
               ...(can("game.read") ? [{ v: "game" as const, label: t("lr.tab.game"), testId: "lc-tab-game" }] : []),
               // sprint 7: the learner's community profile (social.read) — the summary here, the card in «Друзья и жалобы»
               ...(can("social.read") ? [{ v: "social" as const, label: t("lr.tab.social"), testId: "lc-tab-social" }] : []),
+              // sprint 8: the learner's tier and minutes (billing.read) — a separate route, the card works without billing
+              ...(can("billing.read") ? [{ v: "billing" as const, label: t("lr.tab.billing"), testId: "lc-tab-billing" }] : []),
             ]}
           />
         )
@@ -628,6 +641,7 @@ export function LearnerCard({ id, onClose, onOpen }: { id: string; onClose: () =
           {tab === "memory" && can("memory.read") && <LearnerMemoryTab id={card.user_id} />}
           {tab === "game" && can("game.read") && <LearnerGameTab id={card.user_id} />}
           {tab === "social" && can("social.read") && <LearnerSocialTab id={card.user_id} />}
+          {tab === "billing" && can("billing.read") && <LearnerBillingTab id={card.user_id} child={card.kind === "child"} />}
           <p className="xs muted mt-16 row">
             <Icon name="shield" /> {t("lr.piiNote")}
           </p>

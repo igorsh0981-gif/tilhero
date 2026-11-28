@@ -208,7 +208,8 @@ async def test_not_configured(key, region) -> None:
             "unavailable", "not_configured", None, 0)
         assert not azure.requests
         assert (await e.c.get("/internal/v1/status", headers=e.svc("memory"))).json() == {
-            "ai_available": True, "speech_available": False}
+            "ai_available": True, "speech_available": False, 
+            "level": "normal", "free_available": True, "paid_available": True}
         speech = (await e.c.get("/admin/v1/ai/provider", headers=e.h(ANALYST))).json()["speech"]
         assert speech["provider"] == "azure_speech" and speech["key_configured"] is bool(key and key.strip())
         summary = (await e.c.get("/admin/v1/ai/usage/summary", headers=e.h(OPERATIONS))).json()

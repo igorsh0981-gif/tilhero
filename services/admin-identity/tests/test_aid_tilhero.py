@@ -239,19 +239,20 @@ async def test_migration_downgrade_and_reapply() -> None:
         # analyst / auditor +3; 0005: super_admin +3, methodist +2, operations +2, content_manager / qa_analyst /
         # analyst / auditor +1; 0006: super_admin +4, operations +4, content_manager +2, methodist / support /
         # analyst / auditor +1; 0007: super_admin +8, operations +8, support +4, analyst / auditor +4,
-        # content_manager +1
+        # content_manager +1; 0008: super_admin +6, finance 8, support +2, operations +6, analyst / auditor +1
         assert await conn.fetchval("SELECT count(*) FROM role_permissions") == (41 + 6 + 4 + 4 + 3
                                                                                + 8 + 6 + 4 + 5 + 3 + 3
                                                                                + 3 + 2 + 2 + 4
                                                                                + 4 + 4 + 2 + 4
-                                                                               + 8 + 8 + 4 + 8 + 1)
+                                                                               + 8 + 8 + 4 + 8 + 1
+                                                                               + 6 + 8 + 2 + 6 + 1 + 1)
         await asyncio.to_thread(command.downgrade, cfg, "base")
         tables = {r[0] for r in await conn.fetch(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = $1", schema)}
         assert tables <= {"alembic_version"}
         await migrate(SERVICE_DIR, settings)
-        assert await conn.fetchval("SELECT count(*) FROM roles") == 10
-        assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0007"
+        assert await conn.fetchval("SELECT count(*) FROM roles") == 11
+        assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0008"
     finally:
         await conn.close()
         await drop_schema(schema)
@@ -309,7 +310,7 @@ async def test_migration_0003_on_live_matrix() -> None:
         assert await conn.fetchval("SELECT count(*) FROM role_permissions WHERE role = 'analyst' "
                                    "AND permission = 'audit.read'") == 1
         await asyncio.to_thread(command.upgrade, cfg, "head")
-        assert await conn.fetchval("SELECT count(*) FROM roles") == 10
+        assert await conn.fetchval("SELECT count(*) FROM roles") == 11  # спринт 8: + finance
     finally:
         await conn.close()
         await drop_schema(schema)
@@ -847,7 +848,7 @@ async def test_migration_0007_on_live_matrix() -> None:
         privileged = {r["code"] for r in await conn.fetch("SELECT code FROM roles WHERE privileged")}
         assert privileged == before
         assert await conn.fetchval("SELECT count(*) FROM role_permissions WHERE role = 'super_admin'") == 38
-        await asyncio.to_thread(command.upgrade, cfg, "head")
+        await asyncio.to_thread(command.upgrade, cfg, "0007")
         assert await conn.fetchval("SELECT count(*) FROM role_permissions WHERE role = 'super_admin'") == 46
         assert await conn.fetchval("SELECT count(*) FROM roles") == 10
     finally:
@@ -882,3 +883,113 @@ async def test_sprint7_roles_and_permissions(env: Env, root: Person, root2: Pers
     an = await env.onboard(root.actor, new_email("an7"), "analyst")
     assert an.secret is None and set(an.principal["permissions"]) & set(SPRINT7) == {
         "social.read", "referral.read", "league.read", "room.read"}
+
+
+# ---------------------------------------------------------------- спринт 8: деньги (0008)
+
+SPRINT8 = ["billing.read", "billing.manage", "billing.publish", "billing.approve", "billing.refund",
+           "subscriptions.override"]
+
+
+async def test_migration_0008_on_live_matrix() -> None:
+    """0008 поверх действующей матрицы спринта 7: права денег добавляются, изменения four-eyes не затираются; новая
+    роль finance привилегирована составом прав (PRIVILEGED_ROLES не расширяется); роли, уже привилегированные
+    (support, operations), и получившие только чтение (analyst, auditor) — без отзыва сессий. Откат: сотрудники
+    finance → read_only с отзывом сессий, роль и права удалены, заявки с ними — REJECTED, привилегированность — по
+    правилам спринта 7."""
+    schema = unique_schema("adminid_m8")
+    await create_schema(schema)
+    settings = make_settings(database_url=TEST_ADMIN_URL, db_schema=schema)
+    cfg = Config(str(Path(SERVICE_DIR) / "alembic.ini"))
+    cfg.set_main_option("script_location", str(Path(SERVICE_DIR) / "migrations"))
+    cfg.attributes["settings"] = settings
+    conn = await asyncpg.connect(TEST_ADMIN_URL, server_settings={"search_path": schema})
+    sup, an, ops, ro = (uuid.uuid4() for _ in range(4))
+    try:
+        await asyncio.to_thread(command.upgrade, cfg, "0007")
+        await conn.execute("INSERT INTO role_permissions (role, permission) VALUES ('analyst', 'audit.read')")
+        for sid, role, email in ((sup, "support", "s@tilhero.test"), (an, "analyst", "a@tilhero.test"),
+                                 (ops, "operations", "o@tilhero.test"), (ro, "read_only", "r@tilhero.test")):
+            await conn.execute("INSERT INTO staff (staff_id, email, display_name, role) VALUES ($1, $2, 'X', $3)",
+                               sid, email, role)
+        before = {r["code"] for r in await conn.fetch("SELECT code FROM roles WHERE privileged")}
+        assert {"support", "operations"} <= before and "finance" not in before
+
+        await asyncio.to_thread(command.upgrade, cfg, "0008")
+        rows = await conn.fetch("SELECT role, permission FROM role_permissions")
+
+        def new(role: str) -> list[str]:
+            return sorted(p for (r, p) in rows if r == role and p in SPRINT8)
+
+        assert new("super_admin") == sorted(SPRINT8) and new("operations") == sorted(SPRINT8)
+        assert new("finance") == sorted(p for p in SPRINT8 if p.startswith("billing."))
+        assert sorted(p for (r, p) in rows if r == "finance") == sorted(
+            [*(p for p in SPRINT8 if p.startswith("billing.")), "costs.read", "dashboard.read", "users.read"])
+        assert new("support") == sorted(["billing.read", "subscriptions.override"])
+        assert new("analyst") == ["billing.read"] and new("auditor") == ["billing.read"]
+        for role in ("methodist", "communications", "content_manager", "qa_analyst", "read_only"):
+            assert new(role) == [], role
+        assert len([p for (r, p) in rows if r == "super_admin"]) == 52
+        assert await conn.fetchval("SELECT count(*) FROM role_permissions WHERE role = 'analyst' "
+                                   "AND permission = 'audit.read'") == 1
+        name = await conn.fetchrow("SELECT name_ru, name_en FROM roles WHERE code = 'finance'")
+        assert tuple(name) == ("Финансы", "Finance")
+        privileged = {r["code"] for r in await conn.fetch("SELECT code FROM roles WHERE privileged")}
+        assert privileged == before | {"finance"}
+        versions = {r["staff_id"]: r["session_version"] for r in await conn.fetch(
+            "SELECT staff_id, session_version FROM staff")}
+        assert all(versions[s] == 1 for s in (sup, an, ops, ro))  # никто не стал привилегированным
+
+        # сотрудник finance и заявка на право денег; откат → read_only, REJECTED
+        fin, root_id, appr = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        await conn.execute("INSERT INTO staff (staff_id, email, display_name, role) VALUES ($1, 'f@tilhero.test', "
+                           "'F', 'finance')", fin)
+        await conn.execute("INSERT INTO staff (staff_id, email, display_name, role) VALUES ($1, 'root@tilhero.test', "
+                           "'R', 'super_admin')", root_id)
+        await conn.execute(
+            "INSERT INTO approvals (approval_id, kind, status, target, payload, summary, reason, requested_by, "
+            "expires_at) VALUES ($1, 'role.permissions_change', 'PENDING', 'role:read_only', $2::jsonb, "
+            "'{}'::jsonb, 'Чтение денег', $3, now() + interval '1 day')",
+            appr, json.dumps({"role": "read_only", "permissions": ["dashboard.read", "billing.read"]}), root_id)
+        await asyncio.to_thread(command.downgrade, cfg, "0007")
+        assert await conn.fetchval("SELECT status FROM approvals WHERE approval_id = $1", appr) == "REJECTED"
+        assert await conn.fetchval("SELECT role FROM staff WHERE staff_id = $1", fin) == "read_only"
+        assert await conn.fetchval("SELECT session_version FROM staff WHERE staff_id = $1", fin) == 2
+        assert await conn.fetchval("SELECT count(*) FROM roles WHERE code = 'finance'") == 0
+        assert await conn.fetchval("SELECT count(*) FROM role_permissions WHERE permission = ANY($1::text[])",
+                                   SPRINT8) == 0
+        privileged = {r["code"] for r in await conn.fetch("SELECT code FROM roles WHERE privileged")}
+        assert privileged == before
+        # повторный подъём безопасен (ON CONFLICT)
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+        assert await conn.fetchval("SELECT count(*) FROM role_permissions WHERE role = 'super_admin'") == 52
+        assert await conn.fetchval("SELECT count(*) FROM roles") == 11
+    finally:
+        await conn.close()
+        await drop_schema(schema)
+
+
+async def test_sprint8_finance_role(env: Env, root: Person, root2: Person) -> None:
+    """PLAN спринта 8: finance — права денег без заявок «четыре глаза» (subscriptions.override — у support и
+    operations), costs.read, dashboard.read, users.read; привилегирована (MFA, создание — four-eyes); support и
+    operations создают заявки; analyst и auditor — только чтение, не привилегированы."""
+    roles = {r["code"]: r for r in (await env.c.get("/admin/v1/roles", headers=env.h(root.actor))).json()["items"]}
+    holders = {perm: sorted(c for c, r in roles.items() if perm in r["permissions"]) for perm in SPRINT8}
+    assert holders == {
+        "billing.read": sorted(["super_admin", "operations", "support", "finance", "analyst", "auditor"]),
+        "billing.manage": ["finance", "operations", "super_admin"],
+        "billing.publish": ["finance", "operations", "super_admin"],
+        "billing.approve": ["finance", "operations", "super_admin"],
+        "billing.refund": ["finance", "operations", "super_admin"],
+        "subscriptions.override": ["operations", "super_admin", "support"],
+    }
+    assert roles["finance"]["privileged"] is True
+    for code in ("analyst", "auditor", "read_only"):
+        assert roles[code]["privileged"] is False, code
+    c = await env.create_staff(root.actor, new_email("fin8"), "finance")
+    assert c.json()["approval"]["kind"] == "staff.create_privileged" and c.json()["staff"]["role"] == "read_only"
+    fin = await env.onboard(root.actor, new_email("fin8a"), "finance", approver=root2.actor)
+    assert fin.secret is not None  # MFA обязательна
+    assert fin.principal["permissions"] == ["dashboard.read", "users.read", "costs.read", "billing.read",
+                                            "billing.manage", "billing.publish", "billing.approve",
+                                            "billing.refund"]

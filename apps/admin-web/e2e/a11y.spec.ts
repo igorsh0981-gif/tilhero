@@ -6,6 +6,7 @@ import { SID } from "./fixtures/ai-data";
 import { CID, GID } from "./fixtures/memory-data";
 import { EVENT_ID } from "./fixtures/game-data";
 import { CASE, DUEL, GROUP, REFERRAL, ROOM } from "./fixtures/social-data";
+import { ORDER } from "./fixtures/money-data";
 
 async function unnamedControls(page: Page): Promise<string[]> {
   return page.evaluate(() => {
@@ -100,6 +101,15 @@ const SCREENS: Array<[string, string]> = [
   [`#/leagues/duels/${DUEL.won}`, "dl-duel"],
   ["#/pair_rooms", "pair-rooms"],
   [`#/pair_rooms/${ROOM.live}`, "pr-room"],
+  // sprint 8
+  ["#/tariffs", "tariffs"],
+  ["#/tariffs/v/1", "tf-version"],
+  ["#/payments", "payments"],
+  [`#/payments/orders/${ORDER.payme}`, "pay-order"],
+  ["#/payments/refunds", "pay-refunds"],
+  ["#/adjustments", "adjustments"],
+  ["#/reconciliation", "reconciliation"],
+  ["#/finance", "finance"],
 ];
 
 for (const [hash, id] of SCREENS) {

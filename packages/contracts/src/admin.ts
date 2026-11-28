@@ -742,7 +742,9 @@ export type ReleaseNoteRoute =
   // релиз 6.1: игра — герои, магазин, значки, история, настройки; словарь и чтение
   | "heroes" | "shop" | "badges" | "game_history" | "game_settings" | "dictionary" | "reading"
   // спринт 7: друзья (заявки, блокировки, санкции), лиги недели, дуэли, рефералы (как bff.ts и release-notes.json)
-  | "friends" | "leagues" | "duels" | "referrals";
+  | "friends" | "leagues" | "duels" | "referrals"
+  // спринт 8: «Подписка» и «Купить тилы» (за Stars)
+  | "subscription" | "til_shop";
 export type ReleaseNoteIcon =
   | "spark" | "hero" | "calendar" | "clock" | "bell" | "book" | "chat" | "mic" | "star" | "flame" | "users" | "gift"
   | "shield" | "globe" | "trophy" | "news";
@@ -2900,6 +2902,10 @@ export interface BillingSummary {
     est_net_tiyin: number | null;
   };
   by_product: Record<string, { orders: number; revenue_tiyin: number; revenue_stars: number }>;
+  /** возвратов, завершённых в периоде (completed) */
+  refunds_count: number;
+  /** открытых пунктов сверки сейчас (не за период) */
+  recon_open: number;
   active_subscriptions: number;
   stars_subscriptions_live: number;
   trials_started: number;

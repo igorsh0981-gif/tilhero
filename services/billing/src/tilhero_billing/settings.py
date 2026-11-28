@@ -95,6 +95,23 @@ class Settings(ServiceSettings):
     uzum_checkout_url_template: str = ""  # {service_id}, {order_no}, {amount_tiyin}, {return_url}
     uzum_allowed_cidrs: str = ""
 
+    # ---- ядро (поток A)
+    # dev/test: при старте вписать тестовые цены в Stars и активировать каталог v1 (domain/stand.py); stage/prod —
+    # игнорируется (каталог активирует только сотрудник)
+    stand_catalog_on_start: bool = True
+    # начальная загрузка проекции learners из выгрузки identity-consent в фоне при старте (повтор — tick)
+    projection_bootstrap_on_start: bool = True
+    projection_page_size: int = Field(default=500, ge=10, le=1000)
+    # tick: пачки по N строк; ключи идемпотентности, вызовы провайдеров, ответы pre-checkout — сроки хранения
+    tick_batch_size: int = Field(default=500, ge=10, le=5000)
+    idempotency_days: int = Field(default=30, ge=1, le=365)
+    provider_calls_days: int = Field(default=90, ge=7, le=365)
+    pre_checkouts_days: int = Field(default=30, ge=1, le=365)
+    # сверка: Click Prepare без Complete дольше N минут — stale_created (Payme — 12 ч 15 мин, §1.14)
+    stale_click_minutes: int = Field(default=60, ge=10, le=1440)
+    # подписка Stars: продление приходит около subscription_expiration_date — конец подписки tick'ом не раньше
+    stars_renewal_grace_minutes: int = Field(default=60, ge=0, le=1440)
+
     # ---- входы
     # payments-edge → billing: заголовок X-Edge-Token (иначе 404); один токен у billing и payments-edge
     payments_edge_token: SecretStr = SecretStr("")

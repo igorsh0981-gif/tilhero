@@ -1,6 +1,8 @@
-import type { MemberId, PairRoomView, ScenarioCard } from "@tilhero/contracts/bff";
+import type { MemberId, PairRoomView, ScenarioCard, SubscriptionRequiredReason } from "@tilhero/contracts/bff";
 import { useRef, useState } from "react";
 import { ApiError } from "../../api/errors";
+import { subscriptionRequired } from "../../domain/billing";
+import { PairSubscriptionSheet } from "../billing/parts";
 import { lobbyPhase, startValue } from "../../domain/pairRoom";
 import { memberLabel } from "../../domain/social";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -45,7 +47,7 @@ export function PairRoomsScreen() {
             <Icon name="chat" size={20} />
             <div className="stack tight">
               <p className="sub ink">{kid ? t("pair.whatKid") : t("pair.what")}</p>
-              <p className="sub small">{t("pair.minutes")}</p>
+              {!kid ? <p className="sub small">{t("pair.minutes")}</p> : null}
             </div>
           </div>
           <Btn onClick={() => nav.push({ name: "pairInvite" })} data-testid="pair-new">
@@ -98,6 +100,8 @@ export function PairInviteScreen({ partner: initial, partnerLabel }: { partner?:
   const [at, setAt] = useState("");
   const scenarios = useLoad(() => bff.scenarios({}, null), [session.learner.learner_id]);
   const key = useRef<DraftKey | null>(null);
+  // sprint 8: 403 SUBSCRIPTION_REQUIRED {feature, reason} — «Уроки вдвоём — в подписке» (accepting is free)
+  const [locked, setLocked] = useState<SubscriptionRequiredReason | null>(null);
   const start = startValue(when, at);
   const send = useSocialAction(async () => {
     if (!partner || !scenario || !start) return;
@@ -112,6 +116,12 @@ export function PairInviteScreen({ partner: initial, partnerLabel }: { partner?:
       if (e instanceof ApiError && e.code === "ROOM_LIMIT" && typeof e.details.room_id === "string") {
         key.current = null;
         nav.replace({ name: "pairRoom", id: e.details.room_id });
+        return;
+      }
+      const reason = subscriptionRequired(e);
+      if (reason) {
+        key.current = null;
+        setLocked(reason);
         return;
       }
       throw e;
@@ -158,8 +168,7 @@ export function PairInviteScreen({ partner: initial, partnerLabel }: { partner?:
               </div>
             ) : null}
             <p className="sub small">{when === "now" ? t("pair.inv.nowHint") : t("pair.inv.timeHint")}</p>
-            {kid ? <p className="sub small" data-testid="pi-kid">{t("pair.inv.choicesKid")}</p> : null}
-            <p className="sub small">{t("pair.minutes")}</p>
+            {kid ? <p className="sub small" data-testid="pi-kid">{t("pair.inv.choicesKid")}</p> : <p className="sub small">{t("pair.minutes")}</p>}
           </section>
           <ErrorLine text={send.error} />
           <Btn busy={send.busy} disabled={!partner || !scenario || !start} onClick={() => void send.run()} data-testid="pi-send">
@@ -179,6 +188,7 @@ export function PairInviteScreen({ partner: initial, partnerLabel }: { partner?:
           testId="pi-pick-sheet"
         />
       ) : null}
+      {locked ? <PairSubscriptionSheet reason={locked} onClose={() => setLocked(null)} /> : null}
     </>
   );
 }

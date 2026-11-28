@@ -1189,6 +1189,224 @@ def _complaint_resolved_kid(lang: Lang, p: ComplaintParams, ctx: Context) -> Ren
                     f"Xabar berganingiz uchun rahmat! Shikoyat tekshirildi: {result}.", OPEN[lang], None)
 
 
+# ---------------------------------------------------------------- спринт 8: оплата и подписка (billing)
+#
+# INTERNAL_API спринта 8 §8: категория service (не выключается, вне лимита 3 сообщений; тихие часы — как у ответов
+# поддержки), запись — kind transactional; адресат — аккаунт-плательщик (детским профилям не адресуются); кнопка —
+# «Подписка» (route_subscription). Анти-стиринг (решение владельца В1, §0.2): ни одной ссылки, кроме startapp, ни
+# адреса сайта, ни названий фиатных провайдеров, ни цен в сумах; заказы сайта (канал web) — только нейтрально, что
+# стало доступно (purchase_applied; refund_completed web) — без суммы и способа оплаты. Звёзды — только у заказов
+# Mini App (miniapp, renewal). Сотрудники эти тексты не правят (admin.ts TemplateInfo.category без service).
+
+SUBSCRIPTION_ROUTE = "route_subscription"
+SUBSCRIPTION_BUTTON = {"ru": "Открыть подписку", "uz": "Obunani ochish"}
+BILLING_TEMPLATES = ("payment_succeeded", "purchase_applied", "refund_completed", "subscription_expiring",
+                     "subscription_expired", "stars_renewal_failed", "minutes_low", "minutes_adjusted",
+                     "trial_started")
+ProductKind = Literal["subscription", "til_pack"]
+ProductTitle = Annotated[str, Field(min_length=1, max_length=60)]
+
+
+class ProductTitles(Params):
+    ru: ProductTitle
+    uz: ProductTitle
+
+
+def _date(value: datetime, ctx: Context) -> str:
+    return _ddmm(_local(value, ctx.timezone).date())
+
+
+def _stars(n: int) -> str:
+    return f"⭐ {n}"
+
+
+def _tils_ru(n: int) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return f"{n} тил"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return f"{n} тила"
+    return f"{n} тилов"
+
+
+def _ai_minutes(lang: Lang, n: int) -> str:
+    return _minutes_ru(n) if lang == "ru" else f"{n} daqiqa"
+
+
+def _rendered(lang: Lang, title: tuple[str, str], body: tuple[str, str]) -> Rendered:
+    i = 0 if lang == "ru" else 1
+    return Rendered(title[i], body[i], SUBSCRIPTION_BUTTON[lang], SUBSCRIPTION_ROUTE)
+
+
+class PaymentParams(Params):
+    """Оплата за Stars в Mini App (канал miniapp) или продление подписки Stars (renewal): товар, звёзды, срок."""
+
+    order_no: Annotated[int, Field(ge=100_001)]
+    product_kind: ProductKind
+    product_title: ProductTitles
+    amount_stars: Annotated[int, Field(ge=1, le=100_000)]
+    renewal: bool = False
+    ends_at: AwareDatetime | None = None  # конец периода подписки (null — период после текущего, дата при активации)
+    til: Annotated[int, Field(ge=1, le=100_000)] | None = None
+    for_child: bool = False  # пакет тилов детскому профилю аккаунта
+
+
+def _payment_succeeded(lang: Lang, p: PaymentParams, ctx: Context) -> Rendered:
+    product = p.product_title.ru if lang == "ru" else p.product_title.uz
+    paid = f"«{product}» — {_stars(p.amount_stars)}"
+    if p.product_kind == "til_pack":
+        n = p.til or 0
+        ru = (f"{paid}. Детскому профилю: +{_tils_ru(n)}." if p.for_child else f"{paid}. На баланс: +{_tils_ru(n)}.")
+        uz = (f"{paid}. Bola profiliga: +{n} til." if p.for_child else f"{paid}. Balansga: +{n} til.")
+        return _rendered(lang, ("Оплата прошла", "Toʻlov qabul qilindi"), (ru, uz))
+    if p.ends_at is not None:
+        until = _date(p.ends_at, ctx)
+        ru, uz = f"{paid}. Подписка активна до {until}.", f"{paid}. Obuna {until} gacha faol."
+    else:
+        ru = f"{paid}. Новый период начнётся сразу после текущего."
+        uz = f"{paid}. Yangi davr joriy davr tugashi bilan boshlanadi."
+    title = ("Подписка продлена", "Obuna uzaytirildi") if p.renewal else ("Оплата прошла", "Toʻlov qabul qilindi")
+    return _rendered(lang, title, (ru, uz))
+
+
+class PurchaseAppliedParams(Params):
+    """Покупка вне Mini App (канал web) — нейтрально: что стало доступно, без суммы, провайдера и номера заказа."""
+
+    order_id: uuid.UUID
+    product_kind: ProductKind
+    ends_at: AwareDatetime | None = None
+    til: Annotated[int, Field(ge=1, le=100_000)] | None = None
+    for_child: bool = False
+
+
+def _purchase_applied(lang: Lang, p: PurchaseAppliedParams, ctx: Context) -> Rendered:
+    if p.product_kind == "til_pack":
+        n = p.til or 0
+        ru = f"Детскому профилю: +{_tils_ru(n)}." if p.for_child else f"На баланс: +{_tils_ru(n)}."
+        uz = f"Bola profiliga: +{n} til." if p.for_child else f"Balansga: +{n} til."
+        return _rendered(lang, ("Тилы зачислены", "Tillar qoʻshildi"), (ru, uz))
+    if p.ends_at is not None:
+        until = _date(p.ends_at, ctx)
+        ru = f"Подписка активна до {until}: уроки с ИИ и уроки вдвоём доступны."
+        uz = f"Obuna {until} gacha faol: SI bilan darslar va juftlikda darslar ochiq."
+        return _rendered(lang, ("Подписка активна", "Obuna faol"), (ru, uz))
+    return _rendered(lang, ("Подписка продлится", "Obuna davom etadi"),
+                     ("Следующий период подписки начнётся сразу после текущего.",
+                      "Obunaning keyingi davri joriy davr tugashi bilan boshlanadi."))
+
+
+class RefundParams(Params):
+    """Возврат: Mini App (miniapp, renewal) — со звёздами; вне Mini App (web) — нейтрально, без суммы и способа."""
+
+    order_id: uuid.UUID
+    stars: bool
+    product_kind: ProductKind
+    amount_stars: Annotated[int, Field(ge=1, le=100_000)] | None = None
+
+
+def _refund_completed(lang: Lang, p: RefundParams, ctx: Context) -> Rendered:
+    if p.stars and p.amount_stars is not None:
+        ru = f"{_stars(p.amount_stars)} вернутся на баланс Telegram Stars."
+        uz = f"{_stars(p.amount_stars)} Telegram Stars balansiga qaytariladi."
+    else:
+        ru, uz = "Деньги вернутся тем же способом, которым была оплата.", "Pul toʻlov qilingan usulda qaytariladi."
+    if p.product_kind == "subscription":
+        ru += " Период подписки по этому заказу завершён."
+        uz += " Ushbu buyurtma boʻyicha obuna davri yakunlandi."
+    return _rendered(lang, ("Возврат оформлен", "Qaytarish rasmiylashtirildi"), (ru, uz))
+
+
+class ExpiringParams(Params):
+    period_id: uuid.UUID
+    ends_at: AwareDatetime
+    days_left: Annotated[int, Field(ge=0, le=30)]
+    minutes_left: Annotated[int, Field(ge=0, le=100_000)]
+
+
+def _subscription_expiring(lang: Lang, p: ExpiringParams, ctx: Context) -> Rendered:
+    until = _date(p.ends_at, ctx)
+    left = _ai_minutes(lang, p.minutes_left)
+    if p.days_left == 0:
+        title = ("Подписка заканчивается сегодня", "Obuna bugun tugaydi")
+    else:
+        title = (f"Подписка закончится через {_days_ru(p.days_left)}", f"Obuna {p.days_left} kundan keyin tugaydi")
+    return _rendered(lang, title, (
+        f"Действует до {until}. Осталось {left} уроков с ИИ — остаток на следующий период не переносится.",
+        f"{until} gacha amal qiladi. SI bilan darslar uchun {left} qoldi — qoldiq keyingi davrga oʻtmaydi."))
+
+
+class PeriodParams(Params):
+    period_id: uuid.UUID
+
+
+def _subscription_expired(lang: Lang, p: PeriodParams, ctx: Context) -> Rendered:
+    return _rendered(lang, ("Подписка закончилась", "Obuna tugadi"), (
+        "Базовый курс, повторения, чтение и игра доступны как обычно. Уроки с ИИ и уроки вдвоём — снова с "
+        "подпиской.",
+        "Asosiy kurs, takrorlash, oʻqish va oʻyin odatdagidek ochiq. SI bilan darslar va juftlikda darslar — "
+        "yana obuna bilan."))
+
+
+class RenewalFailedParams(Params):
+    subscription_id: uuid.UUID
+    expires_at: AwareDatetime
+
+
+def _stars_renewal_failed(lang: Lang, p: RenewalFailedParams, ctx: Context) -> Rendered:
+    until = _date(p.expires_at, ctx)
+    return _rendered(lang, ("Не удалось продлить подписку", "Obunani uzaytirib boʻlmadi"), (
+        f"На балансе не хватило Stars. Подписка действует до {until}.",
+        f"Balansda Stars yetmadi. Obuna {until} gacha amal qiladi."))
+
+
+class MinutesLowParams(Params):
+    period_id: uuid.UUID
+    minutes_left: Annotated[int, Field(ge=0, le=100_000)]
+    minutes_granted: Annotated[int, Field(ge=1, le=100_000)]
+
+
+def _minutes_low(lang: Lang, p: MinutesLowParams, ctx: Context) -> Rendered:
+    if lang == "ru":
+        body = (f"Осталось {_minutes_ru(p.minutes_left)} из {p.minutes_granted} для уроков с ИИ. Начатый урок всегда "
+                "можно закончить.")
+    else:
+        body = (f"SI bilan darslar uchun {p.minutes_granted} daqiqadan {p.minutes_left} daqiqa qoldi. "
+                "Boshlangan darsni har doim yakunlash mumkin.")
+    return _rendered(lang, ("Минуты заканчиваются", "Daqiqalar tugab bormoqda"), (body, body))
+
+
+class AdjustedParams(Params):
+    """Корректировка «четыре глаза» (только начисление минут или выдача периода): без основания и сотрудника."""
+
+    adjustment_id: uuid.UUID
+    kind: Literal["minutes", "grant_period"]
+    minutes: Annotated[int, Field(ge=1, le=10_000)] | None = None
+    days: Annotated[int, Field(ge=1, le=90)] | None = None
+
+
+def _minutes_adjusted(lang: Lang, p: AdjustedParams, ctx: Context) -> Rendered:
+    if p.kind == "grant_period":
+        days = p.days or 0
+        return _rendered(lang, ("Подписка подключена", "Obuna ulandi"), (
+            f"Вам подключён период подписки: {_days_ru(days)}.", f"Sizga obuna davri ulandi: {days} kun."))
+    n = p.minutes or 0
+    return _rendered(lang, ("Минуты начислены", "Daqiqalar qoʻshildi"), (
+        f"Вам начислено {_minutes_ru(n)} для уроков с ИИ.",
+        f"SI bilan darslar uchun sizga {n} daqiqa qoʻshildi."))
+
+
+class TrialParams(Params):
+    period_id: uuid.UUID
+    ends_at: AwareDatetime
+    minutes_granted: Annotated[int, Field(ge=0, le=100_000)]
+
+
+def _trial_started(lang: Lang, p: TrialParams, ctx: Context) -> Rendered:
+    until = _date(p.ends_at, ctx)
+    return _rendered(lang, ("Пробный период начался", "Sinov davri boshlandi"), (
+        f"До {until}: {_minutes_ru(p.minutes_granted)} уроков с ИИ и уроки вдвоём.",
+        f"{until} gacha: SI bilan darslar uchun {p.minutes_granted} daqiqa va juftlikda darslar."))
+
+
 # ---------------------------------------------------------------- плейсхолдеры версий (спринт 2)
 
 # name → (описание RU, описание EN) — для TemplateInfo.placeholders
@@ -1813,6 +2031,32 @@ TEMPLATES: dict[str, TemplateSpec] = {
             "sanction_appeal_decided.kid", "service", SanctionAppealParams, _sanction_appeal_decided_kid,
             kid_in_app_only=True, staff_editable=False, sample={"appeal_id": _SAMPLE_ID, "decision": "upheld"},
         ),
+        # спринт 8: оплата и подписка — service, не редактируются, только аккаунту-плательщику
+        TemplateSpec("payment_succeeded", "service", PaymentParams, _payment_succeeded, staff_editable=False,
+                     sample={"order_no": 100_042, "product_kind": "subscription",
+                             "product_title": {"ru": "Плюс 30 дней", "uz": "Plus 30 kun"}, "amount_stars": 300,
+                             "renewal": False, "ends_at": "2026-12-22T19:00:00Z"}),
+        TemplateSpec("purchase_applied", "service", PurchaseAppliedParams, _purchase_applied, staff_editable=False,
+                     sample={"order_id": _SAMPLE_ID, "product_kind": "subscription",
+                             "ends_at": "2027-02-20T19:00:00Z"}),
+        TemplateSpec("refund_completed", "service", RefundParams, _refund_completed, staff_editable=False,
+                     sample={"order_id": _SAMPLE_ID, "stars": True, "product_kind": "subscription",
+                             "amount_stars": 300}),
+        TemplateSpec("subscription_expiring", "service", ExpiringParams, _subscription_expiring,
+                     staff_editable=False,
+                     sample={"period_id": _SAMPLE_ID, "ends_at": "2026-12-22T19:00:00Z", "days_left": 3,
+                             "minutes_left": 45}),
+        TemplateSpec("subscription_expired", "service", PeriodParams, _subscription_expired, staff_editable=False,
+                     sample={"period_id": _SAMPLE_ID}),
+        TemplateSpec("stars_renewal_failed", "service", RenewalFailedParams, _stars_renewal_failed,
+                     staff_editable=False,
+                     sample={"subscription_id": _SAMPLE_ID, "expires_at": "2026-12-22T19:00:00Z"}),
+        TemplateSpec("minutes_low", "service", MinutesLowParams, _minutes_low, staff_editable=False,
+                     sample={"period_id": _SAMPLE_ID, "minutes_left": 30, "minutes_granted": 300}),
+        TemplateSpec("minutes_adjusted", "service", AdjustedParams, _minutes_adjusted, staff_editable=False,
+                     sample={"adjustment_id": _SAMPLE_ID, "kind": "minutes", "minutes": 30, "days": None}),
+        TemplateSpec("trial_started", "service", TrialParams, _trial_started, staff_editable=False,
+                     sample={"period_id": _SAMPLE_ID, "ends_at": "2026-11-29T19:00:00Z", "minutes_granted": 60}),
         TemplateSpec(
             "release_note.published", "product", ReleaseNoteParams, _release_note,
             description=("«Что нового» в центре уведомлений", "“What's new” in the in-app notification center"),

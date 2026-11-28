@@ -5,7 +5,10 @@
  * ai.read — реестр агентов, карточка, версия, прогон золотых тестов, золотые тесты, модели, провайдер;
  * ai.manage — черновик версии (из опубликованной или указанной), правка и удаление черновика, золотые тесты, запуск
  * прогона; ai.publish + step-up — публикация версии, канарейка (установка и снятие), откат, правка модели и цен;
- * costs.read — бюджет и затраты; costs.manage + step-up — бюджет и аварийная остановка; вызовы сессии
+ * costs.read — бюджет и затраты; costs.manage + step-up — бюджет и аварийная остановка; спринт 8 (INTERNAL_API §7):
+ * уровни деградации — чтение costs.read, правка costs.manage + step-up (причина 10..500, пороги и ручной уровень
+ * проверяются до домена; ai-gateway — 422 DEGRADATION_INVALID), стоимость занятий — costs.read | dashboard.read,
+ * дневной лимит подписчика в бюджете (learner_daily ≤ paid_learner_daily ≤ monthly); вызовы сессии
  * (`usage?session_id=`) — ещё и qa.read («Контроль диалогов»). Права проверяются здесь до вызова домена, ai-gateway
  * проверяет их повторно по actor.
  *
@@ -28,6 +31,8 @@ import {
   AGENT_VERSION_VIEW,
   AI_BUDGET,
   AI_CALL_PAGE,
+  AI_DEGRADATION,
+  AI_UNIT_COSTS,
   AI_MODEL,
   AI_MODELS,
   AI_PROVIDER,
@@ -51,6 +56,7 @@ import {
   AGENT_VERSION_PATCH,
   BUDGET_UPDATE,
   CASE_ID,
+  DEGRADATION_UPDATE,
   CURSOR_Q,
   EMERGENCY_STOP,
   GOLDEN_CASE_CREATE,
@@ -59,6 +65,7 @@ import {
   MODEL_ID,
   MODEL_UPDATE,
   REASON_ONLY,
+  UNIT_COST_PERIODS,
   USAGE_PERIODS,
   UUID,
   VERSION_NO,
@@ -360,7 +367,12 @@ export function aiRoutes(app: App, ctx: BffContext): void {
 
   /** Лимиты ИИ (costs.manage, step-up); подлимит речи и потолок парной комнаты (спринт 7) — не больше месячного
    *  потолка (422 до домена). */
-  app.put<{ Body: { monthly_cap_usd: number; speech_monthly_cap_usd: number; room_cap_usd?: number } & Record<string, unknown> }>(
+  app.put<{
+    Body: { monthly_cap_usd: number; learner_daily_cap_usd: number; speech_monthly_cap_usd: number; room_cap_usd?: number; paid_learner_daily_cap_usd?: number } & Record<
+      string,
+      unknown
+    >;
+  }>(
     `${BASE}/budget`,
     { config: { ...requirePermission("costs.manage"), ...requireStepUp() }, schema: { response: out(AI_BUDGET), body: BUDGET_UPDATE } },
     async (req, reply) => {
@@ -371,7 +383,13 @@ export function aiRoutes(app: App, ctx: BffContext): void {
       if (req.body.room_cap_usd !== undefined && req.body.room_cap_usd > req.body.monthly_cap_usd) {
         throw validationError("room_cap_usd", "Потолок парной комнаты — не больше месячного потолка ИИ");
       }
-      const res = await aiCall(ctx, "PUT", `${BASE}/budget`, { actor: auth.actor, body: req.body, idempotencyKey: idempotencyKeyOf(req, false) });
+      // спринт 8 (В14): дневной лимит подписчика — не меньше лимита ученика без подписки и не больше месячного потолка
+      const paid = req.body.paid_learner_daily_cap_usd;
+      if (paid !== undefined && (paid < req.body.learner_daily_cap_usd || paid > req.body.monthly_cap_usd)) {
+        throw validationError("paid_learner_daily_cap_usd", "Дневной лимит подписчика — от дневного лимита ученика до месячного потолка ИИ");
+      }
+      // спринт 8 (INTERNAL_API §12): ai-gateway проверяет step-up правки бюджета по заголовку
+      const res = await aiCall(ctx, "PUT", `${BASE}/budget`, { actor: auth.actor, body: req.body, idempotencyKey: idempotencyKeyOf(req, false), headers: { "x-step-up": "ok" } });
       return relayAi(auth, reply, AI_BUDGET, res);
     },
   );
@@ -388,6 +406,47 @@ export function aiRoutes(app: App, ctx: BffContext): void {
         idempotencyKey: idempotencyKeyOf(req, false),
       });
       return relayAi(auth, reply, AI_BUDGET, res);
+    },
+  );
+
+  // ---------------------------------------------------------------- контроль ИИ (спринт 8): уровни деградации, стоимость занятий
+
+  /** Уровень деградации, пороги, расход месяца и последние смены уровня (имена сотрудников — staff/lookup). */
+  app.get(`${BASE}/degradation`, { config: requirePermission("costs.read"), schema: { response: out(AI_DEGRADATION), querystring: query({}) } }, async (req) => {
+    const auth = staffOf(req);
+    return shaped(ctx, auth, AI_SERVICE, AI_DEGRADATION, await aiGet(ctx, `${BASE}/degradation`, { actor: auth.actor }), { names: true });
+  });
+
+  /**
+   * Режим и пороги (costs.manage, step-up): manual — с уровнем, auto — без него (null); 1 ≤ economy ≤ paid_only ≤ 100
+   * (422 до домена). Смена действующего уровня — событие ai.degradation.changed.v1, ручная — ещё аудит (ai-gateway).
+   */
+  app.put<{ Body: { mode: "auto" | "manual"; manual_level: string | null; economy_at_percent: number; paid_only_at_percent: number; reason: string } }>(
+    `${BASE}/degradation`,
+    { config: { ...requirePermission("costs.manage"), ...requireStepUp() }, schema: { response: out(AI_DEGRADATION), body: DEGRADATION_UPDATE } },
+    async (req, reply) => {
+      const auth = staffOf(req);
+      const b = req.body;
+      if (b.mode === "manual" && b.manual_level === null) throw validationError("manual_level", "В ручном режиме нужен уровень");
+      if (b.mode === "auto" && b.manual_level !== null) throw validationError("manual_level", "В автоматическом режиме уровень не задаётся");
+      if (b.economy_at_percent > b.paid_only_at_percent) throw validationError("paid_only_at_percent", "Порог «только подписчики» — не ниже порога экономии");
+      const res = await aiCall(ctx, "PUT", `${BASE}/degradation`, {
+        actor: auth.actor,
+        body: { ...b, reason: b.reason.trim() },
+        idempotencyKey: idempotencyKeyOf(req, false),
+        headers: { "x-step-up": "ok" },
+      });
+      return relayAi(auth, reply, AI_DEGRADATION, res, true);
+    },
+  );
+
+  /** Стоимость урока, сценария и урока вдвоём, стоимость ИИ-минуты, доля деградированных занятий (week | month). */
+  app.get<{ Querystring: { period?: string } }>(
+    `${BASE}/unit-costs`,
+    { config: requirePermission("costs.read", "dashboard.read"), schema: { response: out(AI_UNIT_COSTS), querystring: query({ period: enumOf(UNIT_COST_PERIODS) }) } },
+    async (req) => {
+      const auth = staffOf(req);
+      return shaped(ctx, auth, AI_SERVICE, AI_UNIT_COSTS, await aiGet(ctx, `${BASE}/unit-costs`, { actor: auth.actor, query: { period: req.query.period ?? "month" } }));
     },
   );
 

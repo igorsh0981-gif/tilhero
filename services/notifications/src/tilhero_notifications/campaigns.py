@@ -63,6 +63,8 @@ ROUTES = (
     "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
     # спринт 7: социальное (release-notes.json routes)
     "friends", "leagues", "duels", "referrals",
+    # спринт 8: «Подписка» и «Купить тилы» (release-notes.json routes)
+    "subscription", "til_shop",
 )
 UI_LANGS = ("ru", "uz")
 AGES = ("teens", "adults")

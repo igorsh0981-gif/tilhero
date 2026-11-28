@@ -5,6 +5,13 @@ PairRoomReport).
 несуществующей (404 ROOM_NOT_FOUND). Каждая команда: обслуживание комнаты (своя транзакция) → блокировки обоих
 участников → проверка удаления после блокировки → действие → события в той же транзакции → после фиксации —
 пробуждение ленты, коуч (вне транзакции), оценка участников (фоном).
+
+Спринт 8 (INTERNAL_API §5, BILLING_ENFORCED): урок вдвоём 14+ без ребёнка в комнате приглашает только подписчик с
+функцией pair_lessons (billing `access`; нет — 403 SUBSCRIPTION_REQUIRED, billing недоступен — 503
+BILLING_UNAVAILABLE); пригласивший — плательщик комнаты. Старт с коучем: перед первым вызовом коуча (вне транзакции) —
+удержание у плательщика (ref room, PAIR_ROOM_MAX_MINUTES; повтор и переподключение — то же удержание); отказ или
+billing недоступен — комната без коуча (сценарий с выбором реплик, ai_degraded, mode_changed) и без списания.
+Приглашённому подписка не нужна (В8); комната с ребёнком и комната без коуча бесплатны (В9).
 """
 
 from __future__ import annotations
@@ -278,10 +285,21 @@ async def run_coach(rc: RoomCtx, room_id: uuid.UUID, trigger: str) -> Effects:
             return Effects()
         user_id, locale, audience = caller.user_id, caller.locale, coach.coach_audience(room)
         last_role = speaker.role if speaker is not None else None
+        payer = r.billing_payer_user_id if trigger == "start" and r.billing_hold_id is None else None
+        # оплаченная комната: коуч — от имени плательщика (его тариф у ai-gateway; при paid_only бесплатный
+        # приглашённый иначе остановил бы коуча, за которого заплатил пригласивший)
+        paid_by = r.billing_payer_user_id if r.billing_hold_id is not None else None
+    if payer is not None and rc.settings.billing_enforced:
+        hold = await clients.create_hold(rc.rt, user_id=payer, feature="pair_lessons", ref_kind="room",
+                                         ref_id=room_id, minutes_planned=rc.settings.pair_room_max_minutes)
+        if not hold.allowed or hold.hold_id is None:
+            return await _no_coach(rc, room_id, scn, turn_no, hold.reason or clients.BILLING_UNAVAILABLE)
+        await _keep_hold(rc, room_id, payer, hold)
+        paid_by = payer
     try:
         result = await clients.invoke_agent(
             rc.rt, coach.AGENT, request_id=coach.request_id(room_id, trigger, turn_no), session_id=room_id,
-            session_kind="pair", user_id=user_id, audience=audience, locale=locale, context=ctx_body)
+            session_kind="pair", user_id=paid_by or user_id, audience=audience, locale=locale, context=ctx_body)
     except clients.AiBusy:
         return Effects()
     parsed = coach.parse(result.output, room) if result.status == "ok" else None
@@ -309,6 +327,44 @@ async def run_coach(rc: RoomCtx, room_id: uuid.UUID, trigger: str) -> Effects:
             eff = await coach.degrade(db, room, scn, rc.now, rc.settings, next_role=nxt)
         else:
             eff = await coach.apply(db, room, scn, parsed, trigger, result.cost_usd, rc.now, rc.settings)
+        pair.schedule(room, rc.settings)
+        return eff
+
+
+async def _keep_hold(rc: RoomCtx, room_id: uuid.UUID, payer: uuid.UUID, hold: clients.Hold) -> None:
+    """Удержание комнаты записывается сразу (до ответа коуча): событие завершения понесёт hold_id при любом исходе."""
+    async with rc.rt.transaction() as db:
+        room = await pair.load(db, room_id)
+        if room is None:
+            return
+        await pair.lock_users(db, *room.users)
+        room = await pair.load(db, room_id, fresh=True)
+        if room is None or room.r.billing_payer_user_id != payer or room.r.billing_hold_id is not None:
+            return
+        room.r.billing_hold_id = hold.hold_id
+        put(room.r, billing={"outcome": "held", "minutes_left": hold.minutes_left})
+        if room.r.status not in pair.LIVE:
+            # комната успела закончиться без удержания (событие уже ушло) — минуты вернёт истечение удержания
+            log.warning("pair room hold after finish", extra={"status": room.r.status})
+
+
+async def _no_coach(rc: RoomCtx, room_id: uuid.UUID, scn: dict[str, Any], turn_no: int, reason: str) -> Effects:
+    """Удержание не дано (нет подписки, функции, минут) или billing недоступен: комната без коуча — сценарий с выбором
+    реплик (mode_changed, ai_degraded), без списания; в суточный лимит комнат с коучем не идёт."""
+    log.info("pair room without coach (billing)", extra={"reason": reason[:40]})
+    async with rc.rt.transaction() as db:
+        room = await pair.load(db, room_id)
+        if room is None:
+            return Effects()
+        await pair.lock_users(db, *room.users)
+        room = await pair.load(db, room_id, fresh=True)
+        if room is None or room.r.status not in pair.LIVE or room.r.engine != "ai" or room.r.turn_seq != turn_no \
+                or not st(room.r).get("pending") or room.r.billing_hold_id is not None:
+            return Effects()
+        pair.accrue(room, rc.now)
+        room.r.coach_used = False
+        put(room.r, billing={"outcome": reason})
+        eff = await coach.degrade(db, room, scn, rc.now, rc.settings, next_role="A")
         pair.schedule(room, rc.settings)
         return eff
 
@@ -376,6 +432,7 @@ async def invite(rc: RoomCtx, *, partner_member_id: str, pair_id: str, scenario_
     if rubric is not None:
         cv["rubric"] = ref(str(scn["rubric_id"]), rubric[0])
     kids = "kids" in audiences
+    payer = await _payer(rc, kids)
     room_id = uuid.uuid4()
     r = PairRoom(
         room_id=room_id, pair_id=pair_id, scenario_id=scenario_id, content_versions=cv, title=scn["title"],
@@ -385,7 +442,8 @@ async def invite(rc: RoomCtx, *, partner_member_id: str, pair_id: str, scenario_
         respond_until=start_at + timedelta(minutes=rc.settings.pair_invite_minutes), created_at=rc.now,
         team_goal_reached=False, seq=0, turn_seq=0, progress_seconds=0,
         state={"progress": 0.0, "scenario_skills": coach.scenario_skills(scn)},
-        idempotency_key=key, request_hash=rhash, updated_at=rc.now)
+        idempotency_key=key, request_hash=rhash, updated_at=rc.now, billing_payer_user_id=payer,
+        coach_active_seconds=0)
     r.due_at = r.respond_until
     parts = [RoomParticipant(room_id=room_id, side="inviter", user_id=rc.user,
                              session_id=pair.session_id_for(room_id, rc.user), audience=adm.me_audience,
@@ -426,6 +484,19 @@ async def invite(rc: RoomCtx, *, partner_member_id: str, pair_id: str, scenario_
         me = room2.me(rc.user)
         assert me is not None
         return await room_view(db, room2, me, rc.now, rc.member_key()), False
+
+
+async def _payer(rc: RoomCtx, kids: bool) -> uuid.UUID | None:
+    """Спринт 8: плательщик урока вдвоём — пригласивший с подпиской (функция pair_lessons). Пэйвол выключен или в
+    комнате ребёнок (только сценарий, без ИИ) — бесплатно, billing не вызывается."""
+    if not rc.settings.billing_enforced or kids:
+        return None
+    found = await clients.access(rc.rt, rc.user, "pair_lessons")
+    if found is None:
+        raise clients.billing_unavailable()
+    if not found.allowed:
+        raise clients.subscription_required("pair_lessons", found.reason or "no_subscription")
+    return rc.user
 
 
 async def _tend_mine(rc: RoomCtx) -> None:

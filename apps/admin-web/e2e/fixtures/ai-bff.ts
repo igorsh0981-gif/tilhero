@@ -525,9 +525,12 @@ export class AiStore {
       // sprint 7: the coach of one pair room 0..monthly_cap_usd (absent — kept as it is)
       const rc = body.room_cap_usd === undefined ? this.budget.room_cap_usd : n("room_cap_usd");
       if (!(rc >= 0 && rc <= mo)) return bad("room_cap_usd").then(() => true);
+      // sprint 8 (В14): a subscriber's day — learner_daily ≤ paid ≤ monthly (absent — kept as it is)
+      const pd = body.paid_learner_daily_cap_usd === undefined ? this.budget.paid_learner_daily_cap_usd : n("paid_learner_daily_cap_usd");
+      if (!(pd >= dl && pd <= mo)) return bad("paid_learner_daily_cap_usd").then(() => true);
       // ai-gateway: the updated_at that was read — someone saved in between → 409 BUDGET_CONFLICT {updated_at}
       if (body.updated_at !== undefined && body.updated_at !== this.budget.updated_at) return fail(409, "BUDGET_CONFLICT", { updated_at: this.budget.updated_at });
-      Object.assign(this.budget, { monthly_cap_usd: mo, learner_daily_cap_usd: dl, lesson_cap_usd: ls, speech_monthly_cap_usd: sp, room_cap_usd: rc, alert_percent: al, updated_at: iso(0) });
+      Object.assign(this.budget, { monthly_cap_usd: mo, learner_daily_cap_usd: dl, lesson_cap_usd: ls, speech_monthly_cap_usd: sp, room_cap_usd: rc, paid_learner_daily_cap_usd: pd, alert_percent: al, updated_at: iso(0) });
       audit("ai.budget_updated", "budget", reason);
       return done(200, this.budget);
     }

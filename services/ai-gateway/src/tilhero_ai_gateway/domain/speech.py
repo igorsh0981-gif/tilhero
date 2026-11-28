@@ -5,7 +5,9 @@
 бюджета пропускается.
 
 Порядок:
-1. Доступность: аварийная остановка → `unavailable: ai_disabled`; нет ключа или региона Azure (или модель речи
+1. Доступность: аварийная остановка → `unavailable: ai_disabled`; уровень деградации `off` (спринт 8: ручной —
+   `ai_disabled`, авто по потолку месяца — `budget_exceeded`; прочие уровни произношение не трогают); нет ключа или
+   региона Azure (или модель речи
    выключена в админке) → `unavailable: not_configured`; бюджет (месяц UTC, подлимит речи в месяц
    `speech_monthly_cap_usd` — решение владельца 20.11.2026, ученик за день по Ташкенту) по оценке стоимости длительности
    аудио → `unavailable: budget_exceeded` — всё до вызова провайдера.
@@ -44,6 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tilhero_ai_gateway.contracts import CONTROL_RE, SpeechAssessMeta
 from tilhero_ai_gateway.domain import budget as budgets
+from tilhero_ai_gateway.domain import degradation, tiers
 from tilhero_ai_gateway.domain.common import usd
 from tilhero_ai_gateway.domain.provider_status import ProviderStatus
 from tilhero_ai_gateway.domain.registry import SPEECH_MODEL_BY_PROVIDER
@@ -243,6 +246,9 @@ async def speech_available(session: AsyncSession, provider: SpeechProvider, now:
     budget = await session.get(BudgetRow, 1)
     if budget is None or not budget.ai_enabled or not provider.ready():
         return False
+    # спринт 8: уровень off (ручной или авто — потолок месяца) выключает и произношение (Whisper, $0)
+    if (await degradation.current(session, budget, now)).level == degradation.OFF:
+        return False
     model = await speech_model(session, provider)
     if model is None or not model.active:
         return False
@@ -270,6 +276,9 @@ async def assess(deps: SpeechDeps, meta: SpeechAssessMeta, audio: bytes, info: W
             user_id = None  # удалённый ученик: учёт без идентификатора
         budget = await s.get(BudgetRow, 1)
         model = await speech_model(s, provider)
+        # спринт 8: из уровней деградации произношение выключает только off; дневной лимит — по тарифу
+        level = await degradation.sync(s, deps.clock(), budget=budget) if budget is not None else None
+        paid = await tiers.is_paid(s, user_id, deps.clock())
     base: dict[str, Any] = {
         "call_id": call_id, "request_id": meta.request_id, "caller": caller[:32], "agent_id": AGENT_ID,
         "model_id": model.model_id if model is not None else None, "provider": provider.name,
@@ -288,6 +297,8 @@ async def assess(deps: SpeechDeps, meta: SpeechAssessMeta, audio: bytes, info: W
 
     if budget is None or not budget.ai_enabled:
         return await early("ai_disabled")
+    if level is not None and level.level == degradation.OFF:
+        return await early(level.refusal(paid) or "ai_disabled")
     if not provider.ready() or model is None or not model.active or model.audio_usd_per_hour is None:
         return await early("not_configured")
     price = Decimal(model.audio_usd_per_hour)
@@ -296,7 +307,8 @@ async def assess(deps: SpeechDeps, meta: SpeechAssessMeta, audio: bytes, info: W
         s.add(UsageRow(**base, status="pending"))
     reserved = True
     if provider.budgeted:  # whisper (свой сервер) денег не стоит — бюджеты и подлимит речи не проверяются
-        scope = budgets.Scope(call_id=call_id, user_id=user_id, session_id=None, learner_limits=True, speech=True)
+        scope = budgets.Scope(call_id=call_id, user_id=user_id, session_id=None, learner_limits=True, speech=True,
+                              daily_cap=tiers.daily_cap(budget, paid))
         async with deps.rt.transaction() as s:
             reserved = await budgets.try_reserve(s, budget, scope, actual=Decimal(0), estimate=estimate,
                                                  now=deps.clock(), tz=deps.settings.timezone)

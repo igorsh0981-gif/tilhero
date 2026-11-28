@@ -57,8 +57,16 @@ export const DOMAIN_BUSINESS_401: ReadonlySet<string> = new Set(["PIN_INVALID", 
 /** 503 доменов, которые клиент различает по коду: спринт 3 — learning-plan без снимка курса и кеша (CATALOG_UNAVAILABLE);
  *  спринт 5 — memory: оценка произношения выключена (SPEECH_UNAVAILABLE — Mini App скрывает «Произнести»; спринт 7 —
  *  и распознавание голосового хода парной комнаты: перейти на текст); спринт 7 — gamification: lessons не выдал набор
- *  заданий при принятии дуэли (DUEL_SET_UNAVAILABLE — дуэль остаётся challenged, принятие можно повторить). */
-export const DOMAIN_BUSINESS_503: ReadonlySet<string> = new Set(["CATALOG_UNAVAILABLE", "SPEECH_UNAVAILABLE", "DUEL_SET_UNAVAILABLE"]);
+ *  заданий при принятии дуэли (DUEL_SET_UNAVAILABLE — дуэль остаётся challenged, принятие можно повторить); спринт 8 —
+ *  billing: Telegram не выдал ссылку на счёт (STARS_UNAVAILABLE — заказ pending, повторить тем же Idempotency-Key);
+ *  lessons: приглашение в урок вдвоём, billing недоступен (BILLING_UNAVAILABLE — учёба работает, позвать позже). */
+export const DOMAIN_BUSINESS_503: ReadonlySet<string> = new Set([
+  "CATALOG_UNAVAILABLE",
+  "SPEECH_UNAVAILABLE",
+  "DUEL_SET_UNAVAILABLE",
+  "STARS_UNAVAILABLE",
+  "BILLING_UNAVAILABLE",
+]);
 
 /** Клиент закрыл соединение раньше ответа (long-poll парной комнаты): вызов домена прерван, ответ никому не нужен. */
 export const clientClosed = () => new AppError(499, "CLIENT_CLOSED_REQUEST", "Запрос отменён клиентом");

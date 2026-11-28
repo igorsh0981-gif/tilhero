@@ -124,9 +124,11 @@ describe("спринт 8: плагины маршрутов и клиент bill
     expect(h.logs.parsed().some((l) => l.upstream === "billing" && String(l.msg).includes("BILLING_URL is not set"))).toBe(true);
   });
 
-  it("WEB_PAY_ENABLED=true — область /web/v1 регистрируется (маршруты — поток H); BILLING_URL — клиент billing", async () => {
+  it("WEB_PAY_ENABLED=true — область /web/v1 зарегистрирована (поток H): /me без cookie — 401 SESSION_EXPIRED; BILLING_URL — клиент billing", async () => {
     h = await makeHarness({ WEB_PAY_ENABLED: "true", BILLING_URL: "http://billing.test:8118" });
-    expect((await h.app.inject({ url: `${WEB_PREFIX}/me` })).statusCode).toBe(404);
+    const r = await h.app.inject({ url: `${WEB_PREFIX}/me` });
+    expect(r.statusCode).toBe(401);
+    expect(r.json()).toMatchObject({ code: "SESSION_EXPIRED" });
     expect(BILLING_SERVICE).toBe("billing");
     expect(h.logs.parsed().some((l) => String(l.msg).includes("BILLING_URL is not set"))).toBe(false);
   });

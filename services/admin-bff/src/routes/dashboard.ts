@@ -1,7 +1,7 @@
 /**
  * GET /admin/v1/dashboard?period=today|7d|30d (dashboard.read) → Dashboard — всегда 200 (кроме 401/403/422).
  *
- * Одиннадцать независимых блоков, вызываются параллельно с таймаутом DASHBOARD_TIMEOUT_MS и без повторов:
+ * Двенадцать независимых блоков, вызываются параллельно с таймаутом DASHBOARD_TIMEOUT_MS и без повторов:
  *  - learners    — user-admin        GET /admin/v1/learners/stats?period=
  *  - support     — support           GET /admin/v1/support/stats?period=
  *  - whats_new   — experience-config GET /admin/v1/release-notes/summary
@@ -28,10 +28,16 @@
  *                  (спринт 7, INTERNAL_API §9): social недоступен или SOCIAL_URL не задана → блок недоступен (`service:
  *                  social`); gamification или lessons недоступны (или GAMIFICATION_URL не задана) → их поле null, блок
  *                  доступен. `SocialStats.period` — запрошенный период
+ *  - money       — billing           GET /internal/v1/admin/billing/reports/summary?period=day (выручка сайта в тийинах и
+ *                  Mini App в Stars раздельно, оплаченные заказы, активные подписки, пробные — за сегодня по Ташкенту;
+ *                  возвраты — её refunds_count, завершённые за день; открытые пункты сверки — её recon_open; один
+ *                  вызов, доступен и с dashboard.read) + доля потолка ИИ из блока ai (недоступен — null) — спринт 8.
+ *                  Блок за сегодня при любом периоде главной (`MoneyStats.period` = today). BILLING_URL не задана,
+ *                  сводка недоступна или испорчена → блок недоступен (`service: billing`) — нули не подставляются
  * Источник недоступен, ответил ошибкой (в т. ч. 403 по своему праву) или испорченными данными → блок
  * `{available: false, data: null, service}`; остальные блоки показываются. Нули вместо «нет данных» не подставляются.
  */
-import type { Dashboard, DashboardBlock, GameStats, LessonStats, MemoryStats, MoneyStats, Period, SocialStats } from "@tilhero/contracts/admin";
+import type { AiUsageSummary, Dashboard, DashboardBlock, GameStats, LessonStats, MemoryStats, MoneyStats, Period, SocialStats } from "@tilhero/contracts/admin";
 import type { Actor, AppError } from "@tilhero/ts-common";
 import { BadValue, C, type Codec } from "../codec.js";
 import { DASHBOARD_CAMPAIGNS, DASHBOARD_LEARNERS, DASHBOARD_WHATS_NEW, SUPPORT_STATS } from "../contract.js";
@@ -40,11 +46,12 @@ import { AI_USAGE_SUMMARY, ASSESSMENT_STATS, LESSON_STATS, LESSON_STATS_DOMAIN, 
 import { MEMORY_STATS } from "../contractMemory.js";
 import { GAME_OVERVIEW, GAME_STATS, gameStatsOf, overviewPeriodOf } from "../contractGame.js";
 import { DUEL_STATS, PAIR_ROOM_STATS, SOCIAL_STATS, SOCIAL_STATS_DOMAIN } from "../contractSocial.js";
+import { BILLING_SUMMARY } from "../contractBilling.js";
 import type { BffContext } from "../context.js";
 import { staffOf, type App } from "../http.js";
 import { requirePermission } from "../rbac.js";
 import { PERIOD, query } from "../schemas.js";
-import { DOMAIN, GAME_SERVICE, SOCIAL_SERVICE, upstreamUnavailable, type DomainClient, type DomainKey } from "../upstream.js";
+import { BILLING_SERVICE, DOMAIN, GAME_SERVICE, SOCIAL_SERVICE, upstreamUnavailable, type DomainClient, type DomainKey } from "../upstream.js";
 import { out } from "./common.js";
 import { loadMemoryStats } from "./memory.js";
 
@@ -96,9 +103,42 @@ export const MONEY_STATS: Codec<MoneyStats> = C.obj<MoneyStats>({
   ai_cap_used_pct: C.nullable(C.num(0, 1000)),
 });
 
-/** Спринт 8: источник блока «Деньги» (billing, BILLING_URL admin-bff) подключает поток F; до этого блок недоступен. */
-async function loadMoney(): Promise<DashboardBlock<MoneyStats>> {
-  return { available: false, data: null, service: "billing" };
+/** Доля потолка ИИ для блока «Деньги»: перерасход больше 1000 % показывается как 1000 (граница MoneyStats). */
+const capPct = (ai: DashboardBlock<AiUsageSummary>): number | null => (ai.available && ai.data ? Math.min(ai.data.cap_used_pct, 1000) : null);
+
+/**
+ * Спринт 8 — блок «Деньги»: одна сводка billing за сегодня (refunds_count — возвраты, завершённые за день; recon_open —
+ * открытые пункты сверки) + доля потолка ИИ (из уже загружаемого блока ai). Сводка недоступна или испорчена → блок
+ * недоступен (нули не подставляются).
+ */
+async function loadMoney(ctx: BffContext, actor: Actor, aiBlock: Promise<DashboardBlock<AiUsageSummary>>): Promise<DashboardBlock<MoneyStats>> {
+  try {
+    if (!ctx.billing) throw upstreamUnavailable(BILLING_SERVICE);
+    const o = { actor, timeoutMs: ctx.config.dashboardTimeoutMs, retries: 0 };
+    const base = "/internal/v1/admin/billing";
+    // одна сводка billing за день (reports/summary доступна и с dashboard.read): возвраты за день и открытая сверка —
+    // её поля refunds_count и recon_open (billing, поток A)
+    const [summaryBody, ai] = await Promise.all([ctx.billing.get<unknown>(`${base}/reports/summary`, { ...o, query: { period: "day" } }), aiBlock]);
+    const s = BILLING_SUMMARY.parse(summaryBody, "$");
+    return {
+      available: true,
+      data: {
+        period: "today",
+        web_revenue_tiyin: s.web.revenue_tiyin,
+        stars_revenue_stars: s.stars.revenue_stars,
+        orders_paid: s.web.orders_paid + s.stars.orders_paid,
+        refunds: s.refunds_count,
+        active_subscriptions: s.active_subscriptions,
+        trials_started: s.trials_started,
+        recon_open: s.recon_open,
+        ai_cap_used_pct: capPct(ai),
+      },
+    };
+  } catch (err) {
+    const code = err instanceof BadValue ? "UPSTREAM_BAD_RESPONSE" : ((err as AppError)?.code ?? "UNKNOWN");
+    ctx.log.warn({ upstream: BILLING_SERVICE, err_code: code }, "dashboard block unavailable");
+    return { available: false, data: null, service: BILLING_SERVICE };
+  }
 }
 
 export const DASHBOARD: Codec<Dashboard> = C.obj<Dashboard>({
@@ -247,6 +287,8 @@ export function dashboardRoutes(app: App, ctx: BffContext): void {
       const auth = staffOf(req);
       const period: Period = req.query.period ?? "today";
       const started = performance.now();
+      // блок ai нужен и блоку «Деньги» (доля потолка) — один вызов ai-gateway
+      const aiBlock = load(ctx, auth.actor, period, SPECS.ai);
       const [learners, support, whats_new, campaigns, content, diagnostics, lessons, ai, memory, game, social, money] = await Promise.all([
         load(ctx, auth.actor, period, SPECS.learners),
         load(ctx, auth.actor, period, SPECS.support),
@@ -255,11 +297,11 @@ export function dashboardRoutes(app: App, ctx: BffContext): void {
         load(ctx, auth.actor, period, SPECS.content),
         load(ctx, auth.actor, period, SPECS.diagnostics),
         loadLessons(ctx, auth.actor, period),
-        load(ctx, auth.actor, period, SPECS.ai),
+        aiBlock,
         loadMemory(ctx, auth.actor, period),
         loadGame(ctx, auth.actor, period),
         loadSocial(ctx, auth.actor, period),
-        loadMoney(),
+        loadMoney(ctx, auth.actor, aiBlock),
       ]);
       const blocks = [learners, support, whats_new, campaigns, content, diagnostics, lessons, ai, memory, game, social, money];
       const unavailable = blocks.filter((b) => !b.available).length;

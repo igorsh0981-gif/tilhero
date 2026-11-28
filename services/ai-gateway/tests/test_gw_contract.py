@@ -41,10 +41,12 @@ def _literal_values(annotation: Any) -> set[Any]:
 
 
 def _compare(ts_fields: dict[str, str], model: type[BaseModel], where: str) -> None:
-    assert set(model.model_fields) == set(ts_fields), (
-        f"{where}: поля pydantic {sorted(model.model_fields)} ≠ ai.ts {sorted(ts_fields)}")
+    # поле-ключевое слово Python (`from`) — атрибут `from_` с алиасом
+    names = {(f.alias or n): n for n, f in model.model_fields.items()}
+    assert set(names) == set(ts_fields), (
+        f"{where}: поля pydantic {sorted(names)} ≠ ai.ts {sorted(ts_fields)}")
     for name, type_text in ts_fields.items():
-        annotation = model.model_fields[name].annotation
+        annotation = model.model_fields[names[name]].annotation
         inline = ts.inline_object(type_text)
         if inline is not None:
             nested = _models_in(annotation)
@@ -65,7 +67,10 @@ def _compare(ts_fields: dict[str, str], model: type[BaseModel], where: str) -> N
                                    "SpeechAssessMeta", "PronunciationResult", "AiStatus",
                                    # спринт 7: коуч парного урока и распознавание голосового хода комнаты
                                    "CooperativeCoachContext", "CooperativeCoachOutput", "SpeechTranscribeMeta",
-                                   "SpeechTranscribeResult"])
+                                   "SpeechTranscribeResult",
+                                   # спринт 8: контроль ИИ
+                                   "DegradationEvent", "AiDegradation", "AiDegradationUpdate", "AiUnitCostsKind",
+                                   "AiUnitCosts"])
 def test_agent_models_match_ai_ts(iface: str) -> None:
     _compare(ts.fields("ai.ts", iface), getattr(contracts, iface), iface)
 
@@ -96,7 +101,8 @@ def test_enums_match_ai_ts() -> None:
     aliases = ts.type_aliases("ai.ts")
     assert set(AGENT_IDS) == aliases["AgentId"] == set(get_args(contracts.AgentIdLit))
     for name in ("RubricCriterionCode", "SessionKind", "AgentImplementation", "AgentVersionStatus",
-                 "AgentUnavailableReason", "AgentRefusedReason"):
+                 "AgentUnavailableReason", "AgentRefusedReason", "DegradationLevel", "DegradationMode",
+                 "DegradationReason"):
         assert set(get_args(getattr(contracts, name))) == aliases[name], name
     reasons = {r.strip().strip("'") for r in REASONS_SQL.split(",")}
     assert reasons == aliases["AgentUnavailableReason"] | aliases["AgentRefusedReason"]

@@ -7,6 +7,10 @@
 Только транспорт (INTERNAL_API §8): `/start [payload]` → приветствие с кнопкой «Открыть TilHero» (payload из белого
 списка — в startapp); прочие команды и текст → одна подсказка с той же кнопкой; язык — RU/UZ по language_code.
 Только личные чаты; группы, каналы и боты игнорируются.
+
+Спринт 8 (продажи за Stars, требование Telegram): `/paysupport` и `/support` → вопросы по оплате в поддержке TilHero с
+кнопкой на раздел «Поддержка» Mini App; `/terms` → оферта (только домен Mini App). Платёжные обновления
+(`pre_checkout_query`, `successful_payment`, `refunded_payment`, `subscription`) разбирает `stars.py` до этой функции.
 """
 
 from __future__ import annotations
@@ -14,7 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from tilhero_botgw.texts import lang_of, open_button, start_payload, t
+from tilhero_botgw.settings import default_terms_url
+from tilhero_botgw.texts import SUPPORT_PAYLOAD, lang_of, open_button, start_payload, t
 
 
 @dataclass(frozen=True)
@@ -35,9 +40,11 @@ def parse_command(text: str) -> tuple[str, str] | None:
     return name, rest.strip()
 
 
-def route_update(update: dict[str, Any], miniapp_url: str, app_link: str | None = None) -> UpdateAction:
+def route_update(
+    update: dict[str, Any], miniapp_url: str, app_link: str | None = None, terms_url: str | None = None
+) -> UpdateAction:
     if isinstance(update.get("message"), dict):
-        return _on_message(update["message"], miniapp_url, app_link)
+        return _on_message(update["message"], miniapp_url, app_link, terms_url or default_terms_url(miniapp_url))
     if isinstance(update.get("callback_query"), dict):
         # Inline-кнопок с callback у бота нет: только снять «часики» у клиента
         cq = update["callback_query"]
@@ -49,7 +56,7 @@ def route_update(update: dict[str, Any], miniapp_url: str, app_link: str | None 
     return UpdateAction()
 
 
-def _on_message(msg: dict[str, Any], miniapp_url: str, app_link: str | None) -> UpdateAction:
+def _on_message(msg: dict[str, Any], miniapp_url: str, app_link: str | None, terms_url: str) -> UpdateAction:
     chat = _dict(msg.get("chat"))
     sender = _dict(msg.get("from"))
     chat_id = chat.get("id")
@@ -57,12 +64,20 @@ def _on_message(msg: dict[str, Any], miniapp_url: str, app_link: str | None) -> 
         return UpdateAction()  # бот работает только в личном чате
     lang = lang_of(_str(sender.get("language_code")) or None)
     command = parse_command(_str(msg.get("text")))
-    if command is not None and command[0] == "start":
+    name = command[0] if command is not None else None
+    if command is not None and name == "start":
         payload = start_payload(command[1])
         first_name = _str(sender.get("first_name")).strip()[:64]
         text = t(lang, "hello", name=first_name) if first_name else t(lang, "hello_anon")
+        button = open_button(lang, miniapp_url, app_link, payload)
+    elif name in ("paysupport", "support"):
+        text = t(lang, "paysupport")
+        button = open_button(lang, miniapp_url, app_link, SUPPORT_PAYLOAD, text_key="support_button")
+    elif name == "terms":
+        text = t(lang, "terms")
+        button = {"text": t(lang, "terms_button"), "url": terms_url}
     else:
-        payload, text = None, t(lang, "hint")
+        text, button = t(lang, "hint"), open_button(lang, miniapp_url, app_link, None)
     return UpdateAction(
         reply={
             "method": "sendMessage",
@@ -70,7 +85,7 @@ def _on_message(msg: dict[str, Any], miniapp_url: str, app_link: str | None) -> 
             "text": text,
             "parse_mode": "HTML",
             "link_preview_options": {"is_disabled": True},
-            "reply_markup": {"inline_keyboard": [[open_button(lang, miniapp_url, app_link, payload)]]},
+            "reply_markup": {"inline_keyboard": [[button]]},
         },
         chat_id=chat_id,
     )

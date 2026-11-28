@@ -5,11 +5,13 @@
  *  - 5xx домена → 503 UPSTREAM_UNAVAILABLE {service}; игра (спринт 6) — 503 GAME_UNAVAILABLE {service: gamification},
  *    картинки игры: 4xx домена → 404 ASSET_NOT_FOUND;
  *  - спринт 7: social и lessons от имени ученика (полоса — из identity, она работает) — ошибка и сбой именно этого домена;
- *    лиги и дуэли — как игра (GAME_UNAVAILABLE).
+ *    лиги и дуэли — как игра (GAME_UNAVAILABLE);
+ *  - спринт 8: billing (/v1/billing/*) — 4xx: код и статус как есть, details — только поля контракта (здесь — пусто),
+ *    текст — BFF (анти-стиринг); сбой — 503 BILLING_UNAVAILABLE {service: billing}.
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { bearer, closeRedis, initDataFor, login, makeHarness, type Harness, type LoggedIn, type Service } from "./helpers.js";
+import { BILLING_ENV, bearer, closeRedis, initDataFor, login, makeHarness, type Harness, type LoggedIn, type Service } from "./helpers.js";
 import { makeWav } from "./wavFixture.js";
 import { OTHER_MEMBER } from "./fakeSocial.js";
 
@@ -21,6 +23,7 @@ beforeEach(async () => {
     RATE_LIMIT_PUBLIC_IP_PER_MIN: "1000",
     RATE_LIMIT_SESSION_IP_PER_MIN: "1000",
     RATE_LIMIT_PIN_PER_MIN: "20", // маршрутов с лимитом кода родителя больше 5 (reset-cancel — ревью T-8)
+    ...BILLING_ENV,
   });
   s = await login(h);
   h.fake.setAge(s.userId, "18+");
@@ -48,6 +51,8 @@ type Sample = {
   asset?: boolean;
   /** спринт 7: маршрут social / lessons от имени ученика — ошибку отвечает этот домен (identity — для полосы — работает) */
   domain?: "social" | "lessons";
+  /** спринт 8: маршрут billing — сбой → 503 BILLING_UNAVAILABLE; 4xx — код как есть, details только контрактные */
+  billing?: boolean;
 };
 
 /** Пример корректного запроса для каждого маршрута: ключ — "METHOD /openapi/path". */
@@ -232,6 +237,16 @@ const SAMPLES: Record<string, Sample> = {
   "post /v1/pair-rooms/{room_id}/turns": { domain: "lessons", payload: { choice_id: "c1" }, idem: true },
   "post /v1/pair-rooms/{room_id}/audio": { domain: "lessons", raw: { body: makeWav(), contentType: "audio/wav" } },
   "get /v1/pair-rooms/{room_id}/report": { domain: "lessons" },
+  // спринт 8: подписка и покупки за Telegram Stars (billing, канал miniapp)
+  "get /v1/billing/catalog": { billing: true },
+  "get /v1/billing/subscription": { billing: true },
+  "get /v1/billing/minutes": { billing: true },
+  "get /v1/billing/orders": { billing: true },
+  "get /v1/billing/orders/{order_no}": { billing: true, params: { order_no: "1001" } },
+  "post /v1/billing/trial": { billing: true, idem: true },
+  "post /v1/billing/orders": { billing: true, idem: true, payload: { product_code: "plus_90d", provider: "telegram_stars", offer_version: "1.0", start_mode: "now" } },
+  "post /v1/billing/orders/{order_no}/cancel": { billing: true, params: { order_no: "1001" } },
+  "post /v1/billing/stars-subscription": { billing: true, payload: { auto_renew: false } },
 };
 
 interface Op {
@@ -305,7 +320,7 @@ describe("матрица маршрутов /v1", () => {
       // refresh без живой сессии не дойдёт до домена — свежая сессия на каждый маршрут
       s = await login(h);
       // игра и спринт 7: ошибку отвечает домен маршрута (identity — для полосы ученика — работает)
-      h.fake.failAll = { status: 409, code: "DOMAIN_SAYS_NO", except: new Set<Service>(sample.game || sample.domain ? ["identity"] : []) };
+      h.fake.failAll = { status: 409, code: "DOMAIN_SAYS_NO", except: new Set<Service>(sample.game || sample.domain || sample.billing ? ["identity"] : []) };
       const res = await call(op, bearer(s.access));
       h.fake.failAll = null;
       if (op.key === "post /v1/session/telegram") {
@@ -322,6 +337,11 @@ describe("матрица маршрутов /v1", () => {
         continue;
       }
       expect(res.statusCode, `${op.key}: ${res.body}`).toBe(409);
+      if (sample.billing) {
+        // анти-стиринг: текст и details домена наружу не уходят
+        expect(res.json(), op.key).toEqual({ code: "DOMAIN_SAYS_NO", message: "Покупка сейчас недоступна", trace_id: res.headers["x-trace-id"], details: {} });
+        continue;
+      }
       expect(res.json(), op.key).toEqual({
         code: "DOMAIN_SAYS_NO",
         message: "domain says DOMAIN_SAYS_NO",
@@ -336,12 +356,13 @@ describe("матрица маршрутов /v1", () => {
       const sample = SAMPLES[op.key]!;
       if (sample.noDomain) continue;
       s = await login(h);
-      h.fake.failAll = { status: 500, code: "BOOM", except: new Set<Service>(sample.game || sample.domain ? ["identity"] : []) };
+      h.fake.failAll = { status: 500, code: "BOOM", except: new Set<Service>(sample.game || sample.domain || sample.billing ? ["identity"] : []) };
       const res = await call(op, bearer(s.access));
       h.fake.failAll = null;
       expect(res.statusCode, `${op.key}: ${res.body}`).toBe(503);
-      expect(res.json().code, op.key).toBe(sample.speech ? "SPEECH_UNAVAILABLE" : sample.game ? "GAME_UNAVAILABLE" : "UPSTREAM_UNAVAILABLE");
+      expect(res.json().code, op.key).toBe(sample.speech ? "SPEECH_UNAVAILABLE" : sample.game ? "GAME_UNAVAILABLE" : sample.billing ? "BILLING_UNAVAILABLE" : "UPSTREAM_UNAVAILABLE");
       if (sample.game) expect(res.json().details, op.key).toEqual({ service: "gamification" });
+      if (sample.billing) expect(res.json().details, op.key).toEqual({ service: "billing" });
       if (sample.domain) expect(res.json().details, op.key).toEqual({ service: sample.domain });
       expect(typeof res.json().details.service, op.key).toBe("string");
       expect(res.body, op.key).not.toContain("BOOM");

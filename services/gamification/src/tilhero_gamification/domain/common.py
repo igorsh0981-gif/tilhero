@@ -35,6 +35,9 @@ LEAGUE_CLOSED: Final = "game.league.closed.v1"
 DUEL_CHALLENGED: Final = "game.duel.challenged.v1"
 DUEL_FINISHED: Final = "game.duel.finished.v1"
 REFERRAL_REWARDED: Final = "game.referral.rewarded.v1"
+# спринт 8 (INTERNAL_API §6, §10): подтверждения billing по пакетам тилов
+TIL_PACK_CREDITED: Final = "game.til_pack.credited.v1"
+TIL_PACK_REVERSED: Final = "game.til_pack.reversed.v1"
 
 # права сотрудников (PLAN «Права и роли») — проверяются в домене по actor (защита в глубину)
 GAME_READ: Final = "game.read"
@@ -91,7 +94,8 @@ def item_not_available() -> ApiError:
 
 
 def insufficient_tils(price: int, balance: int) -> ApiError:
-    return conflict("INSUFFICIENT_TILS", "Не хватает тилов. Заработайте в уроках — покупка тилов скоро",
+    # спринт 8: purchase_available и текст о покупке тилов — telegram-bff (по каталогу billing); здесь — false
+    return conflict("INSUFFICIENT_TILS", "Не хватает тилов — заработайте их в уроках",
                     {"price": price, "balance": balance, "missing": max(price - balance, 0),
                      "purchase_available": False})
 

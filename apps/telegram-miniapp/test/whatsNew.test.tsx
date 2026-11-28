@@ -48,8 +48,10 @@ describe("«Что нового» cards (AT-11)", () => {
   it("release 6.1: every illustration of the catalogue is a 16:9 file of this build, the key shape is the catalogue's", () => {
     const cat = catalogue as { illustrations: Array<{ key: string; width: number; height: number }>; limits: { illustration_pattern: string } };
     expect(ILLUSTRATION_RE.source).toBe(cat.limits.illustration_pattern);
-    // sprint 7: s7-social (adults) and s7-family (children: the family together, no podium)
-    expect(cat.illustrations.map((i) => i.key)).toEqual(["welcome", "s6-heroes", "s7-social", "s7-family"]);
+    // sprint 7: s7-social (adults) and s7-family (children: the family together, no podium); sprint 8: s8-plus (14+)
+    // and s8-plus-kids (6–13)
+    expect(cat.illustrations.map((i) => i.key)).toEqual(["welcome", "s6-heroes", "s7-social", "s7-family", "s8-plus",
+      "s8-plus-kids"]);
     for (const i of cat.illustrations) {
       expect({ width: i.width, height: i.height }).toEqual(ILLUSTRATION_SIZE);
       const file = resolve(__dirname, `../public/whatsnew/${i.key}.webp`);
@@ -58,6 +60,25 @@ describe("«Что нового» cards (AT-11)", () => {
       expect(head.subarray(0, 4).toString("latin1") + head.subarray(8, 12).toString("latin1")).toBe("RIFFWEBP");
       expect([head.readUInt16LE(26) & 0x3fff, head.readUInt16LE(28) & 0x3fff], i.key).toEqual([i.width, i.height]);
     }
+  });
+  it("sprint 8: the illustrations s8-plus / s8-plus-kids (release-notes.json `illustrations`) are 16:9 WebP files of this build", () => {
+    const cat = catalogue as { illustrations: Array<{ key: string; width: number; height: number }>; planned?: unknown };
+    const s8 = cat.illustrations.filter((i) => i.key.startsWith("s8-"));
+    expect(s8.map((i) => i.key)).toEqual(["s8-plus", "s8-plus-kids"]);
+    expect(cat.planned).toBeUndefined();
+    for (const i of s8) {
+      expect({ width: i.width, height: i.height }).toEqual(ILLUSTRATION_SIZE);
+      const file = resolve(__dirname, `../public/whatsnew/${i.key}.webp`);
+      expect(existsSync(file), i.key).toBe(true);
+      const head = readFileSync(file).subarray(0, 30);
+      expect(head.subarray(0, 4).toString("latin1") + head.subarray(8, 12).toString("latin1")).toBe("RIFFWEBP");
+      // VP8 (lossy) keeps the size at bytes 26..29, VP8L / VP8X elsewhere — read the chunk kind
+      const kind = head.subarray(12, 16).toString("latin1");
+      const size = kind === "VP8 " ? [head.readUInt16LE(26) & 0x3fff, head.readUInt16LE(28) & 0x3fff] : kind === "VP8X" ? [head.readUIntLE(24, 3) + 1, head.readUIntLE(27, 3) + 1] : null;
+      expect(size, `${i.key}: ${kind}`).toEqual([i.width, i.height]);
+      expect(readFileSync(file).length, i.key).toBeLessThan(150_000);
+    }
+    expect(artOf("s8-plus")).toEqual({ src: "/whatsnew/s8-plus.webp", width: 1200, height: 675 });
   });
   it("hasWhatsNew: welcome / updates with at least one card", () => {
     expect(hasWhatsNew(updates)).toBe(true);

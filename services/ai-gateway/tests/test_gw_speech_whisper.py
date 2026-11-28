@@ -167,21 +167,30 @@ async def test_tts_timeout(wh, monkeypatch) -> None:
 
 
 async def test_no_budget_spent_but_emergency_stop_applies(wh) -> None:
-    """Свой сервер денег не стоит: исчерпанные бюджеты (месяц, подлимит речи, ученик в день) whisper не блокируют;
-    аварийная остановка — блокирует."""
-    await wh.set_budget(monthly_cap_usd=0, speech_monthly_cap_usd=0, learner_daily_cap_usd=0)
+    """Свой сервер денег не стоит: исчерпанные подлимит речи и лимит ученика в день whisper не блокируют; аварийная
+    остановка — блокирует. Спринт 8 (INTERNAL_API §7): из уровней деградации произношение выключает только off —
+    в том числе авто-off по исчерпанному потолку месяца (economy и paid_only его не трогают)."""
+    await wh.set_budget(monthly_cap_usd=20, speech_monthly_cap_usd=0, learner_daily_cap_usd=0)
+    await wh.sql("INSERT INTO usage (call_id, request_id, caller, agent_id, provider, status, cost_usd, created_at, "
+                 "finished_at) VALUES ($1, $2, 'lessons', 'conversation_partner', 'anthropic', 'ok', 19, $3, $3)",
+                 uuid.uuid4(), uuid.uuid4(), wh.now)  # 95 % — paid_only
+    assert (await wh.c.get("/internal/v1/status", headers=wh.svc("memory"))).json() == {
+        "ai_available": True, "speech_available": True, "level": "paid_only", "free_available": False,
+        "paid_available": True}
+    assert (await wh.speech(WAV, speech_meta(reference_text=REF))).json()["status"] == "ok"
     await wh.sql("INSERT INTO usage (call_id, request_id, caller, agent_id, provider, status, cost_usd, created_at, "
                  "finished_at) VALUES ($1, $2, 'lessons', 'conversation_partner', 'anthropic', 'ok', 1, $3, $3)",
-                 uuid.uuid4(), uuid.uuid4(), wh.now)
-    assert (await wh.c.get("/internal/v1/status", headers=wh.svc("memory"))).json() == {
-        "ai_available": True, "speech_available": True}
-    assert (await wh.speech(WAV, speech_meta(reference_text=REF))).json()["status"] == "ok"
+                 uuid.uuid4(), uuid.uuid4(), wh.now)  # 100 % — off
+    res = (await wh.speech(WAV, speech_meta(reference_text=REF))).json()
+    assert (res["status"], res["reason"], res["provider"]) == ("unavailable", "budget_exceeded", None)
+    assert (await wh.c.get("/internal/v1/status", headers=wh.svc("memory"))).json()["speech_available"] is False
     await wh.c.post("/admin/v1/ai/emergency-stop", json={"enabled": True, "reason": "Авария"},
                     headers=wh.h(OPERATIONS))
     res = (await wh.speech(WAV)).json()
     assert (res["status"], res["reason"], res["provider"]) == ("unavailable", "ai_disabled", None)
     assert (await wh.c.get("/internal/v1/status", headers=wh.svc("memory"))).json() == {
-        "ai_available": False, "speech_available": False}
+        "ai_available": False, "speech_available": False, "level": "off", "free_available": False,
+        "paid_available": False}
     assert len(wh.tts.requests) == 1
 
 

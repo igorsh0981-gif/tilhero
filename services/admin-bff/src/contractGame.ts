@@ -186,6 +186,19 @@ export async function withStaffRefs<T>(ctx: BffContext, auth: StaffAuth, value: 
   return value;
 }
 
+/**
+ * Спринт 8 (billing): имя сотрудника домен хранит сам (actor.name команды) — оно и остаётся; staff/lookup — только для
+ * StaffRef с пустым именем (старые записи, имя не пришло); «system» — «Система» без запроса.
+ */
+export async function withDomainNames<T>(ctx: BffContext, auth: StaffAuth, value: T): Promise<T> {
+  const refs: StaffRef[] = [];
+  collectRefs(value, refs);
+  const missing = refs.filter((r) => !r.name && r.staff_id !== SYSTEM_STAFF);
+  const names = missing.length ? await ctx.names.resolve([...new Set(missing.map((r) => r.staff_id))], auth) : new Map<string, string>();
+  for (const r of refs) if (!r.name) r.name = r.staff_id === SYSTEM_STAFF ? SYSTEM_NAME : (names.get(r.staff_id) ?? UNKNOWN_STAFF_NAME);
+  return value;
+}
+
 // ---------------------------------------------------------------- картинки
 
 /** Адрес картинки для админки (admin.ts AdminGameImage.url) — байты отдаёт admin-bff с правом game.read. */

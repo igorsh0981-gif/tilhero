@@ -45,6 +45,10 @@ export interface LessonsScenario {
   aiDropsOnText?: boolean;
   /** the listening step of a media session has the audio file (has_audio; the bytes — GET /v1/media/m-own-coffee/audio) */
   listenFile?: boolean;
+  /** sprint 8 (paywall, BILLING_ENFORCED): a lesson / scenario of a learner 14+ goes with ready replies by the plan */
+  aiLocked?: "no_subscription" | "feature_not_in_plan" | "minutes_exhausted" | "billing_unavailable";
+  /** sprint 8: AI minutes left after the hold on a lesson / scenario with AI («ИИ: осталось N мин») */
+  aiMinutesLeft?: number;
 }
 
 const L = (ru: string, uz: string): Localized => ({ ru, uz });
@@ -389,7 +393,9 @@ export class MockLessons {
 
   /* ---------- sessions ---------- */
   private newRun(owner: string, kids: boolean, kind: SessionKind, ref: { lesson_id?: string; scenario_id?: string; asset_id?: string; title?: Localized }, plan?: Def[]): Run {
-    const full = !kids && !this.sc.aiDegraded;
+    const paywalled = !kids && (kind === "lesson" || kind === "scenario");
+    const locked = paywalled ? (this.sc.aiLocked ?? null) : null;
+    const full = !kids && !this.sc.aiDegraded && !locked;
     const p = plan ?? (kind === "lesson" ? lessonPlan(kids, full) : kind === "scenario" ? [{ kind: "roleplay" as const, graph: kids ? ZOO : CAFE }, { kind: "roleplay_end" as const }, { kind: "done" as const }] : MEDIA_PLAN);
     const stageTypes: SessionStage[] =
       kind === "lesson"
@@ -430,9 +436,9 @@ export class MockLessons {
       finished_at: null,
       expires_at: null,
       minutes: 0,
-      // спринт 8: пэйвол выключен в mock BFF (поток E добавит сценарии ai_locked)
-      ai_locked: null,
-      ai_minutes_left: null,
+      // спринт 8: пэйвол — урок «вариантами» по тарифу или остаток ИИ-минут после удержания
+      ai_locked: locked ? { reason: locked } : null,
+      ai_minutes_left: paywalled && !locked && full && this.sc.aiMinutesLeft != null ? this.sc.aiMinutesLeft : null,
     };
     const r: Run = { view, owner, kids, plan: p, pi: 0, emitted: [], results: new Map(), answers: new Map(), rp: null, hinted: new Set(), simplerAt: 0, openText: null, summary: null };
     this.runs.set(view.session_id, r);

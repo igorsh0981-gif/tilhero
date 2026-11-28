@@ -255,7 +255,9 @@ export async function pairRoomsRoutes(app: App, ctx: BffContext): Promise<void> 
         description:
           "Idempotency-Key (UUID) обязателен. start — now или ISO-8601 не дальше 7 дней (иначе 422 VALIDATION_ERROR). 409 ROOM_LIMIT " +
           "{room_id} | PAIR_NOT_AVAILABLE; 403 BLOCKED | SOCIAL_RESTRICTED {until} | PARTNER_NOT_ALLOWED | FRIENDS_NOT_ALLOWED {reason}; " +
-          "404 MEMBER_NOT_FOUND | LESSON_NOT_AVAILABLE. Детям — только выбор реплик. Лимит tg.room.write.",
+          "404 MEMBER_NOT_FOUND | LESSON_NOT_AVAILABLE. Спринт 8 (пэйвол): 403 SUBSCRIPTION_REQUIRED {feature: pair_lessons, reason: " +
+          "no_subscription | feature_not_in_plan | minutes_exhausted | kids} — как есть; 503 BILLING_UNAVAILABLE — подписку " +
+          "проверить не удалось (учёба работает). Детям — только выбор реплик. Лимит tg.room.write.",
         security: BEARER,
         headers: IdempotencyHeadersSchema,
         body: PairRoomInviteSchema,

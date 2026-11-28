@@ -468,18 +468,36 @@ describe("the shop", () => {
     const ok = screen.getByTestId("shop-bg_ok").querySelector<HTMLElement>(".shop-vis")!;
     expect(ok.style.getPropertyValue("--game-bg")).toBe("var(--ok-soft)");
   });
-  it("409 INSUFFICIENT_TILS: «Не хватает N тилов… покупка тилов скоро», no payment", async () => {
+  it("409 INSUFFICIENT_TILS {purchase_available: false}: «Не хватает N тилов. Заработайте их в уроках», no «Купить тилы»", async () => {
     const shop = { items: [ITEM({})], til_balance: 85, freeze_stock: 2, freeze_max: 5 };
     const after = { items: [ITEM({ can_buy: false, reason_unavailable: "not_enough_tils" })], til_balance: 10, freeze_stock: 2, freeze_max: 5 };
     mount(<ShopScreen />, {
       "GET /v1/game/shop": [[200, shop], [200, after]],
+      "GET /v1/game/summary": [200, { ...SUMMARY, purchase_available: false }],
       "POST /v1/game/shop/purchases": err(409, "INSUFFICIENT_TILS", { price: 40, balance: 10, missing: 30, purchase_available: false }),
     });
     await userEvent.click(await screen.findByTestId("shop-buy-streak_freeze"));
     await userEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Купить" }));
-    expect(await screen.findByTestId("shop-why-streak_freeze")).toHaveTextContent("Не хватает 30 тилов. Заработайте в уроках — покупка тилов скоро");
+    expect(await screen.findByTestId("shop-why-streak_freeze")).toHaveTextContent("Не хватает 30 тилов. Заработайте их в уроках");
     await waitFor(() => expect(screen.getByTestId("shop-buy-streak_freeze")).toBeDisabled());
-    expect(document.body.textContent).not.toMatch(/Payme|оплат/i);
+    expect(screen.queryByTestId("shop-buy-tils")).toBeNull();
+    expect(screen.queryByTestId("shop-get-tils-streak_freeze")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/Payme|оплат|скоро/i);
+  });
+  it("sprint 8: purchase_available — «Купить тилы» in the balance card and under the shortage → the til shop (Stars)", async () => {
+    const shop = { items: [ITEM({ can_buy: false, reason_unavailable: "not_enough_tils", price_til: 120 })], til_balance: 85, freeze_stock: 2, freeze_max: 5 };
+    mount(<ShopScreen />, { "GET /v1/game/shop": [200, shop], "GET /v1/game/summary": [200, { ...SUMMARY, purchase_available: true }] });
+    await userEvent.click(await screen.findByTestId("shop-get-tils-streak_freeze"));
+    expect(screen.getByTestId("pushed")).toHaveTextContent("tilShop");
+    expect(screen.getByTestId("shop-buy-tils")).toHaveTextContent("Купить тилы");
+  });
+  it("sprint 8: a child profile never sees «Купить тилы» (even if the server said so)", async () => {
+    const shop = { items: [ITEM({ can_buy: false, reason_unavailable: "not_enough_tils", price_til: 120 })], til_balance: 85, freeze_stock: 2, freeze_max: 5 };
+    const f = mount(<ShopScreen />, { "GET /v1/game/shop": [200, shop], "GET /v1/game/summary": [200, { ...SUMMARY, purchase_available: true }] }, true);
+    await screen.findByTestId("shop-why-streak_freeze");
+    expect(screen.queryByTestId("shop-buy-tils")).toBeNull();
+    expect(screen.queryByTestId("shop-get-tils-streak_freeze")).toBeNull();
+    expect(f.of("GET /v1/game/summary")).toHaveLength(0);
   });
   it("a lost answer: the retry carries the same Idempotency-Key; the next purchase — a new one", async () => {
     const shop = { items: [ITEM({})], til_balance: 85, freeze_stock: 2, freeze_max: 5 };

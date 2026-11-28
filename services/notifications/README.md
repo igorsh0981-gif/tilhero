@@ -86,6 +86,25 @@ scheduled | unscheduled | stopped | finished | failed | test_sent` (object_type 
 `actor_type=system`).
 Тексты шаблонов и рассылок в аудит не пишутся; тестовый получатель — только индекс.
 
+### Спринт 8: оплата и подписка (INTERNAL_API спринта 8 §8)
+Durable `notifications.billing`: `billing.order.paid.v1`, `billing.order.refunded.v1`, `billing.subscription.changed.v1`,
+`billing.stars_subscription.changed.v1`, `billing.subscription.expiring.v1`, `billing.minutes.low.v1`,
+`billing.adjustment.applied.v1` — только от `billing` (иначе WARNING без `user_id`, без записи). Адресат — аккаунт-
+плательщик (`account_id`; детским профилям не адресуется), категория **service** (не выключается, вне лимита 3
+сообщений; тихие часы, выключатель Telegram и статус — как у ответов поддержки), запись — `kind transactional` (обход
+тихих часов — только у кода PIN). Шаблон оплаченного заказа — по каналу: `miniapp` | `renewal` → `payment_succeeded`
+(товар, звёзды, срок; продление — «Подписка продлена»), `web` → `purchase_applied` (нейтрально: что стало доступно — без
+суммы, провайдера и номера заказа). `refund_completed`: Stars — со звёздами, `web` — «деньги вернутся тем же способом»;
+обезличенный заказ (`account_id null`) — без сообщения. `subscription_expired` — `status expired` + `reason ended`;
+`trial_started` — только центр; `stars_renewal_failed` — `status failed`, после `expires_at` — только центр;
+`subscription_expiring` — после конца периода только центр; `minutes_adjusted` — только начисление минут > 0 и выдача
+периода. Ключи: `payment:<order_id>`, `refund:<order_id>`, `expiring:<period_id>:<days_left>`, `expired:<period_id>`,
+`renewal_failed:<subscription_id>:<expires_at>`, `minutes_low:<period_id>`, `adjust:<adjustment_id>`,
+`trial:<period_id>`. **Анти-стиринг** (AT-100, `tests/test_notifications_billing.py`): весь каталог шаблонов на всех
+вариантах параметров — без ссылок, кроме кнопки `startapp`, без Payme / Click / Uzum, сайта и «сум» / «soʻm»; шаблоны
+заказов сайта — без звёзд, сумм и номера заказа. Миграции нет: шаблоны — в коде (как в спринтах 2–7), категория
+`service` и `kind transactional` уже есть в CHECK (0001, 0002).
+
 ## Политика (в момент отправки, порядок §4)
 Приём только создаёт запись (`telegram_status=scheduled`, `scheduled_for=now`); обработчик журнала берёт свежий
 `DeliveryInfo`, отрисовывает title/body на языке ученика (для центра) и решает (`domain/policy.py`):
@@ -146,6 +165,7 @@ scheduled | unscheduled | stopped | finished | failed | test_sent` (object_type 
 | `sanction_applied`, `sanction_appeal_decided` (+ `.kid`; не редактируются) | service | `route_friends` |
 | `complaint_resolved` (+ `.kid`) | social | — |
 | `pin.reset_code` (только синхронный HTTP, не в центре) | service | — |
+| спринт 8: `payment_succeeded`, `purchase_applied`, `refund_completed`, `subscription_expiring`, `subscription_expired`, `stars_renewal_failed`, `minutes_low`, `minutes_adjusted`, `trial_started` (не редактируются, без детских вариантов) | service | `route_subscription` |
 
 Детские тексты — родителю, с именем ребёнка, мягкие: без «потери серии», «провала», давления (тест
 `test_kid_texts_are_soft_and_name_the_child`). PII в текстах — только имя ребёнка родителю и имя
@@ -215,7 +235,9 @@ licensed — «материал лицензирован и добавлен», 
 ## Рассылки (спринт 2, AT-22)
 Категория `product`, kind `campaign`. Маршрут кнопки — из каталога `packages/contracts/release-notes.json`
 (`campaigns.ROUTES`; спринт 3 — + `diagnostics`, `plan`, `skills`, `scenarios`, `media`, `media_requests`,
-`languages`; релиз 6.1 — + `heroes`, `shop`, `badges`, `game_history`, `game_settings`, `dictionary`, `reading`). Аудиторию отбирает identity-consent (`GET /internal/v1/audience[/count]?ui_lang=&age=&onboarded=&active_days=`,
+`languages`; релиз 6.1 — + `heroes`, `shop`, `badges`, `game_history`, `game_settings`, `dictionary`, `reading`;
+спринт 7 — + `friends`, `leagues`, `duels`, `referrals`; спринт 8 — + `subscription`, `til_shop`: каталог — основной
+список и блок `planned` до переноса потоком I). Аудиторию отбирает identity-consent (`GET /internal/v1/audience[/count]?ui_lang=&age=&onboarded=&active_days=`,
 `age` по умолчанию `adults`). `POST …:dispatch` сначала выполняет шаги рассылок (`campaigns.Runner`, не больше
 `CAMPAIGN_MAX_BATCHES_PER_CALL`), затем отправку: 1) `scheduled` с `send_at ≤ now` → `sending`, фиксация
 `audience_count` (identity-consent недоступен — запуск при следующем вызове); 2) страницы аудитории по

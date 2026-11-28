@@ -70,6 +70,8 @@ _STAT_BY_OP: dict[tuple[str, str], str] = {
     ("referral_bonus", "til"): "earned_til",
     ("referral_welcome", "til"): "earned_til",
     ("referral_welcome", "freeze"): "freezes_granted",
+    # спринт 8: пакеты тилов за деньги (не «заработано»)
+    ("purchase", "til"): "purchased_til",
 }
 
 

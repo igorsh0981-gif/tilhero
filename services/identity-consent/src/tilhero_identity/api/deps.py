@@ -25,8 +25,12 @@ public_profile_callers = InternalAuth({"social", "notifications", "memory", "les
 # admin-bff с actor и правом users.sensitive.read.
 user_admin_only = InternalAuth({"user-admin"})
 admin_bff_only = InternalAuth({"admin-bff"})
-# Спринт 7 (Н1): выгрузка профилей для начальной загрузки проекции — только gamification
-gamification_only = InternalAuth({"gamification"})
+# Спринт 7 (Н1): выгрузка профилей для начальной загрузки проекции — gamification; спринт 8 — + billing (проекция
+# learners с guardian_user_id)
+profile_export_callers = InternalAuth({"gamification", "billing"})
+# Спринт 8 (INTERNAL_API §9): Telegram ID → аккаунт — bot-gateway (Stars) и telegram-bff (вход на сайт оплаты);
+# аккаунт → Telegram ID — только bot-gateway
+telegram_account_callers = InternalAuth({"telegram-bot-gateway", "telegram-bff"})
 
 
 def no_user_context(principal: Principal) -> Principal:
@@ -45,7 +49,15 @@ def notifications_service_call(principal: Principal = Depends(notifications_only
     return no_user_context(principal)
 
 
-def gamification_service_call(principal: Principal = Depends(gamification_only)) -> Principal:
+def profile_export_service_call(principal: Principal = Depends(profile_export_callers)) -> Principal:
+    return no_user_context(principal)
+
+
+def telegram_account_service_call(principal: Principal = Depends(telegram_account_callers)) -> Principal:
+    return no_user_context(principal)
+
+
+def bot_gateway_service_call(principal: Principal = Depends(bot_gateway_only)) -> Principal:
     return no_user_context(principal)
 
 _IDEMPOTENCY_RE = re.compile(r"^[A-Za-z0-9._:\-]{8,128}$")

@@ -40,7 +40,7 @@ for (const vp of [
   { width: 1440, height: 900 },
   { width: 1280, height: 720 },
 ]) {
-  test(`shell ${vp.width}×${vp.height}: all 21 sections (sprint 7: + «Сообщество») and the footer are visible without scrolling; KPI notes are not cut`, async ({ page }) => {
+  test(`shell ${vp.width}×${vp.height}: 26 sections (sprint 8: + «Деньги») and the footer — without scrolling at 1440×900, the menu panel scrolls at 1280×720; KPI notes are not cut`, async ({ page }) => {
     await page.setViewportSize(vp);
     await openAs(page, "admin@tilhero.local", "#/overview");
     await expect(page.getByTestId("block-learners")).toBeVisible();
@@ -58,14 +58,27 @@ for (const vp of [
 
 async function expectAllVisible(page: Page): Promise<void> {
   const m = await navMetrics(page);
-  expect(m.items.map((i) => i.id)).toHaveLength(21);
+  expect(m.items.map((i) => i.id)).toHaveLength(26);
   // WCAG 2.5.8: even the densest rows stay ≥ 24 px high
   for (const it of m.items) expect(it.bottom - it.top, `${it.id} height`).toBeGreaterThanOrEqual(24);
-  expect(m.scroll.scrollHeight, "the menu panel needs no scrolling").toBeLessThanOrEqual(m.scroll.clientHeight + 1);
-  for (const it of m.items) {
-    expect(it.top, `${it.id} top`).toBeGreaterThanOrEqual(m.scroll.top - 0.5);
-    expect(it.bottom, `${it.id} is above the footer`).toBeLessThanOrEqual(Math.min(m.scroll.bottom, m.foot.top) + 0.5);
-    expect(it.hit, `${it.id} is not covered`).toBe(true);
+  if (m.vh >= 780) {
+    // sprint 8: 26 sections still fit 1440×900 without scrolling
+    expect(m.scroll.scrollHeight, "the menu panel needs no scrolling").toBeLessThanOrEqual(m.scroll.clientHeight + 1);
+    for (const it of m.items) {
+      expect(it.top, `${it.id} top`).toBeGreaterThanOrEqual(m.scroll.top - 0.5);
+      expect(it.bottom, `${it.id} is above the footer`).toBeLessThanOrEqual(Math.min(m.scroll.bottom, m.foot.top) + 0.5);
+      expect(it.hit, `${it.id} is not covered`).toBe(true);
+    }
+  } else {
+    // 1280×720: 26 rows of 24 px, 7 group labels, the head and the footer do not fit — the panel scrolls inside
+    // (as at 1280×600), the targets keep their size; the last section is reached by scrolling, the footer stays
+    expect(m.scroll.overflowY).toBe("auto");
+    expect(m.scroll.bottom).toBeLessThanOrEqual(m.foot.top + 0.5);
+    await page.locator(".sn-scroll").evaluate((el) => el.scrollTo(0, el.scrollHeight));
+    const after = await navMetrics(page);
+    expect(after.items.at(-1)!.hit, `${after.items.at(-1)!.id} is reachable`).toBe(true);
+    expect(after.foot.top).toBeCloseTo(m.foot.top, 0);
+    await page.locator(".sn-scroll").evaluate((el) => el.scrollTo(0, 0));
   }
   expect(m.foot.bottom, "footer inside the window").toBeLessThanOrEqual(m.vh + 0.5);
   await expect(page.getByTestId("env-chip")).toBeInViewport({ ratio: 1 });

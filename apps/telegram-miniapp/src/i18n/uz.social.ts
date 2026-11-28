@@ -303,7 +303,7 @@ export const uzSocial: Record<keyof typeof ruSocial, string> = {
   "pair.new": "Juftlikdagi darsga chaqirish",
   "pair.what": "Siz va doʻstingiz SI-murabbiy bilan ssenariyni oʻtasiz: har kimning oʻz roli, oʻz replikalari va oʻz hisoboti bor. Baho — faqat sizning javoblaringiz boʻyicha.",
   "pair.whatKid": "Sen va oilangdan kimdir murabbiy bilan birga ssenariyni oʻtasiz. Sen replikalarni tanlaysan — yozish shart emas.",
-  "pair.minutes": "Dars daqiqalari hisobga olinadi, lekin hozircha yechib olinmaydi.",
+  "pair.minutes": "SI-murabbiy daqiqalari chaqirgan kishida hisoblanadi — har darsga bir marta.",
   "pair.active": "Hozir",
   "pair.finished": "Oʻtganlar",
   "pair.empty": "Juftlikdagi darslar hali yoʻq.",

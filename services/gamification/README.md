@@ -236,9 +236,33 @@ gamification с `DIAGNOSTICS_URL` (добавить diagnostics в `calls` gamif
 Удаляются проекции и участие в лигах; итоги лиг обезличиваются (user_id → null, места и призы остаются); активные
 дуэли — cancelled, все дуэли обезличиваются; реферальные награды обезличиваются.
 
+## Спринт 8 — тилы за деньги (docs/sprint8/INTERNAL_API.md §6)
+gamification денег не знает: пакет тилов (`til_pack`, Mini App за Stars или сайт) начисляется по событию billing.
+- **`billing.order.paid.v1`** (только издатель billing, любой канал; подписки пропускаются): под блокировкой
+  получателя; удалённый — без операции, `game.til_pack.credited.v1 {outcome: user_deleted, op_id: null}`; иначе
+  операция `til +til`, reason `purchase`, ключ `purchase:<order_id>` — без дневного лимита, множителей событий недели и
+  XP недели (ребёнку покупает родитель: `account_id ≠ beneficiary` — ученик-ребёнок) → строка `til_orders` →
+  `game.til_pack.credited.v1 {outcome: credited, op_id}` (billing переводит заказ в «выполнен»).
+- **`billing.order.refunded.v1`** (`til_pack`): на балансе ≥ пакета — обратная запись системой (reason `reversal`,
+  исходная → `reversed`) → `reversed`; иначе `tils_spent` без операции (частичных обратных записей нет; billing
+  заводит пункт сверки) → `game.til_pack.reversed.v1`. Заказ обезличен billing и не начислялся — подтверждать
+  некому (лог). Возврат раньше начисления (события не по порядку) — `TransientError`: шина повторит доставку после
+  `paid` (оба типа — одним потребителем `gamification.billing`).
+- **Идемпотентность:** тот же event_id — inbox; другой event_id того же заказа — строка `til_orders` и ключи операций:
+  второй операции нет, подтверждение повторяется с сохранёнными данными. Операцию `purchase` сотрудник не отменяет
+  (`OPERATION_NOT_REVERSIBLE`) — деньги и тилы возвращает только возврат заказа в billing.
+- **`GET /internal/v1/game/purchases/by-order/{order_id}`** (только billing, иначе 403 `CALLER_NOT_ALLOWED`) →
+  `{order_id, credited (тилы сейчас на счету), til, til_balance (баланс получателя), status: credited | reversed |
+  tils_spent}`; нет начисления — 404 `PURCHASE_NOT_FOUND`.
+- `purchase_available` в `GameSummary` и `INSUFFICIENT_TILS` вычисляет telegram-bff по каталогу billing; здесь — `false`.
+- **Данные (миграция 0003):** `til_orders (order_id PK, user_id, til 1..100 000, op_id, reversal_op_id, status,
+  credited_at, reversed_at)`. Сага удаляет строки вместе с реестром. Обезличенная статистика — `purchased_til`.
+
 ## Runbook
 - **Баланс не сходится** — tick раз в сутки сверяет и пересчитывает (`WALLET_DRIFT` в логах); принудительно — ждать
   следующего прохода после `RECONCILE_HOURS` или вызвать `tick.reconcile(..., force=True)` из консоли.
 - **Ошибочное начисление** — обратная запись в админке (`reverse`), не правка реестра.
 - **Неудачная версия правил** — откат на архивную (`rollback`): новая версия, проведённые операции не меняются.
+- **Тилы по заказу не начислены** (billing: пункт сверки `paid_not_fulfilled`) — проверить DLQ `gamification.billing`
+  и `SELECT * FROM gamification.til_orders WHERE order_id = …`; повтор события безопасен (ключ `purchase:<order_id>`).
 - **Тесты**: `source .dev/testenv.sh && uv run pytest services/gamification -q -p no:cacheprovider`.

@@ -27,6 +27,7 @@ import { GLOSSARY_ACTIONS, GLOSSARY_SOURCES, GLOSSARY_STATUSES, PARTS_OF_SPEECH 
 import * as MEM from "../src/screens/memory/model";
 import * as GM from "../src/screens/game/model";
 import * as SOC from "../src/screens/social/model";
+import * as MNY from "../src/screens/money/model";
 
 const placeholders = (s: string) => [...new Set([...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort();
 const CYR = /[Ѐ-ӿ]/;
@@ -288,6 +289,56 @@ describe("i18n dictionaries", () => {
       ...["inviter", "invitee"].map((x) => `prs.${x}`),
       ...["online", "offline"].map((x) => `prn.${x}`),
       ...["required", "days_range", "reason_short", "reason_long", "too_many", "same_result"].map((x) => `sci.${x}`),
+      // sprint 8: «Деньги» — tariffs, orders and payments, adjustments, reconciliation, finance, the «Тариф» tab, AI control
+      ...["money"].flatMap((b) => [`dash.b.${b}`, `dash.empty.${b}`, `dash.svc.${b}`, `nav.g.${b}`]),
+      ...["paid_learner_daily_cap_usd"].flatMap((x) => [`csf.l.${x}`, `csf.h.${x}`]),
+      ...MNY.MONEY_PAGES.map((x) => `page.${x}`),
+      ...MNY.PROVIDERS.map((x) => `bprv.${x}`),
+      ...MNY.CHANNELS.map((x) => `chn.${x}`),
+      ...MNY.ORDER_STATUSES.map((x) => `ost.${x}`),
+      ...MNY.PRODUCT_KINDS.map((x) => `pk.${x}`),
+      ...MNY.FEATURES.map((x) => `feat.${x}`),
+      ...MNY.AUDIENCES.map((x) => `ageseg.${x}`),
+      ...MNY.STARS_MODES.map((x) => `stm.${x}`),
+      ...MNY.REFUND_STATUSES.flatMap((x) => [`rfst.${x}`, `pay.refunded.${x}`]),
+      ...MNY.TXN_STATES.map((x) => `txs.${x}`),
+      ...MNY.ADJ_KINDS.map((x) => `adk.${x}`),
+      ...MNY.ADJ_STATUSES.map((x) => `ads.${x}`),
+      ...MNY.RECON_KINDS.map((x) => `rck.${x}`),
+      ...MNY.RECON_STATUSES.map((x) => `rcst.${x}`),
+      ...MNY.PERIOD_STATUSES.map((x) => `bps.${x}`),
+      ...MNY.SUB_STATUSES.map((x) => `subst.${x}`),
+      ...MNY.STARS_SUB_STATUSES.map((x) => `ssub.${x}`),
+      ...MNY.ENTRY_KINDS.map((x) => `mle.${x}`),
+      ...MNY.CATALOG_STATUSES.map((x) => `cvst.${x}`),
+      ...MNY.DEG_LEVELS.flatMap((x) => [`dlv.${x}`, `dlv.h.${x}`]),
+      ...MNY.DEG_MODES.map((x) => `dmode.${x}`),
+      ...MNY.DEG_REASONS.map((x) => `dreason.${x}`),
+      ...MNY.REPORT_PERIODS.map((x) => `fin.p.${x}`),
+      ...MNY.TIERS.map((x) => `tier.${x}`),
+      ...MNY.PERIOD_SOURCES.map((x) => `lb.src.${x}`),
+      ...MNY.CLOSE_REASONS.map((x) => `lb.close.${x}`),
+      ...MNY.PAY_TABS.map((x) => `pay.tab.${x}`),
+      ...MNY.LIMIT_KEYS.map((x) => `tf.lim.${x}`),
+      ...["ru", "uz"].flatMap((l) => [`tf.title.${l}`, `tf.descr.${l}`, `tf.starsTitle.${l}`]),
+      ...["on_sale", "hidden"].map((x) => `tf.st.${x}`),
+      ...["no_draft", "unsaved", "invalid", "not_validated"].map((x) => `tf.gate.${x}`),
+      ...["granted", "spent", "expired", "revoked", "overage"].map((x) => `fin.min.${x}`),
+      ...["system", "learner", "staff"].map((x) => `lb.actor.${x}`),
+      ...["staff", "provider"].map((x) => `pay.init.${x}`),
+      ...["provider_api", "provider_cabinet"].map((x) => `pay.method.${x}`),
+      ...["after_current", "now"].map((x) => `pay.sm.${x}`),
+      ...["pending", "registered", "failed"].map((x) => `rcpt.${x}`),
+      ...["sale", "refund"].map((x) => `rcpt.k.${x}`),
+      ...["order_no", "txn", "account", "to_before_from", "channel_provider"].map((x) => `pay.fp.${x}`),
+      ...["economy", "paid_only", "order"].map((x) => `deg.p.${x}`),
+      ...["paid_only", "off"].map((x) => `deg.warn.${x}`),
+      ...["lesson", "scenario", "pair"].map((x) => `uc.k.${x}`),
+      ...[
+        "required", "not_integer", "range", "too_long", "tin_format", "https", "code_format", "duplicate", "uz_script", "sums_format", "no_price",
+        "no_providers", "stars_sub_days", "stars_sub_max", "til_one_time", "ikpu_format", "package_format", "fiscal_missing", "no_subscription",
+        "reason_short", "reason_long", "minutes_range", "below_zero", "period_required", "days_range", "grant_minutes",
+      ].map((x) => `mi.${x}`),
     ];
     expect(want.filter((k) => !has(k))).toEqual([]);
     void OBJECT_TYPES;
@@ -351,6 +402,20 @@ describe("i18n dictionaries", () => {
     expect(codes.length).toBeGreaterThan(12);
     expect(codes.filter((c) => !has(`err.${c}`))).toEqual([]);
     expect(codes.filter((c) => !(`err.${c}` in en))).toEqual([]);
+  });
+
+  it("every admin error code of INTERNAL_API §11 (sprint 8 «Деньги») has a text in RU and EN", () => {
+    const doc = readFileSync(join(__dirname, "..", "..", "..", "docs", "sprint8", "INTERNAL_API.md"), "utf8");
+    const from = doc.indexOf("- **Админка:**");
+    expect(from).toBeGreaterThan(0);
+    const rest = doc.slice(from + 4);
+    const block = rest.slice(0, rest.search(/\n(- \*\*|#)/));
+    const codes = [...new Set([...block.matchAll(/`([A-Z][A-Z0-9_]+)/g)].map((m) => m[1]!))];
+    expect(codes).toEqual(expect.arrayContaining(["CATALOG_INVALID", "SELF_APPROVAL", "REFUND_NOT_ALLOWED", "DEGRADATION_INVALID", "STEP_UP_REQUIRED"]));
+    expect(codes.filter((c) => !has(`err.${c}`))).toEqual([]);
+    expect(codes.filter((c) => !(`err.${c}` in en))).toEqual([]);
+    // the refusals the refund dialog names by their reason
+    for (const r of ["provider_window", "not_paid"]) expect(has(`pay.na.${r}`)).toBe(true);
   });
 
   it("no interface text is hard-coded outside the dictionaries (Cyrillic only in src/i18n)", () => {

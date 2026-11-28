@@ -6,11 +6,12 @@
  * и `age_band` полосы активного ученика (аудиторию gamification выводит сама). user_id в запросах нет — только токен.
  *
  * Ошибки: 4xx gamification — клиенту как есть (код, статус, details): 404 HERO_NOT_FOUND | ITEM_NOT_FOUND; 409
- * HERO_NOT_AVAILABLE | INSUFFICIENT_TILS {price, balance, missing, purchase_available: false} | ALREADY_OWNED |
+ * HERO_NOT_AVAILABLE | INSUFFICIENT_TILS {price, balance, missing, purchase_available} | ALREADY_OWNED |
  * FREEZE_STOCK_FULL {max} | NOT_OWNED; 410 ITEM_NOT_AVAILABLE; 422 IDEMPOTENCY_KEY_REUSED. Недоступность, таймаут, 5xx,
  * отказ внутренней авторизации и ответ не по контракту → 503 GAME_UNAVAILABLE {service: gamification} (Mini App скрывает
- * игровой блок). Деньги: `purchase_available` всегда false (тилы за деньги — спринт 8), и в GameSummary, и в
- * INSUFFICIENT_TILS.
+ * игровой блок). Деньги (спринт 8): `purchase_available` в GameSummary и в INSUFFICIENT_TILS вычисляет BFF — «Купить
+ * тилы» за Stars доступно (routes/billing.ts purchaseAvailable: каталог billing того же ученика; детский профиль, нет
+ * billing или сбой — false); ответ gamification на этот счёт не учитывается.
  *
  * Картинки: домен отдаёт {asset_id, sha256, width, height} — url собирает BFF: /v1/game/assets/{asset_id}/{sha256}
  * (путь от адреса BFF). Готовый url домена без sha256 принимается, только если это тот же путь для того же asset_id;
@@ -29,7 +30,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { asAccount } from "../account.js";
 import { expectShape } from "../check.js";
 import type { BffContext } from "../context.js";
-import { BEARER, authOf, errorResponses, idempotencyKey, schemaErrors, type App } from "../http.js";
+import { BEARER, authOf, errorResponses, idempotencyKey, localeOf, schemaErrors, type App } from "../http.js";
 import {
   DailyQuestsSchema,
   EquipmentRequestSchema,
@@ -55,6 +56,7 @@ import {
 import { isChildProfile, kidsNotAllowed, learnerCall, socialUnavailable } from "../socialApi.js";
 import type { AccessClaims } from "../tokens.js";
 import { GAME_SERVICE, type RawMethod, type RawRequest } from "../upstream.js";
+import { purchaseAvailable } from "./billing.js";
 import { etagMatches, pageView } from "./content.js";
 
 const user = { access: "user" } as const;
@@ -204,7 +206,7 @@ export function gameRoutes(app: App, ctx: BffContext): void {
   const imgOrNull = (what: string, i: DomainImage | null): C.GameImage | null => (i ? img(what, i) : null);
   const refView = (what: string, r: D<"ShopItemRef"> | null): C.ShopItemRef | null => (r ? { ...r, image: imgOrNull(what, r.image) } : null);
   const badgeView = (what: string, b: D<"BadgeView">): C.BadgeView => ({ ...b, image: imgOrNull(what, b.image) });
-  const summaryView = (s: D<"Summary">): C.GameSummary => ({
+  const summaryView = (s: D<"Summary">, purchase: boolean): C.GameSummary => ({
     ...s,
     hero: s.hero ? { ...s.hero, image: img("summary.hero.image", s.hero.image) } : null,
     equipment: {
@@ -212,9 +214,13 @@ export function gameRoutes(app: App, ctx: BffContext): void {
       frame: refView("summary.equipment.frame.image", s.equipment.frame),
     },
     settings: settingsView(s.settings),
-    purchase_available: false,
+    purchase_available: purchase,
   });
-  const summaryOf = (raw: unknown) => summaryView(shape("summary", GameDomain.Summary, raw));
+  /** Сводка игры и признак «Купить тилы» (billing) — параллельно: сбой billing даёт false, сбой игры — 503 игры. */
+  const summaryOf = async (auth: AccessClaims, req: { query: unknown; headers: Record<string, string | string[] | undefined> }, work: Promise<unknown>) => {
+    const [raw, purchase] = await Promise.all([work, purchaseAvailable(ctx, auth, localeOf(req))]);
+    return summaryView(shape("summary", GameDomain.Summary, raw), purchase);
+  };
 
   // ---------------------------------------------------------------- чтение (tg.game.read)
   app.get(
@@ -225,13 +231,17 @@ export function gameRoutes(app: App, ctx: BffContext): void {
         tags: TAG,
         summary: "Игровая сводка (главная, профиль): уровень, XP, тилы, заморозки, герой, задания дня, события, экипировка, настройки",
         description:
-          "Задания дня выпускаются при первом запросе дня. hero = null — герой не выбран (показать выбор). purchase_available " +
-          "всегда false (тилы за деньги — спринт 8). 503 GAME_UNAVAILABLE — игровой блок скрыть, учёба работает.",
+          "Задания дня выпускаются при первом запросе дня. hero = null — герой не выбран (показать выбор). purchase_available — " +
+          "«Купить тилы» за Telegram Stars доступно (спринт 8: продажи включены, право платить, есть пакет с ценой в Stars; " +
+          "детский профиль и сбой billing — false). 503 GAME_UNAVAILABLE — игровой блок скрыть, учёба работает.",
         security: BEARER,
         response: { 200: GameView.Summary, ...errorResponses(401, 410, 423) },
       },
     },
-    async (req) => summaryOf(await call(authOf(req), READ, "GET", "/internal/v1/game/summary")),
+    async (req) => {
+      const auth = authOf(req);
+      return summaryOf(auth, req, call(auth, READ, "GET", "/internal/v1/game/summary"));
+    },
   );
 
   app.get(
@@ -289,7 +299,7 @@ export function gameRoutes(app: App, ctx: BffContext): void {
       schema: {
         tags: TAG,
         summary: "Магазин за тилы: фоны, рамки героя, заморозка серии; owned / can_buy / reason_unavailable",
-        description: "Покупка тилов за деньги — спринт 8: при нехватке тилов — «Покупка тилов скоро», экранов оплаты нет.",
+        description: "Тилы за Telegram Stars (спринт 8) — GET /v1/billing/catalog; доступность — GameSummary.purchase_available.",
         security: BEARER,
         response: { 200: GameView.Shop, ...errorResponses(401, 410, 423) },
       },
@@ -373,7 +383,10 @@ export function gameRoutes(app: App, ctx: BffContext): void {
         response: { 200: GameView.Summary, ...errorResponses(401, 404, 409, 410, 423) },
       },
     },
-    async (req) => summaryOf(await call(authOf(req), WRITE, "PUT", "/internal/v1/game/hero", { body: { hero_code: req.body.hero_code } })),
+    async (req) => {
+      const auth = authOf(req);
+      return summaryOf(auth, req, call(auth, WRITE, "PUT", "/internal/v1/game/hero", { body: { hero_code: req.body.hero_code } }));
+    },
   );
 
   app.put(
@@ -389,12 +402,16 @@ export function gameRoutes(app: App, ctx: BffContext): void {
         response: { 200: GameView.Summary, ...errorResponses(401, 404, 409, 410, 423) },
       },
     },
-    async (req) =>
-      summaryOf(
-        await call(authOf(req), WRITE, "PUT", "/internal/v1/game/equipment", {
+    async (req) => {
+      const auth = authOf(req);
+      return summaryOf(
+        auth,
+        req,
+        call(auth, WRITE, "PUT", "/internal/v1/game/equipment", {
           body: { background_code: req.body.background_code, frame_code: req.body.frame_code },
         }),
-      ),
+      );
+    },
   );
 
   app.patch(
@@ -444,7 +461,8 @@ export function gameRoutes(app: App, ctx: BffContext): void {
         description:
           "Idempotency-Key (UUID) обязателен (422 IDEMPOTENCY_KEY_REQUIRED): повтор ключа — тот же ответ, без второго списания; " +
           "тот же ключ с другим телом — 422 IDEMPOTENCY_KEY_REUSED. 404 ITEM_NOT_FOUND; 409 INSUFFICIENT_TILS {price, balance, " +
-          "missing, purchase_available: false} | ALREADY_OWNED | FREEZE_STOCK_FULL {max}; 410 ITEM_NOT_AVAILABLE. " +
+          "missing, purchase_available} (спринт 8: «Купить тилы» за Stars — вычисляет BFF) | ALREADY_OWNED | FREEZE_STOCK_FULL " +
+          "{max}; 410 ITEM_NOT_AVAILABLE. " +
           "429 RATE_LIMITED (tg.game.purchase, 10 в минуту на ученика).",
         security: BEARER,
         headers: IdempotencyHeadersSchema,
@@ -454,13 +472,15 @@ export function gameRoutes(app: App, ctx: BffContext): void {
     },
     async (req) => {
       const key = idempotencyKey(req, true)!;
+      const auth = authOf(req);
       let raw: unknown;
       try {
-        raw = await call(authOf(req), PURCHASE, "POST", "/internal/v1/game/purchases", { body: { item_code: req.body.item_code }, idempotencyKey: key });
+        raw = await call(auth, PURCHASE, "POST", "/internal/v1/game/purchases", { body: { item_code: req.body.item_code }, idempotencyKey: key });
       } catch (err) {
-        // тилы за деньги в спринте 6 не продаются — признак не зависит от домена
+        // спринт 8: «Купить тилы» за Stars — по каталогу billing, а не по ответу gamification
         if (err instanceof AppError && err.code === "INSUFFICIENT_TILS") {
-          throw new AppError(err.status, err.code, err.message, { ...err.details, purchase_available: false });
+          const purchase = await purchaseAvailable(ctx, auth, localeOf(req));
+          throw new AppError(err.status, err.code, err.message, { ...err.details, purchase_available: purchase });
         }
         throw err;
       }

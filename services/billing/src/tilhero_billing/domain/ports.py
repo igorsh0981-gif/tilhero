@@ -134,10 +134,12 @@ FiscalKind = Literal["sale", "refund"]
 
 @runtime_checkable
 class PaymentPort(Protocol):
-    async def check(self, provider: ProviderCode, order_ref: str, amount: int, *,
+    async def check(self, provider: ProviderCode, order_ref: str, amount: int | None, *,
                     payer_account_id: UUID | None = None) -> CheckOk:
         """Можно ли оплатить: заказ найден (канал провайдера), pending и не истёк, сумма совпадает, флаги включены;
         Payme — нет транзакции в ожидании (OrderBusy); Stars — плательщик (PayerMismatch), нет живой подписки.
+        amount None — сумма не пришла (Uzum check): проверяется заказ без суммы. Stars: payload первого заказа живой
+        подписки того же плательщика — возможный pre-checkout продления (§14 S2) — CheckOk и при STARS_ENABLED=false.
         Ошибки: OrderNotFound, OrderClosed, AlreadyPaid, AmountMismatch, OrderBusy, PayerMismatch,
         SubscriptionExists, PaymentsDisabled."""
         ...
@@ -148,9 +150,11 @@ class PaymentPort(Protocol):
         Ошибки — как check."""
         ...
 
-    async def perform(self, provider: ProviderCode, provider_txn_id: str) -> TxnView:
+    async def perform(self, provider: ProviderCode, provider_txn_id: str,
+                      meta: Mapping[str, Any] | None = None) -> TxnView:
         """created → performed + выдача (подписка — период и минуты; тилы — заказ paid и событие). Повтор
-        `performed` → тот же TxnView. Ошибки: TxnNotFound, TxnTimedOut, InvalidState."""
+        `performed` → тот же TxnView. meta — дополнение provider_meta (Uzum paymentSource; без карт и секретов).
+        Ошибки: TxnNotFound, TxnTimedOut, InvalidState, AlreadyPaid (заказ оплачен другой попыткой — Click)."""
         ...
 
     async def paid(self, provider: ProviderCode, provider_txn_id: str, order_ref: str, amount: int, *,
@@ -191,4 +195,33 @@ class PaymentPort(Protocol):
                            data: Mapping[str, Any]) -> None:
         """Фискальные данные чека (Payme SetFiscalData: PERFORM → sale, CANCEL → refund — отдельные записи).
         Ошибка: ReceiptTxnNotFound."""
+        ...
+
+
+# ---------------------------------------------------------------- сверх PaymentPort (реализует PaymentService ядра)
+
+@runtime_checkable
+class PreCheckoutJournal(Protocol):
+    """Журнал ответов на `pre_checkout_query` (таблица `stars_pre_checkouts`, 30 дней): повтор `query_id` — тот же
+    ответ (§1.5). Реализация — `domain/payments.PaymentService`."""
+
+    async def recall_pre_checkout(self, query_id: str) -> tuple[bool, str | None] | None:
+        """Сохранённый ответ `(ok, error_code)` или None."""
+        ...
+
+    async def remember_pre_checkout(self, query_id: str, order_ref: str | None, ok: bool,
+                                    error_code: str | None) -> tuple[bool, str | None]:
+        """Записать ответ (первый выигрывает) → сохранённый `(ok, error_code)`."""
+        ...
+
+
+@runtime_checkable
+class ProviderCallJournal(Protocol):
+    """Журнал `provider_calls` (только метаданные, 90 дней): входящие колбэки и обновления, исходящие вызовы.
+    Реализация — `PaymentService.record_call` (ошибки журнала поглощает сама и на ответ не влияют); то же
+    именованными аргументами — `record_provider_call`."""
+
+    async def record_call(self, provider: str, direction: str, method: str, result_code: str, latency_ms: int, *,
+                          provider_txn_id: str | None = None, order_no: int | None = None,
+                          client_ip: str | None = None) -> None:
         ...

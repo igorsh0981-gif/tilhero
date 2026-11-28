@@ -36,6 +36,7 @@ export const URLS = {
   memory: "http://memory.test",
   gamification: "http://gamification.test",
   social: "http://social.test",
+  billing: "http://billing.test",
 } as const;
 export type Service = keyof typeof URLS;
 export const AUD: Record<Service, string> = {
@@ -54,6 +55,7 @@ export const AUD: Record<Service, string> = {
   memory: "memory",
   gamification: "gamification",
   social: "social",
+  billing: "billing",
 };
 
 export function testConfig(env: Record<string, string> = {}): Config {
@@ -81,6 +83,7 @@ export function testConfig(env: Record<string, string> = {}): Config {
     MEMORY_URL: URLS.memory,
     GAMIFICATION_URL: URLS.gamification,
     SOCIAL_URL: URLS.social,
+    BILLING_URL: URLS.billing,
     UPSTREAM_RETRIES: "0",
     UPSTREAM_TIMEOUT_MS: "2000",
     DASHBOARD_TIMEOUT_MS: "500",
@@ -1762,6 +1765,215 @@ export function pairRoomDomain(p: Record<string, unknown> = {}) {
     ...p,
   };
 }
+
+// ---------------------------------------------------------------- деньги (спринт 8): ответы billing по admin.ts «Деньги»
+
+export const ORDER_ID = "a1b2c3d4-0001-4a5b-8c6d-000000000001";
+export const ORDER_ID_STARS = "a1b2c3d4-0002-4a5b-8c6d-000000000002";
+export const TXN_ID = "a1b2c3d4-0003-4a5b-8c6d-000000000003";
+export const REFUND_ID = "a1b2c3d4-0004-4a5b-8c6d-000000000004";
+export const ADJUSTMENT_ID = "a1b2c3d4-0005-4a5b-8c6d-000000000005";
+export const RECON_ITEM_ID = "a1b2c3d4-0006-4a5b-8c6d-000000000006";
+export const PERIOD_ID = "a1b2c3d4-0007-4a5b-8c6d-000000000007";
+export const HOLD_ID = "a1b2c3d4-0008-4a5b-8c6d-000000000008";
+export const STARS_SUB_ID = "a1b2c3d4-0009-4a5b-8c6d-000000000009";
+export const RECEIPT_ID = "a1b2c3d4-000a-4a5b-8c6d-00000000000a";
+export const RECON_RUN_ID = "a1b2c3d4-000b-4a5b-8c6d-00000000000b";
+export const ACCOUNT_ID = LEARNER_USER_ID;
+/** Автор заявки «четыре глаза» (support) и решающий (finance). */
+export const MONEY_AUTHOR_ID = "b2c3d4e5-0001-4b5c-8d6e-000000000001";
+export const MONEY_APPROVER_ID = "b2c3d4e5-0002-4b5c-8d6e-000000000002";
+
+const L2 = (ru: string, uz: string) => ({ ru, uz });
+
+export function catalogPayload(p: Record<string, unknown> = {}) {
+  return {
+    merchant: { tin: "123456789" },
+    offer: { version: "1.0", url: "https://miniapp.tilhero.test/legal/offer" },
+    trial: { enabled: true, days: 7, minutes: 60, features: ["ai_lessons", "pair_lessons"] },
+    limits: { min_start_minutes: 1, pair_min_minutes: 10, low_minutes_percent: 10, expiring_days: 3, order_ttl_minutes: 1440, stars_order_ttl_minutes: 60, pending_orders_max: 5, hold_ttl_hours: 80 },
+    products: [
+      {
+        code: "plus_30d", kind: "subscription", status: "on_sale", sort: 10,
+        title: L2("TilHero Плюс — 30 дней", "TilHero Plus — 30 kun"), description: L2("Уроки с ИИ", "SI bilan darslar"),
+        days: 30, minutes: 300, features: ["ai_lessons", "pair_lessons"], audiences: ["teens", "adults"],
+        price_tiyin: 4_900_000, providers: ["payme", "click", "uzum"], price_stars: 250, stars_mode: "subscription",
+        stars_title: L2("TilHero Плюс", "TilHero Plus"),
+        fiscal: { ikpu: "10305001001000000", package_code: "1500398", units: null, vat_percent: 12, receipt_title: "TilHero Plus 30" },
+      },
+      {
+        code: "til_100", kind: "til_pack", status: "on_sale", sort: 50, til: 100,
+        title: L2("100 тилов", "100 til"), audiences: ["kids", "teens", "adults"],
+        price_tiyin: 500_000, providers: ["payme", "click"], price_stars: null, stars_mode: "one_time",
+        stars_title: L2("100 тилов", "100 til"), fiscal: null,
+      },
+    ],
+    ...p,
+  };
+}
+export function catalogVersionDomain(p: Record<string, unknown> = {}) {
+  return {
+    version: 2,
+    status: "active",
+    comment: "Цены сайта из В2 и В5",
+    created_by: { staff_id: MONEY_AUTHOR_ID, name: "Финансы" },
+    created_at: "2026-11-20T09:00:00Z",
+    validated: true,
+    activated_by: MONEY_APPROVER_ID,
+    activated_at: "2026-11-20T10:00:00Z",
+    payload: catalogPayload(),
+    diff: [{ path: "products[0].price_stars", from: null, to: 250 }],
+    updated_at: "2026-11-20T10:00:00Z",
+    ...p,
+  };
+}
+export function orderRowDomain(p: Record<string, unknown> = {}) {
+  return {
+    order_id: ORDER_ID,
+    order_no: 1042,
+    status: "fulfilled",
+    channel: "web",
+    provider: "payme",
+    product_code: "plus_30d",
+    product_kind: "subscription",
+    product_title: L2("TilHero Плюс — 30 дней", "TilHero Plus — 30 kun"),
+    currency: "UZS",
+    amount_tiyin: 4_900_000,
+    amount_stars: null,
+    account_id: ACCOUNT_ID,
+    beneficiary_id: ACCOUNT_ID,
+    created_at: "2026-11-21T08:00:00Z",
+    expires_at: "2026-11-22T08:00:00Z",
+    paid_at: "2026-11-21T08:03:00Z",
+    fulfilled_at: "2026-11-21T08:03:00Z",
+    closed_at: null,
+    ...p,
+  };
+}
+export function txnDomain(p: Record<string, unknown> = {}) {
+  return {
+    txn_id: TXN_ID, seq: 1, provider: "payme", provider_txn_id: "5d7f3a1b2c3d4e5f6a7b8c9d", state: "performed", cancel_reason: null, provider_reason: null,
+    amount_tiyin: 4_900_000, amount_stars: null, provider_time: "2026-11-21T08:02:10Z", created_at: "2026-11-21T08:02:10Z", performed_at: "2026-11-21T08:03:00Z", cancelled_at: null, ...p,
+  };
+}
+export function refundDomain(p: Record<string, unknown> = {}) {
+  return {
+    refund_id: REFUND_ID, order_id: ORDER_ID, order_no: 1042, txn_id: TXN_ID, provider: "payme", amount_tiyin: 4_900_000, amount_stars: null,
+    status: "awaiting_provider", initiated_by: "staff", method: "provider_cabinet", reason: "Ученик оплатил дважды по ошибке",
+    requested_by: { staff_id: MONEY_APPROVER_ID, name: "Финансы" }, requested_at: "2026-11-21T12:00:00Z", completed_at: null, failure_code: null,
+    tils_check: null, instruction: { provider: "payme", provider_txn_id: "5d7f3a1b2c3d4e5f6a7b8c9d", amount_tiyin: 4_900_000 }, ...p,
+  };
+}
+export function orderCardDomain(p: Record<string, unknown> = {}) {
+  return {
+    ...orderRowDomain(),
+    offer_version: "1.0",
+    locale: "ru",
+    start_mode: "after_current",
+    stars_mode: null,
+    product_snapshot: { code: "plus_30d", price_tiyin: 4_900_000, days: 30, minutes: 300 },
+    transactions: [txnDomain()],
+    receipts: [
+      { receipt_id: RECEIPT_ID, txn_id: TXN_ID, kind: "sale", source: "payme_set_fiscal_data", status: "registered", fiscal_receipt_id: "1234", terminal_id: "EP000000000001", fiscal_sign: "9876543210", qr_code_url: "https://ofd.soliq.uz/check?t=EP000000000001&r=1234", status_code: 0, message: null, attempts: 1, registered_at: "2026-11-21T08:04:00Z", created_at: "2026-11-21T08:03:30Z" },
+    ],
+    refunds: [],
+    stars_subscription: null,
+    provider_calls: [{ call_id: 77, provider: "payme", direction: "in", method: "PerformTransaction", result_code: "ok", latency_ms: 42, created_at: "2026-11-21T08:03:00Z" }],
+    // домен может прислать подсказку — admin-bff её не берёт
+    can_refund: false,
+    ...p,
+  };
+}
+export function starsOrderCardDomain(p: Record<string, unknown> = {}) {
+  return orderCardDomain({
+    order_id: ORDER_ID_STARS, order_no: 1043, channel: "miniapp", provider: "telegram_stars", currency: "XTR", amount_tiyin: null, amount_stars: 250, stars_mode: "subscription", start_mode: null,
+    transactions: [txnDomain({ provider: "telegram_stars", provider_txn_id: "stxABCdef123", amount_tiyin: null, amount_stars: 250 })],
+    receipts: [],
+    stars_subscription: { subscription_id: STARS_SUB_ID, product_code: "plus_30d", status: "active", amount_stars: 250, expires_at: "2026-12-21T08:03:00Z", renewals: 0, first_order_no: 1043, created_at: "2026-11-21T08:03:00Z", updated_at: "2026-11-21T08:03:00Z" },
+    provider_calls: [],
+    ...p,
+  });
+}
+export function billingPeriodDomain(p: Record<string, unknown> = {}) {
+  return {
+    period_id: PERIOD_ID, product_code: "plus_30d", source: "order", status: "active", features: ["ai_lessons", "pair_lessons"], minutes_granted: 300, days: 30,
+    starts_at: "2026-11-21T08:03:00Z", ends_at: "2026-12-21T08:03:00Z", created_at: "2026-11-21T08:03:00Z", closed_at: null, close_reason: null, order_no: 1042,
+    balance: { granted: 300, spent: 42, removed: 0, held: 10, overage: 0, minutes_left: 248 }, ...p,
+  };
+}
+export function billingAccountDomain(p: Record<string, unknown> = {}) {
+  return {
+    account_id: ACCOUNT_ID, status: "active", tier: "paid", features: ["ai_lessons", "pair_lessons"], expiring: false, minutes_exhausted: false, trial_used: true,
+    current_period: billingPeriodDomain(), periods: [billingPeriodDomain()],
+    holds: [{ hold_id: HOLD_ID, feature: "ai_lessons", ref_kind: "session", ref_id: SESSION_ID, learner_id: ACCOUNT_ID, minutes: 10, status: "active", settled_minutes: null, overage: null, created_at: "2026-11-22T07:00:00Z", expires_at: "2026-11-25T15:00:00Z", settled_at: null }],
+    stars_subscription: null, pending_adjustments: 1, ...p,
+  };
+}
+export function ledgerEntryDomain(p: Record<string, unknown> = {}) {
+  return { entry_id: randomUUID(), seq: 3, period_id: PERIOD_ID, kind: "adjust", minutes: 30, overage: 0, learner_id: null, ref_kind: "adjustment", ref_id: ADJUSTMENT_ID, actor: `staff:${MONEY_APPROVER_ID}`, actor_name: null, created_at: "2026-11-21T09:00:00Z", ...p };
+}
+export function adjustmentDomain(p: Record<string, unknown> = {}) {
+  return {
+    adjustment_id: ADJUSTMENT_ID, account_id: ACCOUNT_ID, kind: "minutes", minutes: 30, days: null, period_id: PERIOD_ID, reason: "Сбой урока 21.11, компенсация",
+    status: "pending", requested_by: { staff_id: MONEY_AUTHOR_ID, name: "Поддержка" }, requested_at: "2026-11-21T09:00:00Z", decided_by: null, decided_at: null, decision_note: null,
+    before_value: null, after_value: null, expires_at: "2026-11-24T09:00:00Z", can_decide: true, can_cancel: true, ...p,
+  };
+}
+export function reconItemDomain(p: Record<string, unknown> = {}) {
+  return {
+    item_id: RECON_ITEM_ID, run_id: RECON_RUN_ID, kind: "stale_created", provider: "click", order_id: ORDER_ID, order_no: 1042, txn_id: TXN_ID, period_id: null,
+    details: { prepared_at: "2026-11-21T06:00:00Z" }, status: "open", created_at: "2026-11-21T08:00:00Z", resolved_by: null, resolved_at: null, note: null, ...p,
+  };
+}
+export function billingSummaryDomain(p: Record<string, unknown> = {}) {
+  return {
+    period: "day", from: "2026-11-21T19:00:00Z", to: "2026-11-22T19:00:00Z",
+    web: { revenue_tiyin: 14_700_000, refunds_tiyin: 4_900_000, net_tiyin: 9_800_000, orders_paid: 3, by_provider: { payme: { orders: 2, revenue_tiyin: 9_800_000 }, click: { orders: 1, revenue_tiyin: 4_900_000 }, uzum: { orders: 0, revenue_tiyin: 0 } } },
+    stars: { revenue_stars: 750, refunds_stars: 0, net_stars: 750, orders_paid: 3, renewals: 1, est_net_tiyin: null },
+    by_product: { plus_30d: { orders: 5, revenue_tiyin: 14_700_000, revenue_stars: 750 }, til_100: { orders: 1, revenue_tiyin: 0, revenue_stars: 0 } },
+    // billing api/admin.py: refunds_count — reports.summary, recon_open — reconciliation.open_count
+    refunds_count: 1, recon_open: 2,
+    active_subscriptions: 41, stars_subscriptions_live: 12, trials_started: 7, trials_converted: 2, conversion_pct: 28.6,
+    minutes: { granted: 9000, spent: 1240, expired: 300, revoked: 0, overage: 12 },
+    fx: { usd_in_tiyin: 1_285_000, valid_from: "2026-11-01" }, star_rate: { star_in_tiyin: 18_000, valid_from: "2026-11-01" },
+    ...p,
+  };
+}
+export function fxRateDomain(p: Record<string, unknown> = {}) {
+  return { usd_in_tiyin: 1_285_000, valid_from: "2026-11-01", set_by: MONEY_APPROVER_ID, reason: "Курс ЦБ на 01.11", created_at: "2026-11-01T05:00:00Z", ...p };
+}
+export function starRateDomain(p: Record<string, unknown> = {}) {
+  return { star_in_tiyin: 18_000, valid_from: "2026-11-01", set_by: MONEY_APPROVER_ID, reason: "Оценка по выплате за октябрь", created_at: "2026-11-01T05:00:00Z", ...p };
+}
+export const PROVIDERS_DOMAIN = [
+  { provider: "telegram_stars", enabled: true, configured: true, last_callback_at: "2026-11-22T06:00:00Z", last_error_code: null },
+  { provider: "payme", enabled: false, configured: false, last_callback_at: null, last_error_code: null },
+  { provider: "click", enabled: false, configured: true, last_callback_at: null, last_error_code: "SIGN_CHECK_FAILED" },
+  { provider: "uzum", enabled: false, configured: false, last_callback_at: null, last_error_code: null },
+];
+export function degradationDomain(p: Record<string, unknown> = {}) {
+  return {
+    mode: "auto", manual_level: null, level: "economy", economy_at_percent: 80, paid_only_at_percent: 90, spent_percent: 83.4, month: "2026-11",
+    events: [
+      { seq: 2, from: "normal", to: "economy", mode: "auto", reason: "threshold", spent_percent: 80.1, actor: null, at: "2026-11-20T10:00:00Z" },
+      { seq: 1, from: "economy", to: "normal", mode: "manual", reason: "manual", spent_percent: 10, actor: MONEY_APPROVER_ID, at: "2026-11-02T10:00:00Z" },
+    ],
+    updated_at: "2026-11-20T10:00:00Z",
+    ...p,
+  };
+}
+const unitKind = (p: Record<string, unknown> = {}) => ({
+  sessions: 120, ai_sessions: 100, cost_usd: "1.500000", cost_per_ai_session_p50_usd: "0.012000", cost_per_ai_session_p95_usd: "0.030000", billable_minutes: 1000, cost_per_billable_minute_usd: "0.001500", ...p,
+});
+export function unitCostsDomain(p: Record<string, unknown> = {}) {
+  return {
+    period: "month", from: "2026-11-01T00:00:00Z", to: "2026-11-22T10:00:00Z",
+    by_kind: { lesson: unitKind(), scenario: unitKind({ sessions: 40, ai_sessions: 30, cost_usd: "0.600000", cost_per_ai_session_p95_usd: "0.040000", billable_minutes: 300, cost_per_billable_minute_usd: "0.002000" }), pair: unitKind({ sessions: 0, ai_sessions: 0, cost_usd: "0.000000", cost_per_ai_session_p50_usd: null, cost_per_ai_session_p95_usd: null, billable_minutes: 0, cost_per_billable_minute_usd: null }) },
+    degraded_sessions_pct: 4.5,
+    ...p,
+  };
+}
+
 export const SOCIAL_STATS_DOMAIN = { friend_requests: 25, friendships_added: 18, referrals_in_review: 3, cases_opened: 4, cases_open: 2 };
 
 export class FakeDomains {
@@ -1793,6 +2005,11 @@ export class FakeDomains {
   /** Переопределить ответ: ключ "<service> <METHOD> <path>" (path без query). */
   on(service: Service, method: string, path: string, h: Handler): void {
     this.overrides.set(`${service} ${method} ${path}`, h);
+  }
+
+  /** Снять переопределение: снова ответ по умолчанию. */
+  off(service: Service, method: string, path: string): void {
+    this.overrides.delete(`${service} ${method} ${path}`);
   }
 
   callsTo(service: Service, method?: string, pathPrefix?: string): Call[] {
@@ -1913,6 +2130,8 @@ export class FakeDomains {
         return this.leaguesAndDuels(c, key) ?? this.gamification(c, key);
       case "social":
         return this.social(c, key);
+      case "billing":
+        return this.billing(c, key);
     }
     return domainError(404, "NOT_FOUND");
   }
@@ -2023,6 +2242,13 @@ export class FakeDomains {
       return json(200, aiBudget({ ...b, updated_by: c.actor?.id }));
     }
     if (key === `POST ${B}/emergency-stop`) return json(200, aiBudget({ ai_enabled: !c.body.enabled }));
+    // спринт 8: уровни деградации и стоимость занятий
+    if (key === `GET ${B}/degradation`) return json(200, degradationDomain());
+    if (key === `PUT ${B}/degradation`) {
+      const { reason: _r, ...d } = c.body;
+      return json(200, degradationDomain({ ...d, level: d.mode === "manual" ? d.manual_level : "economy", updated_at: "2026-11-22T10:00:00Z" }));
+    }
+    if (key === `GET ${B}/unit-costs`) return json(200, unitCostsDomain({ period: c.query.period ?? "month" }));
     if (key === `GET ${B}/usage/summary`) return json(200, { ...AI_USAGE_SUMMARY, period: c.query.period ?? "month" });
     if (key === `GET ${B}/usage/by-session`) {
       // у SESSION_ID — два вызова; остальные сессии — по одному; SESSION_ID_2 (выбор реплик) — вызовов нет
@@ -2084,6 +2310,58 @@ export class FakeDomains {
   }
 
   /** social `/internal/v1/admin/*` (спринт 7): карточка, модерация, рефералы, обзор; StaffRef — из actor-токена. */
+  /** Спринт 8: billing `/internal/v1/admin/billing/*` (admin.ts «Деньги»). */
+  private billing(c: Call, key: string): Response {
+    const B = "/internal/v1/admin/billing";
+    if (key === `GET ${B}/catalog`) {
+      const { payload: _p, diff: _d, updated_at: _u, ...active } = catalogVersionDomain();
+      const { payload: _p2, diff: _d2, updated_at: _u2, ...draft } = catalogVersionDomain({ version: 3, status: "draft", validated: false, activated_by: null, activated_at: null });
+      return json(200, { items: [draft, active] });
+    }
+    if (key === `PUT ${B}/catalog/draft`) return json(200, catalogVersionDomain({ version: 3, status: "draft", validated: false, activated_by: null, activated_at: null, payload: c.body.payload, comment: c.body.comment, created_by: c.actor?.id }));
+    if (key === `DELETE ${B}/catalog/draft`) return new Response(null, { status: 204 });
+    if (key === `POST ${B}/catalog/draft/validate`) return json(200, { ok: true, errors: [], warnings: [{ path: "products[1].fiscal", code: "FISCAL_MISSING" }] });
+    if (key === `POST ${B}/catalog/draft/activate`) return json(200, catalogVersionDomain({ version: 3, comment: c.body.comment, activated_by: c.actor?.id }));
+    const cv = /^\/internal\/v1\/admin\/billing\/catalog\/(\d+)(\/rollback)?$/.exec(c.path);
+    if (cv && c.method === "GET") return json(200, catalogVersionDomain({ version: Number(cv[1]), status: Number(cv[1]) === 3 ? "draft" : "active" }));
+    if (cv && c.method === "POST") return json(200, catalogVersionDomain({ version: 4, comment: c.body.comment, activated_by: c.actor?.id }));
+    if (key === `POST ${B}/trials:grant-all`) return json(200, { granted: 120, skipped: 7 });
+    if (key === `GET ${B}/orders`) return json(200, { items: [orderRowDomain(), orderRowDomain({ order_id: ORDER_ID_STARS, order_no: 1043, channel: "miniapp", provider: "telegram_stars", currency: "XTR", amount_tiyin: null, amount_stars: 250 })], next_cursor: null });
+    const ord = /^\/internal\/v1\/admin\/billing\/orders\/([^/]+)(\/refunds)?$/.exec(c.path);
+    if (ord && c.method === "GET") return json(200, ord[1] === ORDER_ID_STARS ? starsOrderCardDomain() : orderCardDomain({ order_id: ord[1] }));
+    if (ord && c.method === "POST") return json(201, refundDomain({ order_id: ord[1], reason: c.body.reason, requested_by: c.actor?.id }));
+    if (key === `GET ${B}/refunds`) return json(200, { items: [refundDomain()], next_cursor: null });
+    const rf = /^\/internal\/v1\/admin\/billing\/refunds\/([^/]+)\/fail$/.exec(c.path);
+    if (rf) return json(200, refundDomain({ refund_id: rf[1], status: "failed", failure_code: "MANUAL_CLOSE" }));
+    const acc = /^\/internal\/v1\/admin\/billing\/accounts\/([^/]+)(\/ledger|\/adjustments)?$/.exec(c.path);
+    if (acc && !acc[2] && c.method === "GET") return json(200, billingAccountDomain({ account_id: acc[1] }));
+    if (acc && acc[2] === "/ledger") return json(200, { items: [ledgerEntryDomain(), ledgerEntryDomain({ kind: "debit", minutes: -3, ref_kind: "session", ref_id: SESSION_ID, actor: "system", actor_name: "Система" })], next_cursor: null });
+    if (acc && acc[2] === "/adjustments") {
+      const { reason, ...rest } = c.body;
+      return json(202, adjustmentDomain({ account_id: acc[1], minutes: null, days: null, period_id: null, ...rest, reason, requested_by: c.actor?.id }));
+    }
+    if (key === `GET ${B}/adjustments`) {
+      return json(200, { items: [adjustmentDomain(), adjustmentDomain({ adjustment_id: randomUUID(), requested_by: { staff_id: MONEY_APPROVER_ID, name: "Финансы" } })], next_cursor: null });
+    }
+    const adj = /^\/internal\/v1\/admin\/billing\/adjustments\/([^/]+)\/(approve|reject|cancel)$/.exec(c.path);
+    if (adj) {
+      const status = adj[2] === "approve" ? "applied" : adj[2] === "reject" ? "rejected" : "cancelled";
+      return json(200, adjustmentDomain({ adjustment_id: adj[1], status, decided_by: adj[2] === "cancel" ? MONEY_AUTHOR_ID : c.actor?.id, decided_at: "2026-11-22T09:00:00Z", decision_note: c.body?.note ?? null }));
+    }
+    if (key === `GET ${B}/reconciliation/items`) return json(200, { items: [reconItemDomain()], next_cursor: null });
+    if (key === `POST ${B}/reconciliation/runs`) return json(202, { run_id: RECON_RUN_ID, kind: "manual", started_at: "2026-11-22T09:00:00Z", finished_at: null, checked: 0, found: 0, error: null });
+    const ri = /^\/internal\/v1\/admin\/billing\/reconciliation\/items\/([^/]+)\/resolve$/.exec(c.path);
+    if (ri) return json(200, reconItemDomain({ item_id: ri[1], status: c.body.status, note: c.body.note, resolved_by: c.actor?.id, resolved_at: "2026-11-22T09:00:00Z" }));
+    if (key === `GET ${B}/reports/summary`) return json(200, billingSummaryDomain({ period: c.query.period ?? "day" }));
+    if (key === `GET ${B}/reports/daily`) return json(200, { items: [{ date: c.query.from, web_revenue_tiyin: 4_900_000, web_refunds_tiyin: 0, stars_revenue_stars: 250, stars_refunds_stars: 0, orders_paid: 2, trials_started: 1, minutes_spent: 120 }] });
+    if (key === `GET ${B}/fx`) return json(200, { items: [fxRateDomain()] });
+    if (key === `PUT ${B}/fx`) return json(200, fxRateDomain({ ...c.body, set_by: c.actor?.id }));
+    if (key === `GET ${B}/star-rate`) return json(200, { items: [starRateDomain()] });
+    if (key === `PUT ${B}/star-rate`) return json(200, starRateDomain({ ...c.body, set_by: c.actor?.id }));
+    if (key === `GET ${B}/providers`) return json(200, { items: PROVIDERS_DOMAIN });
+    return domainError(404, "NOT_FOUND");
+  }
+
   private social(c: Call, key: string): Response {
     const B = "/internal/v1/admin";
     const by = { staff_id: c.actor?.id ?? SOCIAL_STAFF_ID, name: c.actor?.name ?? "Имя из токена" };

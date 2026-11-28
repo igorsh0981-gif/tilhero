@@ -12,7 +12,7 @@ from typing import Any
 from test_identity_guardian_grants import _granted_teen
 
 EXPORT = "/internal/v1/export/profiles"
-FIELDS = {"user_id", "kind", "age_band", "guardian_consent", "updated_at"}
+FIELDS = {"user_id", "kind", "age_band", "guardian_consent", "guardian_user_id", "updated_at"}
 
 
 async def _all(env, limit: int = 500) -> list[dict[str, Any]]:

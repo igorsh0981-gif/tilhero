@@ -1,5 +1,5 @@
 {
-  "$comment": "«Что нового» TilHero: общий каталог для experience-config (проверка заметки), telegram-bff, Mini App (переход по ссылке пункта, иконка, иллюстрация) и admin-web (редактор, предпросмотр). Иллюстрация — файл apps/telegram-miniapp/public/whatsnew/<key>.webp (16:9, width×height из списка); ключ — limits.illustration_pattern. Сверка — контрактные тесты.",
+  "$comment": "«Что нового» TilHero: общий каталог для experience-config (проверка заметки), telegram-bff, Mini App (переход по ссылке пункта, иконка, иллюстрация) и admin-web (редактор, предпросмотр). Иллюстрация — файл apps/telegram-miniapp/public/whatsnew/<key>.webp (16:9, width×height из списка); ключ — limits.illustration_pattern. Сверка — контрактные тесты. Спринт 8: переходы subscription («Подписка») и til_shop («Купить тилы»), иллюстрации s8-plus (14+) и s8-plus-kids (6–13) — заметка только о подписке за Stars, без сайта оплаты (PLAN, решение 20); публикуется вместе с включением продаж.",
   "locales": [
     "ru",
     "uz"
@@ -48,7 +48,9 @@
     "friends",
     "leagues",
     "duels",
-    "referrals"
+    "referrals",
+    "subscription",
+    "til_shop"
   ],
   "icons": [
     "spark",
@@ -88,6 +90,16 @@
       "key": "s7-family",
       "width": 1200,
       "height": 675
+    },
+    {
+      "key": "s8-plus",
+      "width": 1200,
+      "height": 675
+    },
+    {
+      "key": "s8-plus-kids",
+      "width": 1200,
+      "height": 675
     }
   ],
   "limits": {
@@ -99,24 +111,5 @@
     "items_max": 6,
     "client_max_notes": 5,
     "illustration_pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
-  },
-  "planned": {
-    "$comment": "Спринт 8 (поток 0): заготовка «Что нового» релиза 8 — ключи иллюстраций s8-plus (14+, на «вы») и s8-plus-kids (6–13, на «ты») и переходы subscription («Подписка») и til_shop («Купить тилы»). Пока НЕ в routes / illustrations: контрактные тесты клиентов сверяют основные списки целиком и проверяют файл иллюстрации. Иллюстрации (WebP 1200×675 в apps/telegram-miniapp/public/whatsnew/) и списки клиентов (Mini App nav.ts и deeplink, telegram-bff, admin-web, experience-config ROUTES / ILLUSTRATIONS, notifications campaigns.ROUTES) готовят потоки E, F, D; ключи переносятся из planned в основные списки вместе с ними при интеграции (поток I). Заметка — только о подписке за Stars, без сайта оплаты (PLAN, решение 20).",
-    "routes": [
-      "subscription",
-      "til_shop"
-    ],
-    "illustrations": [
-      {
-        "key": "s8-plus",
-        "width": 1200,
-        "height": 675
-      },
-      {
-        "key": "s8-plus-kids",
-        "width": 1200,
-        "height": 675
-      }
-    ]
   }
 }

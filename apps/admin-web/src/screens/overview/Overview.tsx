@@ -7,7 +7,7 @@
  * the others keep working (admin.ts Dashboard, always 200; a block missing in an older admin-bff counts as down).
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { AiUsageSummary, ContentSummary, Dashboard, DashboardBlock, DashboardCampaigns, DashboardLearners, DashboardWhatsNew, DiagnosticStats, GameStats, LessonStats, MemoryStats, SocialStats, SupportStats } from "@tilhero/contracts/admin";
+import type { AiUsageSummary, ContentSummary, Dashboard, DashboardBlock, DashboardCampaigns, DashboardLearners, DashboardWhatsNew, DiagnosticStats, GameStats, LessonStats, MemoryStats, MoneyStats, SocialStats, SupportStats } from "@tilhero/contracts/admin";
 import type { ContentKind } from "@tilhero/contracts/content";
 import { DashboardApi, type Period } from "../../api/endpoints";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -19,9 +19,10 @@ import { Btn, Callout, cx, Seg, Spinner } from "../../ui/kit";
 import { setAiEnabled } from "../ai/aiState";
 import { budgetLevel, usd } from "../ai/model";
 import { zoneDateTime } from "../game/model";
+import { useMoney } from "../money/parts";
 
 const PERIODS: readonly Period[] = ["today", "7d", "30d"];
-type BlockKey = "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai" | "memory" | "game" | "social";
+type BlockKey = "learners" | "support" | "whats_new" | "campaigns" | "content" | "diagnostics" | "lessons" | "ai" | "memory" | "game" | "social" | "money";
 const SESSION_KINDS = ["lesson", "scenario", "media", "review", "reading"] as const;
 const OFF = (service: string) => ({ available: false, data: null, service });
 const DX_AREAS = ["vocabulary", "grammar", "reading", "listening"] as const;
@@ -113,6 +114,10 @@ export function Overview() {
             <Block<SocialStats> k="social" icon="userPlus" block={data.social ?? OFF("social")} empty={(x) => x.friend_requests + x.friendships_added + (x.duels_finished ?? 0) + (x.pair_rooms_finished ?? 0) + x.referrals_in_review + x.cases_opened + x.cases_open === 0}>
               {(x) => <SocialBody x={x} period={periodLabel} />}
             </Block>
+            {/* sprint 8: money of today (billing; the AI cap — ai-gateway: null when it is down) */}
+            <Block<MoneyStats> k="money" icon="coins" block={data.money ?? OFF("billing")} empty={(x) => x.web_revenue_tiyin + x.stars_revenue_stars + x.orders_paid + x.refunds + x.active_subscriptions + x.trials_started + x.recon_open === 0}>
+              {(x) => <MoneyBody x={x} />}
+            </Block>
           </div>
         </>
       )}
@@ -196,6 +201,9 @@ function Attention({ d }: { d: Dashboard }) {
     rows.push({ id: "cases", label: t("att.cases"), n: soc.cases_open, go: () => navigate("moderation", "cases"), show: can("moderation.manage") });
     rows.push({ id: "referrals", label: t("att.referrals"), n: soc.referrals_in_review, go: () => navigate("referrals", "review"), show: can("referral.read") });
   }
+  // sprint 8: open reconciliation items
+  const mon = d.money?.available ? d.money.data : null;
+  if (mon) rows.push({ id: "recon", label: t("att.recon"), n: mon.recon_open, go: () => navigate("reconciliation"), show: can("billing.read") });
   const live = rows.filter((r) => r.n > 0);
   if (!live.length) return null;
   return (
@@ -654,6 +662,39 @@ function SocialBody({ x, period }: { x: SocialStats; period: string }) {
         <div className="acts">
           {can("league.read") && <Btn size="sm" icon="podium" label={t("dsoc.leagues")} onClick={() => navigate("leagues")} testId="dsoc-leagues" />}
           {can("room.read") && <Btn size="sm" icon="mic" label={t("dsoc.rooms2")} onClick={() => navigate("pair_rooms")} testId="dsoc-rooms-open" />}
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ---------------------------------------------------------------- sprint 8: money */
+
+/** Money of today (Asia/Tashkent): the site in sums and the Mini App in Stars — side by side, never summed. */
+function MoneyBody({ x }: { x: MoneyStats }) {
+  const { t, fmt } = useI18n();
+  const { can } = useSession();
+  const { navigate } = useNav();
+  const money = useMoney();
+  return (
+    <>
+      <Row k={t("dmoney.web")} v={money.sum(x.web_revenue_tiyin)} testId="dmoney-web" />
+      <Row k={t("dmoney.stars")} v={money.stars(x.stars_revenue_stars)} testId="dmoney-stars" />
+      <Row k={t("dmoney.orders")} v={fmt.num(x.orders_paid)} testId="dmoney-orders" />
+      <Row k={t("dmoney.refunds")} v={fmt.num(x.refunds)} testId="dmoney-refunds" />
+      <Row k={t("dmoney.subs")} v={fmt.num(x.active_subscriptions)} testId="dmoney-subs" />
+      <Row k={t("dmoney.trials")} v={fmt.num(x.trials_started)} testId="dmoney-trials" />
+      <Row
+        k={t("dmoney.recon")}
+        testId="dmoney-recon"
+        v={can("billing.read") && x.recon_open ? <button type="button" className="tr" onClick={() => navigate("reconciliation")} data-testid="dmoney-recon-link">{fmt.num(x.recon_open)}</button> : fmt.num(x.recon_open)}
+      />
+      <Row k={t("dmoney.aiCap")} v={x.ai_cap_used_pct == null ? <span className="muted" data-testid="dmoney-ai-na">{t("dmem.noData")}</span> : fmt.pct(x.ai_cap_used_pct)} testId="dmoney-ai" />
+      <p className="xs muted">{t("dmoney.note")}</p>
+      {(can("billing.read") || can("dashboard.read")) && (
+        <div className="acts">
+          <Btn size="sm" icon="activity" label={t("dmoney.open")} onClick={() => navigate("finance")} testId="dmoney-open" />
+          {can("billing.read") && <Btn size="sm" icon="coins" label={t("dmoney.orders2")} onClick={() => navigate("payments")} testId="dmoney-payments" />}
         </div>
       )}
     </>

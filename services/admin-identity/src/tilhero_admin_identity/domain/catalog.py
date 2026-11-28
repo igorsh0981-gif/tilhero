@@ -4,7 +4,8 @@ docs/sprint2/PLAN.md §«Роли и права») плюс миграция 000
 §«Права и роли») и миграция 0004 (права ИИ, контроля диалогов и затрат, роль qa_analyst, docs/sprint4/PLAN.md
 §«Права и роли») и миграция 0005 (права памяти и словаря курса, docs/sprint5/PLAN.md §«Права и роли») и миграция 0006
 (права игры и кошельков учеников, docs/sprint6/PLAN.md §«Права и роли») и миграция 0007 (социальное: друзья, модерация,
-рефералы, лиги и дуэли, парные комнаты, docs/sprint7/PLAN.md §«Права»); источник истины во время работы — таблицы
+рефералы, лиги и дуэли, парные комнаты, docs/sprint7/PLAN.md §«Права») и миграция 0008 (деньги: права billing.*,
+subscriptions.override, роль finance, docs/sprint8/PLAN.md §«Права и роли»); источник истины во время работы — таблицы
 roles/role_permissions (меняются только через four-eyes)."""
 
 from __future__ import annotations
@@ -63,10 +64,17 @@ Permission = Literal[
     "league.manage",
     "room.read",
     "room.manage",
+    # спринт 8 — деньги (миграция 0008)
+    "billing.read",
+    "billing.manage",
+    "billing.publish",
+    "billing.approve",
+    "billing.refund",
+    "subscriptions.override",
 ]
 RoleCode = Literal[
-    "super_admin", "operations", "communications", "support", "methodist", "content_manager", "qa_analyst", "analyst",
-    "auditor", "read_only",
+    "super_admin", "operations", "communications", "support", "methodist", "content_manager", "qa_analyst", "finance",
+    "analyst", "auditor", "read_only",
 ]
 
 PERMISSIONS: tuple[str, ...] = get_args(Permission)
@@ -84,8 +92,12 @@ PRIVILEGED_ROLES: frozenset[str] = frozenset({"super_admin", "operations", "comm
 # героев, предметов магазина и событий недели (game.publish), ручные операции и обратная запись в кошельке ученика,
 # возврат покупки (wallet.adjust; черновики game.manage — без step-up); спринт 7 — санкции больше 7 дней и бессрочные
 # (moderation.manage), активация реферальной кампании (referral.manage), переоценка лиг и дуэлей (league.manage),
-# остановка парной комнаты (room.manage); чтение (*.read) — без step-up. Без MFA step-up невозможен, поэтому роль,
-# получившая такое право через four-eyes, обязана подключить MFA (сессии её сотрудников отзываются). Роль
+# остановка парной комнаты (room.manage); спринт 8 — активация и откат каталога тарифов, массовая выдача пробного
+# (billing.publish), решение по заявке «четыре глаза» (billing.approve), возврат (billing.refund), заявка на
+# корректировку минут или периода (subscriptions.override; billing.manage — черновики и курсы — без step-up; роль
+# finance привилегирована составом прав, PRIVILEGED_ROLES не расширяется); чтение (*.read) — без step-up. Без MFA
+# step-up невозможен, поэтому роль, получившая такое право через four-eyes, обязана подключить MFA (сессии её
+# сотрудников отзываются). Роль
 # привилегированна, если она в PRIVILEGED_ROLES ИЛИ содержит хотя бы одно из этих прав — расширение матрицы
 # непривилегированной роли не обходит MFA и four-eyes.
 PRIVILEGED_PERMISSIONS: frozenset[str] = frozenset({
@@ -96,6 +108,7 @@ PRIVILEGED_PERMISSIONS: frozenset[str] = frozenset({
     "memory.manage",
     "game.publish", "wallet.adjust",
     "moderation.manage", "referral.manage", "league.manage", "room.manage",
+    "billing.publish", "billing.approve", "billing.refund", "subscriptions.override",
 })
 SUPER_ADMIN = "super_admin"
 DEFAULT_ROLE = "read_only"

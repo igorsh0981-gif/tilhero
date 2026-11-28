@@ -71,6 +71,9 @@ import { PairInviteScreen, PairRoomsScreen } from "./screens/social/Pair";
 import { PairReportScreen } from "./screens/social/PairReport";
 import { PairRoomScreen } from "./screens/social/PairRoom";
 import { ReferralsScreen } from "./screens/social/Referrals";
+import { MinutesScreen, PaymentsScreen } from "./screens/billing/Payments";
+import { SubscriptionScreen } from "./screens/billing/Subscription";
+import { TilShopScreen } from "./screens/billing/TilShop";
 
 type Phase =
   | { kind: "boot" }
@@ -525,7 +528,7 @@ function PushedScreen({ p }: { p: Pushed }) {
     case "delete":
       return <DeleteScreen />;
     case "support":
-      return <Support number={p.number} />;
+      return <Support number={p.number} category={p.category} subject={p.subject} />;
     case "ticket":
       return <TicketScreen id={p.id} />;
     case "diagnostics":
@@ -607,5 +610,14 @@ function PushedScreen({ p }: { p: Pushed }) {
       return <PairReportScreen key={p.id} id={p.id} />;
     case "referrals":
       return <ReferralsScreen />;
+    // sprint 8: the subscription and purchases for Telegram Stars
+    case "subscription":
+      return <SubscriptionScreen />;
+    case "payments":
+      return <PaymentsScreen />;
+    case "minutes":
+      return <MinutesScreen />;
+    case "tilShop":
+      return <TilShopScreen />;
   }
 }

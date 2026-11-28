@@ -3,6 +3,8 @@ from __future__ import annotations
 import itertools
 import uuid
 from collections import deque
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,7 @@ from ls_testkit import (
     SEED_DATA,
     FakeAI,
     FakeAssessment,
+    FakeBilling,
     FakeCatalog,
     FakeDiagnostics,
     FakeIdentity,
@@ -76,7 +79,7 @@ class Env:
     def __init__(self, settings: Settings, client: httpx.AsyncClient, runtime: Runtime, bus: InMemoryBus, app: Any,
                  catalog: FakeCatalog, ai: FakeAI, assessment: FakeAssessment, plan: FakePlan,
                  diagnostics: FakeDiagnostics, social: FakeSocial | None = None,
-                 identity: FakeIdentity | None = None) -> None:
+                 identity: FakeIdentity | None = None, billing: FakeBilling | None = None) -> None:
         self.settings = settings
         self.c = client
         self.runtime = runtime
@@ -89,6 +92,7 @@ class Env:
         self.diagnostics = diagnostics
         self.social = social or FakeSocial()
         self.identity = identity or FakeIdentity()
+        self.billing = billing or FakeBilling()  # спринт 8: удержания и доступ (вызывается только при пэйволе)
         self.now = T0
         app.state.clock = lambda: self.now
         self._seeds = itertools.count()
@@ -341,11 +345,11 @@ class Env:
         return dict(r.json())
 
 
-@pytest.fixture
-async def env():
+@asynccontextmanager
+async def make_env(**settings_kw: Any) -> AsyncIterator[Env]:
     schema = unique_schema("ls")
     await create_schema(schema)
-    settings = make_settings(database_url=TEST_ADMIN_URL, db_schema=schema)
+    settings = make_settings(database_url=TEST_ADMIN_URL, db_schema=schema, **settings_kw)
     await migrate(SERVICE_DIR, settings)
     bus = InMemoryBus()
     runtime = Runtime(settings, bus=bus)
@@ -356,19 +360,39 @@ async def env():
     diagnostics = FakeDiagnostics()
     social = FakeSocial()
     identity = FakeIdentity()
+    billing = FakeBilling()
     app = build_app(settings, runtime, transports={
         "catalog": httpx.MockTransport(catalog.handler), "ai-gateway": httpx.MockTransport(ai.handler),
         "assessment": httpx.MockTransport(assessment.handler), "learning-plan": httpx.MockTransport(plan.handler),
         "diagnostics": httpx.MockTransport(diagnostics.handler), "social": httpx.MockTransport(social.handler),
-        "identity-consent": httpx.MockTransport(identity.handler)})
-    async with app.router.lifespan_context(app):
-        client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://lessons")
-        e = Env(settings, client, runtime, bus, app, catalog, ai, assessment, plan, diagnostics, social, identity)
-        await e.flush()
+        "identity-consent": httpx.MockTransport(identity.handler),
+        "billing": httpx.MockTransport(billing.handler)})
+    try:
+        async with app.router.lifespan_context(app):
+            client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://lessons")
+            e = Env(settings, client, runtime, bus, app, catalog, ai, assessment, plan, diagnostics, social,
+                    identity, billing)
+            await e.flush()
+            yield e
+            await app.state.room_hub.drain()
+            await client.aclose()
+            if not settings.billing_enforced:  # спринт 8: пэйвол выключен — billing не вызывается (как в спринте 7)
+                assert billing.calls == [], billing.calls
+    finally:
+        await drop_schema(schema)
+
+
+@pytest.fixture
+async def env():
+    async with make_env() as e:
         yield e
-        await app.state.room_hub.drain()
-        await client.aclose()
-    await drop_schema(schema)
+
+
+@pytest.fixture
+async def paid():
+    """Спринт 8: пэйвол включён (BILLING_ENFORCED=true), срок billing в тестах — доли секунды."""
+    async with make_env(billing_enforced=True, billing_timeout_seconds=0.3) as e:
+        yield e
 
 
 @pytest.fixture

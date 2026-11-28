@@ -147,6 +147,37 @@ import type {
   UiLang,
 } from "@tilhero/contracts/admin";
 import type { Ticket as ClientTicket } from "@tilhero/contracts/bff";
+import type {
+  AdjustmentRequest,
+  AdjustmentStatus,
+  Adjustment,
+  AdminBillingAccount,
+  AdminLedgerEntry,
+  AdminOrderCard,
+  AdminOrderRow,
+  AdminRefund,
+  AiDegradationUpdate,
+  AiDegradationView,
+  AiUnitCosts,
+  BillingDailyRow,
+  BillingProviderStatus,
+  BillingSummary,
+  CatalogDraftRequest,
+  CatalogValidation,
+  CatalogVersion,
+  CatalogVersionSummary,
+  FinanceOverview,
+  FxRate,
+  FxRateRequest,
+  LearnerTier,
+  ReconItem,
+  ReconItemKind,
+  ReconRun,
+  RefundStatus,
+  StarRate,
+  StarRateRequest,
+  TrialsGrantAllResult,
+} from "@tilhero/contracts/admin";
 import type { Band, ContentKind, GlossaryReviewStatus, GlossarySource, MediaRequestStatus, ScenarioTestRun, VersionStatus } from "@tilhero/contracts/content";
 import type { SessionKind } from "@tilhero/contracts/ai";
 import type { DuelStatus, GameCurrency, PairRoomStatus, ReferralStatus, SanctionAppealStatus } from "@tilhero/contracts/bff";
@@ -183,6 +214,8 @@ export interface LearnerFilters {
   status?: LearnerStatus | "";
   locale?: UiLang | "";
   has_open_tickets?: boolean | null;
+  /** sprint 8 (ADM-USR-01): the learner's tier — free | paid (projection of billing in user-admin) */
+  tier?: LearnerTier | "";
   cursor?: string | null;
   limit?: number;
 }
@@ -190,8 +223,10 @@ export interface LearnerFilters {
 export const Learners = {
   list: (f: LearnerFilters) =>
     api.get<Page<AdminLearnerRow>>("/learners", {
-      query: { q: f.q, kind: f.kind, age_band: f.age_band, status: f.status, locale: f.locale, has_open_tickets: f.has_open_tickets ?? undefined, cursor: f.cursor, limit: f.limit ?? 50 },
+      query: { q: f.q, kind: f.kind, age_band: f.age_band, status: f.status, locale: f.locale, has_open_tickets: f.has_open_tickets ?? undefined, tier: f.tier, cursor: f.cursor, limit: f.limit ?? 50 },
     }),
+  /** sprint 8: the «Тариф» tab (billing.read) — the subscription of the learner's account (a child — the guardian's) */
+  billing: (id: string) => api.get<AdminBillingAccount>(`/learners/${enc(id)}/billing`),
   card: (id: string) => api.get<AdminLearnerCard>(`/learners/${enc(id)}`),
   reveal: (id: string, reason: string) => api.post<RevealResult>(`/learners/${enc(id)}/reveal`, { field: "telegram_user_id", reason }),
 };
@@ -402,7 +437,7 @@ export const Diagnostics = {
 /** admin.ts AgentDetail (row + versions) and AgentVersionView (version + names; `updated_at` — the If-Match of PATCH) */
 export type { AgentDetail, AgentVersionView };
 export type AgentCardView = AgentDetail;
-export type BudgetInput = Pick<AiBudget, "monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "speech_monthly_cap_usd" | "room_cap_usd" | "alert_percent">;
+export type BudgetInput = Pick<AiBudget, "monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "speech_monthly_cap_usd" | "room_cap_usd" | "paid_learner_daily_cap_usd" | "alert_percent">;
 
 export const Ai = {
   agents: (background = false) => api.get<{ items: AgentRow[] }>("/ai/agents", { background }),
@@ -445,6 +480,11 @@ export const Ai = {
   emergencyStop: (stop: boolean, reason: string) => api.post<AiBudget>("/ai/emergency-stop", { enabled: stop, reason }),
   usageSummary: (period: AiUsageSummary["period"], background = false) => api.get<AiUsageSummary>("/ai/usage/summary", { query: { period }, background }),
   usage: (f: { session_id?: string; agent_id?: AgentId; cursor?: string | null }) => api.get<Page<AiCall>>("/ai/usage", { query: { ...f, limit: 50 } }),
+  /** sprint 8: levels of degradation (costs.read; change — costs.manage + step-up) and the cost of activities */
+  degradation: () => api.get<AiDegradationView>("/ai/degradation"),
+  /** ai-gateway: costs.manage + step-up (admin-bff sends X-Step-Up), the Idempotency-Key — a repeat after a lost answer */
+  putDegradation: (body: AiDegradationUpdate, idempotencyKey?: string) => api.put<AiDegradationView>("/ai/degradation", body, idempotencyKey ? { idempotencyKey } : {}),
+  unitCosts: (period: AiUnitCosts["period"]) => api.get<AiUnitCosts>("/ai/unit-costs", { query: { period } }),
 };
 
 /* ---------------------------------------------------------------- dialogue QA (lessons + assessment, sprint 4) */
@@ -635,4 +675,64 @@ export const PairRooms = {
   list: (f: { status?: PairRoomStatus | ""; from?: string; to?: string; cursor?: string | null }) => api.get<Page<AdminPairRoomRow>>("/pair-rooms", { query: { status: f.status, from: f.from, to: f.to, cursor: f.cursor, limit: 50 } }),
   get: (id: string) => api.get<AdminPairRoom>(`/pair-rooms/${enc(id)}`),
   stop: (id: string, reason: string, idempotencyKey: string) => api.post<AdminPairRoom>(`/pair-rooms/${enc(id)}/stop`, { reason }, { idempotencyKey }),
+};
+
+/* ---------------------------------------------------------------- money (sprint 8, billing) */
+
+export interface OrderQuery {
+  status?: string;
+  channel?: string;
+  provider?: string;
+  product_kind?: string;
+  order_no?: string;
+  provider_txn_id?: string;
+  account_id?: string;
+  from?: string;
+  to?: string;
+  cursor?: string | null;
+}
+
+/**
+ * «Деньги» (billing.read; commands — billing.manage / billing.publish / billing.refund / billing.approve /
+ * subscriptions.override, step-up as INTERNAL_API §12). Every command carries an Idempotency-Key built by the screen
+ * from the command itself (CommandKey) — never from a version that changes after a lost answer.
+ */
+export const Billing = {
+  catalog: () => api.get<{ items: CatalogVersionSummary[] }>("/billing/catalog"),
+  catalogVersion: (v: number) => api.get<CatalogVersion>(`/billing/catalog/${v}`),
+  /** If-Match: `updated_at` of the draft that was read (409 DRAFT_CONFLICT when someone saved in between) */
+  saveDraft: (body: CatalogDraftRequest, ifMatch: string | null) => api.put<CatalogVersion>("/billing/catalog/draft", body, ifMatch ? { headers: { "If-Match": ifMatch } } : {}),
+  deleteDraft: () => api.del<void>("/billing/catalog/draft"),
+  validate: () => api.post<CatalogValidation>("/billing/catalog/draft/validate"),
+  activate: (comment: string, idempotencyKey: string) => api.post<CatalogVersion>("/billing/catalog/draft/activate", { comment }, { idempotencyKey }),
+  rollback: (version: number, comment: string, idempotencyKey: string) => api.post<CatalogVersion>(`/billing/catalog/${version}/rollback`, { comment }, { idempotencyKey }),
+  grantTrials: (reason: string, idempotencyKey: string) => api.post<TrialsGrantAllResult>("/billing/trials:grant-all", { reason }, { idempotencyKey }),
+  orders: (q: OrderQuery) => api.get<Page<AdminOrderRow>>("/billing/orders", { query: { ...q, limit: 50 } }),
+  order: (id: string) => api.get<AdminOrderCard>(`/billing/orders/${enc(id)}`),
+  refund: (orderId: string, reason: string, force: boolean, idempotencyKey: string) =>
+    api.post<AdminRefund>(`/billing/orders/${enc(orderId)}/refunds`, force ? { reason, force } : { reason }, { idempotencyKey }),
+  refunds: (status: RefundStatus | "", cursor?: string | null) => api.get<Page<AdminRefund>>("/billing/refunds", { query: { status, cursor, limit: 50 } }),
+  failRefund: (id: string, note: string, idempotencyKey: string) => api.post<AdminRefund>(`/billing/refunds/${enc(id)}/fail`, { note }, { idempotencyKey }),
+  account: (id: string) => api.get<AdminBillingAccount>(`/billing/accounts/${enc(id)}`),
+  ledger: (id: string, cursor?: string | null) => api.get<Page<AdminLedgerEntry>>(`/billing/accounts/${enc(id)}/ledger`, { query: { cursor, limit: 50 } }),
+  requestAdjustment: (accountId: string, body: AdjustmentRequest, idempotencyKey: string) => api.post<Adjustment>(`/billing/accounts/${enc(accountId)}/adjustments`, body, { idempotencyKey }),
+  adjustments: (status: AdjustmentStatus | "", cursor?: string | null, accountId?: string | null) =>
+    api.get<Page<Adjustment>>("/billing/adjustments", { query: { status, cursor, account_id: accountId ?? undefined, limit: 50 } }),
+  approve: (id: string, note: string | null, idempotencyKey: string) => api.post<Adjustment>(`/billing/adjustments/${enc(id)}/approve`, note ? { note } : {}, { idempotencyKey }),
+  reject: (id: string, note: string, idempotencyKey: string) => api.post<Adjustment>(`/billing/adjustments/${enc(id)}/reject`, { note }, { idempotencyKey }),
+  cancelAdjustment: (id: string, idempotencyKey: string) => api.post<Adjustment>(`/billing/adjustments/${enc(id)}/cancel`, undefined, { idempotencyKey }),
+  recon: (f: { status?: string; kind?: ReconItemKind | ""; cursor?: string | null }) => api.get<Page<ReconItem>>("/billing/reconciliation/items", { query: { ...f, limit: 50 } }),
+  reconRun: (idempotencyKey: string) => api.post<ReconRun>("/billing/reconciliation/runs", undefined, { idempotencyKey }),
+  resolve: (id: string, status: "resolved" | "ignored", note: string, idempotencyKey: string) => api.post<ReconItem>(`/billing/reconciliation/items/${enc(id)}/resolve`, { status, note }, { idempotencyKey }),
+  summary: (period: BillingSummary["period"]) => api.get<BillingSummary>("/billing/reports/summary", { query: { period } }),
+  daily: (from: string, to: string) => api.get<{ items: BillingDailyRow[] }>("/billing/reports/daily", { query: { from, to } }),
+  fx: () => api.get<{ items: FxRate[] }>("/billing/fx"),
+  putFx: (body: FxRateRequest) => api.put<FxRate>("/billing/fx", body),
+  starRate: () => api.get<{ items: StarRate[] }>("/billing/star-rate"),
+  putStarRate: (body: StarRateRequest) => api.put<StarRate>("/billing/star-rate", body),
+  providers: () => api.get<{ items: BillingProviderStatus[] }>("/billing/providers"),
+};
+
+export const Finance = {
+  overview: (period: FinanceOverview["period"]) => api.get<FinanceOverview>("/finance/overview", { query: { period } }),
 };

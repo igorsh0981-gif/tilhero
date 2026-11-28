@@ -9,8 +9,11 @@
 `identity-consent`, `learning-plan`, `social`, `experience-config`, `support`, `notifications`; спринт 2 —
 `admin-identity` (`auth.*`, `staff.*`, `role.*`, `approval.*`); спринты 3–4 — `catalog` (контент; спринт 5 — ещё словарь
 курса `glossary.entry_created | updated | reviewed | archived`), `diagnostics`, `lessons`, `assessment`, `ai-gateway`;
-спринт 5 — `memory` (`memory.card_adjusted` — ручная правка карточки ученика: перенос, сброс, заморозка)
-(`consumers.AUDIT_EVENT_PRODUCERS`). Действия журнал не перечисляет: код действия — строка `^[a-z][a-z0-9_.]*$` от
+спринт 5 — `memory` (`memory.card_adjusted` — ручная правка карточки ученика: перенос, сброс, заморозка); спринт 6 —
+`gamification`; спринт 8 — `billing` (`billing.catalog_activated | catalog_rolled_back | adjustment_requested |
+adjustment_approved | adjustment_rejected | adjustment_cancelled | refund_requested | refund_completed | refund_failed |
+recon_resolved | fx_updated | star_rate_updated | trials_granted`; ручная деградация ИИ `ai.degradation_updated` — от
+`ai-gateway`) (`consumers.AUDIT_EVENT_PRODUCERS`). Действия журнал не перечисляет: код действия — строка `^[a-z][a-z0-9_.]*$` от
 доверенного издателя. Актора определяет
 издатель: сотрудник — из токена admin-bff (claim `actor`), ученик — из `sub`, иначе сам сервис. События безопасности,
 согласий и удаления — только от `identity-consent` (`SECURITY_EVENT_PRODUCERS`). События остальных издателей

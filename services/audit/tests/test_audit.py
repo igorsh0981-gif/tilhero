@@ -41,7 +41,7 @@ AUDITOR = Actor(id="staff-7", role="auditor", permissions=frozenset({"audit.read
 SUPPORT = Actor(id="staff-8", role="support", permissions=frozenset({"support.reply"}))
 SPRINT1_WRITERS = ("identity-consent", "learning-plan", "social", "experience-config", "support", "notifications")
 BUS_WRITERS = (*SPRINT1_WRITERS, "admin-identity", "catalog", "diagnostics", "lessons", "assessment", "ai-gateway",
-               "memory", "gamification")
+               "memory", "gamification", "billing")
 HTTP_WRITERS = ("identity-consent",)
 
 
@@ -152,6 +152,11 @@ WRITER_RECORDS: dict[str, dict[str, Any]] = {
                            object_type="game_wallet", object_id=str(uuid.uuid4()), before={"til_balance": 10},
                            after={"til_balance": 60, "currency": "til", "amount": 50},
                            reason="Компенсация за сбой начисления по обращению"),
+    # спринт 8: возврат по заказу (billing.refund, step-up) — номер заказа и провайдер, без данных плательщика
+    "billing": record(actor_id=str(uuid.uuid4()), actor_role="finance", action="billing.refund_requested",
+                      object_type="billing_order", object_id=str(uuid.uuid4()), before={"status": "fulfilled"},
+                      after={"refund_status": "requested", "provider": "telegram_stars", "order_no": 100_042},
+                      reason="Возврат в течение 3 дней, использовано 4 минуты"),
 }
 
 
@@ -237,6 +242,51 @@ async def test_sprint7_social_records_accepted(env) -> None:
                for i, (_, rec) in zip(items, SPRINT7_RECORDS, strict=True))
     verify = await env.c.get("/admin/v1/audit/verify", headers=env.read_headers())
     assert verify.json()["valid"] is True and verify.json()["checked"] == len(SPRINT7_RECORDS)
+    assert env.bus.dlq == []
+
+
+# спринт 8: деньги — издатель billing (каталог, «четыре глаза», возвраты, сверка, курсы) и ручная деградация ИИ от
+# ai-gateway; автор заявки и подтверждающий — разные сотрудники, обе записи в журнале
+SPRINT8_RECORDS: list[tuple[str, dict[str, Any]]] = [
+    ("billing", record(actor_id=str(uuid.uuid4()), actor_role="finance", action="billing.catalog_activated",
+                       object_type="billing_catalog", object_id="3", before={"version": 2},
+                       after={"version": 3, "status": "active"}, reason="Цены в Stars от финансов (О1)")),
+    ("billing", record(actor_id=str(uuid.uuid4()), actor_role="support", action="billing.adjustment_requested",
+                       object_type="billing_adjustment", object_id=str(uuid.uuid4()), before=None,
+                       after={"kind": "minutes", "minutes": 30, "status": "pending"},
+                       reason="Сбой урока по обращению, компенсация минутами")),
+    ("billing", record(actor_id=str(uuid.uuid4()), actor_role="finance", action="billing.adjustment_approved",
+                       object_type="billing_adjustment", object_id=str(uuid.uuid4()), before={"status": "pending"},
+                       after={"status": "applied", "minutes_before": 12, "minutes_after": 42},
+                       reason="Проверено по журналу урока")),
+    ("billing", record(actor_id=str(uuid.uuid4()), actor_role="finance", action="billing.recon_resolved",
+                       object_type="billing_recon_item", object_id=str(uuid.uuid4()), before={"status": "open"},
+                       after={"status": "resolved", "kind": "stars_unmatched"},
+                       reason="Тестовый платёж Telegram, сопоставлен вручную")),
+    ("ai-gateway", record(actor_id=str(uuid.uuid4()), actor_role="operations", action="ai.degradation_updated",
+                          object_type="ai_budget", object_id="degradation",
+                          before={"mode": "auto", "manual_level": None, "level": "economy"},
+                          after={"mode": "manual", "manual_level": "paid_only", "level": "paid_only"},
+                          reason="Потолок месяца на исходе — только подписчики до пополнения")),
+]
+
+
+async def test_sprint8_billing_records_accepted(env) -> None:
+    """Спринт 8 (INTERNAL_API §9): billing — новый издатель журнала; записи денег и ручной деградации ИИ попадают в
+    журнал ровно один раз, цепочка цела; запись от имени billing с чужим издателем — отбрасывается."""
+    assert "billing" in AUDIT_EVENT_PRODUCERS
+    for producer, rec in SPRINT8_RECORDS:
+        ev = make_envelope("admin.audit.recorded.v1", rec, producer=producer)
+        assert_event_conforms(ev)
+        await env.bus.publish(ev)
+        await env.handler("audit.admin_records")(ev)  # повторная доставка — inbox
+    # bot-gateway и payments-edge аудит не пишут
+    for producer in ("telegram-bot-gateway", "payments-edge", "web-pay"):
+        await env.publish("admin.audit.recorded.v1", record(action="billing.refund_completed"), producer)
+    items = sorted(await env.records(), key=lambda i: i["seq"])
+    assert [(i["source"], i["action"]) for i in items] == [(p, rec["action"]) for p, rec in SPRINT8_RECORDS]
+    verify = await env.c.get("/admin/v1/audit/verify", headers=env.read_headers())
+    assert verify.json()["valid"] is True and verify.json()["checked"] == len(SPRINT8_RECORDS)
     assert env.bus.dlq == []
 
 

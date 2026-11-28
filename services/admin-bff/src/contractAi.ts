@@ -28,13 +28,20 @@ import type {
   SessionFlag,
   SessionRow,
   Transcript,
+  AiDegradationView,
+  DegradationEventRow,
 } from "@tilhero/contracts/admin";
 import type {
   Agent,
   AgentId,
   AgentRollout,
   AiBudget,
+  AiDegradation,
   AiModel,
+  AiUnitCosts,
+  AiUnitCostsKind,
+  DegradationEvent,
+  DegradationLevel,
   AiProviderStatus,
   ConfirmedError,
   GoldenCase,
@@ -58,6 +65,10 @@ import {
   SESSION_OUTCOMES,
   SESSION_STATUSES,
   SKILL_OUTCOMES,
+  DEGRADATION_LEVELS,
+  DEGRADATION_MODES,
+  DEGRADATION_REASONS,
+  UNIT_COST_PERIODS,
 } from "./schemas.js";
 
 // ---------------------------------------------------------------- перечисления: вход (schemas.ts) = ai.ts / admin.ts
@@ -789,5 +800,71 @@ export function aiFigures(calls: readonly AiCall[]): Pick<SessionRow, SessionRow
   const p95 = lat.length ? lat[Math.max(0, Math.ceil(lat.length * 0.95) - 1)]! : null;
   return { models, cost_usd: Math.round(cost * 1e6) / 1e6, p95_latency_ms: p95 };
 }
+
+// ---------------------------------------------------------------- контроль ИИ (спринт 8, ai.ts, INTERNAL_API §7)
+
+const LEVELS = DEGRADATION_LEVELS satisfies readonly DegradationLevel[];
+const _exactLevels: [Exact<DegradationLevel, typeof LEVELS>, Exact<AiDegradation["mode"], typeof DEGRADATION_MODES>, Exact<DegradationEvent["reason"], typeof DEGRADATION_REASONS>] = [
+  true,
+  true,
+  true,
+];
+void _exactLevels;
+
+/** Доля потолка месяца с резервами (может превышать 100 — потолок снижен ниже расхода). */
+const SPENT_PCT = C.num(0, 1e6);
+const DEGRADATION_EVENT = C.obj<DegradationEventRow>({
+  seq: C.int(0),
+  from: C.oneOf(LEVELS),
+  to: C.oneOf(LEVELS),
+  mode: C.oneOf(DEGRADATION_MODES),
+  reason: C.oneOf(DEGRADATION_REASONS),
+  spent_percent: SPENT_PCT,
+  // staff_id сотрудника (manual); null — система; имя — withNames (admin-identity staff/lookup)
+  actor: C.nullable(C.uuid),
+  actor_name: C.name,
+  at: C.time,
+});
+const DEGRADATION_OBJ = C.obj<AiDegradationView>({
+  mode: C.oneOf(DEGRADATION_MODES),
+  manual_level: C.nullable(C.oneOf(LEVELS)),
+  level: C.oneOf(LEVELS),
+  economy_at_percent: C.int(1, 100),
+  paid_only_at_percent: C.int(1, 100),
+  spent_percent: SPENT_PCT,
+  month: C.id(/^\d{4}-(0[1-9]|1[0-2])$/, 7),
+  events: C.arr(DEGRADATION_EVENT, 50),
+  updated_at: C.time,
+});
+/**
+ * Уровни деградации ИИ: пороги 1 ≤ economy ≤ paid_only ≤ 100, ручной уровень — только в режиме manual (в auto —
+ * null). Иное — испорченный ответ (503).
+ */
+export const AI_DEGRADATION: Codec<AiDegradationView> = C.map(DEGRADATION_OBJ, DEGRADATION_OBJ.schema, (d, p) => {
+  if (d.economy_at_percent > d.paid_only_at_percent) return bad(`${p}.paid_only_at_percent`);
+  if ((d.mode === "manual") !== (d.manual_level !== null)) return bad(`${p}.manual_level`);
+  return d;
+});
+
+/** USD строкой с 6 знаками после точки ("0.012345") — как отдаёт ai-gateway (ai.ts AiUnitCostsKind). */
+export const USD6 = C.id(/^\d{1,9}\.\d{6}$/, 16);
+const UNIT_KIND = C.obj<AiUnitCostsKind>({
+  sessions: COUNT,
+  ai_sessions: COUNT,
+  cost_usd: USD6,
+  cost_per_ai_session_p50_usd: C.nullable(USD6),
+  cost_per_ai_session_p95_usd: C.nullable(USD6),
+  billable_minutes: COUNT,
+  cost_per_billable_minute_usd: C.nullable(USD6),
+});
+/** Стоимость урока, сценария и урока вдвоём; ИИ-занятий не больше занятий. */
+const UNIT_KIND_CHECKED: Codec<AiUnitCostsKind> = C.map(UNIT_KIND, UNIT_KIND.schema, (k, p) => (k.ai_sessions > k.sessions ? bad(`${p}.ai_sessions`) : k));
+export const AI_UNIT_COSTS: Codec<AiUnitCosts> = C.obj<AiUnitCosts>({
+  period: C.oneOf(UNIT_COST_PERIODS),
+  from: C.time,
+  to: C.time,
+  by_kind: C.obj<AiUnitCosts["by_kind"]>({ lesson: UNIT_KIND_CHECKED, scenario: UNIT_KIND_CHECKED, pair: UNIT_KIND_CHECKED }),
+  degraded_sessions_pct: C.nullable(PCT),
+});
 
 export { BadValue };

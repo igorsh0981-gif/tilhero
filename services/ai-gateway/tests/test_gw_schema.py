@@ -43,7 +43,9 @@ from tilhero_common.testing import (
 )
 
 TABLES = ("agents", "models", "agent_versions", "agent_rollout", "golden_cases", "test_runs", "budget", "usage",
-          "deleted_users", "outbox", "inbox")
+          "deleted_users", "outbox", "inbox",
+          # спринт 8 (миграция 0009): контроль ИИ
+          "learner_tiers", "session_costs", "degradation_events")
 REAL_SEED = Path(SERVICE_DIR) / "migrations" / "seed"
 OVERLAY_0003 = REAL_SEED / "0003"
 OVERLAY_0004 = REAL_SEED / "0004"
@@ -381,3 +383,35 @@ async def test_db_immutability_under_runtime_role(roles_env) -> None:
                                "canary_percent = 0 WHERE agent_id = 'teaching_coach'")
     await _execute(rt, schema, "UPDATE agent_versions SET status = 'archived', archived_at = now() "
                                "WHERE agent_id = 'teaching_coach' AND status = 'published'")
+
+
+async def test_sprint8_migration_reversible(roles_env) -> None:
+    """0009 (спринт 8): откат — degraded → budget_exceeded, таблицы и столбцы контроля ИИ удалены; повторный подъём —
+    значения по умолчанию (0,30 $, auto, 80/90, normal); CHECK порогов и ручного уровня — в БД."""
+    _, roles = roles_env
+    owner = make_settings(database_url=roles.owner_url, db_schema=roles.schema, seed_dir=None)
+    cfg = Config(str(Path(SERVICE_DIR) / "alembic.ini"))
+    cfg.set_main_option("script_location", str(Path(SERVICE_DIR) / "migrations"))
+    cfg.attributes["settings"] = owner
+    await _execute(roles.owner_url, roles.schema,
+                   "INSERT INTO usage (call_id, request_id, caller, agent_id, provider, status, reason, finished_at) "
+                   "VALUES ($1, $2, 'lessons', 'conversation_partner', 'anthropic', 'unavailable', 'degraded', "
+                   "now())", uuid.uuid4(), uuid.uuid4())
+    await asyncio.to_thread(command.downgrade, cfg, "0008")
+    rows = await _fetch(roles.owner_url, roles.schema, "SELECT reason FROM usage")
+    assert [r["reason"] for r in rows] == ["budget_exceeded"]
+    tables = await _fetch(roles.owner_url, roles.schema,
+                          "SELECT table_name FROM information_schema.tables WHERE table_schema = $1", roles.schema)
+    assert not {"learner_tiers", "session_costs", "degradation_events"} & {r["table_name"] for r in tables}
+    await migrate(SERVICE_DIR, owner)
+    [budget] = await _fetch(roles.owner_url, roles.schema,
+                            "SELECT paid_learner_daily_cap_usd::text AS paid, degradation_mode, degradation_level, "
+                            "economy_at_percent, paid_only_at_percent, last_level FROM budget")
+    assert dict(budget) == {"paid": "0.3000", "degradation_mode": "auto", "degradation_level": None,
+                            "economy_at_percent": 80, "paid_only_at_percent": 90, "last_level": "normal"}
+    for bad in ("UPDATE budget SET degradation_mode = 'manual'",  # ручной режим без уровня
+                "UPDATE budget SET degradation_level = 'off'",  # уровень в auto
+                "UPDATE budget SET economy_at_percent = 95",  # economy > paid_only
+                "UPDATE budget SET paid_learner_daily_cap_usd = 1000"):  # больше потолка месяца
+        with pytest.raises(asyncpg.PostgresError):
+            await _execute(roles.owner_url, roles.schema, bad)

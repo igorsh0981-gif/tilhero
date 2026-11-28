@@ -1,5 +1,4 @@
 # TilHero payments-edge (спринт 8, INTERNAL_API §4) — публичный Caddy ТОЛЬКО для колбэков Payme, Click, Uzum.
-# Заготовка потока 0; доводит, документирует (README) и проверяет (`caddy validate` в тесте сборки) поток B.
 # Без кода, БД и шины. TLS терминирует Railway edge — здесь только HTTP на {$PORT}. Https-адреса этого домена —
 # URL колбэков в кабинетах провайдеров (В13). Страниц для браузера нет: покупатель возвращается на сайт оплаты.
 # Env: PORT (8080), BILLING_URL — приватный адрес billing без пути (http://${{billing.RAILWAY_PRIVATE_DOMAIN}}:8118),
@@ -7,8 +6,11 @@
 # Маршруты: /pay/payme (любой метод — billing ответит Payme -32300 на не-POST) → /provider/v1/payme;
 #           POST /pay/click/prepare|complete → /provider/v1/click/prepare|complete;
 #           POST /pay/uzum/check|create|confirm|reverse|status → /provider/v1/uzum/<op>; прочее — 404.
-# Входящий X-Edge-Token клиента заменяется своим; тело ≤ 64 КиБ; таймаут ответа billing 10 с. Access-лог не
-# включён: тела колбэков, подписи и учётные данные (Authorization Payme/Uzum) никуда не пишутся.
+# Входящий X-Edge-Token клиента заменяется своим (значение читается из окружения на каждый запрос и не попадает в
+# конфигурацию), служебные заголовки клиента (внутренний JWT, трассировка, cookie) вырезаются; тело ≤ 64 КиБ
+# (иначе 413); таймаут ответа billing 10 с. Access-лог не включён: тела колбэков, подписи и учётные данные
+# (Authorization Payme/Uzum) никуда не пишутся. Проверка: `caddy validate` в Dockerfile и
+# services/billing/tests/providers/test_payments_edge.py (validate + живой прогон, если есть бинарь caddy).
 {
 	admin off
 	persist_config off
@@ -19,31 +21,56 @@
 		# Caddy), а не крайний левый (его подделывает клиент) — проверка CIDR провайдера (*_ALLOWED_CIDRS).
 		trusted_proxies static 0.0.0.0/0 ::/0
 		client_ip_headers X-Forwarded-For
+		timeouts {
+			read_header 10s
+			read_body 15s
+			write 30s
+			idle 2m
+		}
+	}
+}
+
+# Прокси к billing: свой X-Edge-Token вместо клиентского, без служебных заголовков клиента, без повторов.
+# Тело больше 64 КиБ по Content-Length — 413 ДО проксирования (request_body max_size обрывает поток уже на пути в
+# billing — так остаются только chunked-запросы без длины: billing получит обрыв и запрос не обработает)
+(to_billing) {
+	respond @too_large 413
+	reverse_proxy {$BILLING_URL:http://billing.railway.internal:8118} {
+		header_up X-Edge-Token {env.PAYMENTS_EDGE_TOKEN}
+		header_up -X-Internal-Token
+		header_up -X-Trace-Id
+		header_up -X-Correlation-Id
+		header_up -X-Causation-Id
+		header_up -Idempotency-Key
+		header_up -Cookie
+		header_down -Server
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 10s
+		}
 	}
 }
 
 :{$PORT:8080} {
 	request_body {
-		max_size 64KB
+		max_size 64KiB
 	}
-	header -Server
+	# Content-Length > 65536 (с ведущими нулями тоже)
+	@too_large header_regexp Content-Length ^0*(?:[1-9][0-9]{5,}|[7-9][0-9]{4}|6[6-9][0-9]{3}|65[6-9][0-9]{2}|655[4-9][0-9]|6553[7-9])$
+	header {
+		Cache-Control "no-store"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
 
 	handle /healthz {
-		header Cache-Control "no-store"
 		respond "ok" 200
 	}
 
 	@payme path /pay/payme
 	handle @payme {
 		rewrite * /provider/v1/payme
-		reverse_proxy {$BILLING_URL:http://billing.railway.internal:8118} {
-			header_up X-Edge-Token {$PAYMENTS_EDGE_TOKEN}
-			header_down -Server
-			transport http {
-				dial_timeout 5s
-				response_header_timeout 10s
-			}
-		}
+		import to_billing
 	}
 
 	@click {
@@ -52,14 +79,7 @@
 	}
 	handle @click {
 		rewrite * /provider/v1/click/{re.click.1}
-		reverse_proxy {$BILLING_URL:http://billing.railway.internal:8118} {
-			header_up X-Edge-Token {$PAYMENTS_EDGE_TOKEN}
-			header_down -Server
-			transport http {
-				dial_timeout 5s
-				response_header_timeout 10s
-			}
-		}
+		import to_billing
 	}
 
 	@uzum {
@@ -68,14 +88,7 @@
 	}
 	handle @uzum {
 		rewrite * /provider/v1/uzum/{re.uzum.1}
-		reverse_proxy {$BILLING_URL:http://billing.railway.internal:8118} {
-			header_up X-Edge-Token {$PAYMENTS_EDGE_TOKEN}
-			header_down -Server
-			transport http {
-				dial_timeout 5s
-				response_header_timeout 10s
-			}
-		}
+		import to_billing
 	}
 
 	handle {

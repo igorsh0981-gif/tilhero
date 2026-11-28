@@ -45,9 +45,14 @@ TS = DateTime(timezone=True)
 AGENT_IDS_SQL = ", ".join(f"'{a}'" for a in AGENT_IDS)
 ID_SQL = "'^[a-z0-9][a-z0-9._-]{1,63}$'"
 HEX64_SQL = "'^[0-9a-f]{64}$'"
-# причины unavailable / refused (ai.ts AgentUnavailableReason | AgentRefusedReason; спринт 5: + not_configured)
+# причины unavailable / refused (ai.ts AgentUnavailableReason | AgentRefusedReason; спринт 5: + not_configured;
+# спринт 8: + degraded — уровень paid_only, ученик без подписки)
 REASONS_SQL = ("'ai_disabled', 'not_configured', 'budget_exceeded', 'cost_limit', 'provider_error', 'timeout', "
-               "'invalid_output', 'kids_not_allowed', 'agent_not_active'")
+               "'invalid_output', 'degraded', 'kids_not_allowed', 'agent_not_active'")
+# спринт 8 (миграция 0009): уровни деградации (ai.ts DegradationLevel, DegradationMode, DegradationReason)
+LEVELS_SQL = "'normal', 'economy', 'paid_only', 'off'"
+DEGRADATION_MODES_SQL = "'auto', 'manual'"
+DEGRADATION_REASONS_SQL = "'threshold', 'manual', 'emergency_stop', 'month_reset'"
 # оценка произношения: вызов состоялся (status ok), но оценки нет (PronunciationResult insufficient_evidence)
 INSUFFICIENT_SQL = "'not_recognized', 'low_confidence', 'incomplete'"
 PROVIDERS_SQL = "'anthropic', 'fake', 'whisper', 'azure_speech', 'fake_speech'"
@@ -262,7 +267,8 @@ class TestRunRow(Base):
 
 class BudgetRow(Base):
     """Бюджет ИИ (singleton, id = 1): аварийная остановка, потолок месяца, лимит ученика в день и урока; подлимит
-    оценки произношения в месяц внутри потолка (спринт 5, миграция 0005); потолок парной комнаты (спринт 7, 0008)."""
+    оценки произношения в месяц внутри потолка (спринт 5, миграция 0005); потолок парной комнаты (спринт 7, 0008);
+    спринт 8 (0009): дневной лимит подписчика и настройки уровней деградации (domain/degradation.py)."""
 
     __tablename__ = "budget"
     __table_args__ = (
@@ -274,6 +280,15 @@ class BudgetRow(Base):
         CheckConstraint("speech_monthly_cap_usd >= 0 AND speech_monthly_cap_usd <= monthly_cap_usd",
                         name="ck_budget_speech"),
         CheckConstraint("room_cap_usd >= 0 AND room_cap_usd <= monthly_cap_usd", name="ck_budget_room"),
+        CheckConstraint("paid_learner_daily_cap_usd >= 0 AND paid_learner_daily_cap_usd <= monthly_cap_usd",
+                        name="ck_budget_paid_daily"),
+        CheckConstraint(f"degradation_mode IN ({DEGRADATION_MODES_SQL})", name="ck_budget_degradation_mode"),
+        CheckConstraint(f"(degradation_mode = 'manual') = (degradation_level IS NOT NULL) "
+                        f"AND (degradation_level IS NULL OR degradation_level IN ({LEVELS_SQL}))",
+                        name="ck_budget_degradation_level"),
+        CheckConstraint("economy_at_percent >= 1 AND economy_at_percent <= paid_only_at_percent "
+                        "AND paid_only_at_percent <= 100", name="ck_budget_thresholds"),
+        CheckConstraint(f"last_level IN ({LEVELS_SQL})", name="ck_budget_last_level"),
     )
 
     id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
@@ -287,6 +302,18 @@ class BudgetRow(Base):
     alert_percent: Mapped[int] = mapped_column(Integer, nullable=False)
     updated_by: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
+    # спринт 8 (миграция 0009, В14): дневной лимит ученика с подпиской; learner_daily ≤ paid ≤ monthly (домен)
+    paid_learner_daily_cap_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False,
+                                                               server_default="0.3000")
+    # уровни деградации: режим, ручной уровень (NULL в auto), пороги доли расхода месяца, действующий уровень на момент
+    # последней проверки (смена — degradation_events + ai.degradation.changed.v1)
+    degradation_mode: Mapped[str] = mapped_column(String(8), nullable=False, server_default="auto")
+    degradation_level: Mapped[str | None] = mapped_column(String(16))
+    economy_at_percent: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="80")
+    paid_only_at_percent: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="90")
+    last_level: Mapped[str] = mapped_column(String(16), nullable=False, server_default="normal")
+    last_level_at: Mapped[datetime | None] = mapped_column(TS)
+    degradation_updated_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
 
 
 class UsageRow(Base):
@@ -353,3 +380,64 @@ class DeletedUser(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     deleted_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
+
+
+class LearnerTier(Base):
+    """Тариф ученика (спринт 8) — проекция billing.access.changed.v1 (только издатель billing): `paid` — tier paid и
+    paid_until NULL или в будущем; нет строки — free. Поздние события (changed_at меньше записанного) не применяются;
+    сага удаления удаляет строку."""
+
+    __tablename__ = "learner_tiers"
+    __table_args__ = (CheckConstraint("tier IN ('free', 'paid')", name="ck_learner_tiers_tier"),)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tier: Mapped[str] = mapped_column(String(8), nullable=False)
+    paid_until: Mapped[datetime | None] = mapped_column(TS)
+    changed_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now())
+
+
+class SessionCost(Base):
+    """Завершённое занятие (спринт 8, отчёт «стоимость урока и минуты»): lesson.session.completed.v1 (kind lesson |
+    scenario) и lesson.pair.completed.v1 (kind pair, session_id = room_id, user_id — плательщик комнаты). Стоимость —
+    сумма usage по session_id. Сага удаления обезличивает user_id."""
+
+    __tablename__ = "session_costs"
+    __table_args__ = (
+        CheckConstraint("kind IN ('lesson', 'scenario', 'pair')", name="ck_session_costs_kind"),
+        CheckConstraint("minutes BETWEEN 0 AND 600", name="ck_session_costs_minutes"),
+        CheckConstraint("billable_minutes IS NULL OR billable_minutes BETWEEN 0 AND 240",
+                        name="ck_session_costs_billable"),
+        Index("ix_session_costs_completed", "completed_at"),
+        Index("ix_session_costs_user", "user_id"),
+    )
+
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    billable_minutes: Mapped[int | None] = mapped_column(SmallInteger)
+    completed_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+
+
+class DegradationEventRow(Base):
+    """Смена действующего уровня деградации (спринт 8, ai.ts DegradationEvent): actor — staff_id ручной правки или
+    NULL (система: порог, аварийная остановка, новый месяц)."""
+
+    __tablename__ = "degradation_events"
+    __table_args__ = (
+        CheckConstraint(f"from_level IN ({LEVELS_SQL}) AND to_level IN ({LEVELS_SQL}) AND from_level <> to_level",
+                        name="ck_degradation_events_levels"),
+        CheckConstraint(f"mode IN ({DEGRADATION_MODES_SQL})", name="ck_degradation_events_mode"),
+        CheckConstraint(f"reason IN ({DEGRADATION_REASONS_SQL})", name="ck_degradation_events_reason"),
+        CheckConstraint("spent_percent >= 0 AND spent_percent <= 1000", name="ck_degradation_events_spent"),
+    )
+
+    seq: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    from_level: Mapped[str] = mapped_column(String(16), nullable=False)
+    to_level: Mapped[str] = mapped_column(String(16), nullable=False)
+    mode: Mapped[str] = mapped_column(String(8), nullable=False)
+    reason: Mapped[str] = mapped_column(String(16), nullable=False)
+    spent_percent: Mapped[Decimal] = mapped_column(Numeric(7, 2), nullable=False)
+    actor: Mapped[str | None] = mapped_column(String(64))
+    at: Mapped[datetime] = mapped_column(TS, nullable=False)

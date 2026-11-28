@@ -4,6 +4,7 @@ import { ruGame } from "./ru.game";
 import { ruLessons } from "./ru.lessons";
 import { ruMemory } from "./ru.memory";
 import { ruSocial } from "./ru.social";
+import { ruBilling } from "./ru.billing";
 
 export const ru = {
   ...ruContent,
@@ -11,6 +12,7 @@ export const ru = {
   ...ruMemory,
   ...ruGame,
   ...ruSocial,
+  ...ruBilling,
   // ---- common ----
   "c.continue": "Продолжить",
   "c.back": "Назад",

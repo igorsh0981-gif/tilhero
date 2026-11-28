@@ -12,6 +12,7 @@ import { ChatList, RoleplayView, type Cast } from "./Roleplay";
 import { DoneView, ExplanationView, ItemView, ListenView, NoticeView, OpenAnswerView, RoleplayEndView, StepFrame } from "./steps";
 import { usePlayer } from "./usePlayer";
 import { ReadingStepView } from "../reading/ReadingStep";
+import { AiPlanPlaque } from "../billing/parts";
 
 /**
  * The lesson player (APP-LESS-02…06, AT-40…43): a header with the stages (strip and the current stage in words), the
@@ -82,6 +83,11 @@ export function LessonPlayer({ sessionId, duelId }: { sessionId: string; duelId?
           <Icon name="target" size={20} />
           <p className="sub ink">{t(kid ? "du.playerNoteKid" : "du.playerNote")}</p>
         </div>
+      ) : null}
+      {/* sprint 8 (paywall): ready replies because of the plan — the reason and «О подписке»; with AI — the minutes left
+          after the hold, on the first stage (the number of the start) */}
+      {st.session && step && step.type !== "done" && !duel && (st.session.ai_locked || (st.session.ai_minutes_left != null && st.session.stages[0]?.type === st.session.stage)) ? (
+        <AiPlanPlaque locked={st.session.ai_locked?.reason ?? null} minutesLeft={st.session.ai_minutes_left} kid={kid} />
       ) : null}
       {/* AI off at the start (emergency stop, budget) — from the first step; gone in the roleplay — after the re-read */}
       {showsDegraded(st.session, step) ? (

@@ -31,7 +31,7 @@ from tilhero_common.internal_auth import Actor
 from tilhero_common.testing import internal_headers
 from tilhero_user_admin.domain.queries import period_start
 
-ROW_KEYS = {"user_id", "kind", "guardian_user_id", "display_name", "username", "telegram_id_masked", "locale",
+ROW_KEYS = {"user_id", "kind", "tier", "guardian_user_id", "display_name", "username", "telegram_id_masked", "locale",
             "age_band", "guardian_consent", "status", "onboarding_completed", "goal", "reminders_enabled",
             "children_count", "open_tickets", "tickets_total", "created_at", "last_activity_at"}
 CARD_KEYS = ROW_KEYS | {"consent", "security", "notifications", "plan", "children", "guardian", "refreshed_at"}

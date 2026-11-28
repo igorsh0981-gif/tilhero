@@ -6,7 +6,8 @@ ai.ts SpeechTranscribeMeta / SpeechTranscribeResult). Вызывающий — �
 тестах (`SPEECH_PROVIDER=fake`) — детерминированный `fake_speech` (модель `fake-speech`, 0 $).
 
 Порядок:
-1. Доступность: аварийная остановка (`ai_enabled = false`) → `ai_disabled`; распознаватель не настроен (нет
+1. Доступность: аварийная остановка (`ai_enabled = false`) → `ai_disabled`; уровень деградации `off` (спринт 8) —
+   `ai_disabled` (ручной) / `budget_exceeded` (авто); распознаватель не настроен (нет
    `TTS_URL`) или модель речи выключена в админке → `not_configured` — 503 SPEECH_UNAVAILABLE без вызова tts.
 2. tts: таймаут попытки ≤ 12 с; один повтор при сетевой ошибке и 502/504, если до дедлайна (14,5 с от приёма) осталось
    ≥ 4 с; 503 `RECOGNITION_UNAVAILABLE`, прочие ответы и неверное тело — без повтора (CPU tts не перегружается) →
@@ -41,6 +42,7 @@ from tilhero_ai_gateway.contracts import (
     SpeechTranscribeMeta,
     SpeechTranscribeResult,
 )
+from tilhero_ai_gateway.domain import degradation
 from tilhero_ai_gateway.domain.provider_status import ProviderStatus
 from tilhero_ai_gateway.domain.wav import WavInfo, mean_amplitude, parse_wav
 from tilhero_ai_gateway.models import BudgetRow, DeletedUser, ModelRow, UsageRow
@@ -218,6 +220,8 @@ async def transcribe(deps: TranscribeDeps, meta: SpeechTranscribeMeta, audio: by
             user_id = None  # удалённый ученик: учёт без идентификатора
         budget = await s.get(BudgetRow, 1)
         model = await s.get(ModelRow, tr.model_id)
+        # спринт 8: из уровней деградации распознавание голоса (Whisper, $0) выключает только off
+        level = await degradation.sync(s, deps.clock(), budget=budget) if budget is not None else None
     base: dict[str, Any] = {
         "call_id": call_id, "request_id": meta.request_id, "caller": caller[:32], "agent_id": AGENT_ID,
         "model_id": tr.model_id, "provider": tr.name, "session_id": meta.room_id, "session_kind": SESSION_KIND,
@@ -233,6 +237,8 @@ async def transcribe(deps: TranscribeDeps, meta: SpeechTranscribeMeta, audio: by
 
     if budget is None or not budget.ai_enabled:
         raise await early("ai_disabled")
+    if level is not None and level.level == degradation.OFF:
+        raise await early(level.refusal(True) or "ai_disabled")
     if not tr.ready() or model is None or not model.active:
         raise await early("not_configured")
     async with deps.rt.transaction() as s:

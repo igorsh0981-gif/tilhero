@@ -43,6 +43,8 @@ LEVELS = ("zero", "beginner", "some", "confident")
 PRESETS = ("daily", "weekdays", "three_per_week", "custom")
 # категории настроек ученика (admin.ts NotificationCategory без service; спринт 7: + game, миграция 0003)
 CATEGORIES = ("reminders", "missed", "social", "support", "product", "game")
+# спринт 8 (миграция 0004): тариф ученика — проекция billing.access.changed.v1 (admin.ts LearnerTier)
+TIERS = ("free", "paid")
 TICKET_STATUSES = ("NEW", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED")
 OPEN_TICKET_STATUSES = ("NEW", "IN_PROGRESS", "WAITING_CUSTOMER")
 MASK = "•"
@@ -94,6 +96,9 @@ class LearnerSummary(Base):
         Index("ix_learner_status", "status"),
         Index("ix_learner_guardian", "guardian_user_id", postgresql_where=text("guardian_user_id IS NOT NULL")),
         Index("ix_learner_activity", "last_activity_at"),
+        # спринт 8 (0004): тариф; NULL — событий billing ещё не было («считать free»)
+        CheckConstraint(f"tier IS NULL OR tier IN {_in(TIERS)}", name="ck_learner_tier"),
+        Index("ix_learner_tier", "tier"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
@@ -141,6 +146,10 @@ class LearnerSummary(Base):
     open_tickets: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     tickets_total: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     # --- служебное
+    # --- тариф (спринт 8, billing.access.changed.v1): версия — changed_at события
+    tier: Mapped[str | None] = mapped_column(String(8))
+    paid_until: Mapped[datetime | None] = mapped_column(TS)
+    tier_at: Mapped[datetime | None] = mapped_column(TS)
     refreshed_at: Mapped[datetime | None] = mapped_column(TS)  # последнее чтение из identity-consent
     erased_at: Mapped[datetime | None] = mapped_column(TS)
     updated_at: Mapped[datetime] = mapped_column(TS, nullable=False, server_default=func.now(), onupdate=func.now())

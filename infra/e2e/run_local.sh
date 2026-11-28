@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# TilHero — сквозной локальный стенд спринтов 1–7: все сервисы на реальных PG/Redis/NATS + мок Telegram Bot API.
+# TilHero — сквозной локальный стенд спринтов 1–8: все сервисы на реальных PG/Redis/NATS + мок Telegram Bot API
+# (спринт 8: + Stars), мок «Log In with Telegram» (OIDC), мок исходящих API провайдеров (Click Merchant API), Caddy
+# payments-edge и web-pay.
 # Перенесён из aievent (infra/e2e/run_local.sh) — только то, что нужно TilHero, без туристического контура.
 #
 #   infra/e2e/run_local.sh up        — ключи внутреннего JWT (Ed25519 на издателя, как в prod), bootstrap ролей БД
@@ -8,7 +10,8 @@
 #   infra/e2e/run_local.sh test [аргументы scenario.py] — сброс учёток admin-identity + up + infra/e2e/scenario.py
 #                                      (спринт 1, Mini App) + infra/e2e/scenario_admin.py (спринт 2, админка через
 #                                      admin-bff) + scenario_content.py (3) + scenario_lessons.py (4) + scenario_memory.py
-#                                      (5) + scenario_game.py (6) + scenario_social.py (7, последним); у каждого — PASS/FAIL по шагам и «Итого: N/M PASS»
+#                                      (5) + scenario_game.py (6) + scenario_social.py (7) + scenario_money.py (8, последним,
+#                                      BILLING_ENFORCED=true); у каждого — PASS/FAIL по шагам и «Итого: N/M PASS»
 #   infra/e2e/run_local.sh admin     — сброс учёток admin-identity + up + только infra/e2e/scenario_admin.py
 #   infra/e2e/run_local.sh content   — сброс учёток admin-identity + up + только infra/e2e/scenario_content.py
 #                                      (спринт 3: контент, диагностика, план, практика — Mini App и админка)
@@ -20,6 +23,11 @@
 #   infra/e2e/run_local.sh game      — сброс учёток admin-identity + up + только infra/e2e/scenario_game.py (спринт 6)
 #   infra/e2e/run_local.sh social    — сброс учёток admin-identity + up + только infra/e2e/scenario_social.py (спринт 7:
 #                                      друзья → лига → дуэль → парный урок → реферал → жалоба и санкция → удаление)
+#   infra/e2e/run_local.sh money     — сброс учёток admin-identity + up (BILLING_ENFORCED=true) + только
+#                                      infra/e2e/scenario_money.py (спринт 8: Stars, сайт оплаты, минуты, контроль ИИ,
+#                                      «четыре глаза», сверка, сага, анти-стиринг; в конце — прогон с выключенными флагами)
+#   infra/e2e/run_local.sh reconfig  — без миграций перезапустить только сервисы, у которых изменилось окружение (флаги
+#                                      E2E_*_ENABLED, E2E_BILLING_ENFORCED): так сценарий спринта 8 выключает и включает флаги
 #   infra/e2e/run_local.sh ui [TGID] — дополнительно Mini App (vite :5173) с VITE_DEV_INIT_DATA для Telegram ID TGID
 #   infra/e2e/run_local.sh status    — состояние процессов и /health/ready
 #   infra/e2e/run_local.sh restart [name] — перезапустить один сервис (после правки кода) или всё
@@ -48,7 +56,18 @@
 # Внутренний JWT: у каждого сервиса свой INTERNAL_JWT_PRIVATE_KEY, у всех — INTERNAL_JWT_PUBLIC_KEYS (как stage/prod,
 # infra/scripts/gen_internal_keys.py); seed'ы — .dev/e2e/internal-keys.json (infra/e2e/internal_keys.py, не в git).
 # Все Python-сервисы — ENV=dev (обязательная переменная).
-# Логи: .dev/logs/<name>.log, PID: .dev/run/<name>.pid, перехват Telegram: .dev/e2e/telegram.jsonl.
+# Деньги (спринт 8): billing 8118 (ключ JWT billing у всех — E2E_PUBLIC_KEYS, как setup.py; DEPLOYMENT §11 п. 8);
+# мок Telegram шлёт платёжные обновления в webhook bot-gateway (pre_checkout_query — ответ из тела webhook); мок OIDC
+# 8192 (TELEGRAM_OIDC_BASE telegram-bff, iss = этот адрес); мок провайдеров 8191 (Click Merchant API — CLICK_API_URL
+# billing; колбэки Payme/Click/Uzum сценарий шлёт сам через payments-edge, infra/e2e/mock_payments.py); Caddy
+# payments-edge 8193 → billing /provider/v1/* с X-Edge-Token и web-pay 5175 (статика apps/web-pay/dist + /api/* →
+# telegram-bff /web/v1/*) — бинарь Caddy 2.10: CADDY_BIN, `caddy` в PATH или /tmp/caddy-dl/caddy (в репозиторий не
+# кладётся); без него сценарий идёт в billing и telegram-bff напрямую. Флаги (E2E_*): PAYMENTS_ENABLED, STARS_ENABLED,
+# PAYME_ENABLED, CLICK_ENABLED, UZUM_ENABLED (billing), WEB_PAY_ENABLED (telegram-bff) — по умолчанию true;
+# BILLING_ENFORCED (lessons) — false (сценарии спринтов 4–7 идут без пэйвола), `money` включает. Сервис с изменённым
+# окружением `up`/`reconfig` перезапускает сам (подпись команды — .dev/run/<name>.sig).
+# Логи: .dev/logs/<name>.log, PID: .dev/run/<name>.pid, перехват Telegram: .dev/e2e/telegram.jsonl, провайдеров —
+# .dev/e2e/payments.jsonl.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -84,9 +103,40 @@ export E2E_ADMIN_MFA_ENC_KEY="${E2E_ADMIN_MFA_ENC_KEY:-dGlsaGVyby1lMmUtYWRtaW4tb
 export E2E_ADMIN_BOOTSTRAP_EMAIL="${E2E_ADMIN_BOOTSTRAP_EMAIL:-root.e2e@tilhero.local}"
 export E2E_ADMIN_BOOTSTRAP_PASSWORD="${E2E_ADMIN_BOOTSTRAP_PASSWORD:-Bootstrap-e2e-2026-temp}"
 export E2E_ADMIN_TEST_CHAT_IDS="${E2E_ADMIN_TEST_CHAT_IDS:-5550001001,5550001002}"
+# деньги (спринт 8): dev-значения стенда, заведомо тестовые (не prod). Ключи провайдеров — те же строки, что в
+# services/billing/tests/providers/simulators.py (infra/e2e/mock_payments.py подписывает ими колбэки)
+export E2E_PAYMENTS_EDGE_TOKEN="${E2E_PAYMENTS_EDGE_TOKEN:-e2e-payments-edge-token-0123456789abcdef-local}"
+export E2E_WEB_SESSION_SECRET="${E2E_WEB_SESSION_SECRET:-e2e-web-session-secret-0123456789abcdef-local-xyz}"
+export E2E_WEB_PAY_ORIGIN="${E2E_WEB_PAY_ORIGIN:-http://127.0.0.1:5175}"
+export E2E_OIDC_CLIENT_ID="${E2E_OIDC_CLIENT_ID:-${E2E_BOT_TOKEN%%:*}}"  # Client ID «Log In with Telegram» = ID бота
+export E2E_OIDC_CLIENT_SECRET="${E2E_OIDC_CLIENT_SECRET:-e2e-oidc-client-secret-0123456789abcdef}"
+export E2E_PAYME_MERCHANT_ID="${E2E_PAYME_MERCHANT_ID:-5e730e8e0b852a417aa49ceb}"
+export E2E_PAYME_KEY="${E2E_PAYME_KEY:-test-payme-key-0123456789}"
+export E2E_CLICK_SERVICE_ID="${E2E_CLICK_SERVICE_ID:-12345}"
+export E2E_CLICK_MERCHANT_ID="${E2E_CLICK_MERCHANT_ID:-67890}"
+export E2E_CLICK_MERCHANT_USER_ID="${E2E_CLICK_MERCHANT_USER_ID:-4321}"
+export E2E_CLICK_SECRET_KEY="${E2E_CLICK_SECRET_KEY:-test-click-secret-0123456789}"
+export E2E_UZUM_SERVICE_ID="${E2E_UZUM_SERVICE_ID:-498614}"
+export E2E_UZUM_LOGIN="${E2E_UZUM_LOGIN:-test-uzum-login}"
+export E2E_UZUM_PASSWORD="${E2E_UZUM_PASSWORD:-test-uzum-password-0123456789}"
+# флаги запуска (INTERNAL_API спринта 8 §0.7): стенд — включены; пэйвол — только сценарием спринта 8 (`money`)
+export E2E_PAYMENTS_ENABLED="${E2E_PAYMENTS_ENABLED:-true}"
+export E2E_STARS_ENABLED="${E2E_STARS_ENABLED:-true}"
+export E2E_PAYME_ENABLED="${E2E_PAYME_ENABLED:-true}"
+export E2E_CLICK_ENABLED="${E2E_CLICK_ENABLED:-true}"
+export E2E_UZUM_ENABLED="${E2E_UZUM_ENABLED:-true}"
+export E2E_WEB_PAY_ENABLED="${E2E_WEB_PAY_ENABLED:-true}"
+export E2E_BILLING_ENFORCED="${E2E_BILLING_ENFORCED:-false}"
 ADMIN_BFF_PORT="${ADMIN_BFF_PORT:-8002}"
 MOCK_TG_PORT="${MOCK_TG_PORT:-8190}"
+MOCK_PAY_PORT="${MOCK_PAY_PORT:-8191}"
+MOCK_OIDC_PORT="${MOCK_OIDC_PORT:-8192}"
+EDGE_PORT="${EDGE_PORT:-8193}"
+WEB_PAY_PORT="${WEB_PAY_PORT:-5175}"
 BOTGW_INTERNAL_PORT="${BOTGW_INTERNAL_PORT:-8108}"
+# Caddy 2.10 (payments-edge, web-pay): официальный релиз с проверенной контрольной суммой; в репозиторий не кладётся
+CADDY_BIN="${CADDY_BIN:-$(command -v caddy || true)}"
+if [ -z "$CADDY_BIN" ] && [ -x /tmp/caddy-dl/caddy ]; then CADDY_BIN=/tmp/caddy-dl/caddy; fi
 PG="127.0.0.1:5432"
 KEYS_FILE="$E2E/internal-keys.json"
 
@@ -110,6 +160,7 @@ PY_SERVICES=(
   "tts|services/tts|tilhero_tts.main:app|8115|"
   "memory|services/memory|tilhero_memory.main:app|8116|memory"
   "gamification|services/gamification|tilhero_gamification.main:app|8117|gamification"
+  "billing|services/billing|tilhero_billing.main:app|8118|billing"
 )
 
 log() { printf '\033[1;34m[e2e]\033[0m %s\n' "$*"; }
@@ -171,7 +222,9 @@ svc_env() {
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 AI_GATEWAY_URL=http://127.0.0.1:8114"
       env="$env ASSESSMENT_URL=http://127.0.0.1:8113 LEARNING_PLAN_URL=http://127.0.0.1:8102 DIAGNOSTICS_URL=http://127.0.0.1:8111"
       # спринт 7: дуэли и парные комнаты — связь учеников (social), согласие на голос (identity-consent), member_id
-      env="$env SOCIAL_URL=http://127.0.0.1:8109 IDENTITY_CONSENT_URL=http://127.0.0.1:8101 MEMBER_ID_KEY=$E2E_MEMBER_ID_KEY" ;;
+      env="$env SOCIAL_URL=http://127.0.0.1:8109 IDENTITY_CONSENT_URL=http://127.0.0.1:8101 MEMBER_ID_KEY=$E2E_MEMBER_ID_KEY"
+      # спринт 8: пэйвол (удержание минут при старте урока с ИИ и урока вдвоём; billing недоступен — без ИИ)
+      env="$env BILLING_URL=http://127.0.0.1:8118 BILLING_ENFORCED=$E2E_BILLING_ENFORCED BILLING_TIMEOUT_SECONDS=2" ;;
     memory)  # спринт 5: SCHEDULER_TOKEN — вход n8n memory-tick (на стенде tick вызывает сценарий)
       env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN CATALOG_URL=http://127.0.0.1:8110 ASSESSMENT_URL=http://127.0.0.1:8113"
       env="$env AI_GATEWAY_URL=http://127.0.0.1:8114 IDENTITY_CONSENT_URL=http://127.0.0.1:8101" ;;
@@ -191,7 +244,23 @@ svc_env() {
     telegram-bot-gateway)
       env="$env BOT_TOKEN=$E2E_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET=$E2E_WEBHOOK_SECRET MINIAPP_URL=$E2E_MINIAPP_URL"
       env="$env TELEGRAM_API_BASE=http://127.0.0.1:$MOCK_TG_PORT IDENTITY_CONSENT_URL=http://127.0.0.1:8101"
-      env="$env TELEGRAM_APP_LINK=$E2E_TELEGRAM_APP_LINK HOST=127.0.0.1 INTERNAL_PORT=$BOTGW_INTERNAL_PORT" ;;
+      env="$env TELEGRAM_APP_LINK=$E2E_TELEGRAM_APP_LINK HOST=127.0.0.1 INTERNAL_PORT=$BOTGW_INTERNAL_PORT"
+      # спринт 8: платёжные обновления Stars → billing; внутренний API /internal/v1/stars/* (iss=billing)
+      env="$env BILLING_URL=http://127.0.0.1:8118 TELEGRAM_TEST_ENV=false" ;;
+    billing)  # спринт 8: Stars — через bot-gateway (внутренний порт), колбэки — через payments-edge (X-Edge-Token)
+      env="$env SCHEDULER_TOKEN=$E2E_SCHEDULER_TOKEN PAYMENTS_EDGE_TOKEN=$E2E_PAYMENTS_EDGE_TOKEN TIMEZONE=Asia/Tashkent"
+      env="$env IDENTITY_CONSENT_URL=http://127.0.0.1:8101 GAMIFICATION_URL=http://127.0.0.1:8117"
+      env="$env BOTGW_URL=http://127.0.0.1:$BOTGW_INTERNAL_PORT WEB_PAY_ORIGIN=$E2E_WEB_PAY_ORIGIN"
+      env="$env PAYMENTS_ENABLED=$E2E_PAYMENTS_ENABLED STARS_ENABLED=$E2E_STARS_ENABLED PAYME_ENABLED=$E2E_PAYME_ENABLED"
+      env="$env CLICK_ENABLED=$E2E_CLICK_ENABLED UZUM_ENABLED=$E2E_UZUM_ENABLED TRIAL_ON_ENFORCEMENT=false"
+      # ссылки оплаты — только строятся (https, не открываются); исходящие Click Merchant API — мок провайдеров
+      env="$env PAYME_MERCHANT_ID=$E2E_PAYME_MERCHANT_ID PAYME_LOGIN=Paycom PAYME_KEY=$E2E_PAYME_KEY"
+      env="$env PAYME_CHECKOUT_URL=https://checkout.test.paycom.uz"
+      env="$env CLICK_SERVICE_ID=$E2E_CLICK_SERVICE_ID CLICK_MERCHANT_ID=$E2E_CLICK_MERCHANT_ID"
+      env="$env CLICK_MERCHANT_USER_ID=$E2E_CLICK_MERCHANT_USER_ID CLICK_SECRET_KEY=$E2E_CLICK_SECRET_KEY"
+      env="$env CLICK_PAY_URL=https://my.click.uz/services/pay CLICK_API_URL=http://127.0.0.1:$MOCK_PAY_PORT/click/v2/merchant"
+      env="$env UZUM_SERVICE_ID=$E2E_UZUM_SERVICE_ID UZUM_LOGIN=$E2E_UZUM_LOGIN UZUM_PASSWORD=$E2E_UZUM_PASSWORD"
+      env="$env UZUM_CHECKOUT_URL_TEMPLATE=https://checkout.uzum.e2e.invalid/pay/{service_id}/{order_no}/{amount_tiyin}" ;;
   esac
   echo "$env"
 }
@@ -207,14 +276,23 @@ is_running() {
   [ -f "$RUN/$1.start" ] && [ "$(cat "$RUN/$1.start")" = "$(proc_start "$pid")" ]
 }
 
-# запуск в отдельной группе процессов (uv/npx порождают дочерние) — stop гасит всю группу
+# запуск в отдельной группе процессов (uv/npx порождают дочерние) — stop гасит всю группу. Подпись (команда с
+# окружением, sha256) — в .dev/run/<name>.sig: запущенный сервис с другой подписью (сменились флаги E2E_*) перезапускается
 spawn() {
   local name="$1" dir="$2"; shift 2
-  if is_running "$name"; then log "$name уже запущен (pid $(cat "$RUN/$name.pid"))"; return; fi
+  local sig; sig="$(printf '%s\n' "$dir" "$@" | sha256sum | cut -c1-64)"
+  if is_running "$name"; then
+    if [ "$(cat "$RUN/$name.sig" 2>/dev/null)" = "$sig" ]; then
+      log "$name уже запущен (pid $(cat "$RUN/$name.pid"))"; return
+    fi
+    log "перезапуск $name: изменилось окружение"
+    stop_one "$name"
+  fi
   log "старт $name"
   ( cd "$ROOT/$dir" && exec setsid "$@" >>"$LOGS/$name.log" 2>&1 < /dev/null ) &
   echo $! > "$RUN/$name.pid"
   proc_start $! > "$RUN/$name.start"
+  printf '%s' "$sig" > "$RUN/$name.sig"
 }
 
 wait_ready() {
@@ -253,21 +331,22 @@ migrate() {
     >>"$LOGS/$name.migrate.log" 2>&1 || { tail -n 30 "$LOGS/$name.migrate.log" >&2; die "миграции $name не прошли"; }
 }
 
-up() {
-  bash "$ROOT/infra/dev/stack.sh" up >/dev/null || die "stack.sh up не поднял PG/Redis/NATS"
-  pg_isready -h 127.0.0.1 -p 5432 >/dev/null || die "PostgreSQL недоступен"
-  load_keys
-
+start_mocks() {
   spawn mock-telegram . uv run --quiet python infra/e2e/mock_telegram.py --port "$MOCK_TG_PORT" \
-    --token "$E2E_BOT_TOKEN" --store "$E2E/telegram.jsonl"
+    --token "$E2E_BOT_TOKEN" --store "$E2E/telegram.jsonl" \
+    --webhook "http://127.0.0.1:8107/telegram/webhook" --webhook-secret "$E2E_WEBHOOK_SECRET"
+  # спринт 8: «Log In with Telegram» (OIDC: JWKS, /auth, /token) и исходящие API провайдеров (Click Merchant API)
+  spawn mock-oidc . uv run --quiet python infra/e2e/mock_oidc.py --port "$MOCK_OIDC_PORT" \
+    --client-id "$E2E_OIDC_CLIENT_ID" --client-secret-env E2E_OIDC_CLIENT_SECRET
+  spawn mock-payments . uv run --quiet python infra/e2e/mock_payments.py --port "$MOCK_PAY_PORT" \
+    --store "$E2E/payments.jsonl"
   wait_ready mock-telegram "http://127.0.0.1:$MOCK_TG_PORT/health" 30
+  wait_ready mock-oidc "http://127.0.0.1:$MOCK_OIDC_PORT/health" 30
+  wait_ready mock-payments "http://127.0.0.1:$MOCK_PAY_PORT/health" 30
+}
 
-  bootstrap_db
+start_services() {
   local spec name dir mod port role
-  for spec in "${PY_SERVICES[@]}"; do
-    IFS='|' read -r name dir mod port role <<<"$spec"
-    migrate "$name" "$dir" "$role"
-  done
   for spec in "${PY_SERVICES[@]}"; do
     IFS='|' read -r name dir mod port role <<<"$spec"
     if [[ "$mod" == "-m "* ]]; then  # собственная точка входа (bot-gateway: два порта в одном процессе)
@@ -286,6 +365,8 @@ up() {
     ( cd "$ROOT" && npm run --silent build -w @tilhero/ts-common ) >>"$LOGS/telegram-bff.build.log" 2>&1 \
       || { tail -n 30 "$LOGS/telegram-bff.build.log" >&2; die "сборка ts-common не прошла"; }
   fi
+  # спринт 8: billing (/v1/billing/* — канал miniapp, /web/v1/* — канал web); сайт оплаты: вход через мок OIDC
+  # (TELEGRAM_OIDC_BASE — только dev/test), Origin сайта — Caddy web-pay
   spawn telegram-bff services/telegram-bff env ENV=dev NODE_ENV=development PORT=8001 HOST=127.0.0.1 LOG_LEVEL=info \
     TRUST_PROXY_HOPS=0 BOT_TOKEN="$E2E_BOT_TOKEN" SESSION_JWT_SECRET="$E2E_SESSION_JWT_SECRET" \
     INTERNAL_JWT_PRIVATE_KEY="$(key_of telegram-bff)" INTERNAL_JWT_PUBLIC_KEYS="$E2E_PUBLIC_KEYS" \
@@ -295,7 +376,10 @@ up() {
     NOTIFICATIONS_URL=http://127.0.0.1:8104 EXPERIENCE_URL=http://127.0.0.1:8106 SOCIAL_URL=http://127.0.0.1:8109 \
     CATALOG_URL=http://127.0.0.1:8110 DIAGNOSTICS_URL=http://127.0.0.1:8111 \
     LESSONS_URL=http://127.0.0.1:8112 ASSESSMENT_URL=http://127.0.0.1:8113 TTS_URL=http://127.0.0.1:8115 \
-    MEMORY_URL=http://127.0.0.1:8116 GAMIFICATION_URL=http://127.0.0.1:8117 \
+    MEMORY_URL=http://127.0.0.1:8116 GAMIFICATION_URL=http://127.0.0.1:8117 BILLING_URL=http://127.0.0.1:8118 \
+    WEB_PAY_ENABLED="$E2E_WEB_PAY_ENABLED" WEB_PAY_ORIGIN="$E2E_WEB_PAY_ORIGIN" \
+    TELEGRAM_LOGIN_CLIENT_ID="$E2E_OIDC_CLIENT_ID" TELEGRAM_LOGIN_CLIENT_SECRET="$E2E_OIDC_CLIENT_SECRET" \
+    TELEGRAM_OIDC_BASE="http://127.0.0.1:$MOCK_OIDC_PORT" WEB_SESSION_SECRET="$E2E_WEB_SESSION_SECRET" \
     RATE_LIMIT_SESSION_IP_PER_MIN="${E2E_RATE_LIMIT_SESSION_IP_PER_MIN:-500}" \
     RATE_LIMIT_USER_PER_MIN="${E2E_RATE_LIMIT_USER_PER_MIN:-600}" \
     RATE_LIMIT_PUBLIC_IP_PER_MIN="${E2E_RATE_LIMIT_PUBLIC_IP_PER_MIN:-600}" \
@@ -315,10 +399,30 @@ up() {
     CATALOG_URL=http://127.0.0.1:8110 DIAGNOSTICS_URL=http://127.0.0.1:8111 \
     AI_GATEWAY_URL=http://127.0.0.1:8114 LESSONS_URL=http://127.0.0.1:8112 ASSESSMENT_URL=http://127.0.0.1:8113 \
     MEMORY_URL=http://127.0.0.1:8116 GAMIFICATION_URL=http://127.0.0.1:8117 SOCIAL_URL=http://127.0.0.1:8109 \
+    BILLING_URL=http://127.0.0.1:8118 \
     RATE_LIMIT_LOGIN_IP_PER_MIN="${E2E_RATE_LIMIT_LOGIN_IP_PER_MIN:-60}" \
     RATE_LIMIT_AUTH_STEP_IP_PER_MIN="${E2E_RATE_LIMIT_AUTH_STEP_IP_PER_MIN:-120}" \
     npx tsx src/main.ts
 
+  # спринт 8: Caddy payments-edge (колбэки провайдеров → billing с X-Edge-Token) и web-pay (сайт оплаты)
+  if [ -n "$CADDY_BIN" ]; then
+    spawn payments-edge . env PORT="$EDGE_PORT" BILLING_URL=http://127.0.0.1:8118 \
+      PAYMENTS_EDGE_TOKEN="$E2E_PAYMENTS_EDGE_TOKEN" "$CADDY_BIN" run --config apps/payments-edge/Caddyfile \
+      --adapter caddyfile
+    if [ ! -f "$ROOT/apps/web-pay/dist/index.html" ]; then
+      log "сборка web-pay → apps/web-pay/dist"
+      ( cd "$ROOT" && npm run --silent build -w @tilhero/web-pay ) >>"$LOGS/web-pay.build.log" 2>&1 \
+        || { tail -n 30 "$LOGS/web-pay.build.log" >&2; die "сборка web-pay не прошла"; }
+    fi
+    spawn web-pay . env PORT="$WEB_PAY_PORT" BFF_URL=http://127.0.0.1:8001 WEB_ROOT="$ROOT/apps/web-pay/dist" \
+      "$CADDY_BIN" run --config apps/web-pay/Caddyfile --adapter caddyfile
+  else
+    log "Caddy не найден (CADDY_BIN): payments-edge и web-pay не подняты — сценарий спринта 8 пойдёт напрямую"
+  fi
+}
+
+wait_all() {
+  local spec name dir mod port role
   for spec in "${PY_SERVICES[@]}"; do
     IFS='|' read -r name dir mod port role <<<"$spec"
     wait_ready "$name" "http://127.0.0.1:$port/health/ready" 90
@@ -326,7 +430,36 @@ up() {
   wait_ready telegram-bot-gateway "http://127.0.0.1:$BOTGW_INTERNAL_PORT/health/ready" 30
   wait_ready telegram-bff "http://127.0.0.1:8001/health/ready" 90
   wait_ready admin-bff "http://127.0.0.1:$ADMIN_BFF_PORT/health/ready" 90
+  if [ -n "$CADDY_BIN" ]; then
+    wait_ready payments-edge "http://127.0.0.1:$EDGE_PORT/healthz" 30
+    wait_ready web-pay "http://127.0.0.1:$WEB_PAY_PORT/healthz" 30
+  fi
+}
+
+up() {
+  bash "$ROOT/infra/dev/stack.sh" up >/dev/null || die "stack.sh up не поднял PG/Redis/NATS"
+  pg_isready -h 127.0.0.1 -p 5432 >/dev/null || die "PostgreSQL недоступен"
+  load_keys
+  start_mocks
+
+  bootstrap_db
+  local spec name dir mod port role
+  for spec in "${PY_SERVICES[@]}"; do
+    IFS='|' read -r name dir mod port role <<<"$spec"
+    migrate "$name" "$dir" "$role"
+  done
+  start_services
+  wait_all
   log "стенд поднят; логи: $LOGS"
+}
+
+reconfig() {
+  # без bootstrap ролей и миграций: перезапуск только сервисов с изменённым окружением (флаги E2E_*)
+  load_keys
+  start_mocks
+  start_services
+  wait_all
+  log "окружение применено (флаги: PAYMENTS=$E2E_PAYMENTS_ENABLED STARS=$E2E_STARS_ENABLED WEB_PAY=$E2E_WEB_PAY_ENABLED BILLING_ENFORCED=$E2E_BILLING_ENFORCED)"
 }
 
 reset_admin() {
@@ -380,8 +513,9 @@ stop_one() {
 
 stop() {
   local f
-  for f in miniapp admin-bff telegram-bff gamification memory tts lessons assessment ai-gateway diagnostics catalog user-admin admin-identity notifications telegram-bot-gateway social support \
-           learning-plan identity-consent experience-config audit mock-telegram; do
+  for f in miniapp web-pay payments-edge admin-bff telegram-bff billing gamification memory tts lessons assessment ai-gateway \
+           diagnostics catalog user-admin admin-identity notifications telegram-bot-gateway social support \
+           learning-plan identity-consent experience-config audit mock-payments mock-oidc mock-telegram; do
     stop_one "$f"
   done
 }
@@ -390,9 +524,12 @@ status() {
   local spec name dir mod port role
   printf '%-22s %-8s %s\n' service pid ready
   for spec in "${PY_SERVICES[@]}" "telegram-bot-gateway(int)|.|.|$BOTGW_INTERNAL_PORT|" "telegram-bff|.|.|8001|" \
-              "admin-bff|.|.|$ADMIN_BFF_PORT|" "mock-telegram|.|.|$MOCK_TG_PORT|" "miniapp|.|.|5173|"; do
+              "admin-bff|.|.|$ADMIN_BFF_PORT|" "mock-telegram|.|.|$MOCK_TG_PORT|" "mock-oidc|.|.|$MOCK_OIDC_PORT|" \
+              "mock-payments|.|.|$MOCK_PAY_PORT|" "payments-edge|.|.|$EDGE_PORT|" "web-pay|.|.|$WEB_PAY_PORT|" \
+              "miniapp|.|.|5173|"; do
     IFS='|' read -r name dir mod port role <<<"$spec"
     local path="/health/ready"; [[ "$name" == mock-* ]] && path="/health"; [ "$name" = miniapp ] && path="/"
+    [[ "$name" == payments-edge || "$name" == web-pay ]] && path="/healthz"
     local pid="-"; is_running "${name%(int)}" && pid="$(cat "$RUN/${name%(int)}.pid")"
     local code; code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port$path" 2>/dev/null || true)"
     [ "$code" = "000" ] || [ -z "$code" ] && code=down
@@ -430,16 +567,24 @@ case "${1:-up}" in
     if [ -f infra/e2e/scenario_social.py ]; then
       echo; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_social.py || rc=1
     fi
+    # сценарий спринта 8 — со свежей bootstrap-учёткой и пэйволом (lessons перезапускается с BILLING_ENFORCED=true)
+    if [ -f infra/e2e/scenario_money.py ]; then
+      echo; reset_admin; E2E_BILLING_ENFORCED=true up; cd "$ROOT"
+      E2E_BILLING_ENFORCED=true uv run --quiet python infra/e2e/scenario_money.py || rc=1
+    fi
     exit $rc ;;
   content) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_content.py "$@" ;;
   lessons) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_lessons.py "$@" ;;  # уборка — в шаге L00
   memory) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_memory.py "$@" ;;  # уборка — в шаге M00
   game) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_game.py "$@" ;;  # спринт 6
   social) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_social.py "$@" ;;  # спринт 7
+  money) shift; export E2E_BILLING_ENFORCED=true; reset_admin; up; cd "$ROOT"
+    uv run --quiet python infra/e2e/scenario_money.py "$@" ;;  # спринт 8; выключенные флаги — шаг M16 (reconfig)
+  reconfig) reconfig ;;
   admin) shift; reset_admin; up; cd "$ROOT"; uv run --quiet python infra/e2e/scenario_admin.py "$@" ;;  # уборка — в шаге A00
   stop|down) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi ;;
   restart) shift; if [ -n "${1:-}" ]; then stop_one "$1"; else stop; fi; up ;;
   status) status ;;
-  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|content [аргументы]|lessons [аргументы]|memory [аргументы]|game [аргументы]|social [аргументы]|ui [tg_id]|status|stop [name]|restart [name]"
+  *) echo "usage: $0 up|test [аргументы scenario.py]|admin [аргументы scenario_admin.py]|content [аргументы]|lessons [аргументы]|memory [аргументы]|game [аргументы]|social [аргументы]|money [аргументы]|reconfig|ui [tg_id]|status|stop [name]|restart [name]"
      exit 2 ;;
 esac

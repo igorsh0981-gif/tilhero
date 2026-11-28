@@ -22,6 +22,8 @@ BASE = "/admin/v1/experience"
 NAV_TS = Path(SERVICE_DIR).parents[1] / "apps" / "admin-web" / "src" / "state" / "nav.ts"
 GAME = ["heroes", "game", "events"]
 COMMUNITY = ["friends", "moderation", "referrals", "leagues", "pair_rooms"]
+# спринт 8: группа «Деньги» (версия 1.8.0, миграция 0010, test_admin_menu_8.py) — в 1.7.0 её ещё нет
+MONEY = ["tariffs", "payments", "adjustments", "reconciliation", "finance"]
 
 
 def migration() -> ModuleType:
@@ -76,8 +78,8 @@ def test_community_group_right_after_game() -> None:
     assert menu.index("friends") == menu.index("events") + 1
     assert menu[menu.index("heroes"):menu.index("pair_rooms") + 1] == GAME + COMMUNITY
     # все разделы admin-web на своих местах, ничего не выключено; memory — сразу после content (группа продукта)
-    assert {MENU_ALIASES.get(s, s) for s in menu} == {MENU_ALIASES.get(s, s) for s in ADMIN_MENU}
-    assert set(group_of) == set(menu)
+    assert {MENU_ALIASES.get(s, s) for s in menu} == {MENU_ALIASES.get(s, s) for s in ADMIN_MENU} - set(MONEY)
+    assert set(group_of) - set(MONEY) == set(menu)
     assert menu.index("memory") == menu.index("content") + 1
     assert all(item["enabled"] for item in m.PAYLOAD["layout"]["menu"])
     # остальное — как в сиде 1.0.0
@@ -103,7 +105,7 @@ def test_seed_100_puts_community_last() -> None:
     assert not set(COMMUNITY) & set(menu)
     group_of = nav_groups()
     # orderedItems: разделы конфигурации, затем не упомянутые — в порядке по умолчанию
-    full = menu + [s for s in group_of if s not in menu]
+    full = menu + [s for s in group_of if s not in menu and s not in MONEY]
     assert [g for g, _ in groups_in_order(full, group_of)][-1] == "social"
 
 
@@ -111,6 +113,8 @@ def test_seed_100_puts_community_last() -> None:
 
 
 async def test_version_170_active_after_deploy(env) -> None:
+    # спринт 8: поверх 1.7.0 выкладка ставит 1.8.0 (0010) — состояние после выкладки 7 — откат к 0009
+    await _alembic(env, "downgrade", "0009")
     state = await admin_state(env)
     assert (state["current"]["version"], state["previous_version"]) == ("1.7.0", "1.0.0")
     assert state["current"]["activated_by"] == "system:release" and state["current"]["kind"] == "activate"
@@ -123,8 +127,9 @@ async def test_version_170_active_after_deploy(env) -> None:
     assert (await env.current("miniapp")).json()["version"] == "1.0.0"
     # событие активации и аудит — как у сотрудника, от имени выкладки
     events = [e for e in env.migration_events
-              if e.event_type == "experience.config.activated.v1"
-              or (e.event_type == "admin.audit.recorded.v1" and e.payload["object_type"] == "experience_config")]
+              if (e.event_type == "experience.config.activated.v1" and e.payload["version"] == "1.7.0")
+              or (e.event_type == "admin.audit.recorded.v1" and e.payload["object_type"] == "experience_config"
+                  and e.payload["object_id"] == "admin@1.7.0")]
     assert sorted((e.event_type, e.payload.get("action") or "") for e in events) == [
         ("admin.audit.recorded.v1", "config.create"), ("admin.audit.recorded.v1", "config.publish"),
         ("experience.config.activated.v1", "")]
@@ -183,7 +188,7 @@ async def test_downgrade_and_reapply(env) -> None:
     state = await admin_state(env)
     assert (state["current"]["version"], state["previous_version"]) == ("1.0.0", None)
     assert await version_status(env, "1.7.0") == 404
-    await _alembic(env, "upgrade", "head")
+    await _alembic(env, "upgrade", "0009")
     state = await admin_state(env)
     assert (state["current"]["version"], state["previous_version"]) == ("1.7.0", "1.0.0")
 

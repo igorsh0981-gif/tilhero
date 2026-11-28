@@ -14,6 +14,19 @@ permissions:
 
 # Цели матриц — сервисы, которые есть в репозитории (docs/ARCHITECTURE.md §«Каталог сервисов»).
 # Новый сервис добавляется сразу в python, mypy и docker (его Dockerfile — infra/docker/python.Dockerfile как образец).
+#
+# Спринт 8:
+# - Caddy 2.10 (официальный релиз, SHA-512 закреплена ниже — из caddy_2.10.2_checksums.txt релиза) → CADDY_BIN:
+#   services/billing (tests/providers/test_payments_edge.py — validate/adapt и живой прогон payments-edge) и apps/web-pay
+#   (test/caddy.test.ts — заголовки ответа сайта оплаты). Без бинаря эти тесты пропускали бы живую часть.
+# - Анти-стиринг (AT-100): Mini App — после `npm run build` ещё раз test/antiSteering.test.ts с
+#   ANTI_STEERING_REQUIRE_DIST=1 (нет dist/ — падение, а не пропуск); тексты бота —
+#   apps/telegram-bot-gateway/tests/test_botgw_stars_webhook.py::test_bot_texts_have_no_steering, шаблоны уведомлений —
+#   services/notifications/tests/test_notifications_billing.py (анти-стиринг каталога шаблонов) — идут в матрице python
+#   (pytest <цель>); заметка «Что нового» — services/experience-config/tests/test_release_8.py.
+env:
+  CADDY_VERSION: "2.10.2"
+  CADDY_SHA512: "747df7ee74de188485157a383633a1a963fd9233b71fbb4a69ddcbcc589ce4e2cc82dacf5dbbe136cb51d17e14c59daeb5d9bc92487610b0f3b93680b2646546"
 
 jobs:
   python:
@@ -76,6 +89,18 @@ jobs:
           nohup nats-server -js -sd /tmp/nats -m 8222 >/tmp/nats.log 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8222/healthz && break; sleep 1; done
       - run: uv sync --frozen --all-packages
+      - name: Caddy ${{ env.CADDY_VERSION }} (CADDY_BIN, проверка SHA-512)
+        if: matrix.target == 'services/billing'
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/caddy"
+          mkdir -p "$dir"
+          url="https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$dir/caddy.tar.gz" "$url"
+          echo "${CADDY_SHA512}  $dir/caddy.tar.gz" | sha512sum -c -
+          tar -xzf "$dir/caddy.tar.gz" -C "$dir" caddy
+          "$dir/caddy" version
+          echo "CADDY_BIN=$dir/caddy" >> "$GITHUB_ENV"
       - name: Lint
         run: uv run ruff check ${{ matrix.target }}
       - name: Contracts are up to date
@@ -157,6 +182,18 @@ jobs:
       - run: npm ci
       - run: uv sync --frozen --package tilhero-common
         # ts-common проверяет совместимость внутреннего JWT с Python-реализацией
+      - name: Caddy ${{ env.CADDY_VERSION }} (CADDY_BIN, проверка SHA-512)
+        if: matrix.workspace == 'apps/web-pay'
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/caddy"
+          mkdir -p "$dir"
+          url="https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$dir/caddy.tar.gz" "$url"
+          echo "${CADDY_SHA512}  $dir/caddy.tar.gz" | sha512sum -c -
+          tar -xzf "$dir/caddy.tar.gz" -C "$dir" caddy
+          "$dir/caddy" version
+          echo "CADDY_BIN=$dir/caddy" >> "$GITHUB_ENV"
       - name: Typecheck
         working-directory: ${{ matrix.workspace }}
         run: npx tsc -p tsconfig.json --noEmit
@@ -167,6 +204,12 @@ jobs:
         if: matrix.workspace != 'packages/ts-common'
         working-directory: ${{ matrix.workspace }}
         run: npm run build -w @tilhero/ts-common --prefix ../.. && npm run build
+      - name: Anti-steering (Mini App build — без сайта оплаты, Payme/Click/Uzum и сумов)
+        if: matrix.workspace == 'apps/telegram-miniapp'
+        working-directory: ${{ matrix.workspace }}
+        env:
+          ANTI_STEERING_REQUIRE_DIST: "1"
+        run: npx vitest run test/antiSteering.test.ts
       - name: E2E (Playwright, mocked BFF)
         if: matrix.workspace == 'apps/telegram-miniapp' || matrix.workspace == 'apps/admin-web'
         working-directory: ${{ matrix.workspace }}

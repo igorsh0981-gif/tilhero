@@ -33,7 +33,8 @@ def test_settings_defaults_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
     s = make_settings("x")
     assert s.deletion_retry_schedule == DEFAULT and s.deletion_stuck_hours == 24
     assert s.deletion_domains == ["learning-plan", "social", "notifications", "support", "experience-config", "catalog",
-                                  "diagnostics", "lessons", "assessment", "ai-gateway", "memory", "gamification"]
+                                  "diagnostics", "lessons", "assessment", "ai-gateway", "memory", "gamification",
+                                  "billing"]
     monkeypatch.setenv("DELETION_RETRY_SCHEDULE_MINUTES", "1, 2,3")
     monkeypatch.setenv("DELETION_STUCK_HOURS", "0.5")
     monkeypatch.setenv("DELETION_SWEEP_SECONDS", "5")

@@ -208,7 +208,8 @@ async def test_ai_disabled_and_not_configured(env) -> None:
     assert (res["status"], res["reason"], res["provider"], res["cost_usd"], res["words"]) == (
         "unavailable", "ai_disabled", None, 0, [])
     status = (await env.c.get("/internal/v1/status", headers=env.svc("memory"))).json()
-    assert status == {"ai_available": False, "speech_available": False}
+    assert status == {"ai_available": False, "speech_available": False, 
+    "level": "off", "free_available": False, "paid_available": False}
     await env.c.post("/admin/v1/ai/emergency-stop", json={"enabled": False, "reason": "Снята"},
                      headers=env.h(OPERATIONS))
     # модель речи выключена в админке → not_configured, функция скрыта
@@ -242,8 +243,10 @@ async def test_budget_by_audio_duration(env) -> None:
     rows = await env.usage()
     assert [str(x["cost_usd"]) for x in rows] == ["0.020000", "0.020000", "0.000000", "0.020000"]
     await env.set_budget(monthly_cap_usd=0.06)
+    # спринт 8: потолок месяца исчерпан — уровень off (авто)
     assert (await env.c.get("/internal/v1/status", headers=env.svc("memory"))).json() == {
-        "ai_available": True, "speech_available": False}
+        "ai_available": True, "speech_available": False, 
+        "level": "off", "free_available": False, "paid_available": False}
     assert (await env.speech(WAV, speech_meta())).json()["reason"] == "budget_exceeded"
 
 
@@ -266,7 +269,8 @@ async def test_speech_monthly_sub_cap(env) -> None:
     await _speech_spend(env, "4.97")
     await _speech_spend(env, "10", agent="conversation_partner")  # агенты — в общий потолок, не в подлимит речи
     assert (await env.c.get("/internal/v1/status", headers=env.svc("memory"))).json() == {
-        "ai_available": True, "speech_available": True}
+        "ai_available": True, "speech_available": True, 
+        "level": "normal", "free_available": True, "paid_available": True}
     assert (await env.speech(WAV)).json()["status"] == "ok"  # 4,97 + 0,02 ≤ 5
     res = (await env.speech(WAV)).json()  # 4,99 + 0,02 > 5
     assert (res["status"], res["reason"], res["provider"]) == ("unavailable", "budget_exceeded", None)
@@ -275,7 +279,8 @@ async def test_speech_monthly_sub_cap(env) -> None:
         "unavailable", "budget_exceeded", 0, 0)
     await _speech_spend(env, "0.01")  # ровно 5 $ потрачено → функция скрыта
     status = (await env.c.get("/internal/v1/status", headers=env.svc("memory"))).json()
-    assert status == {"ai_available": True, "speech_available": False}
+    assert status == {"ai_available": True, "speech_available": False, 
+    "level": "normal", "free_available": True, "paid_available": True}
     summary = (await env.c.get("/admin/v1/ai/usage/summary", headers=env.h(OPERATIONS))).json()
     assert summary["speech"]["cap_usd"] == 5.0 and summary["speech"]["speech_available"] is False
     assert summary["speech"]["spent_usd"] == pytest.approx(5.0)

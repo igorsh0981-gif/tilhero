@@ -11,7 +11,7 @@ from tilhero_ai_gateway.api.common import now_of
 from tilhero_ai_gateway.api.internal import router as internal_router
 from tilhero_ai_gateway.api.speech import SpeechBodyMiddleware
 from tilhero_ai_gateway.api.speech import router as speech_router
-from tilhero_ai_gateway.consumers import CONSUMER_USER_DELETED, DELETION_REQUESTED, deletion_handler
+from tilhero_ai_gateway.consumers import configure as configure_consumers
 from tilhero_ai_gateway.domain import stand
 from tilhero_ai_gateway.domain.invoke import Deps
 from tilhero_ai_gateway.domain.provider_status import ProviderStatus
@@ -43,7 +43,7 @@ def build_app(settings: Settings | None = None, runtime: Runtime | None = None, 
     transcriber = make_transcriber(settings, runtime)
 
     def configure(rt: Runtime) -> None:
-        rt.add_consumer(CONSUMER_USER_DELETED, [DELETION_REQUESTED], deletion_handler(rt))
+        configure_consumers(rt)
 
         async def on_start(rt: Runtime) -> None:
             if rt.db is None:

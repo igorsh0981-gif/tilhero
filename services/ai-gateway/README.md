@@ -119,6 +119,36 @@ pattern, anyOf; прочие ключевые слова отклоняются 
   `0008`. `PUT /admin/v1/ai/budget` принимает `room_cap_usd` (необязателен — не передан, прежний; больше потолка месяца
   → 422 `BUDGET_INVALID {fields: [room_cap_usd]}`), `GET` всегда его отдаёт.
 
+## Спринт 8: контроль ИИ (INTERNAL_API §7, ai.ts «Контроль ИИ», AT-98)
+- **Тариф ученика** — проекция `billing.access.changed.v1` (только от billing) в `learner_tiers`: `paid` — tier paid и
+  `paid_until` NULL или в будущем; нет строки — `free`; позднее событие (меньший `changed_at`) тариф не откатывает.
+- **Дневной лимит по тарифу:** free — `learner_daily_cap_usd` (0,05), paid — `paid_learner_daily_cap_usd` (0,30);
+  `learner_daily ≤ paid_daily ≤ monthly` (иначе 422 `BUDGET_INVALID {fields: [paid_learner_daily_cap_usd]}`).
+- **Уровни деградации** (domain/degradation.py): аварийная остановка → `off`; `manual` → заданный; `auto` — по доле
+  расхода месяца UTC с резервами: `< economy_at_percent` (80) — `normal`, `< paid_only_at_percent` (90) — `economy`,
+  `< 100 %` — `paid_only`, иначе `off`. `economy` (и `paid_only` у подписчика) — попытки сразу резервной моделью
+  версии; `paid_only` у ученика free — `unavailable: degraded` до провайдера ($0, строка usage); `off` — `ai_disabled`
+  (остановка или ручной off) / `budget_exceeded` (авто). Золотые прогоны — только потолок месяца; произношение и голос
+  комнаты (Whisper) — только `off`. Тариф проверяется по `user_id` вызова: коуч оплаченной комнаты урока вдвоём
+  вызывается от имени плательщика (lessons, поток C) — бесплатный приглашённый его не останавливает.
+- **Смена действующего уровня** фиксируется там, где её видно (вызов, `/status`, чтение и правка настроек, бюджет,
+  остановка): строка `degradation_events` + `ai.degradation.changed.v1 {from, to, mode, reason, spent_percent, at}` в
+  одной транзакции, под блокировкой строки бюджета (параллельные наблюдатели пишут смену один раз). Основание:
+  `threshold`, `manual` (правка сотрудником, `actor`), `emergency_stop` (вход и выход), `month_reset` (снижение из-за
+  нового месяца). Ручная правка — ещё аудит `ai.degradation_updated` (было/стало с действующим уровнем).
+- **`GET /internal/v1/status`** — `AiStatus {ai_available, speech_available, level, free_available (normal|economy),
+  paid_available (+ paid_only)}`; lessons при старте урока с удержанием billing смотрит `paid_available`.
+- **Стоимость занятий:** consumers `lesson.session.completed.v1` (kind lesson | scenario) и `lesson.pair.completed.v1`
+  (kind pair, session_id = room_id, ученик — плательщик комнаты) → `session_costs`; стоимость — сумма `usage` по
+  session_id. `ai_sessions` — есть успешный вызов или списаны ИИ-минуты; деградированные — есть отказ
+  `degraded | budget_exceeded | ai_disabled` (занятие, сразу начатое без ИИ по статусу, вызовов не делает — его видно
+  в отчётах billing).
+- Миграция `0009`: `budget` + `paid_learner_daily_cap_usd`, `degradation_mode`, `degradation_level`,
+  `economy_at_percent`, `paid_only_at_percent`, `last_level`, `last_level_at`, `degradation_updated_at`;
+  `learner_tiers`, `session_costs`, `degradation_events`; `usage.reason` + `degraded`. Откат: `degraded` →
+  `budget_exceeded`.
+- Сага: `learner_tiers` — удаляется, `session_costs.user_id` → NULL.
+
 ## Admin API (`/admin/v1/ai`, только admin-bff с `actor`; права — здесь, step-up — в admin-bff)
 | Метод | Путь | Право | Ответ / ошибки |
 |---|---|---|---|
@@ -139,6 +169,9 @@ pattern, anyOf; прочие ключевые слова отклоняются 
 | GET | `/provider` | ai.read | `AiProviderStatus` — ключ только «задан / не задан», ошибка — код и время; `speech {provider, key_configured, region, last_error}` (ключ Azure не показывается никогда; регион — как введён) |
 | GET / PUT | `/budget` / `AiBudget`-поля `& {reason}` (`updated_at?` — защита от гонки, `ai_enabled?`; `speech_monthly_cap_usd` обязателен) | costs.read / costs.manage | `AiBudget` (+ `speech_monthly_cap_usd`); 409 `BUDGET_CONFLICT`; 422 `BUDGET_INVALID {fields}` (подлимит речи > потолка месяца) |
 | POST | `/emergency-stop` `{enabled, reason}` | costs.manage | `AiBudget`; `enabled: true` — остановка включена (ИИ выключен) |
+| GET | `/degradation` | costs.read | `AiDegradation {mode, manual_level, level, economy_at_percent, paid_only_at_percent, spent_percent, month, events (≤ 20, новые сверху), updated_at}` (спринт 8) |
+| PUT | `/degradation` `AiDegradationUpdate {mode, manual_level, economy_at_percent, paid_only_at_percent, reason 10..500}` | costs.manage + **step-up в домене** (`X-Step-Up: ok` от admin-bff или claim `step_up`) | `AiDegradation`; 403 `STEP_UP_REQUIRED {permission}`; 422 `DEGRADATION_INVALID {fields}` (1 ≤ economy ≤ paid_only ≤ 100; manual_level — только и обязательно в manual); `Idempotency-Key` |
+| GET | `/unit-costs?period=week\|month` | costs.read \| dashboard.read | `AiUnitCosts {period, from, to, by_kind {lesson, scenario, pair}, degraded_sessions_pct}` (USD — строки с 6 знаками) |
 | GET | `/usage/summary?period=day\|week\|month` | costs.read \| dashboard.read | `AiUsageSummary` (+ `speech {calls, audio_minutes, spent_usd, speech_available, cap_usd}` — вызовы `pronunciation_coach` за период, минуты оценённого аудио, расход; входит в `spent_usd`) |
 | GET | `/usage?session_id=\|agent_id=&cursor=&limit=` | costs.read (с `session_id` — ещё qa.read) | `Page<AiCall>` (без user_id и текстов; `audio_ms` — длительность аудио речи, у LLM 0; у речи `status ok` бывает с причиной insufficient_evidence) |
 | GET | `/usage/by-session?session_id=<id>&session_id=…` (≤ 50) | qa.read \| costs.read | `{items: [{session_id, models, cost_usd, p95_latency_ms}]}` — для журнала «Контроля диалогов»; сессии без вызовов — нули; 422 `TOO_MANY_SESSIONS` |
@@ -324,7 +357,10 @@ ai-gateway. Пустые переменные — «не настроено»: `
 Azure F0 — 5 ч в месяц, шлюз его не учитывает и считает по цене).
 
 ## События
-- Публикует: `admin.audit.recorded.v1` (аудит), `user.domain.deleted.v1 {domain: "ai-gateway", mode: "anonymized"}`.
+- Публикует: `admin.audit.recorded.v1` (аудит), `user.domain.deleted.v1 {domain: "ai-gateway", mode: "anonymized"}`,
+  `ai.degradation.changed.v1` (спринт 8, смена действующего уровня).
+- Потребляет (спринт 8): `billing.access.changed.v1` (только billing) → `learner_tiers`; `lesson.session.completed.v1`,
+  `lesson.pair.completed.v1` (только lessons) → `session_costs`.
 - Потребляет: `user.deletion.requested.v1` (только от identity-consent; inbox) → `usage.user_id = NULL` (вызовы агентов и
   оценки произношения), `deleted_users`, кеш результатов вызовов и оценок произношения ученика в Redis стирается (аудио
   не хранилось нигде).
@@ -334,7 +370,8 @@ Azure F0 — 5 ч в месяц, шлюз его не учитывает и сч
 `audio_usd_per_hour`: azure-speech-pa 1.32, fake-speech 0 — миграция 0004; whisper-base-en 0 — миграция 0006),
 `agent_versions` (триггер неизменяемости),
 `agent_rollout` (только LLM-агенты), `golden_cases`, `test_runs` (завершённый неизменяем), `budget`, `usage` (только
-метаданные вызова; речь — + `audio_ms`), `deleted_users`, `outbox`, `inbox`.
+метаданные вызова; речь — + `audio_ms`), `deleted_users`, `learner_tiers`, `session_costs`, `degradation_events`
+(спринт 8), `outbox`, `inbox`.
 
 ## Настройки
 `AI_PROVIDER`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` (тесты), `AI_ALLOW_FAKE_TEST_PUBLISH` (dev/test; на стенде ещё
@@ -346,6 +383,9 @@ Azure F0 — 5 ч в месяц, шлюз его не учитывает и сч
 
 ## Runbook
 - **Авария провайдера / расходы:** `POST /admin/v1/ai/emergency-stop {enabled: true}` — все вызовы `ai_disabled`.
+- **Потолок месяца на исходе (спринт 8):** `PUT /admin/v1/ai/degradation {mode: manual, manual_level: paid_only}`
+  (TOTP) — ИИ только подписчикам и резервной моделью; возврат — `{mode: auto, manual_level: null}`. Пороги авто —
+  `economy_at_percent` / `paid_only_at_percent`; история смен — `GET /admin/v1/ai/degradation`.
 - **Регрессия версии:** `POST /agents/{id}/rollback` (снимает и канарейку).
 - **Прогон «завис» в running** (рестарт процесса): при старте прогоны старше 60 минут помечаются `failed`.
 - **Произношение не работает:** `GET /admin/v1/ai/provider` → `speech`. whisper: `key_configured` — задан ли

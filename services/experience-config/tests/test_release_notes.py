@@ -29,6 +29,8 @@ WHATSNEW_DIR = Path(__file__).resolve().parents[3] / "apps" / "telegram-miniapp"
 NOTE_KEYS = {"release_note_id", "slug", "title", "items", "audience", "illustration", "published_at"}
 RELEASE_6 = ("s6-heroes", "s6-heroes-kids")  # заметки релиза 6.1 (миграция 0007), опубликованы при выкладке
 RELEASE_7 = ("s7-social", "s7-social-kids")  # заметки релиза 7 (миграция 0009), опубликованы при выкладке
+# заметки релиза 8 (миграция 0011) — черновики до включения продаж (PLAN спринта 8, решение 20)
+RELEASE_8 = ("s8-plus", "s8-plus-kids")
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 
 
@@ -110,6 +112,8 @@ def test_catalog_matches_contract() -> None:
     assert tuple(cat["locales"]) == rn.LOCALES
     assert tuple(cat["audiences"]) == rn.AUDIENCES
     assert tuple(cat["segments"]["age"]) == rn.AGE_SEGMENTS and tuple(cat["segments"]["ui_lang"]) == rn.UI_LANGS
+    # спринт 8: переходы и иллюстрации релиза 8 — в основных списках (поток I перенёс их из planned)
+    assert "planned" not in cat
     assert tuple(cat["routes"]) == rn.ROUTES
     assert tuple(cat["icons"]) == rn.ICONS
     lim = cat["limits"]
@@ -122,7 +126,8 @@ def test_catalog_matches_contract() -> None:
     assert rn.Route.__args__ == rn.ROUTES and rn.IconName.__args__ == rn.ICONS  # type: ignore[attr-defined]
     assert rn.Audience.__args__ == rn.AUDIENCES  # type: ignore[attr-defined]
     # релиз 6.1: иллюстрации — ключ, размер; файл лежит в Mini App и действительно такого размера (16:9)
-    assert {i["key"]: (i["width"], i["height"]) for i in cat["illustrations"]} == rn.ILLUSTRATIONS
+    main = {i["key"]: (i["width"], i["height"]) for i in cat["illustrations"]}
+    assert main == rn.ILLUSTRATIONS and list(rn.ILLUSTRATIONS) == list(main)
     assert rn.Illustration.__args__ == tuple(rn.ILLUSTRATIONS)  # type: ignore[attr-defined]
     assert lim["illustration_pattern"] == rn.ILLUSTRATION_PATTERN
     for key, (width, height) in rn.ILLUSTRATIONS.items():
@@ -170,7 +175,7 @@ async def test_seed_welcome_published_and_draft_archived_by_release(env) -> None
             assert pressure not in ru
     # туристический сид «Бот турист» не перенесён
     all_slugs = [n["slug"] for n in (await env.c.get(BASE, headers=env.h(WN_EDITOR))).json()["items"]]
-    assert sorted(all_slugs) == sorted([WELCOME, DRAFT, *RELEASE_6, *RELEASE_7])
+    assert sorted(all_slugs) == sorted([WELCOME, DRAFT, *RELEASE_6, *RELEASE_7, *RELEASE_8])
     # архив не виден ученикам; лента взрослого — заметки релизов 7 и 6.1 и welcome-1
     assert [n["slug"] for n in (await feed(env)).json()["items"]] == ["s7-social", "s6-heroes", WELCOME]
 
@@ -607,14 +612,16 @@ async def test_staff_permissions_and_callers(env) -> None:
     assert missing_arc.status_code == 404 and missing_arc.json()["code"] == "RELEASE_NOTE_NOT_FOUND"
     await create(env, note("x2"))
     drafts = await env.c.get(BASE, params={"status": "draft"}, headers=env.h(WN_EDITOR))
-    assert [i["status"] for i in drafts.json()["items"]] == ["draft"]
+    # черновик x2 и черновики релиза 8 (s8-plus, s8-plus-kids — до включения продаж)
+    assert sorted(i["slug"] for i in drafts.json()["items"]) == sorted(["x2", *RELEASE_8])
+    assert {i["status"] for i in drafts.json()["items"]} == {"draft"}
     assert (await env.c.get(BASE, params={"status": "deleted"}, headers=env.h(WN_EDITOR))).status_code == 422
-    # 8 заметок: welcome-1, 2026.11 (архив), s6-heroes, s6-heroes-kids, s7-social, s7-social-kids, опубликованная n
-    # и черновик x2
+    # 10 заметок: welcome-1, 2026.11 (архив), s6-heroes, s6-heroes-kids, s7-social, s7-social-kids, черновики релиза 8,
+    # опубликованная n и черновик x2
     page1 = (await env.c.get(BASE, params={"limit": 5}, headers=env.h(WN_EDITOR))).json()
     page2 = (await env.c.get(BASE, params={"limit": 5, "cursor": page1["next_cursor"]},
                              headers=env.h(WN_EDITOR))).json()
-    assert len(page1["items"]) == 5 and len(page2["items"]) == 3 and page2["next_cursor"] is None
+    assert len(page1["items"]) == 5 and len(page2["items"]) == 5 and page2["next_cursor"] is None
     bad = await env.c.get(BASE, params={"cursor": "@@"}, headers=env.h(WN_EDITOR))
     assert bad.status_code == 400 and bad.json()["code"] == "INVALID_CURSOR"
 
@@ -677,7 +684,8 @@ async def test_views_total_in_list_and_card_without_n_plus_1(env) -> None:
     views = {i["slug"]: (i["status"], i["views_total"]) for i in page["items"]}
     assert views == {WELCOME: ("published", 4), "2026.12": ("published", 3), "2027.01": ("draft", 0),
                      DRAFT: ("archived", 0), "s6-heroes": ("published", 0), "s6-heroes-kids": ("published", 0),
-                     "s7-social": ("published", 0), "s7-social-kids": ("published", 0)}
+                     "s7-social": ("published", 0), "s7-social-kids": ("published", 0),
+                     "s8-plus": ("draft", 0), "s8-plus-kids": ("draft", 0)}
     # одна выборка заметок + один GROUP BY по отметкам, не запрос на каждую заметку
     assert sum("release_note_views" in sql for sql in statements) == 1, statements
     card = (await env.c.get(f"{BASE}/{a['release_note_id']}", headers=env.h(WN_EDITOR))).json()
@@ -795,9 +803,10 @@ async def test_summary_for_dashboard(env) -> None:
     path = f"{BASE}/summary"
     r = await env.c.get(path, headers=env.h(DASHBOARD))
     assert r.status_code == 200, r.text
-    # после выкладки 7: welcome-1 и заметки релизов 6.1 и 7 опубликованы, черновик сида — в архиве
+    # после выкладки 8: welcome-1 и заметки релизов 6.1 и 7 опубликованы, черновик сида — в архиве, заметки релиза 8 —
+    # черновики (публикуются с включением продаж)
     kids = await staff_note(env, "s7-social-kids")  # вставлена последней — «последняя опубликованная»
-    assert r.json() == {"published": 5, "drafts": 0, "latest": {
+    assert r.json() == {"published": 5, "drafts": 2, "latest": {
         "release_note_id": kids["release_note_id"], "slug": "s7-social-kids",
         "title": "Учимся вместе с семьёй: лига, дуэли и урок вдвоём", "views_total": 0,
         "published_at": kids["published_at"]}}
@@ -806,17 +815,17 @@ async def test_summary_for_dashboard(env) -> None:
     for _ in range(2):
         await seen_as(env, uuid.uuid4(), [a["release_note_id"]], "uz", "adults")
     s = (await env.c.get(path, headers=env.h(WN_PUBLISHER))).json()
-    assert (s["published"], s["drafts"]) == (6, 1)
+    assert (s["published"], s["drafts"]) == (6, 3)
     assert s["latest"]["slug"] == "2026.12" and s["latest"]["title"] == "Декабрь 2026"  # заголовок — RU
     assert s["latest"]["views_total"] == 2 and s["latest"]["published_at"] == a["published_at"]
     # снятая — не «последняя опубликованная» и не считается
     await archive(env, a)
     s = (await env.c.get(path, headers=env.h(DASHBOARD))).json()
-    assert (s["published"], s["drafts"]) == (5, 1) and s["latest"]["slug"] == "s7-social-kids"
+    assert (s["published"], s["drafts"]) == (5, 3) and s["latest"]["slug"] == "s7-social-kids"
     for slug in (WELCOME, *RELEASE_6, *RELEASE_7):
         await archive(env, await staff_note(env, slug))
     s = (await env.c.get(path, headers=env.h(DASHBOARD))).json()
-    assert s == {"published": 0, "drafts": 1, "latest": None}
+    assert s == {"published": 0, "drafts": 3, "latest": None}
 
 
 async def test_summary_auth(env) -> None:
@@ -895,8 +904,10 @@ async def test_migrations_down_and_up_again(env) -> None:
     assert await count("SELECT count(*) FROM release_notes WHERE slug = 'welcome-1'") == 1
     assert await count("SELECT count(*) FROM release_notes") == 1
     await _alembic(env, "upgrade", "head")
-    # welcome-1, 2026.11 (архив), s6-heroes, s6-heroes-kids, s7-social, s7-social-kids
-    assert await count("SELECT count(*) FROM release_notes") == 6
+    # welcome-1, 2026.11 (архив), s6-heroes, s6-heroes-kids, s7-social, s7-social-kids, s8-plus и s8-plus-kids
+    # (черновики)
+    assert await count("SELECT count(*) FROM release_notes") == 8
+    assert await count("SELECT count(*) FROM release_notes WHERE status = 'draft'") == 2
     await _alembic(env, "downgrade", "0002")
     assert await count("SELECT count(*) FROM information_schema.tables WHERE table_schema = :schema "
                        "AND table_name IN ('release_notes', 'release_note_views', 'deleted_users')",

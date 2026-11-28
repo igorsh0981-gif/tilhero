@@ -11,12 +11,17 @@
 - learning-plan, diagnostics: сбой → None (следующий урок / «было» навыка не показываются);
 - social: недоступен → 503 UPSTREAM_UNAVAILABLE {service: social} (социальная команда не выполняется, учёба работает);
 - identity-consent: сбой → None (голос недоступен — 503 SPEECH_UNAVAILABLE у вызывающего);
-- speech:transcribe: 503/сеть → 503 SPEECH_UNAVAILABLE; 422 AUDIO_INVALID и 403 KIDS_NOT_ALLOWED — как у шлюза.
+- speech:transcribe: 503/сеть → 503 SPEECH_UNAVAILABLE; 422 AUDIO_INVALID и 403 KIDS_NOT_ALLOWED — как у шлюза;
+- спринт 8, billing (INTERNAL_API спринта 8 §0.3, §1.11): удержание минут `POST /internal/v1/holds` и доступ
+  `GET /internal/v1/access/{user_id}` — не дольше BILLING_TIMEOUT_SECONDS (2 с) на весь вызов, без повторов в клиенте
+  (удержание идемпотентно по (ref_kind, ref_id) — повтор делает следующая команда); сбой, таймаут, ответ не по
+  контракту → «billing недоступен»: занятие без ИИ, приглашение в урок вдвоём — 503 BILLING_UNAVAILABLE.
 Тексты учеников в логи не пишутся — только тип ошибки и код агента.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -37,6 +42,7 @@ LEARNING_PLAN = "learning-plan"
 DIAGNOSTICS = "diagnostics"
 SOCIAL = "social"
 IDENTITY = "identity-consent"
+BILLING = "billing"
 AUDIENCES = frozenset({"kids", "teens", "adults"})
 
 EVALUATION_STATUSES = frozenset({"ok", "partial", "insufficient_evidence", "pending_review"})
@@ -123,6 +129,25 @@ def _cost(value: Any) -> Decimal:
     except InvalidOperation:
         return Decimal("0")
     return cost if cost.is_finite() and Decimal("0") <= cost <= Decimal("100") else Decimal("0")
+
+
+async def _ai_status(runtime: Runtime) -> dict[str, Any] | None:
+    try:
+        data = await runtime.client(AI_GATEWAY).get("/internal/v1/status")
+    except Exception as exc:  # статус необязателен: урок не блокируется
+        log.warning("ai-gateway status failed", extra={"error_type": type(exc).__name__})
+        return None
+    return data if isinstance(data, dict) else None
+
+
+async def paid_ai_available(runtime: Runtime) -> bool:
+    """Спринт 8: ИИ для подписчика (ai.ts AiStatus.paid_available — уровни normal | economy | paid_only); старый шлюз
+    без поля — ai_available. Ошибка связи — True (как ai_available: деградация на первом вызове)."""
+    data = await _ai_status(runtime)
+    if data is None:
+        return True
+    value = data.get("paid_available", data.get("ai_available"))
+    return value is not False
 
 
 async def ai_available(runtime: Runtime) -> bool:
@@ -361,3 +386,101 @@ async def transcribe(runtime: Runtime, audio: bytes, meta: dict[str, Any]) -> di
     return {"text": " ".join(data["text"].split())[:600],
             "duration_ms": int(duration) if isinstance(duration, int) and not isinstance(duration, bool)
             and 0 <= duration <= 60_000 else 0}
+
+
+# ---------------------------------------------------------------- спринт 8: billing (удержания и доступ)
+
+BILLING_FEATURES = frozenset({"ai_lessons", "pair_lessons"})
+# причины отказа billing (bff.ts AiLockReason / SubscriptionRequiredReason); billing_unavailable — наша, при сбое
+DENY_REASONS = frozenset({"no_subscription", "feature_not_in_plan", "minutes_exhausted", "kids"})
+BILLING_UNAVAILABLE = "billing_unavailable"
+
+
+@dataclass(frozen=True)
+class Hold:
+    """Ответ `POST /internal/v1/holds`: allowed — минуты удержаны (hold_id); иначе reason: no_subscription |
+    feature_not_in_plan | minutes_exhausted | kids | billing_unavailable (сбой, таймаут, ответ не по контракту)."""
+
+    allowed: bool
+    reason: str | None = None
+    hold_id: uuid.UUID | None = None
+    minutes_held: int | None = None
+    minutes_left: int | None = None
+
+
+@dataclass(frozen=True)
+class Access:
+    """Ответ `GET /internal/v1/access/{user_id}?feature=…`."""
+
+    allowed: bool
+    reason: str | None
+    minutes_left: int | None
+
+
+def billing_unavailable() -> ApiError:
+    return unavailable("BILLING_UNAVAILABLE", "Подписка сейчас недоступна — попробуйте позже, учёба работает")
+
+
+def subscription_required(feature: str, reason: str) -> ApiError:
+    """403 SUBSCRIPTION_REQUIRED {feature, reason} (bff.ts SubscriptionRequiredDetails)."""
+    return forbidden("SUBSCRIPTION_REQUIRED", "Уроки вдвоём с ИИ-коучем — в подписке",
+                     {"feature": feature, "reason": reason})
+
+
+def _count(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 1_000_000 else None
+
+
+async def _billing_call(runtime: Runtime, method: str, path: str, **kw: Any) -> Any:
+    """Вызов billing с общим сроком BILLING_TIMEOUT_SECONDS (включая соединение); исключение — billing недоступен."""
+    seconds = float(getattr(runtime.settings, "billing_timeout_seconds", 2.0))
+    async with asyncio.timeout(seconds):
+        return await runtime.client(BILLING).request(method, path, **kw)
+
+
+async def create_hold(runtime: Runtime, *, user_id: uuid.UUID, feature: str, ref_kind: str, ref_id: uuid.UUID,
+                      minutes_planned: int) -> Hold:
+    """POST billing /internal/v1/holds (`sub` = user_id тела). Повтор по (ref_kind, ref_id) — тот же ответ billing:
+    переподключение и повтор команды не создают второго удержания. Сбой — Hold(allowed=False, billing_unavailable)."""
+    body = {"user_id": str(user_id), "feature": feature, "ref_kind": ref_kind, "ref_id": str(ref_id),
+            "minutes_planned": max(1, min(120, int(minutes_planned)))}
+    try:
+        data = await _billing_call(runtime, "POST", "/internal/v1/holds", json=body, subject=str(user_id),
+                                   idempotency_key=f"hold:{ref_kind}:{ref_id}")
+    except UpstreamError as exc:
+        log.warning("billing hold failed", extra={"status": exc.status, "code": exc.code[:40], "feature": feature})
+        return Hold(False, BILLING_UNAVAILABLE)
+    except Exception as exc:  # таймаут и прочее: занятие идёт без ИИ
+        log.warning("billing hold error", extra={"error_type": type(exc).__name__, "feature": feature})
+        return Hold(False, BILLING_UNAVAILABLE)
+    if not isinstance(data, dict) or not isinstance(data.get("allowed"), bool):
+        log.warning("billing hold response malformed")
+        return Hold(False, BILLING_UNAVAILABLE)
+    if data["allowed"] is False:
+        reason = data.get("reason")
+        return Hold(False, reason if reason in DENY_REASONS else "no_subscription")
+    try:
+        hold_id = uuid.UUID(str(data.get("hold_id")))
+    except ValueError:
+        log.warning("billing hold response malformed")
+        return Hold(False, BILLING_UNAVAILABLE)
+    held, left = _count(data.get("minutes_held")), _count(data.get("minutes_left"))
+    return Hold(True, None, hold_id, held, left)
+
+
+async def access(runtime: Runtime, user_id: uuid.UUID, feature: str) -> Access | None:
+    """GET billing /internal/v1/access/{user_id}?feature= → Access; None — billing недоступен (сбой, таймаут, ответ не
+    по контракту)."""
+    try:
+        data = await _billing_call(runtime, "GET", f"/internal/v1/access/{user_id}", params={"feature": feature},
+                                   subject=str(user_id))
+    except Exception as exc:
+        log.warning("billing access failed", extra={"error_type": type(exc).__name__, "feature": feature})
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("allowed"), bool):
+        log.warning("billing access response malformed")
+        return None
+    reason = data.get("reason")
+    if data["allowed"]:
+        return Access(True, None, _count(data.get("minutes_left")))
+    return Access(False, reason if reason in DENY_REASONS else "no_subscription", _count(data.get("minutes_left")))

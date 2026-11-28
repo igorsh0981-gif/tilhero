@@ -4,7 +4,7 @@ import re
 from functools import lru_cache
 from urllib.parse import urlsplit
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 
 from tilhero_common.settings import ServiceSettings
 
@@ -32,6 +32,16 @@ def _is_local(url: str) -> bool:
     return host in _LOCAL_HOSTS or host.endswith(".localhost") or host.startswith("127.")
 
 
+def default_terms_url(miniapp_url: str) -> str:
+    """Оферта — на домене Mini App (INTERNAL_API спринта 8 §1.2, §2): `<origin MINIAPP_URL>/legal/offer`."""
+    parts = urlsplit(miniapp_url)
+    return f"{parts.scheme}://{parts.netloc}/legal/offer"
+
+
+# Bot API: ответ на pre_checkout_query — не позже 10 с; свои таймауты identity + billing — с запасом
+PRE_CHECKOUT_LIMIT_SECONDS = 9.0
+
+
 class Settings(ServiceSettings):
     """Без БД: только Redis (идемпотентность update_id и отправок). Секреты — только из окружения."""
 
@@ -55,9 +65,28 @@ class Settings(ServiceSettings):
     # (inv_…, gc_…, route_…) доходит до Mini App как start_param в initData. Пусто — кнопка web_app с ?startapp=.
     telegram_app_link: str | None = None
     telegram_api_base: str = "https://api.telegram.org"  # TELEGRAM_API_BASE (в тестах — мок)
+    # TELEGRAM_TEST_ENV=true — тестовая среда Telegram: методы {TELEGRAM_API_BASE}/bot<token>/test/<METHOD> (stage с
+    # тестовым ботом из тестового @BotFather, спринт 8 §1.5); prod — false
+    telegram_test_env: bool = False
     telegram_timeout_seconds: float = 5.0
     identity_consent_url: str = "http://127.0.0.1:8101"
     menu_button_text: str = "TilHero"
+
+    # ---- спринт 8: Telegram Stars (INTERNAL_API §2) — платёжные обновления → billing, внутренний API для billing
+    billing_url: str = "http://127.0.0.1:8118"  # BILLING_URL (приватная сеть)
+    # TERMS_URL — оферта для /terms: только https на домене Mini App (не сайт оплаты);
+    # пусто — <origin MINIAPP_URL>/legal/offer
+    terms_url: str | None = None
+    # pre_checkout_query: identity-consent 2 с + billing 3 с — ответ в теле webhook до 10 с Bot API
+    stars_identity_timeout_seconds: float = Field(default=2.0, gt=0, le=5)
+    stars_pre_checkout_timeout_seconds: float = Field(default=3.0, gt=0, le=5)
+    # successful_payment / refunded_payment / subscription → billing: 5 с на попытку, один повтор на сеть/5xx,
+    # всё обновление — не дольше 9 с (иначе 503 и Telegram повторит)
+    stars_billing_timeout_seconds: float = Field(default=5.0, gt=0, le=8)
+    stars_update_deadline_seconds: float = Field(default=9.0, gt=0, le=9.5)
+    # обновление «в обработке» (Redis SET NX): параллельный дубль получает 503; сбой процесса — ключ истечёт сам
+    stars_processing_ttl_seconds: int = Field(default=60, ge=10, le=600)
+    stars_invoice_idempotency_ttl_seconds: int = 24 * 3600  # createInvoiceLink: идемпотентность по order_id
 
     redis_key_prefix: str = "botgw"
     update_ttl_seconds: int = 48 * 3600
@@ -82,10 +111,28 @@ class Settings(ServiceSettings):
     def _strip_miniapp_url(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
 
+    @field_validator("terms_url", mode="before")
+    @classmethod
+    def _strip_terms_url(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
     @model_validator(mode="after")
     def _validate(self) -> Settings:
         if not self.miniapp_url and not self.is_secure_env:
             self.miniapp_url = DEV_MINIAPP_URL
+        if (self.stars_identity_timeout_seconds + self.stars_pre_checkout_timeout_seconds
+                > PRE_CHECKOUT_LIMIT_SECONDS):
+            raise ValueError("STARS_IDENTITY_TIMEOUT_SECONDS + STARS_PRE_CHECKOUT_TIMEOUT_SECONDS must be <= 9")
+        if self.miniapp_url:
+            if self.terms_url is None:
+                self.terms_url = default_terms_url(self.miniapp_url)
+            # анти-стиринг (решение В1): /terms ведёт только на домен Mini App, не на сайт оплаты
+            elif not _is_https(self.terms_url) or urlsplit(self.terms_url).hostname != urlsplit(
+                    self.miniapp_url).hostname or any(ch.isspace() for ch in self.terms_url):
+                raise ValueError("TERMS_URL must be https on the Mini App domain")
         if not self.telegram_webhook_url and self.railway_public_domain:
             self.telegram_webhook_url = f"https://{self.railway_public_domain.strip().rstrip('/')}/telegram/webhook"
         secret = self.telegram_webhook_secret.get_secret_value()

@@ -61,6 +61,21 @@
     social.appeal.decided.v1 → sanction_appeal_decided (sanction_appeal_decided:<appeal>) — категория service
     (не выключается настройкой категорий); social.case.resolved.v1 → complaint_resolved жалобщику
     (complaint_resolved:<case>), social, без подробностей;
+- спринт 8 (INTERNAL_API §8; только от billing, чужой издатель — WARNING без записи): адресат — аккаунт-плательщик
+  (`account_id`; детским профилям не адресуется), категория service, kind transactional, кнопка «Подписка»
+  (route_subscription); шаблон заказа — по каналу (анти-стиринг: заказ сайта — нейтрально, без суммы и способа):
+  - billing.order.paid.v1: miniapp | renewal → payment_succeeded (товар, звёзды, срок); web → purchase_applied
+    (payment:<order_id>);
+  - billing.order.refunded.v1 → refund_completed (refund:<order_id>), обезличенный заказ (account_id null) — без
+    сообщения;
+  - billing.subscription.expiring.v1 → subscription_expiring (expiring:<period_id>:<days_left>), после конца
+    периода — только центр;
+  - billing.subscription.changed.v1: expired + ended → subscription_expired (expired:<period_id>); trial →
+    trial_started, только центр (trial:<period_id>);
+  - billing.stars_subscription.changed.v1 (failed) → stars_renewal_failed
+    (renewal_failed:<subscription_id>:<expires_at>), после expires_at — только центр;
+  - billing.minutes.low.v1 → minutes_low (minutes_low:<period_id>);
+  - billing.adjustment.applied.v1 (начисление минут > 0 или выдача периода) → minutes_adjusted (adjust:<id>);
 - user.deletion.requested.v1 (только от identity-consent) → удаление → user.domain.deleted.v1 {domain: notifications};
 - user.status.changed / consent.revoked / user.notification_settings.changed / user.profile.updated — сброс кэша
   адресации.
@@ -138,6 +153,20 @@ PAIR_INVITED = "lesson.pair.invited.v1"
 PAIR_STARTING = "lesson.pair.starting.v1"
 PAIR_COMPLETED = "lesson.pair.completed.v1"
 LESSONS_PRODUCERS = frozenset({"lessons"})
+# Спринт 8: оплата и подписка — только от billing
+ORDER_PAID = "billing.order.paid.v1"
+ORDER_REFUNDED = "billing.order.refunded.v1"
+SUBSCRIPTION_CHANGED = "billing.subscription.changed.v1"
+STARS_SUBSCRIPTION_CHANGED = "billing.stars_subscription.changed.v1"
+SUBSCRIPTION_EXPIRING = "billing.subscription.expiring.v1"
+MINUTES_LOW = "billing.minutes.low.v1"
+ADJUSTMENT_APPLIED = "billing.adjustment.applied.v1"
+BILLING_EVENTS = [ORDER_PAID, ORDER_REFUNDED, SUBSCRIPTION_CHANGED, STARS_SUBSCRIPTION_CHANGED, SUBSCRIPTION_EXPIRING,
+                  MINUTES_LOW, ADJUSTMENT_APPLIED]
+BILLING_PRODUCERS = frozenset({"billing"})
+# каналы заказов за Telegram Stars (Mini App и автопродление); web — сайт оплаты: только нейтральный текст
+STARS_CHANNELS = frozenset({"miniapp", "renewal"})
+BILLING_KIND = "transactional"
 PAIR_INVITE_TTL = timedelta(minutes=15)  # без ответа приглашение истекает через start_at + 15 мин (§3.2)
 SCHEDULED_AFTER = timedelta(minutes=1)  # start_at позже приглашения больше чем на минуту — запланированная комната
 CACHE_EVENTS = [
@@ -356,6 +385,104 @@ class PairCompleted(_Payload):
     end_reason: Literal["completed", "participant_left", "inactivity", "stopped"]
     participants: Annotated[list[PairParticipant], Field(min_length=1, max_length=2)]
     ended_at: AwareDatetime
+
+
+class _Titles(_Payload):
+    ru: Annotated[str, Field(min_length=1, max_length=60)]
+    uz: Annotated[str, Field(min_length=1, max_length=60)]
+
+
+class _Period(_Payload):
+    starts_at: AwareDatetime | None = None
+    ends_at: AwareDatetime | None = None
+
+
+BillingChannel = Literal["miniapp", "web", "renewal"]
+BillingProductKind = Literal["subscription", "til_pack"]
+
+
+class OrderPaid(_Payload):
+    """billing.order.paid.v1 — сумма в тийинах и провайдер в сообщение не попадают никогда (анти-стиринг)."""
+
+    order_id: uuid.UUID
+    order_no: Annotated[int, Field(ge=100_001)]
+    account_id: uuid.UUID
+    beneficiary_user_id: uuid.UUID
+    channel: BillingChannel
+    product_kind: BillingProductKind
+    product_title: _Titles
+    amount_stars: Annotated[int, Field(ge=1, le=100_000)] | None = None
+    til: Annotated[int, Field(ge=1, le=100_000)] | None = None
+    period: _Period | None = None
+    paid_at: AwareDatetime
+
+
+class OrderRefunded(_Payload):
+    order_id: uuid.UUID
+    account_id: uuid.UUID | None
+    channel: BillingChannel
+    product_kind: BillingProductKind
+    amount_stars: Annotated[int, Field(ge=1, le=100_000)] | None = None
+    refunded_at: AwareDatetime
+
+
+class SubscriptionChanged(_Payload):
+    account_id: uuid.UUID
+    status: Literal["none", "trial", "active", "expired"]
+    reason: str
+    period_id: uuid.UUID | None = None
+    starts_at: AwareDatetime | None = None
+    ends_at: AwareDatetime | None = None
+    minutes_granted: Annotated[int, Field(ge=0, le=100_000)] | None = None
+    changed_at: AwareDatetime
+
+
+class StarsSubscriptionChanged(_Payload):
+    account_id: uuid.UUID
+    subscription_id: uuid.UUID
+    status: Literal["active", "canceled", "failed", "refunded", "ended"]
+    expires_at: AwareDatetime
+
+
+class SubscriptionExpiring(_Payload):
+    account_id: uuid.UUID
+    period_id: uuid.UUID
+    ends_at: AwareDatetime
+    days_left: Annotated[int, Field(ge=0, le=30)]
+    minutes_left: Annotated[int, Field(ge=0, le=100_000)]
+
+
+class MinutesLow(_Payload):
+    account_id: uuid.UUID
+    period_id: uuid.UUID
+    minutes_left: Annotated[int, Field(ge=0, le=100_000)]
+    minutes_granted: Annotated[int, Field(ge=1, le=100_000)]
+
+
+class AdjustmentApplied(_Payload):
+    adjustment_id: uuid.UUID
+    account_id: uuid.UUID
+    kind: Literal["minutes", "grant_period", "revoke_period"]
+    minutes: Annotated[int, Field(ge=-10_000, le=10_000)] | None = None
+    days: Annotated[int, Field(ge=1, le=90)] | None = None
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def order_paid_template(p: OrderPaid) -> tuple[str, dict[str, Any]]:
+    """Шаблон оплаченного заказа по каналу (INTERNAL_API §8): Stars (miniapp, renewal) — товар, звёзды и срок; сайт
+    (web) — нейтрально, что стало доступно."""
+    ends_at = _iso(p.period.ends_at) if p.period is not None else None
+    for_child = p.beneficiary_user_id != p.account_id
+    if p.channel in STARS_CHANNELS and p.amount_stars is not None:
+        return "payment_succeeded", {
+            "order_no": p.order_no, "product_kind": p.product_kind,
+            "product_title": {"ru": p.product_title.ru, "uz": p.product_title.uz}, "amount_stars": p.amount_stars,
+            "renewal": p.channel == "renewal", "ends_at": ends_at, "til": p.til, "for_child": for_child}
+    return "purchase_applied", {"order_id": str(p.order_id), "product_kind": p.product_kind, "ends_at": ends_at,
+                                "til": p.til, "for_child": for_child}
 
 
 class Reward(_Payload):
@@ -915,6 +1042,74 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
                              params={"room_id": str(pc.room_id)}, dedup_key=f"pair_stopped:{pc.room_id}:{user_id}",
                              stale_after=pc.ended_at + timedelta(hours=settings.game_stale_hours))
 
+    # ---------------------------------------------------------------- спринт 8: оплата и подписка
+
+    async def on_billing(session: AsyncSession, env: Envelope) -> None:
+        """Сообщения об оплате и подписке (billing, INTERNAL_API §8) — аккаунту-плательщику."""
+        if env.producer not in BILLING_PRODUCERS:
+            log.warning("billing event from unexpected producer ignored",
+                        extra={"event_type": env.event_type, "producer": env.producer[:64]})
+            return
+        if env.event_type == ORDER_PAID:
+            op = OrderPaid.model_validate(env.payload)
+            template, params = order_paid_template(op)
+            await accept(session, env, user_id=op.account_id, template=template, params=params,
+                         dedup_key=f"payment:{op.order_id}", kind=BILLING_KIND)
+        elif env.event_type == ORDER_REFUNDED:
+            orf = OrderRefunded.model_validate(env.payload)
+            if orf.account_id is None:
+                return  # заказ обезличен (аккаунт удалён) — сообщать некому
+            stars = orf.channel in STARS_CHANNELS and orf.amount_stars is not None
+            await accept(session, env, user_id=orf.account_id, template="refund_completed",
+                         params={"order_id": str(orf.order_id), "stars": stars, "product_kind": orf.product_kind,
+                                 "amount_stars": orf.amount_stars if stars else None},
+                         dedup_key=f"refund:{orf.order_id}", kind=BILLING_KIND)
+        elif env.event_type == SUBSCRIPTION_EXPIRING:
+            ex = SubscriptionExpiring.model_validate(env.payload)
+            await accept(session, env, user_id=ex.account_id, template="subscription_expiring",
+                         params={"period_id": str(ex.period_id), "ends_at": ex.ends_at.isoformat(),
+                                 "days_left": ex.days_left, "minutes_left": ex.minutes_left},
+                         dedup_key=f"expiring:{ex.period_id}:{ex.days_left}", kind=BILLING_KIND,
+                         stale_after=ex.ends_at)
+        elif env.event_type == SUBSCRIPTION_CHANGED:
+            sc = SubscriptionChanged.model_validate(env.payload)
+            if sc.period_id is None:
+                return
+            if sc.status == "expired" and sc.reason == "ended":
+                await accept(session, env, user_id=sc.account_id, template="subscription_expired",
+                             params={"period_id": str(sc.period_id)}, dedup_key=f"expired:{sc.period_id}",
+                             kind=BILLING_KIND)
+            elif sc.status == "trial" and sc.ends_at is not None:
+                await accept(session, env, user_id=sc.account_id, template="trial_started",
+                             params={"period_id": str(sc.period_id), "ends_at": sc.ends_at.isoformat(),
+                                     "minutes_granted": sc.minutes_granted or 0},
+                             dedup_key=f"trial:{sc.period_id}", kind=BILLING_KIND, center_only=True)
+        elif env.event_type == STARS_SUBSCRIPTION_CHANGED:
+            ss = StarsSubscriptionChanged.model_validate(env.payload)
+            if ss.status != "failed":
+                return
+            await accept(session, env, user_id=ss.account_id, template="stars_renewal_failed",
+                         params={"subscription_id": str(ss.subscription_id), "expires_at": ss.expires_at.isoformat()},
+                         dedup_key=f"renewal_failed:{ss.subscription_id}:{ss.expires_at.isoformat()}",
+                         kind=BILLING_KIND, stale_after=ss.expires_at)
+        elif env.event_type == MINUTES_LOW:
+            ml = MinutesLow.model_validate(env.payload)
+            await accept(session, env, user_id=ml.account_id, template="minutes_low",
+                         params={"period_id": str(ml.period_id), "minutes_left": ml.minutes_left,
+                                 "minutes_granted": ml.minutes_granted},
+                         dedup_key=f"minutes_low:{ml.period_id}", kind=BILLING_KIND)
+        else:
+            aa = AdjustmentApplied.model_validate(env.payload)
+            if aa.kind == "minutes" and (aa.minutes or 0) > 0:
+                adjusted: dict[str, Any] = {"adjustment_id": str(aa.adjustment_id), "kind": "minutes",
+                                            "minutes": aa.minutes}
+            elif aa.kind == "grant_period" and aa.days is not None:
+                adjusted = {"adjustment_id": str(aa.adjustment_id), "kind": "grant_period", "days": aa.days}
+            else:
+                return  # списание минут и отзыв периода — без сообщения (§8)
+            await accept(session, env, user_id=aa.account_id, template="minutes_adjusted", params=adjusted,
+                         dedup_key=f"adjust:{aa.adjustment_id}", kind=BILLING_KIND)
+
     # ---------------------------------------------------------------- identity-consent
 
     async def on_user_deleted(session: AsyncSession, env: Envelope) -> None:
@@ -955,6 +1150,7 @@ def build_handlers(runtime: Runtime, dispatcher: Dispatcher) -> tuple[Accept, di
         "notifications.duels_leagues": ([DUEL_CHALLENGED, DUEL_FINISHED, LEAGUE_CLOSED], on_duels_leagues),
         "notifications.referral_rewards": ([REFERRAL_REWARDED], on_referral_rewarded),
         "notifications.pair_rooms": ([PAIR_INVITED, PAIR_STARTING, PAIR_COMPLETED], on_pair),
+        "notifications.billing": (BILLING_EVENTS, on_billing),
         "notifications.user_deleted": ([DELETION_REQUESTED], on_user_deleted),
         "notifications.delivery_cache": (CACHE_EVENTS, on_user_changed),
     }

@@ -501,7 +501,7 @@ test.describe("урок вдвоём", () => {
     await installMic(page, "ok");
     const bff = await start(page, { pair: { autoAccept: true, pauseAfter: 2 } }, { purposes: [...WITH_SOCIAL, "voice_recording"] });
     await page.getByTestId("soc-pair").click();
-    await expect(page.getByTestId("pair-rooms")).toContainText("Минуты урока учитываются, но пока не списываются.");
+    await expect(page.getByTestId("pair-rooms")).toContainText("Минуты ИИ-коуча считаются у того, кто позвал, — один раз за урок.");
     await page.getByTestId("pair-new").click();
     await expect(page.getByTestId("pi-send")).toBeDisabled();
     await page.getByTestId("pi-pick").click();

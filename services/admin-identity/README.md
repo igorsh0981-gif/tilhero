@@ -11,19 +11,20 @@
 `docs/sprint2/PLAN.md` §«Роли и права» + §«Права и роли» `docs/sprint3/PLAN.md`, `docs/sprint4/PLAN.md`,
 `docs/sprint5/PLAN.md`, `docs/sprint6/PLAN.md` и §«Права» `docs/sprint7/PLAN.md`, сид — миграции `0001`, `0003`–`0007`
 (0003–0007 добавляют права к действующей матрице, ничего не затирая); дальше матрица меняется только через four-eyes.
-Названия RU/EN хранятся у ролей (новых ролей в спринтах 5–7 нет); подписи прав — в admin-web.
+Названия RU/EN хранятся у ролей (новых ролей в спринтах 5–7 нет; спринт 8 — `finance`); подписи прав — в admin-web.
 
 | Роль | Права | MFA |
 |---|---|---|
-| super_admin | все 46 | обязательна |
-| operations | dashboard.read, users.read, support.read, audit.read, config.read, config.edit, config.publish, content.read, ai.read, qa.read, costs.read, costs.manage, memory.read, memory.manage, game.read, game.manage, game.publish, wallet.adjust, social.read, moderation.manage, referral.read, referral.manage, league.read, league.manage, room.read, room.manage | обязательна |
+| super_admin | все 52 | обязательна |
+| operations | dashboard.read, users.read, support.read, audit.read, config.read, config.edit, config.publish, content.read, ai.read, qa.read, costs.read, costs.manage, memory.read, memory.manage, game.read, game.manage, game.publish, wallet.adjust, social.read, moderation.manage, referral.read, referral.manage, league.read, league.manage, room.read, room.manage, billing.read, billing.manage, billing.publish, billing.approve, billing.refund, subscriptions.override | обязательна |
 | communications | dashboard.read, whatsnew.manage, whatsnew.publish, notif.templates.manage, notif.campaigns.manage, notif.campaigns.send | обязательна |
-| support | dashboard.read, users.read, support.read, support.reply, game.read, social.read, moderation.manage, referral.read, room.read | обязательна (moderation.manage, с спринта 7) |
+| support | dashboard.read, users.read, support.read, support.reply, game.read, social.read, moderation.manage, referral.read, room.read, billing.read, subscriptions.override | обязательна (moderation.manage, с спринта 7) |
 | methodist | dashboard.read, users.read, content.read, content.edit, content.review, content.publish, ai.read, ai.manage, ai.publish, qa.read, qa.transcripts, qa.review, memory.read, glossary.manage, game.read | обязательна (content.publish, ai.publish, qa.review) |
 | content_manager (Контент-менеджер) | dashboard.read, content.read, content.edit, media.rights, glossary.manage, game.read, game.manage, league.read | обязательна (media.rights) |
 | qa_analyst (QA-аналитик) | dashboard.read, content.read, ai.read, qa.read, qa.transcripts, memory.read | по желанию |
-| analyst | dashboard.read, users.read, content.read, ai.read, qa.read, costs.read, memory.read, game.read, social.read, referral.read, league.read, room.read | по желанию |
-| auditor | dashboard.read, audit.read, content.read, ai.read, qa.read, costs.read, memory.read, game.read, social.read, referral.read, league.read, room.read | по желанию |
+| finance (Финансы, спринт 8) | dashboard.read, users.read, costs.read, billing.read, billing.manage, billing.publish, billing.approve, billing.refund | обязательна (billing.publish, billing.approve, billing.refund — step-up; PRIVILEGED_ROLES не расширялся) |
+| analyst | dashboard.read, users.read, content.read, ai.read, qa.read, costs.read, memory.read, game.read, social.read, referral.read, league.read, room.read, billing.read | по желанию |
+| auditor | dashboard.read, audit.read, content.read, ai.read, qa.read, costs.read, memory.read, game.read, social.read, referral.read, league.read, room.read, billing.read | по желанию |
 | read_only | dashboard.read | по желанию |
 
 `users.sensitive.read`, `staff.manage`, `roles.manage`, `support.manage`, `lang.manage` — только super_admin. Роль
@@ -41,8 +42,10 @@ support — привилегированные, хотя `PRIVILEGED_ROLES` admi
 по ai.publish/qa.review/costs.manage, например methodist, у которого content.publish сняли через four-eyes); 0005 —
 то же для memory.manage (по матрице его получают только operations и super_admin — уже привилегированные); 0006 — то же
 для game.publish и wallet.adjust (тоже только operations и super_admin); 0007 — support получает moderation.manage и
-становится привилегированной: сессии её сотрудников отзываются, при входе — подключение TOTP.
-Сверка с контрактом — `tests/test_aid_contract.py` (admin.ts и PLAN.md спринтов 2–7 разбираются регулярками).
+становится привилегированной: сессии её сотрудников отзываются, при входе — подключение TOTP; 0008 (спринт 8) — права
+денег и роль finance (привилегирована составом прав со step-up: billing.publish, billing.approve, billing.refund,
+subscriptions.override); уже привилегированные support и operations, а analyst и auditor (только billing.read) сессий
+не теряют. Сверка с контрактом — `tests/test_aid_contract.py` (admin.ts и PLAN.md спринтов 2–8 разбираются регулярками).
 
 ## API
 Все вызовы — только от `admin-bff` (внутренний JWT EdDSA; иной издатель → 403 `CALLER_NOT_ALLOWED`).
@@ -147,7 +150,10 @@ qa_analyst → read_only с отзывом сессий, PENDING-заявки с
 (спринт 6) — права `game.read`, `game.manage`, `game.publish` (step-up), `wallet.adjust` (step-up) по матрице PLAN
 спринта 6, новых ролей нет, тот же пересчёт и отзыв сессий, тот же откат; `0007` (спринт 7) — права `social.read`,
 `moderation.manage`, `referral.read|manage`, `league.read|manage`, `room.read|manage` (`*.manage` — step-up) по матрице
-PLAN спринта 7, новых ролей нет; support становится привилегированной (отзыв сессий), тот же откат.
+PLAN спринта 7, новых ролей нет; support становится привилегированной (отзыв сессий), тот же откат; `0008` (спринт 8)
+— права `billing.read|manage|publish|approve|refund`, `subscriptions.override` (все, кроме read и manage, — step-up) и
+роль `finance` («Финансы»); откат: сотрудники finance → read_only с отзывом сессий, права и роль удаляются,
+PENDING-заявки с ними → REJECTED, пересчёт привилегированности.
 Все изменения учёток/ролей/заявок сериализуются `pg_advisory_xact_lock`. Redis: счётчики попыток
 (`{ns}:login:*` по HMAC email, `{ns}:mfa:*` по staff_id), challenge (`{ns}:ch:<sha256>` — сам challenge не хранится),
 idempotency создания сотрудника (без временного пароля).

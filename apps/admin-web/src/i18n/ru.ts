@@ -892,6 +892,8 @@ export const ru = {
   "route.review": "Повторение",
   "route.schedule": "График",
   "route.shop": "Магазин",
+  "route.subscription": "Подписка",
+  "route.til_shop": "Купить тилы",
   "route.support": "Поддержка",
   /* rv */
   "rv.auditNote": "Нужен свежий код из приложения-аутентификатора; раскрытие записывается в аудит (sensitive.view).",

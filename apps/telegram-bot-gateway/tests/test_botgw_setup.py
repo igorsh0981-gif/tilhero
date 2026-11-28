@@ -1,4 +1,5 @@
-"""python -m tilhero_botgw.setup: webhook, команда /start RU/UZ, кнопка меню, описания RU/UZ; валидация настроек."""
+"""python -m tilhero_botgw.setup: webhook (+ pre_checkout_query и subscription), команды /start, /paysupport, /support,
+/terms RU/UZ, кнопка меню, описания RU/UZ; тестовая среда Telegram; валидация настроек."""
 
 from __future__ import annotations
 
@@ -36,16 +37,29 @@ async def test_setup_configures_bot() -> None:
         "url": WEBHOOK,
         "secret_token": SECRET,
         "drop_pending_updates": True,
-        "allowed_updates": ["message", "callback_query", "my_chat_member"],
+        # спринт 8: платёжные обновления Stars — явно (при заданном списке приходят только перечисленные типы)
+        "allowed_updates": ["message", "callback_query", "my_chat_member", "pre_checkout_query", "subscription"],
         "max_connections": 40,
     }
-    assert tg.calls[1][1] == {"commands": [{"command": "start", "description": "Открыть TilHero"}]}  # по умолчанию RU
+    ru_list = [
+        {"command": "start", "description": "Открыть TilHero"},
+        {"command": "paysupport", "description": "Вопросы по оплате"},
+        {"command": "support", "description": "Поддержка"},
+        {"command": "terms", "description": "Условия покупки"},
+    ]
+    uz_list = [
+        {"command": "start", "description": "TilHeroʼni ochish"},
+        {"command": "paysupport", "description": "Toʻlov boʻyicha savollar"},
+        {"command": "support", "description": "Qoʻllab-quvvatlash"},
+        {"command": "terms", "description": "Xarid shartlari"},
+    ]
+    assert tg.calls[1][1] == {"commands": ru_list}  # по умолчанию RU
     ru_commands, uz_commands = tg.calls[2][1], tg.calls[3][1]
-    assert ru_commands == {"commands": [{"command": "start", "description": "Открыть TilHero"}], "language_code": "ru"}
-    assert uz_commands == {
-        "commands": [{"command": "start", "description": "TilHeroʼni ochish"}],
-        "language_code": "uz",
-    }
+    assert ru_commands == {"commands": ru_list, "language_code": "ru"}
+    assert uz_commands == {"commands": uz_list, "language_code": "uz"}
+    for commands in (ru_list, uz_list):  # ограничения Bot API: имя 1..32 [a-z0-9_], описание 1..256
+        assert all(len(c["command"]) <= 32 and c["command"].isascii() and 1 <= len(c["description"]) <= 256
+                   for c in commands)
     menu = tg.calls[4][1]["menu_button"]
     assert menu == {"type": "web_app", "text": "TilHero", "web_app": {"url": MINIAPP}}
     ru_desc, uz_desc = tg.calls[7][1], tg.calls[9][1]
@@ -182,3 +196,17 @@ def test_miniapp_url_required_and_not_local_in_secure_env(monkeypatch) -> None:
         assert Settings(env=env_name).miniapp_url == "https://localhost:5173"
     monkeypatch.setenv("MINIAPP_URL", "https://app.tilhero.uz/")
     assert Settings(env="prod", **prod).miniapp_url == "https://app.tilhero.uz/"
+
+
+async def test_setup_uses_telegram_test_environment() -> None:
+    """TELEGRAM_TEST_ENV=true — методы {TELEGRAM_API_BASE}/bot<token>/test/<METHOD> (тестовый бот, §1.5)."""
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        return httpx.Response(200, json={"ok": True, "result": True})
+
+    settings = make_settings("t_setup", telegram_webhook_url=WEBHOOK, telegram_test_env=True)
+    await botgw_setup.run_setup(settings, transport=httpx.MockTransport(handler))
+    assert paths[0] == f"/bot{TOKEN}/test/setWebhook" and all(f"/bot{TOKEN}/test/" in p for p in paths)
+    assert make_settings("t_setup").telegram_test_env is False  # по умолчанию — боевая среда

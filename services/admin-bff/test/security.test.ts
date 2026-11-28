@@ -42,6 +42,8 @@ afterAll(closeRedis);
 /** Подставить значения параметров пути (валидные по схеме). */
 export function concrete(url: string): string {
   return url
+    // спринт 8: двоеточие в пути (`trials::grant-all` — экранированное в find-my-way) — буквально
+    .replace("::", "\u0000")
     .replace(":kind", "lesson")
     .replace(":pairId", "ru-en")
     .replace(":app", "admin")
@@ -52,7 +54,8 @@ export function concrete(url: string): string {
     .replace(":agentId", "conversation_partner")
     .replace(":modelId", "claude-haiku-5-5")
     .replace(":caseId", "cp-01-correct")
-    .replace(/:[A-Za-z]+/g, "5b1f0d0e-1111-4c2b-9a51-0d6c7a1e2f30");
+    .replace(/:[A-Za-z]+/g, "5b1f0d0e-1111-4c2b-9a51-0d6c7a1e2f30")
+    .replace("\u0000", ":");
 }
 
 /** Реестр маршрутов admin.ts (все, что должен обслуживать admin-bff), + dev. */
@@ -266,6 +269,42 @@ const CONTRACT_ROUTES = [
   "GET /admin/v1/pair-rooms",
   "GET /admin/v1/pair-rooms/:roomId",
   "POST /admin/v1/pair-rooms/:roomId/stop",
+  // спринт 8: «Деньги» (billing), вкладка «Тариф», финансовый обзор, контроль ИИ
+  "GET /admin/v1/billing/catalog",
+  "GET /admin/v1/billing/catalog/:version",
+  "PUT /admin/v1/billing/catalog/draft",
+  "DELETE /admin/v1/billing/catalog/draft",
+  "POST /admin/v1/billing/catalog/draft/validate",
+  "POST /admin/v1/billing/catalog/draft/activate",
+  "POST /admin/v1/billing/catalog/:version/rollback",
+  "POST /admin/v1/billing/trials::grant-all",
+  "GET /admin/v1/billing/orders",
+  "GET /admin/v1/billing/orders/:orderId",
+  "POST /admin/v1/billing/orders/:orderId/refunds",
+  "GET /admin/v1/billing/refunds",
+  "POST /admin/v1/billing/refunds/:refundId/fail",
+  "GET /admin/v1/billing/accounts/:accountId",
+  "GET /admin/v1/billing/accounts/:accountId/ledger",
+  "POST /admin/v1/billing/accounts/:accountId/adjustments",
+  "GET /admin/v1/billing/adjustments",
+  "POST /admin/v1/billing/adjustments/:adjustmentId/approve",
+  "POST /admin/v1/billing/adjustments/:adjustmentId/reject",
+  "POST /admin/v1/billing/adjustments/:adjustmentId/cancel",
+  "GET /admin/v1/billing/reconciliation/items",
+  "POST /admin/v1/billing/reconciliation/runs",
+  "POST /admin/v1/billing/reconciliation/items/:itemId/resolve",
+  "GET /admin/v1/billing/reports/summary",
+  "GET /admin/v1/billing/reports/daily",
+  "GET /admin/v1/billing/fx",
+  "PUT /admin/v1/billing/fx",
+  "GET /admin/v1/billing/star-rate",
+  "PUT /admin/v1/billing/star-rate",
+  "GET /admin/v1/billing/providers",
+  "GET /admin/v1/learners/:id/billing",
+  "GET /admin/v1/finance/overview",
+  "GET /admin/v1/ai/degradation",
+  "PUT /admin/v1/ai/degradation",
+  "GET /admin/v1/ai/unit-costs",
 ];
 
 describe("реестр маршрутов", () => {
@@ -359,6 +398,18 @@ describe("реестр маршрутов", () => {
         "POST /admin/v1/game/leagues/:groupId/reevaluate",
         "POST /admin/v1/game/duels/:duelId/reevaluate",
         "POST /admin/v1/pair-rooms/:roomId/stop",
+        // спринт 8 (INTERNAL_API §12): активация и откат каталога, массовый пробный (billing.publish); заявка на
+        // корректировку (subscriptions.override) и решение по ней (billing.approve); возврат и его закрытие
+        // (billing.refund); уровень деградации ИИ (costs.manage; бюджет ИИ — выше)
+        "POST /admin/v1/billing/catalog/draft/activate",
+        "POST /admin/v1/billing/catalog/:version/rollback",
+        "POST /admin/v1/billing/trials::grant-all",
+        "POST /admin/v1/billing/accounts/:accountId/adjustments",
+        "POST /admin/v1/billing/adjustments/:adjustmentId/approve",
+        "POST /admin/v1/billing/adjustments/:adjustmentId/reject",
+        "POST /admin/v1/billing/orders/:orderId/refunds",
+        "POST /admin/v1/billing/refunds/:refundId/fail",
+        "PUT /admin/v1/ai/degradation",
         // все команды по сотрудникам, ролям, заявкам
         "POST /admin/v1/staff",
         "PATCH /admin/v1/staff/:id",
@@ -513,8 +564,9 @@ describe("RBAC до вызова домена: матрица 10 ролей × �
     for (const role of ROLE_CODES) {
       const own = new Set<string>(DEFAULT_ROLE_MATRIX[role]);
       const n = routes.filter((r) => r.guard.split("|").some((p) => own.has(p as Permission)) || r.guard === `role:${role}`).length;
-      // support/stats, content/summary, diagnostics/stats, memory/analytics, memory/stats, glossary/stats (dashboard.read)
-      if (role === "read_only") expect(n, role).toBe(6);
+      // support/stats, content/summary, diagnostics/stats, memory/analytics, memory/stats, glossary/stats (dashboard.read);
+      // спринт 8: billing/reports/summary, billing/reports/daily, finance/overview, ai/unit-costs
+      if (role === "read_only") expect(n, role).toBe(10);
       else expect(n, role).toBeGreaterThan(1);
     }
   });

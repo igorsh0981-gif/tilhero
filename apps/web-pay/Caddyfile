@@ -1,8 +1,10 @@
 # TilHero web-pay (спринт 8, INTERNAL_API §3) — сайт оплаты вне Telegram: статика Vite за Caddy + /api/* →
 # telegram-bff /web/v1/* по приватной сети (один origin: cookie __Host-wp_session first-party, CSRF и Origin
-# проверяет telegram-bff). Заготовка потока 0; страницы, тест заголовков ответа и README — поток H.
+# проверяет telegram-bff; Host сайта Caddy передаёт как есть — telegram-bff в stage/prod принимает /web/v1/* только с ним).
+# Тест заголовков ответа на живом процессе — test/caddy.test.ts (CADDY_BIN).
 # TLS терминирует Railway edge — здесь только HTTP на {$PORT}.
-# Env: PORT (8080), BFF_URL — приватный адрес telegram-bff без пути (http://${{telegram-bff.RAILWAY_PRIVATE_DOMAIN}}:8001).
+# Env: PORT (8080), BFF_URL — приватный адрес telegram-bff без пути (http://${{telegram-bff.RAILWAY_PRIVATE_DOMAIN}}:8001),
+# WEB_ROOT (/srv) — каталог статики (меняется только в тесте заголовков test/caddy.test.ts).
 # Без Telegram SDK, сторонних скриптов, шрифтов и аналитики; адрес страницы не уходит провайдерам (no-referrer);
 # переходы к провайдерам и в Telegram — навигацией страницы (поток входа — перенаправлением, не всплывающим окном).
 {
@@ -18,7 +20,7 @@
 }
 
 :{$PORT:8080} {
-	root * /srv
+	root * {$WEB_ROOT:/srv}
 	encode zstd gzip
 
 	header {

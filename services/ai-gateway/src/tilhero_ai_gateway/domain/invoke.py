@@ -26,6 +26,12 @@
 `refused: agent_not_active` без вызова провайдера (`supports_request`) — до публикации v2 memory получает «перевода
 нет».
 
+Контроль ИИ (спринт 8, INTERNAL_API §7, domain/degradation.py): вызов ученика (не золотой прогон) проверяет
+действующий уровень после аварийной остановки — `off` → `ai_disabled` (ручной) / `budget_exceeded` (авто), `paid_only`
+и ученик без подписки → `unavailable: degraded` (до провайдера, $0); `economy` (и `paid_only` у подписчика) — попытки
+сразу резервной моделью версии (основная → резервная, без дальнейшего отката). Дневной лимит ученика — по тарифу
+(domain/tiers.py). Смена уровня, замеченная вызовом, записывается (degradation_events + событие).
+
 Парная комната (спринт 7, INTERNAL_API §4): `cooperative_lesson_coach` — `session_kind pair`, `session_id = room_id`;
 бюджет — потолок комнаты `room_cap_usd` и месяц (budget.Scope.room), дневной лимит ученика и лимит урока не
 применяются. До публикации версии (черновик сида) — `refused: agent_not_active`: lessons ведёт комнату по сценарию с
@@ -49,7 +55,7 @@ from sqlalchemy import select, update
 
 from tilhero_ai_gateway.contracts import PAIR_SESSION, output_contract_errors, request_kind
 from tilhero_ai_gateway.domain import budget as budgets
-from tilhero_ai_gateway.domain import jsonschema_lite
+from tilhero_ai_gateway.domain import degradation, jsonschema_lite, tiers
 from tilhero_ai_gateway.domain.common import usd
 from tilhero_ai_gateway.domain.messages import Prompt, build_prompt, first_json_object, sanitize_context
 from tilhero_ai_gateway.domain.provider_status import ProviderStatus
@@ -120,6 +126,13 @@ class VersionSnapshot:
         return cls(row.agent_id, row.version, row.instructions, row.rules, dict(row.output_schema),
                    row.schema_version, row.model_id, row.fallback_model_id, float(row.temperature),
                    row.max_output_tokens, row.timeout_ms, Decimal(row.max_cost_usd))
+
+    def economy(self) -> VersionSnapshot:
+        """Уровень economy (спринт 8): основная модель вызова — резервная модель версии, дальнейшего отката нет; у
+        версии без резервной модели — без изменений."""
+        if not self.fallback_model_id:
+            return self
+        return replace(self, model_id=self.fallback_model_id, fallback_model_id=None)
 
     def for_request(self, context: dict[str, Any]) -> VersionSnapshot:
         """Лимиты вызова с учётом вида запроса: меньшее из лимитов версии и REQUEST_LIMITS."""
@@ -246,12 +259,22 @@ async def invoke(deps: Deps, req: InvokeRequest, *, caller: str, version_overrid
                                                               AgentVersion.version == version_no))).scalar_one_or_none()
         models = {m.model_id: m for m in (await s.execute(select(ModelRow))).scalars().all()}
         free_text = agent.free_text
+        # спринт 8: уровень деградации и тариф — только у вызовов учеников (золотой прогон — только потолок месяца)
+        level: degradation.LevelState | None = None
+        paid = False
+        if budget is not None and learner_limits:
+            level = await degradation.sync(s, now, budget=budget)
+            paid = await tiers.is_paid(s, user_id, now)
     if free_text and req.audience == "kids":
         await _record_early(deps, base, "refused", "kids_not_allowed", started)
         return result(req.agent_id, "refused", "kids_not_allowed", latency_ms=_ms(started))
     if budget is None or (emergency_stop_applies and not budget.ai_enabled) or not provider.ready():
         await _record_early(deps, base, "unavailable", "ai_disabled", started)
         return result(req.agent_id, "unavailable", "ai_disabled", latency_ms=_ms(started))
+    refusal = level.refusal(paid) if level is not None else None
+    if refusal is not None:
+        await _record_early(deps, base, "unavailable", refusal, started)
+        return result(req.agent_id, "unavailable", refusal, latency_ms=_ms(started))
     if row is None:
         await _record_early(deps, base, "refused", "agent_not_active", started)
         return result(req.agent_id, "refused", "agent_not_active", latency_ms=_ms(started))
@@ -261,6 +284,8 @@ async def invoke(deps: Deps, req: InvokeRequest, *, caller: str, version_overrid
         await _record_early(deps, base, "refused", "agent_not_active", started, version=row.version)
         return result(req.agent_id, "refused", "agent_not_active", latency_ms=_ms(started))
     version = VersionSnapshot.of(row).for_request(req.context)
+    if level is not None and level.economy_for(paid):
+        version = version.economy()
     context = sanitize_context(req.agent_id, req.context)
     async with deps.rt.transaction() as s:
         s.add(UsageRow(**base, version=version.version, status="pending", canary=canary))
@@ -273,7 +298,7 @@ async def invoke(deps: Deps, req: InvokeRequest, *, caller: str, version_overrid
     else:
         lesson_session = req.session_id if req.session_kind not in NO_LESSON_CAP_KINDS else None
         scope = budgets.Scope(call_id=call_id, user_id=user_id, session_id=lesson_session,
-                              learner_limits=learner_limits)
+                              learner_limits=learner_limits, daily_cap=tiers.daily_cap(budget, paid))
     outcome = Outcome()
     status, reason = await _attempts(deps, req, version, context, models, budget, scope, outcome)
     latency = _ms(started)

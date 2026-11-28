@@ -9,6 +9,7 @@ import pytest
 
 from tilhero_notifications.domain.texts import PRESSURE_WORDS
 from tilhero_notifications.templates import (
+    BILLING_TEMPLATES,
     KID_TEMPLATES,
     TEMPLATES,
     Context,
@@ -52,6 +53,19 @@ PARAMS: dict[str, dict] = {
     "sanction_applied": {"sanction_id": INVITE, "kind": "social_ban", "until": None},
     "sanction_appeal_decided": {"appeal_id": INVITE, "decision": "upheld"},
     "complaint_resolved": {"case_id": INVITE, "outcome": "dismissed"},
+    # спринт 8 — оплата и подписка (billing)
+    "payment_succeeded": {"order_no": 100_042, "product_kind": "subscription",
+                          "product_title": {"ru": "Плюс 30 дней", "uz": "Plus 30 kun"}, "amount_stars": 300,
+                          "renewal": False, "ends_at": "2026-12-22T19:00:00Z"},
+    "purchase_applied": {"order_id": INVITE, "product_kind": "til_pack", "til": 550, "for_child": True},
+    "refund_completed": {"order_id": INVITE, "stars": False, "product_kind": "subscription"},
+    "subscription_expiring": {"period_id": INVITE, "ends_at": "2026-12-22T19:00:00Z", "days_left": 0,
+                              "minutes_left": 12},
+    "subscription_expired": {"period_id": INVITE},
+    "stars_renewal_failed": {"subscription_id": INVITE, "expires_at": "2026-12-22T19:00:00Z"},
+    "minutes_low": {"period_id": INVITE, "minutes_left": 21, "minutes_granted": 300},
+    "minutes_adjusted": {"adjustment_id": INVITE, "kind": "grant_period", "days": 7},
+    "trial_started": {"period_id": INVITE, "ends_at": "2026-11-29T19:00:00Z", "minutes_granted": 60},
 }
 KID_BASES = ("lesson.reminder", "lesson.missed", "lesson.comeback", "appeal_decided", "reviews_due", "streak_frozen",
              "badge_earned", "hero_stage_reached",
@@ -94,6 +108,10 @@ STARTAPP = {
     "sanction_applied": "route_friends",
     "sanction_appeal_decided": "route_friends",
     "complaint_resolved": None,  # §5: без ссылки
+    # спринт 8: всё об оплате и подписке ведёт в «Подписку» Mini App
+    **{name: "route_subscription" for name in (
+        "payment_succeeded", "purchase_applied", "refund_completed", "subscription_expiring", "subscription_expired",
+        "stars_renewal_failed", "minutes_low", "minutes_adjusted", "trial_started")},
 }
 
 
@@ -234,4 +252,11 @@ def test_registry_flags() -> None:
         "referral_qualified": "social", "referral_rejected": "social", "sanction_applied": "service",
         "sanction_appeal_decided": "service", "complaint_resolved": "social"}
     assert {n for n, s in TEMPLATES.items() if not s.staff_editable} == {
-        "sanction_applied", "sanction_applied.kid", "sanction_appeal_decided", "sanction_appeal_decided.kid"}
+        "sanction_applied", "sanction_applied.kid", "sanction_appeal_decided", "sanction_appeal_decided.kid",
+        *BILLING_TEMPLATES}
+    # спринт 8: оплата и подписка — service, без детских вариантов, с центром, без обхода тихих часов
+    assert len(BILLING_TEMPLATES) == 9
+    for name in BILLING_TEMPLATES:
+        spec = TEMPLATES[name]
+        assert (spec.category, spec.kid_variant, spec.in_app, spec.transactional, spec.direct_only) == (
+            "service", None, True, False, False), name

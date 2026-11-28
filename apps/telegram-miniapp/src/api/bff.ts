@@ -1,4 +1,10 @@
 import type {
+  BillingCatalog,
+  BillingOrderRequest,
+  MinuteEntry,
+  StarsOrder,
+  StarsSubscriptionRequest,
+  SubscriptionView,
   DailyQuests,
   EquipmentRequest,
   GameCurrency,
@@ -389,6 +395,23 @@ export function createBff(client: ApiClient) {
     /** the WAV goes as the body (as «Произнести»); recognised text comes back for confirmation, the audio is not kept */
     pairAudio: (id: string, wav: Blob) => client.request<PairAudio>("POST", `/v1/pair-rooms/${enc(id)}/audio`, { raw: { body: wav, contentType: "audio/wav" } }),
     pairReport: (id: string) => get<PairRoomReport>(`/v1/pair-rooms/${enc(id)}/report`),
+
+    // ---- sprint 8: the subscription and purchases for Telegram Stars (billing via telegram-bff, the Mini App channel) ----
+    /** `quiet` — Profile and the shop: a failure only hides the row / the button (never «Нет связи») */
+    billingCatalog: (quiet = false) => get<BillingCatalog>("/v1/billing/catalog", undefined, quiet),
+    billingSubscription: (quiet = false) => get<SubscriptionView>("/v1/billing/subscription", undefined, quiet),
+    billingMinutes: (cursor: string | null = null) => get<Page<MinuteEntry>>("/v1/billing/minutes", { cursor }),
+    /** one key per «Попробовать бесплатно» tap, reused on a retry (the same trial) */
+    startTrial: (key: string) => client.request<SubscriptionView>("POST", "/v1/billing/trial", { idempotencyKey: key }),
+    /** one key per content of the purchase sheet: a retry (a lost answer, 503 STARS_UNAVAILABLE) gets the same order */
+    createOrder: (body: BillingOrderRequest, key: string) => client.request<StarsOrder>("POST", "/v1/billing/orders", { body, idempotencyKey: key }),
+    /** the history of payments in the Mini App — Stars orders only */
+    orders: (cursor: string | null = null) => get<Page<StarsOrder>>("/v1/billing/orders", { cursor }),
+    /** the poll after the invoice closes: `quiet` — a lost poll is retried, it never toggles «Нет связи» */
+    order: (orderNo: number, quiet = false) => get<StarsOrder>(`/v1/billing/orders/${orderNo}`, undefined, quiet),
+    cancelOrder: (orderNo: number) => client.request<StarsOrder>("POST", `/v1/billing/orders/${orderNo}/cancel`),
+    setAutoRenew: (autoRenew: boolean) =>
+      client.request<SubscriptionView>("POST", "/v1/billing/stars-subscription", { body: { auto_renew: autoRenew } satisfies StarsSubscriptionRequest }),
 
     // ---- deletion ----
     requestDeletion: (body: DeletionRequest) => client.request<DeletionResponse>("POST", "/v1/profile/delete-request", { body }),

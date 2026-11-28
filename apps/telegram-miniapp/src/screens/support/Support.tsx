@@ -19,12 +19,13 @@ const STATUS_TONE: Record<TicketStatus, "ok" | "warn" | "mute" | undefined> = {
 };
 const FALLBACK_CATEGORIES: TicketCategory[] = ["LESSON", "SCHEDULE_REMINDERS", "CHILD_PROFILE", "ACCOUNT", "PERSONAL_DATA", "BUG", "OTHER"];
 
-/** Support (APP-SUP-01, AT-15): a request by category, my requests with statuses and operator replies. */
-export function Support({ number }: { number?: string }) {
+/** Support (APP-SUP-01, AT-15): a request by category, my requests with statuses and operator replies. Sprint 8:
+ *  «Вопрос по оплате» opens the new request at once with the category SUBSCRIPTION_PAYMENT (and the order in the subject). */
+export function Support({ number, category, subject }: { number?: string; category?: TicketCategory; subject?: string }) {
   const { bff, nav } = useApp();
   const { t, fmt } = useI18n();
   const list = useLoad(() => bff.tickets(null), []);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(!!category);
   const opened = useRef(false);
 
   // deep link ticket_TCK-NNNN: open the ticket with that number once the list is here
@@ -44,6 +45,8 @@ export function Support({ number }: { number?: string }) {
         <div className="pad stack">
           {creating ? (
             <NewTicket
+              initialCategory={category ?? null}
+              initialSubject={subject ?? ""}
               onCancel={() => setCreating(false)}
               onCreated={(tk) => {
                 setCreating(false);
@@ -92,16 +95,20 @@ export function Support({ number }: { number?: string }) {
   );
 }
 
-function NewTicket({ onCancel, onCreated }: { onCancel: () => void; onCreated: (t: Ticket) => void }) {
+function NewTicket(props: { initialCategory: TicketCategory | null; initialSubject: string; onCancel: () => void; onCreated: (t: Ticket) => void }) {
+  const { onCancel, onCreated } = props;
   const { bff } = useApp();
   const { t, l } = useI18n();
   const cats = useLoad(() => bff.supportCategories(), []);
-  const [category, setCategory] = useState<TicketCategory | null>(null);
-  const [subject, setSubject] = useState("");
+  const [category, setCategory] = useState<TicketCategory | null>(props.initialCategory);
+  const [subject, setSubject] = useState(props.initialSubject);
   const [message, setMessage] = useState("");
   const [touched, setTouched] = useState(false);
   const key = useRef<DraftKey | null>(null);
-  const options = cats.data?.items.filter((c) => c.available).map((c) => ({ code: c.code, label: l(c.label) })) ?? FALLBACK_CATEGORIES.map((c) => ({ code: c, label: t(`tcat.${c}` as MessageKey) }));
+  const listed = cats.data?.items.filter((c) => c.available).map((c) => ({ code: c.code, label: l(c.label) })) ?? FALLBACK_CATEGORIES.map((c) => ({ code: c, label: t(`tcat.${c}` as MessageKey) }));
+  // the preset category (sprint 8: SUBSCRIPTION_PAYMENT) is offered even when the server list does not mark it
+  const preset = props.initialCategory;
+  const options = preset && !listed.some((c) => c.code === preset) ? [{ code: preset, label: t(`tcat.${preset}` as MessageKey) }, ...listed] : listed;
   const subjOk = subject.trim().length >= 3 && subject.trim().length <= 120;
   const msgOk = message.trim().length >= 1 && message.trim().length <= 4000;
   const send = useAction(async () => {

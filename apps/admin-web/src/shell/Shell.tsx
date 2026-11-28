@@ -48,6 +48,12 @@ const ModerationPage = lazy(() => import("../screens/social/ModerationPage").the
 const ReferralsPage = lazy(() => import("../screens/social/ReferralsPage").then((m) => ({ default: m.ReferralsPage })));
 const LeaguesPage = lazy(() => import("../screens/social/LeaguesPage").then((m) => ({ default: m.LeaguesPage })));
 const PairRoomsPage = lazy(() => import("../screens/social/PairRoomsPage").then((m) => ({ default: m.PairRoomsPage })));
+// sprint 8: «Деньги» — tariffs and products, orders and payments, adjustments, reconciliation, the financial overview
+const TariffsPage = lazy(() => import("../screens/money/TariffsPage").then((m) => ({ default: m.TariffsPage })));
+const PaymentsPage = lazy(() => import("../screens/money/PaymentsPage").then((m) => ({ default: m.PaymentsPage })));
+const AdjustmentsPage = lazy(() => import("../screens/money/AdjustmentsPage").then((m) => ({ default: m.AdjustmentsPage })));
+const ReconciliationPage = lazy(() => import("../screens/money/ReconciliationPage").then((m) => ({ default: m.ReconciliationPage })));
+const FinancePage = lazy(() => import("../screens/money/FinancePage").then((m) => ({ default: m.FinancePage })));
 
 export const APP_VERSION = "admin-web 0.3.0";
 
@@ -62,6 +68,11 @@ function crumbOf(page: PageId | "", id: string | null): string | null {
   if (page === "game") return id.split("/").slice(1).join("/") || null;
   // sprint 7: a tab alone is not an object; a learner, a case, a referral, a group, a duel or a room is
   if (page === "moderation" || page === "referrals" || page === "leagues") return id.split("/").slice(1).join("/") || null;
+  // sprint 8: an order (#/payments/orders/<id>) and a catalog version (#/tariffs/v/<n>) are objects, a tab is not
+  if (page === "payments") return id.startsWith("orders/") ? id.slice(7, 15) : null;
+  if (page === "tariffs") return id.startsWith("v/") ? `v${id.slice(2)}` : null;
+  // the requests of one account (#/adjustments/<account_id>)
+  if (page === "adjustments") return id.slice(0, 8);
   return id;
 }
 
@@ -181,6 +192,11 @@ export function Shell() {
   const crumbId = crumbOf(page, route.id);
   const title = page ? t(`page.${page}`) : "";
   const groups = visibleNav(perms, menu);
+  const navCount = groups.reduce((n, g) => n + g.items.length, 0);
+  // sprint 8: on short windows a long menu scrolls inside — the current section is always in view
+  useEffect(() => {
+    document.querySelector<HTMLElement>('#sidenav [aria-current="page"]')?.scrollIntoView?.({ block: "nearest" });
+  }, [page, navCount]);
   const openCount = stats ? stats.open : null;
   const hot = !!stats && stats.breached > 0;
   const roleName = t(`role.${me.impersonating ?? me.staff.role}`);
@@ -188,7 +204,7 @@ export function Shell() {
   return (
     <NavCtx.Provider value={{ route, navigate }}>
       <div className={cx("shell", collapsed && "is-collapsed", navOpen && "is-nav-open", session.adminLayout?.density === "comfortable" && "density-comfortable")} data-testid="shell">
-        <aside className={cx("sidenav", groups.reduce((n, g) => n + g.items.length, 0) > 17 && "is-many")} id="sidenav" aria-label={t("nav.label")}>
+        <aside className={cx("sidenav", navCount > 17 && "is-many", navCount > 22 && "is-crowded")} id="sidenav" aria-label={t("nav.label")}>
           <div className="sn-head">
             <Wordmark compact={collapsed} sub={t("nav.brandSub", { env: me.env })} />
           </div>
@@ -424,6 +440,26 @@ export function Shell() {
               ) : page === "pair_rooms" ? (
                 <Suspense fallback={<Spinner label={t("common.loading")} />}>
                   <PairRoomsPage routeId={route.id} />
+                </Suspense>
+              ) : page === "tariffs" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <TariffsPage routeId={route.id} />
+                </Suspense>
+              ) : page === "payments" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <PaymentsPage routeId={route.id} />
+                </Suspense>
+              ) : page === "adjustments" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <AdjustmentsPage routeId={route.id} />
+                </Suspense>
+              ) : page === "reconciliation" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <ReconciliationPage />
+                </Suspense>
+              ) : page === "finance" ? (
+                <Suspense fallback={<Spinner label={t("common.loading")} />}>
+                  <FinancePage />
                 </Suspense>
               ) : null}
             </ErrorBoundary>

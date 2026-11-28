@@ -145,8 +145,11 @@ describe("content helpers", () => {
 });
 
 describe("deep links of sprint 3 (release-notes.json routes)", () => {
-  it("the app knows exactly the routes of the catalogue", () => {
-    expect([...ROUTES].sort()).toEqual([...(catalogue as { routes: string[] }).routes].sort());
+  it("the app knows exactly the routes of the catalogue (sprint 8: subscription / til_shop included)", () => {
+    const cat = catalogue as { routes: string[]; planned?: unknown };
+    expect([...ROUTES].sort()).toEqual([...cat.routes].sort());
+    expect(cat.routes).toEqual(expect.arrayContaining(["subscription", "til_shop"]));
+    expect(cat.planned).toBeUndefined();
   });
   it("route_<new> parses; each leads to its screen (skills — the «Прогресс» tab)", () => {
     for (const r of ["diagnostics", "plan", "skills", "scenarios", "media", "media_requests", "languages"]) {

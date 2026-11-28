@@ -138,6 +138,9 @@ export class FakeLessons {
     return steps;
   }
 
+  /** спринт 8 (поток C, BILLING_ENFORCED): поля пэйвола в сессии урока и сценария; null — lessons их не отдаёт (до потока C). */
+  paywall: Pick<LessonSession, "ai_locked" | "ai_minutes_left"> | null = null;
+
   private newSession(owner: string, kind: LessonSession["kind"], kids: boolean, ref: { lesson_id?: string; scenario_id?: string; asset_id?: string }): Sess {
     const id = randomUUID();
     // lessons до спринта 8 (поток C) не отдаёт ai_locked / ai_minutes_left — BFF подставляет null
@@ -160,6 +163,7 @@ export class FakeLessons {
       minutes: 0,
       account_id: "leak-account",
       content_versions: { lesson: 3 },
+      ...(this.paywall && (kind === "lesson" || kind === "scenario") ? { ...this.paywall, billing_hold_id: "hold-leak" } : {}),
     };
     const s: Sess = { view, owner, steps: this.steps(kind, kids), cursor: 0, results: new Map(), retried: false, summary: null };
     this.sessions.set(id, s);

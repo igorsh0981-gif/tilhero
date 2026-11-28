@@ -280,8 +280,11 @@ def test_payload_admin_rules() -> None:
     for section in ("friends", "moderation", "referrals", "leagues", "pair_rooms"):  # спринт 7: «Сообщество»
         p["layout"]["menu"].append({"id": section, "enabled": True})
     assert validate_payload("admin", p)["layout"]["menu"][-1]["id"] == "pair_rooms"
+    for section in ("tariffs", "payments", "adjustments", "reconciliation", "finance"):  # спринт 8: «Деньги»
+        p["layout"]["menu"].append({"id": section, "enabled": True})
+    assert validate_payload("admin", p)["layout"]["menu"][-1]["id"] == "finance"
     p["layout"]["menu"].append({"id": "audit", "enabled": False})
-    assert _errors("admin", p) == [("payload.layout.menu[21].id", "duplicate")]  # 22 — ровно лимит
+    assert _errors("admin", p) == [("payload.layout.menu[26].id", "duplicate")]  # 27 — ровно лимит
     p["layout"]["menu"].append({"id": "users", "enabled": False})
     assert ("payload.layout.menu", "too_many") in _errors("admin", p)
     p = admin_payload()
@@ -341,13 +344,30 @@ def test_payload_admin_community_menu() -> None:
     from tilhero_experience.domain.payload import ADMIN_MENU
 
     community = ["friends", "moderation", "referrals", "leagues", "pair_rooms"]
-    assert list(ADMIN_MENU[-5:]) == community
+    assert list(ADMIN_MENU[-10:-5]) == community  # спринт 8 дописал за ними группу «Деньги»
     p = admin_payload()
     at = [m["id"] for m in p["layout"]["menu"]].index("events") + 1
     p["layout"]["menu"][at:at] = [{"id": c, "enabled": c != "pair_rooms"} for c in community]
     out = validate_payload("admin", p)["layout"]["menu"]
     assert [m["id"] for m in out[at:at + 5]] == community and out[at + 4]["enabled"] is False
     for bad in ("social", "friends_list", "Pair_rooms", "duels"):
+        p = admin_payload()
+        p["layout"]["menu"].append({"id": bad, "enabled": True})
+        assert _errors("admin", p) == [("payload.layout.menu[15].id", "not_allowed")], bad
+
+
+def test_payload_admin_money_menu() -> None:
+    """Спринт 8 (INTERNAL_API §9): разделы «Денег» — tariffs, payments, adjustments, reconciliation, finance — допустимы
+    и выключаются, как любые другие; неизвестные id не принимаются."""
+    from tilhero_experience.domain.payload import ADMIN_MENU
+
+    money = ["tariffs", "payments", "adjustments", "reconciliation", "finance"]
+    assert list(ADMIN_MENU[-5:]) == money
+    p = admin_payload()
+    p["layout"]["menu"].extend({"id": m, "enabled": m != "reconciliation"} for m in money)
+    out = validate_payload("admin", p)["layout"]["menu"]
+    assert [m["id"] for m in out[-5:]] == money and out[-2]["enabled"] is False
+    for bad in ("money", "billing", "orders", "Finance"):
         p = admin_payload()
         p["layout"]["menu"].append({"id": bad, "enabled": True})
         assert _errors("admin", p) == [("payload.layout.menu[15].id", "not_allowed")], bad

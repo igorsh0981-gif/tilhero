@@ -82,6 +82,18 @@
   .sidenav.is-many .sn-group-label{padding:5px 10px 1px}
   .sidenav.is-many .sn-item{min-height:28px;padding:2px 10px}
 }
+/* sprint 8: 26 sections in 7 groups («Деньги» added) — a menu with more than 22 items is denser still, so that 1440×900
+   shows every section and the footer without scrolling (rows stay ≥ 24 px, WCAG 2.5.8). Below 780 px of height 26 rows of
+   24 px, 7 group labels, the head and the footer do not fit: there the menu panel scrolls inside (the footer stays in the
+   window, the current section is scrolled into view) instead of making the targets smaller. */
+@media (max-height:960px){
+  .sidenav.is-crowded .sn-head{min-height:44px;padding:10px 12px 2px 22px}
+  .sidenav.is-crowded .sn-scroll{padding:0 12px 4px}
+  .sidenav.is-crowded .sn-scroll,.sidenav.is-crowded .sn-group{gap:0}
+  .sidenav.is-crowded .sn-group-label{padding:4px 10px 1px;font-size:10.5px;line-height:1.2}
+  .sidenav.is-crowded .sn-item{min-height:25px;padding:1px 10px;font-size:13px;line-height:1.2}
+  .sidenav.is-crowded .sn-foot{padding:5px 12px}
+}
 @media (max-height:780px){
   .sidenav.is-many .sn-head{min-height:40px;padding:8px 12px 2px 22px}
   .sidenav.is-many .sn-scroll{padding:0 12px 4px}

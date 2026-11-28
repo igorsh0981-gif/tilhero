@@ -1,5 +1,7 @@
 /**
  * Ученики (users.read): реестр и карточка — user-admin (read-модель; Telegram ID только маской).
+ * Спринт 8: фильтр списка по тарифу `?tier=free|paid` (проекция billing в user-admin); вкладка «Тариф» карточки —
+ * отдельный маршрут `/admin/v1/learners/{id}/billing` (routes/billing.ts): карточка не зависит от billing.
  * Карточка = user-admin + последние 20 обращений из support по user_id — только если у сотрудника есть support.read
  * (иначе `tickets: null`, support не вызывается); support недоступен — тоже `tickets: null`, карточка открывается.
  * Раскрытие Telegram ID — identity-consent `/admin/v1/users/{id}/reveal` с actor (users.sensitive.read, step-up;
@@ -18,6 +20,7 @@ import {
   CURSOR_Q,
   LEARNER_KIND,
   LEARNER_STATUS,
+  LEARNER_TIERS,
   LIMIT_Q,
   UI_LANG,
   UUID,
@@ -38,6 +41,7 @@ interface ListQuery {
   status?: string;
   locale?: string;
   has_open_tickets?: string;
+  tier?: string;
   cursor?: string;
   limit?: string;
 }
@@ -59,6 +63,8 @@ export function learnerRoutes(app: App, ctx: BffContext): void {
           status: LEARNER_STATUS,
           locale: UI_LANG,
           has_open_tickets: BOOL_Q,
+          // спринт 8 (ADM-USR-01): тариф — проекция billing.access.changed.v1 в user-admin
+          tier: enumOf(LEARNER_TIERS),
           cursor: CURSOR_Q,
           limit: LIMIT_Q,
         }),
@@ -66,10 +72,10 @@ export function learnerRoutes(app: App, ctx: BffContext): void {
     },
     async (req) => {
       const auth = staffOf(req);
-      const { q, kind, age_band, status, locale, has_open_tickets } = req.query;
+      const { q, kind, age_band, status, locale, has_open_tickets, tier } = req.query;
       const body = await domains.userAdmin.get<unknown>("/admin/v1/learners", {
         actor: auth.actor,
-        query: { q: q?.trim(), kind, age_band, status, locale, has_open_tickets, ...pageQuery(req.query) },
+        query: { q: q?.trim(), kind, age_band, status, locale, has_open_tickets, tier, ...pageQuery(req.query) },
       });
       return redactUsernames(auth, await shaped(ctx, auth, DOMAIN.userAdmin, LEARNER_PAGE, body));
     },

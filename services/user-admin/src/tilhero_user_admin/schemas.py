@@ -21,6 +21,8 @@ LearnerStatus = Literal["ACTIVE", "DISABLED", "DELETION_REQUESTED", "DELETED"]
 AgeBand = Literal["6-9", "10-13", "14-17", "18+"]
 GuardianConsent = Literal["not_required", "pending", "granted", "declined"]
 UiLang = Literal["ru", "uz"]
+# спринт 8 (admin.ts LearnerTier): тариф ученика из billing.access.changed.v1
+LearnerTier = Literal["free", "paid"]
 Goal = Literal["work", "career", "travel", "daily", "study", "exam"]
 LevelSelf = Literal["zero", "beginner", "some", "confident"]
 SchedulePreset = Literal["daily", "weekdays", "three_per_week", "custom"]
@@ -178,6 +180,8 @@ class PlanSnapshot(SourceSnapshot):
 class AdminLearnerRow(BaseModel):
     user_id: uuid.UUID
     kind: LearnerKind
+    # спринт 8: null — событий billing ещё не было («считать free»); оплаченный доступ с истёкшим paid_until — free
+    tier: LearnerTier | None
     guardian_user_id: uuid.UUID | None
     display_name: str | None
     username: str | None

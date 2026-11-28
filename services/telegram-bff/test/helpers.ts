@@ -29,6 +29,7 @@ import { buildApp } from "../src/app.js";
 import { loadConfig, type Config } from "../src/config.js";
 import type { App } from "../src/http.js";
 import { signInitData } from "../src/telegramAuth.js";
+import { FakeBilling } from "./fakeBilling.js";
 import { FakeContent } from "./fakeContent.js";
 import { FakeGame } from "./fakeGame.js";
 import { FakeSocial, memberIdOf } from "./fakeSocial.js";
@@ -56,7 +57,11 @@ const URLS = {
   tts: "http://tts.test",
   memory: "http://memory.test",
   gamification: "http://gamification.test",
+  billing: "http://billing.test",
 } as const;
+
+/** Спринт 8: billing подключается явно (BILLING_URL необязателен — по умолчанию его нет, как до спринта 8). */
+export const BILLING_ENV = { BILLING_URL: URLS.billing } as const;
 
 export type Service = keyof typeof URLS;
 
@@ -74,6 +79,7 @@ const DOMAIN_AUD: Record<Service, string> = {
   tts: "tts",
   memory: "memory",
   gamification: "gamification",
+  billing: "billing",
 };
 
 /** MP3-заглушка tts: два беззвучных кадра MPEG-1 Layer III (32 кбит/с, 48 кГц, моно). */
@@ -277,6 +283,8 @@ export class FakeDomains {
   readonly game = new FakeGame();
   /** Спринт 7: social (сообщество, друзья, жалобы, рефералы), лиги и дуэли, задания дуэли и парные комнаты — test/fakeSocial.ts. */
   readonly social7 = new FakeSocial(this.game);
+  /** Спринт 8: billing (API ученика Mini App) — test/fakeBilling.ts. */
+  readonly billing = new FakeBilling();
   private readonly overrides = new Map<string, Handler>();
   private ticketSeq = 3000;
 
@@ -431,6 +439,8 @@ export class FakeDomains {
         return this.memory.memory(r);
       case "gamification":
         return this.social7.gameRoute(r) ?? this.game.route(r);
+      case "billing":
+        return this.billing.route(r) ?? domainError(404, "NOT_FOUND");
     }
   }
 

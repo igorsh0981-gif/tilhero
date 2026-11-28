@@ -173,14 +173,14 @@ describe("rewardTotals / hasRewards", () => {
 
 /* ---------------------------------------------------------------- the shop */
 
-describe("«Не хватает N тилов» — no payment screens", () => {
+describe("«Не хватает N тилов» (sprint 8: «Купить тилы» is a separate button, not in the text)", () => {
   it("RU plurals after «не хватает»: 1 тила, 2 / 5 / 11 тилов, 21 тила", () => {
     const line = (n: number) => shortageText(RU.t, RU.tp, n, false);
-    expect(line(1)).toBe("Не хватает 1 тила. Заработайте в уроках — покупка тилов скоро");
-    expect(line(2)).toBe("Не хватает 2 тилов. Заработайте в уроках — покупка тилов скоро");
-    expect(line(5)).toBe("Не хватает 5 тилов. Заработайте в уроках — покупка тилов скоро");
-    expect(line(11)).toBe("Не хватает 11 тилов. Заработайте в уроках — покупка тилов скоро");
-    expect(line(21)).toBe("Не хватает 21 тила. Заработайте в уроках — покупка тилов скоро");
+    expect(line(1)).toBe("Не хватает 1 тила. Заработайте их в уроках");
+    expect(line(2)).toBe("Не хватает 2 тилов. Заработайте их в уроках");
+    expect(line(5)).toBe("Не хватает 5 тилов. Заработайте их в уроках");
+    expect(line(11)).toBe("Не хватает 11 тилов. Заработайте их в уроках");
+    expect(line(21)).toBe("Не хватает 21 тила. Заработайте их в уроках");
   });
   it("children: on «ты», softer, without the purchase of tils (money only through a parent)", () => {
     const kid = shortageText(RU.t, RU.tp, 20, true);
@@ -188,7 +188,7 @@ describe("«Не хватает N тилов» — no payment screens", () => {
     expect(kid).not.toMatch(/покупк|купи/i);
   });
   it("UZ: Latin, the noun does not change after numerals", () => {
-    expect(shortageText(UZ.t, UZ.tp, 35, false)).toBe("35 til yetmayapti. Darslarda ishlab oling — til sotib olish tez orada");
+    expect(shortageText(UZ.t, UZ.tp, 35, false)).toBe("35 til yetmayapti. Ularni darslarda ishlab oling");
   });
   it("missingTils never negative, whole tils", () => {
     expect(missingTils(40, 35)).toBe(5);

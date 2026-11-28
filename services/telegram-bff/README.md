@@ -197,8 +197,8 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
   совпасть с sha пути (иначе 404), sha256 байтов — с ETag, тип — `image/webp | image/png` с верной сигнатурой (иначе 503,
   лог `game asset rejected` с `reason`). Кеша в BFF нет: каждый запрос — в gamification (она отдаёт только картинки
   опубликованного), браузер кеширует навсегда.
-- **Деньги:** `purchase_available` в `GameSummary` и в `INSUFFICIENT_TILS.details` BFF всегда ставит `false` (тилы за
-  деньги — спринт 8), независимо от ответа домена.
+- **Деньги:** `purchase_available` в `GameSummary` и в `INSUFFICIENT_TILS.details` с спринта 8 вычисляет BFF по каталогу
+  billing (см. «Спринт 8»), ответ домена не учитывается.
 - **`TodayPlan.week[].frozen`:** learning-plan до спринта 6 поля не присылает — BFF отдаёт `false`
   (`routes/plan.ts todayView`).
 
@@ -268,6 +268,43 @@ Mini App ──Bearer──▶ /v1/... ──внутренний JWT v2 (EdDSA,
   {reason}`); в lessons — сырое тело как есть, без повторов. Аудио и распознанный текст в лог не пишутся (`audio_ms`).
 - **Логи:** ник, код друга, запрос поиска, комментарий жалобы, текст обжалования и ходов, подсказки коуча и отчёт — не
   пишутся (`SENSITIVE_KEYS`, redact-пути).
+
+### Спринт 8 — подписка и покупки за Telegram Stars (канал Mini App)
+
+Маршруты — INTERNAL_API спринта 8 §12; файлы: `src/routes/billing.ts`, кодеки и схемы — `src/contractBilling.ts`. Сайт
+оплаты (`/web/v1/*`, `src/web/`) — отдельно (поток H), тот же клиент `ctx.billing` с `chn: web`.
+
+| Метод | Путь | billing (`/internal/v1/me/billing/…`) | Лимит (на аккаунт) |
+|---|---|---|---|
+| GET | `/v1/billing/catalog` | `GET /catalog` | `tg.billing.read` |
+| GET | `/v1/billing/subscription`, `/v1/billing/minutes?cursor=` | `GET /subscription`, `/minutes` | `tg.billing.read` |
+| GET | `/v1/billing/orders?cursor=`, `/v1/billing/orders/{order_no}` | `GET /orders…` | `tg.billing.read` |
+| POST | `/v1/billing/trial` (Idempotency-Key) | `POST /trial` | `tg.billing.order` |
+| POST | `/v1/billing/orders` (Idempotency-Key), `/v1/billing/orders/{order_no}/cancel` | `POST /orders…` | `tg.billing.order` |
+| POST | `/v1/billing/stars-subscription {auto_renew}` | `POST /stars-subscription` | `tg.billing.order` |
+
+- **Вызов:** `sub` — аккаунт, claims `lrn`, `age_band` активного ученика и **`chn: "miniapp"`**; язык счёта Stars —
+  `Accept-Language` (ru | uz). Лимиты — на аккаунт (детский профиль тратит тот же счётчик).
+- **Анти-стиринг (решение владельца В1):** провайдер на входе — только `telegram_stars` (иное — 422 без вызова). Ответы
+  собираются кодеками и сериализуются по схемам контракта: товары без цены в Stars не показываются, способы оплаты —
+  только `telegram_stars`; заказ не Stars (провайдер, валюта, `amount_tiyin`, канал) в истории пропускается (лог
+  `non-Stars orders dropped`), по номеру — 404 `ORDER_NOT_FOUND`, в ответе на команду — 503; ссылка на счёт — только
+  `https://t.me/…` (иначе `null`); оферта на `WEB_PAY_ORIGIN` или не https — 503 (лог `rule: offer_on_web_pay`);
+  источник и цена периодов вне Mini App в `SubscriptionView` не попадают. Ошибки billing: код и статус — как есть,
+  `details` — только поля контракта (`current`, `minutes_left`, `days_left`, `ends_at`, `status`, `field`,
+  `retry_after`), `message` — нейтральный текст BFF (текст домена наружу не уходит). Контрактный тест —
+  `test/billing.test.ts` (подделка billing отдаёт тийины, Payme/Click/Uzum, адрес сайта, заказ сайта — ни одно не доходит
+  до Mini App).
+- **Детский профиль** (`lrn ≠ sub`, до вызова billing): заказы, пробный, отмена, автопродление и история заказов — 403
+  `PAYER_REQUIRED`; каталог — `products: []`, `trial: null`, `can_pay: false`; подписка — статус семьи без
+  `stars_subscription`.
+- **Ошибки:** нет `BILLING_URL`, сеть, таймаут (`BILLING_TIMEOUT_MS`), 5xx, отказ внутренней авторизации, ответ не по
+  контракту — 503 `BILLING_UNAVAILABLE {service: billing}` (учёба работает). `503 STARS_UNAVAILABLE` (Telegram не выдал
+  ссылку, заказ `pending`) и `503 BILLING_UNAVAILABLE` lessons (приглашение в урок вдвоём) — как есть
+  (`DOMAIN_BUSINESS_503`).
+- **`purchase_available`** (`GameSummary` — сводка, выбор героя, экипировка; `INSUFFICIENT_TILS.details`): `sales_enabled
+  ∧ can_pay ∧ есть пакет тилов с ценой в Stars` по каталогу billing того же ученика, параллельно с gamification, таймаут
+  `min(BILLING_TIMEOUT_MS, 1500)` без повторов; детский профиль, нет billing, сбой — `false` (лимиты billing не тратятся).
 
 ## Переменные окружения
 

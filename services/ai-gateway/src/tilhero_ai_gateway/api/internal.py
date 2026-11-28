@@ -56,7 +56,7 @@ from tilhero_ai_gateway.contracts import (
     request_kind,
     validate_context,
 )
-from tilhero_ai_gateway.domain import costs
+from tilhero_ai_gateway.domain import costs, degradation
 from tilhero_ai_gateway.domain.invoke import InvokeRequest, invoke
 from tilhero_ai_gateway.domain.speech import speech_available
 from tilhero_ai_gateway.models import AgentRow
@@ -182,15 +182,21 @@ async def invoke_agent(agent_id: str, body: InvokeIn, request: Request,
 
 
 @router.get("/status")
-async def ai_status(request: Request, principal: Principal = Depends(invoke_auth)) -> dict[str, bool]:
-    """AiStatus {ai_available, speech_available}. ai_available: ИИ включён (нет аварийной остановки) и провайдер
-    готов (ключ задан или fake) — lessons спрашивает при старте занятия: недоступен → режим «варианты» сразу
-    (INTERNAL_API §2.1); лимиты бюджета не учитываются — они проверяются на каждом вызове. speech_available (спринт 5,
-    memory перед оценкой произношения): нет аварийной остановки, ключ и регион Azure заданы (или fake), модель речи
-    включена, месячный потолок не превышен."""
+async def ai_status(request: Request, principal: Principal = Depends(invoke_auth)) -> dict[str, Any]:
+    """AiStatus {ai_available, speech_available, level, free_available, paid_available}. ai_available: ИИ включён
+    (нет аварийной остановки) и провайдер готов (ключ задан или fake) — lessons спрашивает при старте занятия:
+    недоступен → режим «варианты» сразу (INTERNAL_API §2.1); лимиты бюджета не учитываются — они проверяются на каждом
+    вызове. speech_available (спринт 5, memory перед оценкой произношения): нет аварийной остановки, ключ и регион Azure
+    заданы (или fake), модель речи включена, месячный потолок не превышен, уровень не off (спринт 8).
+    Спринт 8 (INTERNAL_API §7): level — действующий уровень деградации (смена — записывается); free_available — ИИ
+    ученику без подписки (provider готов, normal | economy); paid_available — подписчику (+ paid_only): lessons при
+    старте урока с удержанием billing (§5)."""
     deps = deps_of(request)
     speech = speech_deps_of(request)
     async with deps.rt.transaction() as s:
         budget = await costs.get_budget(s)
+        level = await degradation.sync(s, deps.clock(), budget=budget)
         speech_ok = await speech_available(s, speech.provider, speech.clock())
-    return {"ai_available": bool(budget.ai_enabled and deps.provider.ready()), "speech_available": speech_ok}
+        ai_ok = bool(budget.ai_enabled and deps.provider.ready())
+    return {"ai_available": ai_ok, "speech_available": speech_ok, "level": level.level,
+            "free_available": ai_ok and level.free_available(), "paid_available": ai_ok and level.paid_available()}

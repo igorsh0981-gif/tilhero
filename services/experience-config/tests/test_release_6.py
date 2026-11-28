@@ -141,7 +141,7 @@ async def test_events_like_staff_publication(env) -> None:
                                                      n["published_at"].replace("Z", "+00:00")))
         assert_event_conforms(e)
     audits = [e for e in env.migration_events if e.event_type == AUDIT and e.payload["object_type"] == "release_note"
-              and not e.payload["after"]["slug"].startswith("s7-")]  # релиз 7 — test_release_7.py
+              and not e.payload["after"]["slug"].startswith(("s7-", "s8-"))]  # релизы 7 и 8 — свои тесты
     for e in audits:
         assert_event_conforms(e)
         assert (e.payload["actor_type"], e.payload["actor_id"], e.payload["actor_role"]) == (

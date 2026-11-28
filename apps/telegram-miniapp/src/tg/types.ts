@@ -110,7 +110,12 @@ export type TgEvent =
   /** Bot API 8.0: addToHomeScreen failed, payload {error: "UNSUPPORTED"} */
   | "homeScreenFailed"
   /** Bot API 8.0: answer to checkHomeScreenStatus, payload {status} */
-  | "homeScreenChecked";
+  | "homeScreenChecked"
+  /** Bot API 6.1: the invoice opened by openInvoice was closed, payload {url, status} */
+  | "invoiceClosed";
+
+/** Bot API 6.1: openInvoice / invoiceClosed statuses (the bot's billing is still the source of truth). */
+export type TgInvoiceStatus = "paid" | "cancelled" | "failed" | "pending";
 
 /** Bot API 8.0: checkHomeScreenStatus / homeScreenChecked {status}. */
 export type TgHomeScreenStatus = "unsupported" | "unknown" | "added" | "missed";
@@ -152,6 +157,9 @@ export interface TgWebApp {
   openTelegramLink(url: string): void;
   showPopup(params: TgPopupParams, cb?: (buttonId: string) => void): void;
   showConfirm(message: string, cb?: (ok: boolean) => void): void;
+  /** Bot API 6.1+: opens an invoice by its link (https://t.me/$… / https://t.me/invoice/…); the callback gets the status
+   *  when the invoice is closed. */
+  openInvoice?(url: string, callback?: (status: TgInvoiceStatus | string) => void): void;
   requestWriteAccess?(cb?: (granted: boolean) => void): void;
   BackButton: TgBackButton;
   MainButton: TgBottomButton;

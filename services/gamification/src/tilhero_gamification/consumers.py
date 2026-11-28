@@ -1,6 +1,6 @@
-"""Потребители событий gamification (§1.2; спринт 7 — §2.1, §2.3, §2.4): inbox-дедупликация по event_id в
-Runtime.add_consumer, издатель проверяется — события чужих издателей не исполняются. Всё в одной транзакции с inbox и
-outbox."""
+"""Потребители событий gamification (§1.2; спринт 7 — §2.1, §2.3, §2.4; спринт 8 — §6 пакеты тилов): inbox-дедупликация
+по event_id в Runtime.add_consumer, издатель проверяется — события чужих издателей не исполняются. Всё в одной
+транзакции с inbox и outbox."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tilhero_common.app import Runtime
 from tilhero_common.messaging import Envelope
-from tilhero_gamification.domain import earning, projections, saga, social_rewards
+from tilhero_gamification.domain import earning, projections, saga, social_rewards, til_packs
 from tilhero_gamification.settings import Settings
 
 LESSON_COMPLETED: Final = "lesson.session.completed.v1"
@@ -36,6 +36,9 @@ DIAGNOSTICS_COMPLETED: Final = "diagnostics.completed.v1"
 REFERRAL_QUALIFIED: Final = "social.referral.qualified.v1"
 PAIR_COMPLETED: Final = "lesson.pair.completed.v1"
 IDENTITY_UPDATED: Final = "user.profile.updated.v1"
+# спринт 8: пакеты тилов за деньги — только от billing (любой канал: Mini App за Stars и сайт)
+ORDER_PAID: Final = "billing.order.paid.v1"
+ORDER_REFUNDED: Final = "billing.order.refunded.v1"
 
 PRODUCERS: Final = {
     LESSON_COMPLETED: "lessons", REVIEW_COMPLETED: "memory", SKILLS_CHANGED: "diagnostics",
@@ -44,6 +47,7 @@ PRODUCERS: Final = {
     COMMUNITY_UPDATED: "social", FRIENDSHIP_CHANGED: "social", BLOCK_CHANGED: "social", FAMILY_ADDED: "social",
     SANCTION_CHANGED: "social", DIAGNOSTICS_COMPLETED: "diagnostics", REFERRAL_QUALIFIED: "social",
     PAIR_COMPLETED: "lessons", IDENTITY_UPDATED: "identity-consent",
+    ORDER_PAID: "billing", ORDER_REFUNDED: "billing",
 }
 
 log = logging.getLogger("tilhero.gamification.consumers")
@@ -158,6 +162,16 @@ def register(rt: Runtime) -> None:
         if trusted(env):
             await projections.on_identity_profile(session, dict(env.payload), env.occurred_at, now_of(rt))
 
+    async def on_billing(session: AsyncSession, env: Envelope) -> None:
+        """Пакет тилов оплачен → начисление (purchase) и подтверждение; возвращён → обратная запись или tils_spent.
+        Оба типа — одним потребителем: порядок «оплата → возврат» по одному заказу сохраняется."""
+        if not trusted(env):
+            return
+        if env.event_type == ORDER_PAID:
+            await til_packs.on_order_paid(session, settings(), now_of(rt), dict(env.payload), env.event_id)
+        else:
+            await til_packs.on_order_refunded(session, settings(), now_of(rt), dict(env.payload), env.event_id)
+
     rt.add_consumer("gamification.lessons", [LESSON_COMPLETED], on_lesson)
     rt.add_consumer("gamification.reviews", [REVIEW_COMPLETED], on_review)
     rt.add_consumer("gamification.skills", [SKILLS_CHANGED], on_skills)
@@ -176,3 +190,4 @@ def register(rt: Runtime) -> None:
     rt.add_consumer("gamification.referrals", [REFERRAL_QUALIFIED], on_referral)
     rt.add_consumer("gamification.pairs", [PAIR_COMPLETED], on_pair)
     rt.add_consumer("gamification.identity", [IDENTITY_UPDATED], on_identity)
+    rt.add_consumer("gamification.billing", [ORDER_PAID, ORDER_REFUNDED], on_billing)

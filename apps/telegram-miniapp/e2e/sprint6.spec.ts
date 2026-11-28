@@ -291,21 +291,23 @@ test.describe("выбор героя", () => {
 });
 
 test.describe("магазин", () => {
-  test("покупка за тилы с Idempotency-Key, «Куплено» и «Надеть»; нехватка — «покупка тилов скоро», без оплаты", async ({ page }) => {
+  test("покупка за тилы с Idempotency-Key, «Куплено» и «Надеть»; нехватка — «Заработайте их в уроках» и (спринт 8) «Купить тилы»", async ({ page }) => {
     const bff = await start(page);
     await page.getByTestId("game-shop").click();
     await expect(page.getByTestId("shop")).toBeVisible();
     await expect(page.getByTestId("shop-balance")).toContainText("У вас 85 тилов");
     await expect(page.getByTestId("shop-freezes")).toHaveText("2 из 5");
-    await expect(page.getByTestId("shop-balance")).toContainText("Покупка тилов — скоро");
+    // sprint 8: tils for Telegram Stars — a separate button (the BFF: purchase_available), no «скоро» in the texts
+    await expect(page.getByTestId("shop-balance")).not.toContainText("скоро");
+    await expect(page.getByTestId("shop-buy-tils")).toHaveText("Купить тилы");
     // the three sections and the prices
     await expect(page.getByTestId("shop-sec-streak_freeze").locator("li")).toHaveCount(1);
     await expect(page.getByTestId("shop-streak_freeze")).toContainText("Цена: 40 тилов");
     await expect(page.getByTestId("shop-streak_freeze")).toContainText("Запас: 2 из 5");
     // not enough: 120 > 85 — the reason in words, the button is off, no payment screens
-    await expect(page.getByTestId("shop-why-bg_space")).toHaveText("Не хватает 35 тилов. Заработайте в уроках — покупка тилов скоро");
+    await expect(page.getByTestId("shop-why-bg_space")).toHaveText("Не хватает 35 тилов. Заработайте их в уроках");
     await expect(page.getByTestId("shop-buy-bg_space")).toBeDisabled();
-    await expect(page.getByTestId("shop-buy-bg_space")).toHaveAccessibleDescription("Не хватает 35 тилов. Заработайте в уроках — покупка тилов скоро");
+    await expect(page.getByTestId("shop-buy-bg_space")).toHaveAccessibleDescription("Не хватает 35 тилов. Заработайте их в уроках");
     await shotOf(page, "shop-balance", "39_shop");
 
     // the frame: 50 tils
@@ -321,7 +323,7 @@ test.describe("магазин", () => {
     await expect(page.getByTestId("shop-frame_gold")).toHaveAttribute("data-owned", "true");
     await expect(page.getByTestId("shop-frame_gold")).toContainText("Куплено");
     // now the freeze is short of 5: «тилов» after a number in the genitive
-    await expect(page.getByTestId("shop-why-streak_freeze")).toHaveText("Не хватает 5 тилов. Заработайте в уроках — покупка тилов скоро");
+    await expect(page.getByTestId("shop-why-streak_freeze")).toHaveText("Не хватает 5 тилов. Заработайте их в уроках");
     await shotOf(page, "shop-streak_freeze", "47_shop_shortage");
     // wear it
     await page.getByTestId("shop-equip-frame_gold").click();
@@ -391,7 +393,7 @@ test.describe("магазин", () => {
     bff.game.state(bff.active).til = 10;
     await page.getByTestId("shop-buy-streak_freeze").click();
     await confirm(page);
-    await expect(page.getByTestId("shop-why-streak_freeze")).toHaveText("Не хватает 30 тилов. Заработайте в уроках — покупка тилов скоро");
+    await expect(page.getByTestId("shop-why-streak_freeze")).toHaveText("Не хватает 30 тилов. Заработайте их в уроках");
     await expect(page.getByTestId("shop-balance")).toContainText("У вас 10 тилов");
     expect(bff.game.purchasesMade).toBe(0);
   });
@@ -616,7 +618,7 @@ test.describe("ребёнок 6–13", () => {
     await page.getByTestId("game-shop").click();
     await expect(page.getByTestId("shop-balance")).toContainText("У тебя 20 тилов");
     await expect(page.getByTestId("shop-why-streak_freeze")).toHaveText("Не хватает 20 тилов. Их можно заработать в уроках!");
-    expect(await page.getByTestId("shop").innerText()).not.toContain("покупка тилов");
+    expect(await page.getByTestId("shop").innerText()).not.toMatch(/покупка тилов|Купить тилы|⭐/);
     await page.getByTestId("bar-back").click();
     // the rewards of a reading just finished: quiet by default for children
     await finishKidReading(page);
@@ -675,7 +677,7 @@ test.describe("доступность и язык", () => {
     await expect(page.getByTestId("game-tils")).toHaveText("85 til");
     await expectLatin(page);
     await page.getByTestId("game-shop").click();
-    await expect(page.getByTestId("shop-why-bg_space")).toHaveText("35 til yetmayapti. Darslarda ishlab oling — til sotib olish tez orada");
+    await expect(page.getByTestId("shop-why-bg_space")).toHaveText("35 til yetmayapti. Ularni darslarda ishlab oling");
     await expectLatin(page);
     await page.getByTestId("bar-back").click();
     await page.getByTestId("game-history").click();

@@ -1,7 +1,14 @@
 """Тексты бота RU/UZ (узбекская латиница) и сборка ссылок открытия Mini App.
 
 Бот — только транспорт (решение заказчика №1): `/start [payload]` — приветствие с кнопкой «Открыть TilHero»;
-прочие команды и текст — одна подсказка с той же кнопкой. Команд и диалогов нет.
+прочие команды и текст — одна подсказка с той же кнопкой. Диалогов нет.
+
+Спринт 8 (продажи за Telegram Stars; требование Telegram — payments-stars): `/paysupport` и `/support` — вопросы по
+оплате в поддержке TilHero (кнопка на раздел «Поддержка» Mini App) и пояснение, что поддержка Telegram с покупками в
+боте не помогает; `/terms` — оферта на домене Mini App; тексты отказа `pre_checkout_query`.
+**Анти-стиринг (решение В1):** ни один текст не упоминает сайт оплаты, ссылок на него, другие способы оплаты, названия
+фиатных провайдеров и цены в сумах (тест test_botgw_stars_webhook). Тексты `/paysupport` и `/terms` — черновики до
+вычитки юристом (О6).
 """
 
 from __future__ import annotations
@@ -33,6 +40,14 @@ TEXTS: dict[Lang, dict[str, str]] = {
         "hint": "Бот только открывает приложение и присылает напоминания. Всё остальное — в TilHero: "
         "нажмите кнопку ниже.",
         "open": "Открыть TilHero",
+        # спринт 8: команды продаж за Stars (О6 — черновики до вычитки юристом)
+        "paysupport": "Вопросы по оплате, подписке TilHero Плюс и тилам решает поддержка TilHero. Откройте приложение "
+        "→ «Поддержка», опишите вопрос — ответ придёт в этот чат.\n\nПоддержка Telegram не помогает с покупками в "
+        "ботах и мини-приложениях — пишите нам.",
+        "support_button": "Написать в поддержку",
+        "terms": "Условия покупки подписки TilHero Плюс и тилов — в публичной оферте TilHero. Перед оплатой приложение "
+        "показывает условия и просит согласия с ними.",
+        "terms_button": "Открыть оферту",
     },
     "uz": {
         "hello": "Salom, {name}! Butun taʼlim TilHero mini-ilovasida: mashgʻulotlar, jadval va eslatmalar. "
@@ -42,13 +57,66 @@ TEXTS: dict[Lang, dict[str, str]] = {
         "hint": "Bot faqat ilovani ochadi va eslatmalar yuboradi. Qolgan hammasi TilHeroʼda — quyidagi tugmani "
         "bosing.",
         "open": "TilHeroʼni ochish",
+        "paysupport": "Toʻlov, TilHero Plus obunasi va tillar boʻyicha savollarni TilHero qoʻllab-quvvatlash xizmati "
+        "hal qiladi. Ilovani oching → «Qoʻllab-quvvatlash», savolingizni yozing — javob shu chatga keladi.\n\nTelegram "
+        "qoʻllab-quvvatlash xizmati botlar va mini-ilovalardagi xaridlar boʻyicha yordam bermaydi — bizga yozing.",
+        "support_button": "Qoʻllab-quvvatlashga yozish",
+        "terms": "TilHero Plus obunasi va tillarni xarid qilish shartlari — TilHero ommaviy ofertasida. Toʻlovdan "
+        "oldin ilova shartlarni koʻrsatadi va ularga roziligingizni soʻraydi.",
+        "terms_button": "Ofertani ochish",
     },
 }
 
 BOT_COMMANDS: dict[Lang, list[dict[str, str]]] = {
-    "ru": [{"command": "start", "description": "Открыть TilHero"}],
-    "uz": [{"command": "start", "description": "TilHeroʼni ochish"}],
+    "ru": [
+        {"command": "start", "description": "Открыть TilHero"},
+        {"command": "paysupport", "description": "Вопросы по оплате"},
+        {"command": "support", "description": "Поддержка"},
+        {"command": "terms", "description": "Условия покупки"},
+    ],
+    "uz": [
+        {"command": "start", "description": "TilHeroʼni ochish"},
+        {"command": "paysupport", "description": "Toʻlov boʻyicha savollar"},
+        {"command": "support", "description": "Qoʻllab-quvvatlash"},
+        {"command": "terms", "description": "Xarid shartlari"},
+    ],
 }
+SUPPORT_PAYLOAD = "route_support"  # раздел «Поддержка» Mini App (обращение по оплате — категория в приложении)
+
+# Отказ pre_checkout_query (error_message, показывается пользователю): коды billing §1.5 + `unavailable` (таймаут, сбой,
+# любая иная ошибка). Без упоминания других способов оплаты и сайта.
+PRE_CHECKOUT_ERRORS: dict[Lang, dict[str, str]] = {
+    "ru": {
+        "order_not_found": "Счёт устарел или отменён. Откройте TilHero и оформите покупку заново.",
+        "order_closed": "Счёт устарел или отменён. Откройте TilHero и оформите покупку заново.",
+        "amount_mismatch": "Стоимость в счёте не совпадает с заказом. Оформите покупку заново в TilHero.",
+        "payer_mismatch": "Этот счёт оформлен в другом аккаунте TilHero. Откройте TilHero и оформите покупку в своём "
+        "профиле.",
+        "already_paid": "Этот счёт уже оплачен — покупка появится в TilHero.",
+        "subscription_exists": "Подписка TilHero Плюс уже активна. Управлять ею можно в TilHero → «Подписка».",
+        "payments_disabled": "Покупки в TilHero сейчас недоступны. Попробуйте позже.",
+        "unavailable": "Оплата временно недоступна. Попробуйте ещё раз через несколько минут.",
+    },
+    "uz": {
+        "order_not_found": "Hisob eskirgan yoki bekor qilingan. TilHeroʼni oching va xaridni qaytadan "
+        "rasmiylashtiring.",
+        "order_closed": "Hisob eskirgan yoki bekor qilingan. TilHeroʼni oching va xaridni qaytadan rasmiylashtiring.",
+        "amount_mismatch": "Hisob summasi buyurtmaga mos kelmaydi. Xaridni TilHeroʼda qaytadan rasmiylashtiring.",
+        "payer_mismatch": "Bu hisob boshqa TilHero hisobida rasmiylashtirilgan. TilHeroʼni oching va xaridni oʻz "
+        "profilingizda rasmiylashtiring.",
+        "already_paid": "Bu hisob allaqachon toʻlangan — xarid TilHeroʼda koʻrinadi.",
+        "subscription_exists": "TilHero Plus obunasi allaqachon faol. Uni TilHero → «Obuna» boʻlimida boshqarish "
+        "mumkin.",
+        "payments_disabled": "TilHeroʼda xaridlar hozir mavjud emas. Keyinroq urinib koʻring.",
+        "unavailable": "Toʻlov vaqtincha mavjud emas. Bir necha daqiqadan soʻng qayta urinib koʻring.",
+    },
+}
+
+
+def pre_checkout_error_text(lang: Lang, error: str | None) -> str:
+    """Текст отказа pre_checkout_query: известный код billing — свой текст, остальное — «временно недоступна»."""
+    texts = PRE_CHECKOUT_ERRORS[lang]
+    return texts.get(error or "", texts["unavailable"])
 
 DESCRIPTIONS: dict[Lang, dict[str, str]] = {
     "ru": {
@@ -99,11 +167,13 @@ def webapp_url(base: str, startapp: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
-def open_button(lang: Lang, miniapp_url: str, app_link: str | None, payload: str | None) -> dict[str, Any]:
+def open_button(
+    lang: Lang, miniapp_url: str, app_link: str | None, payload: str | None, *, text_key: str = "open"
+) -> dict[str, Any]:
     """Кнопка «Открыть TilHero». С payload и TELEGRAM_APP_LINK — прямая ссылка t.me/<bot>/<app>?startapp=…
     (Telegram передаст payload в initData.start_param); без прямой ссылки — web_app на MINIAPP_URL?startapp=…;
     без payload — web_app на MINIAPP_URL."""
-    text = t(lang, "open")
+    text = t(lang, text_key)
     if payload is None:
         return {"text": text, "web_app": {"url": miniapp_url}}
     if not START_PARAM_RE.fullmatch(payload):

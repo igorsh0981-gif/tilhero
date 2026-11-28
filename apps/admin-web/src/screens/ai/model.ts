@@ -467,10 +467,10 @@ export function budgetLevel(pct: number, alertPercent: number): "ok" | "warn" | 
   return "ok";
 }
 
-export type BudgetForm = Record<"monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "speech_monthly_cap_usd" | "room_cap_usd" | "alert_percent", string>;
+export type BudgetForm = Record<"monthly_cap_usd" | "learner_daily_cap_usd" | "lesson_cap_usd" | "speech_monthly_cap_usd" | "room_cap_usd" | "paid_learner_daily_cap_usd" | "alert_percent", string>;
 export interface BudgetIssue {
   field: keyof BudgetForm;
-  code: "range" | "range0" | "gt_daily" | "gt_monthly";
+  code: "range" | "range0" | "gt_daily" | "gt_monthly" | "lt_learner";
 }
 export const budgetForm = (b: Pick<AiBudget, keyof BudgetForm>): BudgetForm => ({
   monthly_cap_usd: String(b.monthly_cap_usd),
@@ -479,8 +479,12 @@ export const budgetForm = (b: Pick<AiBudget, keyof BudgetForm>): BudgetForm => (
   speech_monthly_cap_usd: String(b.speech_monthly_cap_usd),
   // sprint 7: an ai-gateway before the room cap answers without it — the default of the contract (0.10)
   room_cap_usd: String(b.room_cap_usd ?? ROOM_CAP_DEFAULT),
+  // sprint 8 (В14): the daily cap of a subscriber; admin-bff answers 0.30 before the migration of ai-gateway
+  paid_learner_daily_cap_usd: String(b.paid_learner_daily_cap_usd ?? PAID_DAILY_CAP_DEFAULT),
   alert_percent: String(b.alert_percent),
 });
+/** AiBudget.paid_learner_daily_cap_usd by default (INTERNAL_API sprint 8 §7, owner's decision В14) */
+export const PAID_DAILY_CAP_DEFAULT = 0.3;
 /** AiBudget.room_cap_usd by default (INTERNAL_API sprint 7 §4) */
 export const ROOM_CAP_DEFAULT = 0.1;
 
@@ -495,7 +499,7 @@ export function mergeBudgetForm(read: BudgetForm, entered: BudgetForm, now: Budg
 }
 
 /**
- * Caps are positive, a lesson ≤ a learner's day ≤ the month; the sub-cap of pronunciation (sprint 5, owner's decision:
+ * Caps are positive, a lesson ≤ a learner's day ≤ a subscriber's day (sprint 8, $0.30) ≤ the month; the sub-cap of pronunciation (sprint 5, owner's decision:
  * $5 a month) is 0…the month (0 — the feature is off); the coach of one pair room (sprint 7, $0.10 by default) is
  * 0…the month (0 — rooms go by the scenario with choices); the alert threshold is 1…100 %.
  */
@@ -506,6 +510,7 @@ export function checkBudget(f: BudgetForm): { issues: BudgetIssue[]; value: Pick
   const l = num(f.lesson_cap_usd);
   const sp = num(f.speech_monthly_cap_usd);
   const rc = num(f.room_cap_usd);
+  const pd = num(f.paid_learner_daily_cap_usd);
   const a = num(f.alert_percent);
   if (m == null || m <= 0 || m > 100_000) issues.push({ field: "monthly_cap_usd", code: "range" });
   if (d == null || d <= 0) issues.push({ field: "learner_daily_cap_usd", code: "range" });
@@ -516,8 +521,13 @@ export function checkBudget(f: BudgetForm): { issues: BudgetIssue[]; value: Pick
   else if (m != null && m > 0 && sp > m) issues.push({ field: "speech_monthly_cap_usd", code: "gt_monthly" });
   if (rc == null || rc < 0) issues.push({ field: "room_cap_usd", code: "range0" });
   else if (m != null && m > 0 && rc > m) issues.push({ field: "room_cap_usd", code: "gt_monthly" });
+  // sprint 8: a subscriber's day — not below a free learner's day, not above the month
+  if (pd == null || pd <= 0) issues.push({ field: "paid_learner_daily_cap_usd", code: "range" });
+  // (compared with a free learner's day only when that one is itself valid — one mistake, one message)
+  else if (d != null && d > 0 && (m == null || m <= 0 || d <= m) && pd < d) issues.push({ field: "paid_learner_daily_cap_usd", code: "lt_learner" });
+  else if (m != null && m > 0 && pd > m) issues.push({ field: "paid_learner_daily_cap_usd", code: "gt_monthly" });
   if (a == null || !Number.isInteger(a) || a < 1 || a > 100) issues.push({ field: "alert_percent", code: "range" });
-  return { issues, value: issues.length ? null : { monthly_cap_usd: m!, learner_daily_cap_usd: d!, lesson_cap_usd: l!, speech_monthly_cap_usd: sp!, room_cap_usd: rc!, alert_percent: a! } };
+  return { issues, value: issues.length ? null : { monthly_cap_usd: m!, learner_daily_cap_usd: d!, lesson_cap_usd: l!, speech_monthly_cap_usd: sp!, room_cap_usd: rc!, paid_learner_daily_cap_usd: pd!, alert_percent: a! } };
 }
 
 /** sprint 5: a speech model (pronunciation) is priced per hour of audio, not per token. */

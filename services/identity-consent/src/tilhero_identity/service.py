@@ -75,6 +75,7 @@ from tilhero_identity.models import (
     User,
 )
 from tilhero_identity.schemas import (
+    AccountTelegramUser,
     AgeRequest,
     BiometricEnableResponse,
     ConsentRequest,
@@ -103,6 +104,7 @@ from tilhero_identity.schemas import (
     SecurityState,
     SettingsPatch,
     TelegramLoginRequest,
+    TelegramUserAccount,
     UserSummary,
 )
 from tilhero_identity.settings import Settings
@@ -1700,6 +1702,35 @@ class IdentityService:
                 consent_accepted=consent is not None and consent_accepted(consent.purposes),
                 purposes=learner_purposes(user, consent),
             )
+
+    async def account_by_telegram(self, telegram_user_id: int) -> TelegramUserAccount:
+        """Спринт 8: Telegram ID → аккаунт (bot-gateway, telegram-bff). Только аккаунт (у детского профиля Telegram ID
+        нет); обезличенный (Telegram ID снят) и неизвестный — 404. Удаляемый отдаётся со `status`: Telegram ID живёт
+        до ACK billing в саге — bot-gateway передаёт billing поздний платёж Stars (пункт сверки), сайт и pre-checkout
+        отказывают по статусу."""
+        async with self._tx() as session:
+            user = (await session.execute(
+                select(User).where(User.telegram_user_id == telegram_user_id)
+            )).scalar_one_or_none()
+            if user is None or user.kind != "account" or user.status == "DELETED":
+                raise _user_not_found()
+            return TelegramUserAccount(
+                account_id=user.user_id,
+                age_band=user.age_band,  # type: ignore[arg-type]
+                guardian_consent=user.guardian_consent,  # type: ignore[arg-type]
+                status=user.status,  # type: ignore[arg-type]
+            )
+
+    async def telegram_of_account(self, account_id: uuid.UUID) -> AccountTelegramUser:
+        """Спринт 8: аккаунт → Telegram ID (только bot-gateway: возврат Stars и отмена автопродления). Работает и для
+        удаляемого аккаунта — сага billing отменяет подписку Stars до ACK billing, а identity-consent снимает
+        Telegram ID только при обезличивании, после ACK всех доменов (в т.ч. billing). Детский профиль, обезличенный,
+        неизвестный — 404."""
+        async with self._tx() as session:
+            user = await session.get(User, account_id)
+            if user is None or user.kind != "account" or user.status == "DELETED" or user.telegram_user_id is None:
+                raise _user_not_found()
+            return AccountTelegramUser(telegram_user_id=user.telegram_user_id)
 
     async def set_bot_status(self, telegram_user_id: int, blocked: bool) -> None:
         """Блокировка бота не меняет настройки: пока бот заблокирован, доставка в Telegram выключена для аккаунта и

@@ -56,10 +56,7 @@ describe("contract coverage", () => {
       const [method, url] = e.split(" ") as [string, string];
       return !h.app.hasRoute({ method: method as "GET", url });
     });
-    // спринт 8, поток 0: /v1/billing/* описаны в контракте, маршруты пишет поток E (routes/billing.ts) — исключение
-    // снимается вместе с ними (поток E удаляет этот фильтр)
-    const SPRINT8_PENDING = /^(GET|POST) \/v1\/billing\//;
-    expect(missing.filter((e) => !SPRINT8_PENDING.test(e))).toEqual([]);
+    expect(missing).toEqual([]);
   });
 
   it("туристических маршрутов нет", () => {

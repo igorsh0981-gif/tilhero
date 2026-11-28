@@ -436,13 +436,38 @@ class AudiencePage(BaseModel):
 
 
 class ProfileExportItem(BaseModel):
-    """Строка выгрузки профилей (export.py): значения age_band и guardian_consent — как в user.profile.updated.v1."""
+    """Строка выгрузки профилей (export.py): значения age_band и guardian_consent — как в user.profile.updated.v1.
+    Спринт 8: `guardian_user_id` — опекун детского профиля (у аккаунта — null): billing строит пул минут аккаунта и
+    его детских профилей и проверяет получателя пакета тилов (INTERNAL_API спринта 8 §1.16, §9)."""
 
     user_id: uuid.UUID
     kind: Literal["account", "child"]
     age_band: Literal["6-9", "10-13", "14-17", "18+"] | None
     guardian_consent: Literal["not_required", "pending", "granted", "declined"] | None
+    guardian_user_id: uuid.UUID | None
     updated_at: datetime
+
+
+class TelegramUserAccount(BaseModel):
+    """Спринт 8 (INTERNAL_API §9): аккаунт TilHero по Telegram ID — для telegram-bot-gateway (pre_checkout_query,
+    платёжные обновления Stars) и telegram-bff (вход на сайт оплаты). Без имени, username и самого Telegram ID.
+
+    `status` — дополнение к контракту (как в `/public` и `DeliveryInfo`): `DELETION_REQUESTED` — профиль удаляется
+    (сайт — `login_error=not_allowed`, pre-checkout — отказ; платёжные обновления bot-gateway всё ещё может передать
+    billing — Telegram ID живёт до ACK billing в саге); `DISABLED` — TilHero отключён учеником. Обезличенный или
+    неизвестный — 404."""
+
+    account_id: uuid.UUID
+    age_band: Literal["14-17", "18+"] | None
+    guardian_consent: GuardianConsent
+    status: PublicStatus
+
+
+class AccountTelegramUser(BaseModel):
+    """Спринт 8: Telegram ID аккаунта — только telegram-bot-gateway (возврат и отмена подписки Stars по
+    `account_id` из billing, в т.ч. в саге удаления до ACK billing)."""
+
+    telegram_user_id: int
 
 
 class ProfileExportPage(BaseModel):

@@ -18,7 +18,7 @@ PII: копия `username`/`display_name`; полный Telegram ID не хра�
 ## API (вызывает только `admin-bff`, claim `actor` обязателен, права проверяются здесь же)
 | Метод | Путь | Право | Ответ |
 |---|---|---|---|
-| GET | `/admin/v1/learners?q=&kind=&age_band=&status=&locale=&has_open_tickets=&cursor=&limit=` | `users.read` | `Page<AdminLearnerRow>` (новые сверху) |
+| GET | `/admin/v1/learners?q=&kind=&age_band=&status=&locale=&has_open_tickets=&tier=&cursor=&limit=` | `users.read` | `Page<AdminLearnerRow>` (новые сверху); спринт 8 — `tier` строки и фильтр `tier=free\|paid` |
 | GET | `/admin/v1/learners/stats?period=today\|7d\|30d` | `dashboard.read` | `DashboardLearners` |
 | GET | `/admin/v1/learners/{id}` | `users.read` | `AdminLearnerCard` без `tickets` (их добавляет admin-bff) |
 
@@ -60,6 +60,7 @@ warning без данных). Не публикует.
 |---|---|---|
 | `user.profile.created.v1` | identity-consent | строка: `kind`, `guardian_user_id`, `locale`, `age_band`, `created_at`; досрочная сверка (имя и username есть только в источнике) |
 | `user.profile.updated.v1` | identity-consent | `locale`, `age_band`, `guardian_consent`; смена имени → досрочная сверка |
+| `billing.access.changed.v1` (спринт 8) | billing | `tier`, `paid_until` (у free — NULL), версия — `changed_at` события: позднее событие тариф не откатывает; удалённому — без изменений. В строке: `paid` с наступившим `paid_until` — `free` (событие об окончании могло ещё не прийти), NULL — событий не было («считать free»); фильтр `tier=free` включает NULL |
 | `user.status.changed.v1`, `user.deletion.requested.v1` | identity-consent | статус (`DELETION_REQUESTED`) |
 | `consent.accepted.v1`, `consent.revoked.v1` | identity-consent | блок `consent`: у аккаунта — только `basis=self` (собственное согласие; решение родителя о подростке — `guardian_consent`), у детского профиля — только `basis=guardian` (ревью P2-3); вид ещё не известен — принимается, исправит снимок |
 | `user.notification_settings.changed.v1` | identity-consent | блок `notifications` |
@@ -91,12 +92,13 @@ identity-consent `GET /admin/v1/users?updated_after=&cursor=&limit=500` и learn
 идёт (в процессе или на другой реплике) — новый не ждёт: `skipped`. Сбой источника не роняет сервис и не влияет на
 readiness: тип ошибки — в лог и `reconcile_state.last_error`. Источники должны принимать вызывающего `user-admin`.
 
-## Данные (схема `user_admin`, миграции 0001–0002)
+## Данные (схема `user_admin`, миграции 0001–0004)
 - `admin_learner_summary` — строка на ученика: поля `AdminLearnerRow` + JSONB `consent`, `security`, `notifications`,
   `plan` + служебные (`search_text`, `source_updated_at`, версии групп полей, `profile_known`, `refreshed_at`,
   `erased_at`). CHECK: формат маски, у детского профиля нет Telegram, опекун только у ребёнка, у DELETED нет PII,
   связи с опекуном и плана; индексы — `(created_at, user_id)`, `status`, `guardian_user_id` (частичный),
-  `last_activity_at`;
+  `last_activity_at`, `tier` (спринт 8, миграция 0004: `tier`, `paid_until`, `tier_at`, CHECK `ck_learner_tier`;
+  удаление стирает тариф);
 - `ticket_refs` — номер/статус/автор обращения (счётчики пересчитываются из неё — идемпотентно);
 - `reconcile_state` — водяной знак и исход сверки по источнику; `outbox`/`inbox` (`create_messaging_tables`).
 

@@ -87,7 +87,7 @@ describe("AI budget (review R2-07)", () => {
       const r = answers.shift()!;
       return new Response(JSON.stringify(r.body), { status: r.status, headers: { "Content-Type": "application/json" } });
     }));
-    const b = { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, room_cap_usd: 0.1, alert_percent: 90 };
+    const b = { monthly_cap_usd: 20, learner_daily_cap_usd: 0.05, lesson_cap_usd: 0.03, speech_monthly_cap_usd: 5, room_cap_usd: 0.1, paid_learner_daily_cap_usd: 0.3, alert_percent: 90 };
     await Ai.putBudget(b, "2026-11-19T10:00:00Z", "Порог 90 %");
     expect(calls[0]!.url).toBe("/admin/v1/ai/budget");
     expect(calls[0]!.init.method).toBe("PUT");

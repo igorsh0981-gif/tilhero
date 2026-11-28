@@ -23,10 +23,14 @@ AUDIT_EVENT = "admin.audit.recorded.v1"
 # 3–4 — контент, диагностика, уроки, оценки, ИИ; спринт 5 — memory (ручная правка карточки memory.card_adjusted;
 # словарь курса glossary.* пишет catalog); спринт 6 — gamification (правила, герои, магазин, события, кошельки: game.*);
 # спринт 7 — новых издателей нет (INTERNAL_API спринта 7 §6): social (дела модерации, санкции, обжалования, кампании и
-# решения по рефералам), gamification (лиги и дуэли, переоценка) и lessons (остановка парной комнаты) уже в списке.
+# решения по рефералам), gamification (лиги и дуэли, переоценка) и lessons (остановка парной комнаты) уже в списке;
+# спринт 8 (INTERNAL_API спринта 8 §9, §1.17) — billing (каталог: активация и откат; «четыре глаза»: заявка, решение,
+# отмена; возвраты; разбор сверки; курсы USD и Stars; массовый пробный: billing.*). Ручная деградация ИИ
+# (ai.degradation_updated) пишет ai-gateway — он уже в списке. Telegram ID и секретов провайдеров в записях нет
+# (отвечает издатель).
 AUDIT_EVENT_PRODUCERS = frozenset({
     "identity-consent", "learning-plan", "social", "experience-config", "support", "notifications", "admin-identity",
-    "catalog", "diagnostics", "lessons", "assessment", "ai-gateway", "memory", "gamification",
+    "catalog", "diagnostics", "lessons", "assessment", "ai-gateway", "memory", "gamification", "billing",
 })
 SECURITY_EVENT_PRODUCERS = frozenset({"identity-consent"})
 

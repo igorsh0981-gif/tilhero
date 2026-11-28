@@ -132,9 +132,10 @@ async def test_start_payload_without_direct_link_falls_back_to_web_app(gw) -> No
 
 
 @pytest.mark.parametrize(
-    "text", ["/help", "/events", "/watch", "/support", "/unknown", "Где мой урок?", "/start%20x", ""]
+    "text", ["/help", "/events", "/watch", "/unknown", "Где мой урок?", "/start%20x", "/supports", "/pay", ""]
 )
 async def test_other_commands_and_text_get_one_hint(link_gw, text: str) -> None:
+    """/paysupport, /support, /terms (спринт 8) — свои ответы, см. test_botgw_stars_webhook.py."""
     reply = (await link_gw.webhook(link_gw.message(text))).json()
     assert reply["method"] == "sendMessage" and reply["text"] == HINT_RU
     assert button(reply) == PLAIN_RU

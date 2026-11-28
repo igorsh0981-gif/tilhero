@@ -32,7 +32,9 @@ import { supportRoutes } from "./routes/support.js";
 import { SessionStore } from "./sessions.js";
 import { gameRoutes, registerAssetParser } from "./routes/game.js";
 import { socialRoutes } from "./routes/social.js";
-import { DomainClient, GAME_SERVICE, SERVICE_NAME, SOCIAL_SERVICE, createDomains } from "./upstream.js";
+import { billingRoutes } from "./routes/billing.js";
+import { financeRoutes } from "./routes/finance.js";
+import { BILLING_SERVICE, DomainClient, GAME_SERVICE, SERVICE_NAME, SOCIAL_SERVICE, createDomains } from "./upstream.js";
 
 export interface AppDeps {
   redis?: Redis;
@@ -214,6 +216,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   // спринт 6: gamification (игра, спринт 7 — ещё лиги и дуэли); спринт 7: social (друзья, модерация, рефералы)
   const gamification = optionalClient(GAME_SERVICE, config.gamificationUrl, "GAMIFICATION_URL");
   const social = optionalClient(SOCIAL_SERVICE, config.socialUrl, "SOCIAL_URL");
+  // спринт 8: billing (деньги, вкладка «Тариф», финансовый обзор)
+  const billing = optionalClient(BILLING_SERVICE, config.billingUrl, "BILLING_URL");
   const ctx: BffContext = {
     config,
     redis,
@@ -225,6 +229,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
     domains,
     gamification,
     social,
+    billing,
     principals: new PrincipalCache(redis, config.redisKeyPrefix, config.session.principalCacheSeconds, domains.adminIdentity, store),
     names: new StaffNames(domains.adminIdentity, log),
     log,
@@ -291,6 +296,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<App>
   // спринт 7: социальное — друзья и жалобы, модерация, рефералы (social), лиги и дуэли (gamification), парные комнаты
   // (lessons)
   socialRoutes(app, ctx);
+  // спринт 8: «Деньги» (billing), вкладка «Тариф» карточки ученика; финансовый обзор (billing + ai-gateway)
+  billingRoutes(app, ctx);
+  financeRoutes(app, ctx);
 
   app.addHook("onClose", async () => {
     redis.off("error", onRedisError);

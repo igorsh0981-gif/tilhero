@@ -1,4 +1,4 @@
-"""Модели gamification — зеркало миграций 0001–0002 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
+"""Модели gamification — зеркало миграций 0001–0003 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
 
 user_id везде — ученик (`lrn` внутреннего токена). PII сервис не хранит: только идентификаторы, счётчики и суммы.
 Реестр `ledger` — только добавление (триггер): UPDATE — лишь перевод `confirmed → reversed` с `reversed_by`,
@@ -63,6 +63,8 @@ FAMILY_ROLES = ("owner", "adult", "teen", "child")
 GUARDIAN_CONSENTS = ("not_required", "pending", "granted", "declined")
 REFERRAL_OUTCOMES = ("rewarded", "inviter_capped", "legacy")
 PROJECTIONS = ("families", "friendships", "levels", "profiles")
+# спринт 8: пакет тилов по заказу billing
+TIL_ORDER_STATUSES = ("credited", "reversed", "tils_spent")
 
 
 def _in(values: tuple[str, ...]) -> str:
@@ -875,3 +877,32 @@ class ProjectionLoad(Base):
     attempted_at: Mapped[datetime | None] = mapped_column(TS)
     completed_at: Mapped[datetime | None] = mapped_column(TS)
     error: Mapped[str | None] = mapped_column(String(64))
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Спринт 8 — тилы за деньги (INTERNAL_API спринта 8 §6)
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+class TilOrder(Base):
+    """Пакет тилов по оплаченному заказу billing (одна строка на заказ; миграция 0003): получатель, тилы, операция
+    `purchase` (ключ `purchase:<order_id>`); возврат — обратная запись (reversed) или «тилы уже потрачены»
+    (tils_spent, без операции). Удаляется сагой вместе с реестром."""
+
+    __tablename__ = "til_orders"
+    __table_args__ = (
+        CheckConstraint("til BETWEEN 1 AND 100000", name="ck_til_orders_til"),
+        CheckConstraint(f"status {_in(TIL_ORDER_STATUSES)}", name="ck_til_orders_status"),
+        CheckConstraint("(status = 'reversed') = (reversal_op_id IS NOT NULL)", name="ck_til_orders_reversal"),
+        CheckConstraint("(status = 'credited') = (reversed_at IS NULL)", name="ck_til_orders_reversed_at"),
+        Index("ix_til_orders_user", "user_id"),
+    )
+
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    til: Mapped[int] = mapped_column(Integer(), nullable=False)
+    op_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    reversal_op_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(String(12), nullable=False)
+    credited_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    reversed_at: Mapped[datetime | None] = mapped_column(TS)

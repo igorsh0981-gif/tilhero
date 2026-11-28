@@ -1,0 +1,62 @@
+/* ==========================================================================
+   Sprint 8 screens in the notebook language: «Подписка» (the status, the AI minutes meter, the Stars subscription and
+   its auto-renew), the plans for Telegram Stars, the purchase sheet, «История платежей», «Купить тилы», the plaques of a
+   lesson without AI and «ИИ: осталось N мин». Tokens only, no colour literals; a state is never shown by colour alone
+   (statuses are words in pills, a check mark in the list of what is included, the minutes — a number next to the bar).
+   Same layer as content.css / game.css / social.css (request to move into ui-tokens — README).
+   ========================================================================== */
+@layer layout {
+  /* ---------- Stars ---------- */
+  .stars { display: inline-flex; align-items: baseline; gap: 2px; font-weight: 700; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .stars.big { font: 700 20px var(--font-display); }
+
+  /* ---------- what is included ---------- */
+  .bill-feats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .bill-feats li { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-md); line-height: 1.35; }
+  .bill-feats .mk {
+    width: 20px; height: 20px; border-radius: 10px; flex-shrink: 0; display: grid; place-items: center;
+    background: var(--ok-soft); color: var(--ok); margin-top: 1px;
+  }
+
+  /* ---------- the status and the minutes ---------- */
+  .card.bill-on { border: 1.5px solid var(--pen); }
+  #bill-st { gap: 8px; }
+  #bill-st svg { color: var(--pen); flex-shrink: 0; }
+  .bill-on #bill-st svg { color: var(--ok); }
+  .bill-meter { display: flex; flex-direction: column; gap: 6px; }
+  .bill-meter .prog { height: 10px; border-radius: 5px; }
+  .bill-meter .prog > div { border-radius: 5px; }
+  .bill-meter .prog.low > div { background: var(--warn); }
+  .bill-stars { border-top: 1px dashed var(--line); padding-top: 12px; }
+  .bill-stars .pill { white-space: normal; text-align: right; }
+
+  /* ---------- plans and packs ---------- */
+  .bill-plan .hrow.between { align-items: flex-start; }
+  .bill-plan .h3 { overflow-wrap: anywhere; }
+  .bill-plan .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .bill-plan .btn svg, .bill-plan .btn2 svg { color: currentColor; }
+  .bill-pack { gap: 12px; }
+  .bill-pack .btn { width: auto; flex-shrink: 0; padding: 0 16px; min-width: 96px; }
+  .bill-pack .btn .stars { color: inherit; }
+  .bill-pack-ic { width: 44px; height: 44px; border-radius: 22px; display: grid; place-items: center; background: var(--warn-soft); color: var(--warn); flex-shrink: 0; }
+  .bill-kid-hero { height: 88px; width: auto; flex-shrink: 0; }
+
+  /* ---------- the purchase sheet ---------- */
+  .bill-buy .lc-kv .kv { align-items: baseline; }
+  .bill-buy .lc-kv .kv > span:last-child { text-align: right; }
+  .bill-checking { display: flex; gap: 10px; align-items: center; }
+
+  /* ---------- the history ---------- */
+  .bill-order .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .bill-order .pill svg { margin-right: 2px; }
+  .bill-order .duo:empty { display: none; }
+
+  /* ---------- a lesson without AI by the plan, the minutes left ---------- */
+  .bill-lock svg { color: var(--pen); }
+  .bill-lock .lnk { min-height: 32px; padding: 0; justify-content: flex-start; }
+  .bill-ai-left {
+    display: inline-flex; gap: 6px; align-items: center; align-self: flex-start; margin: 0;
+    padding: 4px 10px; border-radius: var(--r-pill); background: var(--pen-soft); color: var(--pen);
+    font-size: var(--fs-sm); font-weight: 600;
+  }
+}

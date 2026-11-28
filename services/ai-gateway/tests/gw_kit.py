@@ -373,11 +373,18 @@ class Env:
     async def set_budget(self, **values: Any) -> dict[str, Any]:
         current = (await self.c.get("/admin/v1/ai/budget", headers=self.h(OPERATIONS))).json()
         body = {k: current[k] for k in ("monthly_cap_usd", "learner_daily_cap_usd", "lesson_cap_usd",
-                                        "speech_monthly_cap_usd", "room_cap_usd", "alert_percent")}
+                                        "speech_monthly_cap_usd", "room_cap_usd", "paid_learner_daily_cap_usd",
+                                        "alert_percent")}
         body.update(values)
         for cap in ("speech_monthly_cap_usd", "room_cap_usd"):  # подлимиты — не больше потолка месяца
             if cap not in values:
                 body[cap] = min(body[cap], body["monthly_cap_usd"])
+        # спринт 8 (ai.ts AiBudget): learner_daily ≤ paid_learner_daily ≤ monthly
+        if "learner_daily_cap_usd" not in values:
+            body["learner_daily_cap_usd"] = min(body["learner_daily_cap_usd"], body["monthly_cap_usd"])
+        if "paid_learner_daily_cap_usd" not in values:
+            body["paid_learner_daily_cap_usd"] = max(body["learner_daily_cap_usd"],
+                                                     min(body["paid_learner_daily_cap_usd"], body["monthly_cap_usd"]))
         body["reason"] = "Лимиты в тесте"
         r = await self.c.put("/admin/v1/ai/budget", json=body, headers=self.h(OPERATIONS))
         assert r.status_code == 200, r.text

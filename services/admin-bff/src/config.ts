@@ -105,6 +105,14 @@ export interface Config {
    * {service: social}, блок обзора недоступен, остальная админка работает. Значения по умолчанию нет.
    */
   socialUrl: string | null;
+  /**
+   * Спринт 8: billing (BILLING_URL) — «Деньги» (каталог, заказы, возвраты, корректировки, сверка, отчёты), вкладка
+   * «Тариф» карточки ученика, финансовый обзор и блок обзора `money`. Как GAMIFICATION_URL — необязательна во всех
+   * окружениях: не задана → маршруты `/admin/v1/billing/*` и `/admin/v1/learners/{id}/billing` отвечают 503
+   * UPSTREAM_UNAVAILABLE {service: billing}, в финансовом обзоре блок выручки null, блок обзора недоступен, остальная
+   * админка работает. Значения по умолчанию нет.
+   */
+  billingUrl: string | null;
   upstreamTimeoutMs: number;
   upstreamRetries: number;
   /** Таймаут одного независимого блока: блок дашборда, блок карточки сессии «Контроля диалогов», затраты строки
@@ -291,8 +299,9 @@ export function loadConfig(env: Env = process.env): Config {
     (Object.entries(DOMAIN_URL_VARS) as Array<[keyof DomainUrls, keyof typeof DEV_DEFAULTS]>).map(([k, name]) => [k, url(name)]),
   ) as unknown as DomainUrls;
 
-  // необязательные адреса: gamification (спринт 6) и social (спринт 7); пусто — раздел выключен (503 на его маршрутах)
-  const optionalUrl = (name: "GAMIFICATION_URL" | "SOCIAL_URL"): string | null => {
+  // необязательные адреса: gamification (спринт 6), social (спринт 7), billing (спринт 8); пусто — раздел выключен (503
+  // на его маршрутах)
+  const optionalUrl = (name: "GAMIFICATION_URL" | "SOCIAL_URL" | "BILLING_URL"): string | null => {
     const v = raw(name);
     if (v === undefined) return null;
     try {
@@ -306,6 +315,7 @@ export function loadConfig(env: Env = process.env): Config {
   };
   const gamificationUrl = optionalUrl("GAMIFICATION_URL");
   const socialUrl = optionalUrl("SOCIAL_URL");
+  const billingUrl = optionalUrl("BILLING_URL");
 
   const cfg: Config = {
     nodeEnv,
@@ -329,6 +339,7 @@ export function loadConfig(env: Env = process.env): Config {
     urls,
     gamificationUrl,
     socialUrl,
+    billingUrl,
     upstreamTimeoutMs: int("UPSTREAM_TIMEOUT_MS", 3000, 100, 60_000),
     upstreamRetries: int("UPSTREAM_RETRIES", 1, 0, 5),
     dashboardTimeoutMs: int("DASHBOARD_TIMEOUT_MS", 2000, 100, 30_000),

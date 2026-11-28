@@ -59,6 +59,13 @@ export const GAME_SERVICE = "gamification";
  */
 export const SOCIAL_SERVICE = "social";
 
+/**
+ * Спринт 8: billing — необязательный домен (BILLING_URL), как gamification: адрес не задан → маршруты «Деньги» и вкладка
+ * «Тариф» отвечают 503 UPSTREAM_UNAVAILABLE {service: billing}, блок обзора `money` недоступен, в финансовом обзоре
+ * блок выручки null.
+ */
+export const BILLING_SERVICE = "billing";
+
 const INTERNAL_AUTH_CODES = new Set([
   "INTERNAL_TOKEN_INVALID",
   "INTERNAL_TOKEN_EXPIRED",

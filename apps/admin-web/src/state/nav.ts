@@ -24,6 +24,11 @@ export type PageId =
   | "referrals"
   | "leagues"
   | "pair_rooms"
+  | "tariffs"
+  | "payments"
+  | "adjustments"
+  | "reconciliation"
+  | "finance"
   | "news"
   | "support"
   | "config"
@@ -31,7 +36,7 @@ export type PageId =
   | "roles"
   | "audit";
 
-export type NavGroup = "product" | "ai" | "game" | "social" | "comms" | "manage";
+export type NavGroup = "product" | "ai" | "game" | "social" | "money" | "comms" | "manage";
 
 export interface NavItem {
   id: PageId;
@@ -70,6 +75,15 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: "referrals", group: "social", icon: "gift", perms: ["referral.read"] },
   { id: "leagues", group: "social", icon: "podium", perms: ["league.read"] },
   { id: "pair_rooms", group: "social", icon: "mic", perms: ["room.read"] },
+  // sprint 8: «Деньги» (ADMIN_MENU 1.8.0: tariffs, payments, adjustments, reconciliation, finance) — billing.read; the
+  // financial overview — billing.read | dashboard.read (admin.ts FinanceOverview). Commands need billing.manage /
+  // billing.publish / billing.refund / billing.approve / subscriptions.override (buttons hidden without them; admin-bff
+  // and billing re-check). Not in the experience-config seed 1.0.0: they follow the config's sections until 1.8.0.
+  { id: "tariffs", group: "money", icon: "card", perms: ["billing.read"] },
+  { id: "payments", group: "money", icon: "coins", perms: ["billing.read"] },
+  { id: "adjustments", group: "money", icon: "userCheck", perms: ["billing.read"] },
+  { id: "reconciliation", group: "money", icon: "scan", perms: ["billing.read"] },
+  { id: "finance", group: "money", icon: "activity", perms: ["billing.read", "dashboard.read"] },
   // «Новости и „Что нового“» of the prototype: release notes + notification templates + campaigns (tabs by right)
   { id: "news", group: "comms", icon: "sparkles", perms: ["whatsnew.manage", "notif.templates.manage", "notif.campaigns.manage"] },
   { id: "support", group: "comms", icon: "support", perms: ["support.read"] },
@@ -81,7 +95,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
 ];
 
 export const PAGE_IDS: readonly PageId[] = NAV_ITEMS.map((i) => i.id);
-export const GROUPS: readonly NavGroup[] = ["product", "ai", "game", "social", "comms", "manage"];
+export const GROUPS: readonly NavGroup[] = ["product", "ai", "game", "social", "money", "comms", "manage"];
 export const navItem = (id: string): NavItem | undefined => NAV_ITEMS.find((i) => i.id === id);
 /**
  * Ids of the experience-config menu that name a section of admin-web by another id: INTERNAL_API sprint 6 §8 calls the

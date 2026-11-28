@@ -486,6 +486,8 @@ export const NOTE_ROUTES = [
   "heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading",
   // спринт 7
   "friends", "leagues", "duels", "referrals",
+  // спринт 8: «Подписка» и «Купить тилы» (за Stars)
+  "subscription", "til_shop",
 ] as const;
 export const NOTE_ICONS = [
   "spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield", "globe", "trophy", "news",

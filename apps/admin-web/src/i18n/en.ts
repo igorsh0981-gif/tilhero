@@ -889,6 +889,8 @@ export const en: Record<MessageKey, string> = {
   "route.review": "Review",
   "route.schedule": "Schedule",
   "route.shop": "Shop",
+  "route.subscription": "Subscription",
+  "route.til_shop": "Buy tils",
   "route.support": "Support",
   /* rv */
   "rv.auditNote": "A fresh authenticator code is required; the reveal is written to the audit log (sensitive.view).",

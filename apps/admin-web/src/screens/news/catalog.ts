@@ -33,6 +33,8 @@ export const NOTE_ROUTES: readonly ReleaseNoteRoute[] = [
   // sprint 7: friends (requests, blocks, sanctions), weekly leagues, duels, referrals — no route of its own for a pair
   // lesson: it starts from «Друзья» and the link room_<room_id>
   "friends", "leagues", "duels", "referrals",
+  // sprint 8: «Подписка» and «Купить тилы» (Telegram Stars only)
+  "subscription", "til_shop",
 ];
 export const NOTE_ICONS: readonly ReleaseNoteIcon[] = ["spark", "hero", "calendar", "clock", "bell", "book", "chat", "mic", "star", "flame", "users", "gift", "shield", "globe", "trophy", "news"];
 export const AUDIENCES: readonly ReleaseNoteAudience[] = ["new", "existing", "all"];
@@ -44,7 +46,7 @@ export const NOTE_LIMITS = { title: 80, itemTitle: 80, itemText: 200, itemsMin: 
  * Mini App build (apps/telegram-miniapp/public/whatsnew/<key>.webp, 16:9, 1200×675), bundled into this build for the
  * picker and the phone preview. A new release adds its key here, in the catalogue and in experience-config.
  */
-export const NOTE_ILLUSTRATIONS: readonly string[] = ["welcome", "s6-heroes", "s7-social", "s7-family"];
+export const NOTE_ILLUSTRATIONS: readonly string[] = ["welcome", "s6-heroes", "s7-social", "s7-family", "s8-plus", "s8-plus-kids"];
 export const ILLUSTRATION_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 export const ILLUSTRATION_SIZE = { width: 1200, height: 675 } as const;
 const ILLUSTRATION_FILES = import.meta.glob<string>("../../../../telegram-miniapp/public/whatsnew/*.webp", { eager: true, query: "?url", import: "default" });

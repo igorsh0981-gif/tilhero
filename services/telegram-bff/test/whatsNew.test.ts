@@ -41,11 +41,12 @@ describe("каталог release-notes.json", () => {
     expect(cat.segments.age.sort()).toEqual(["adults", "kids", "teens"]);
     // релиз 6.1: иллюстрации — формат ключа тот же, что пропускает BFF; каждый ключ каталога ему соответствует
     expect(ILLUSTRATION_PATTERN).toBe(cat.limits.illustration_pattern);
-    // спринт 7: заставка «Что нового» — взрослая и детская иллюстрации
-    expect(cat.illustrations.map((i) => i.key)).toEqual(["welcome", "s6-heroes", "s7-social", "s7-family"]);
+    // спринт 7: заставка «Что нового» — взрослая и детская иллюстрации; спринт 8 — подписка за Stars (14+ и 6–13)
+    expect(cat.illustrations.map((i) => i.key)).toEqual(["welcome", "s6-heroes", "s7-social", "s7-family", "s8-plus", "s8-plus-kids"]);
     for (const i of cat.illustrations) expect(new RegExp(ILLUSTRATION_PATTERN).test(i.key), i.key).toBe(true);
     expect(NOTE_ROUTES).toEqual(expect.arrayContaining(["heroes", "shop", "badges", "game_history", "game_settings", "dictionary", "reading"]));
     expect(NOTE_ROUTES).toEqual(expect.arrayContaining(["friends", "leagues", "duels", "referrals"]));
+    expect(NOTE_ROUTES).toEqual(expect.arrayContaining(["subscription", "til_shop"]));
   });
 
   it("возраст → сегмент: 6-9, 10-13 → kids; 14-17 → teens; 18+ и не выбран → adults", () => {

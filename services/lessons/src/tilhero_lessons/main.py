@@ -1,6 +1,7 @@
 """lessons: оркестратор урока 20 минут (INTERNAL_API §2) — сессии урока, сценария, медиа и повтора, машина
 состояний, этапы и шаги, пауза и восстановление, ролевая ситуация по графу сценария, итоги с независимой оценкой;
-спринт 7 — задания дуэли и парные комнаты с ИИ-коучем (INTERNAL_API спринта 7 §3)."""
+спринт 7 — задания дуэли и парные комнаты с ИИ-коучем (INTERNAL_API спринта 7 §3); спринт 8 — удержание и
+списание ИИ-минут по подписке (billing, INTERNAL_API спринта 8 §5)."""
 
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from tilhero_lessons.api.scheduler import router as scheduler_router
 from tilhero_lessons.api.social import router as social_router
 from tilhero_lessons.audio import AUDIO_LIMIT, AudioBodyMiddleware
 from tilhero_lessons.catalog import CATALOG, CatalogGateway
-from tilhero_lessons.clients import AI_GATEWAY, ASSESSMENT, DIAGNOSTICS, IDENTITY, LEARNING_PLAN, SOCIAL
+from tilhero_lessons.clients import AI_GATEWAY, ASSESSMENT, BILLING, DIAGNOSTICS, IDENTITY, LEARNING_PLAN, SOCIAL
 from tilhero_lessons.consumers import (
     DELETION_REQUESTED,
     DUEL_FINISHED,
@@ -46,7 +47,7 @@ def build_app(
     transports: dict[str, httpx.AsyncBaseTransport] | None = None,
 ) -> FastAPI:
     """transports — заглушки доменов в тестах (httpx.MockTransport) по имени: catalog, ai-gateway, assessment,
-    learning-plan, diagnostics, social, identity-consent."""
+    learning-plan, diagnostics, social, identity-consent, billing."""
     settings = settings or get_settings()
     runtime = runtime or Runtime(settings)
     tr = transports or {}
@@ -84,6 +85,9 @@ def build_app(
                            transport=tr.get(SOCIAL))
         rt.register_client(IDENTITY, settings.identity_consent_url, timeout=settings.identity_timeout_seconds,
                            retries=1, transport=tr.get(IDENTITY))
+        # спринт 8: billing — удержания и доступ; без повторов в клиенте (общий срок 2 с — clients._billing_call)
+        rt.register_client(BILLING, settings.billing_url, timeout=settings.billing_timeout_seconds, retries=0,
+                           transport=tr.get(BILLING))
         rt.add_consumer("lessons.user_deletion", [DELETION_REQUESTED], deletion)
         rt.add_consumer("lessons.profiles", [PROFILE_CREATED, PROFILE_UPDATED], on_profile_event)
         rt.add_consumer("lessons.social", [SOCIAL_PROFILE_UPDATED, SOCIAL_BLOCK_CHANGED, SOCIAL_SANCTION_CHANGED],

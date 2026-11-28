@@ -396,6 +396,9 @@ export const BUDGET_UPDATE = obj(
     lesson_cap_usd: USD(1000),
     speech_monthly_cap_usd: USD(100_000),
     room_cap_usd: USD(1000),
+    // спринт 8 (В14): дневной лимит подписчика (tier paid); необязателен на входе (admin-web до спринта 8 его не шлёт —
+    // ai-gateway оставляет прежний); learner_daily_cap_usd ≤ paid_learner_daily_cap_usd ≤ monthly_cap_usd — в маршруте
+    paid_learner_daily_cap_usd: USD(1000),
     alert_percent: integer(1, 100),
     reason: REASON,
   },
@@ -726,3 +729,118 @@ export const LEAGUE_REEVALUATE = obj(
 export const LEAGUE_RELEASE = obj({ reason: SOCIAL_REASON }, ["reason"]);
 export const DUEL_REEVALUATE = obj({ result: enumOf(DUEL_STAFF_RESULTS), reason: SOCIAL_REASON }, ["result", "reason"]);
 export const PAIR_ROOM_STOP = obj({ reason: SOCIAL_REASON }, ["reason"]);
+
+// ---------------------------------------------------------------- деньги (спринт 8, admin.ts «Деньги»)
+
+/** Перечисления admin.ts / bff.ts / web.ts — сверка с типами при компиляции (contractBilling.ts). */
+export const BILLING_PROVIDERS = ["telegram_stars", "payme", "click", "uzum"] as const;
+export const WEB_PROVIDERS = ["payme", "click", "uzum"] as const;
+export const BILLING_CHANNELS = ["miniapp", "web", "renewal"] as const;
+export const BILLING_CURRENCIES = ["UZS", "XTR"] as const;
+export const BILLING_AUDIENCES = ["kids", "teens", "adults"] as const;
+export const BILLING_FEATURES = ["ai_lessons", "pair_lessons"] as const;
+export const PRODUCT_KINDS = ["subscription", "til_pack"] as const;
+export const STARS_MODES = ["one_time", "subscription"] as const;
+export const ORDER_STATUSES = ["pending", "paid", "fulfilled", "expired", "cancelled", "refunded"] as const;
+export const STARS_SUBSCRIPTION_STATUSES = ["active", "canceled", "failed", "refunded", "ended"] as const;
+export const SUBSCRIPTION_STATUSES = ["none", "trial", "active", "expired"] as const;
+export const MINUTE_ENTRY_KINDS = ["grant", "debit", "expire", "revoke", "adjust"] as const;
+export const MINUTE_REF_KINDS = ["order", "trial", "grant", "session", "room", "period", "hold", "refund", "adjustment", "deletion"] as const;
+export const CATALOG_STATUSES = ["draft", "active", "archived"] as const;
+export const TXN_STATES = ["created", "performed", "cancelled", "refunded"] as const;
+export const REFUND_STATUSES = ["awaiting_provider", "completed", "failed"] as const;
+export const PERIOD_STATUSES = ["scheduled", "active", "ended", "superseded", "revoked"] as const;
+export const ADJUSTMENT_KINDS = ["minutes", "grant_period", "revoke_period"] as const;
+export const ADJUSTMENT_STATUSES = ["pending", "applied", "rejected", "expired", "cancelled"] as const;
+export const RECON_ITEM_KINDS = [
+  "paid_not_fulfilled", "stale_created", "provider_mismatch", "duplicate_payment", "refund_without_request", "refund_stuck",
+  "fiscal_missing", "tils_spent_on_refund", "paid_after_deletion", "payer_mismatch", "stars_unmatched",
+  "stars_subscription_desync", "hold_expired", "balance_drift", "unmatched_settlement",
+] as const;
+export const RECON_STATUSES = ["open", "resolved", "ignored"] as const;
+export const LEARNER_TIERS = ["free", "paid"] as const;
+export const REPORT_PERIODS = ["day", "week", "month"] as const;
+/** Отчёт по дням — не больше 92 дней (admin.ts BillingDailyRow). */
+export const DAILY_MAX_DAYS = 92;
+
+/** Причина, комментарий, заметка команд «Денег» — 10..500 (admin.ts). */
+export const MONEY_REASON = str(10, 500);
+/** Номер версии каталога в пути. */
+export const CATALOG_VERSION_NO = str(1, 9, { pattern: "^[1-9][0-9]{0,8}$" });
+/** Номер заказа в фильтре: целое ≥ 1. */
+export const ORDER_NO_Q = str(1, 12, { pattern: "^[1-9][0-9]{0,11}$" });
+/** Идентификатор транзакции провайдера в фильтре — без пробелов и управляющих символов. */
+export const PROVIDER_TXN_Q = str(1, 128, { pattern: "^[A-Za-z0-9._:-]+$" });
+export const DATE_Q = str(10, 10, { pattern: "^\\d{4}-\\d{2}-\\d{2}$" });
+/**
+ * Тело черновика каталога (admin.ts CatalogDraftRequest): `payload` — JSON-объект как есть (как черновик правил игры);
+ * границы, связи полей и фискальные реквизиты проверяет billing — 422 CATALOG_INVALID {errors: [{path, code}]}.
+ */
+export const CATALOG_DRAFT = obj({ payload: { type: "object", maxProperties: 20 }, comment: nullable(str(0, 500)) }, ["payload", "comment"]);
+/** Каталог до 200 товаров с RU/UZ текстами и фискальными реквизитами — 256 КБ (остальные маршруты — 64 КБ). */
+export const CATALOG_BODY_LIMIT = 256 * 1024;
+export const CATALOG_COMMENT = obj({ comment: MONEY_REASON }, ["comment"]);
+/** RefundRequest: причина 10..500; force — вернуть деньги, даже если купленные тилы уже потрачены. */
+export const REFUND_REQUEST = obj({ reason: MONEY_REASON, force: { type: "boolean" } }, ["reason"]);
+export const REFUND_FAIL = obj({ note: MONEY_REASON }, ["note"]);
+/**
+ * AdjustmentRequest по виду (admin.ts): minutes — ±1..10 000 к периоду period_id; grant_period — days 1..90 и minutes
+ * > 0; revoke_period — period_id. Поля другого вида — 422 (плоская схема с условиями: ошибка указывает на поле).
+ */
+export const ADJUSTMENT_REQUEST = obj(
+  {
+    kind: enumOf(ADJUSTMENT_KINDS),
+    minutes: { type: "integer", minimum: -10_000, maximum: 10_000, not: { const: 0 } },
+    days: integer(1, 90),
+    period_id: UUID,
+    reason: MONEY_REASON,
+  },
+  ["kind", "reason"],
+  {
+    allOf: [
+      {
+        if: { properties: { kind: { const: "minutes" } } },
+        then: { required: ["minutes", "period_id"], not: { required: ["days"] } },
+      },
+      {
+        if: { properties: { kind: { const: "grant_period" } } },
+        then: { required: ["days", "minutes"], properties: { minutes: { type: "integer", minimum: 1 } }, not: { required: ["period_id"] } },
+      },
+      {
+        if: { properties: { kind: { const: "revoke_period" } } },
+        then: { required: ["period_id"], allOf: [{ not: { required: ["minutes"] } }, { not: { required: ["days"] } }] },
+      },
+    ],
+  },
+);
+/** Подтверждение — заметка по желанию (≤ 500); отклонение — обязательна, 10..500. */
+export const ADJUSTMENT_APPROVE = obj({ note: str(1, 500) });
+export const ADJUSTMENT_REJECT = obj({ note: MONEY_REASON }, ["note"]);
+export const RECON_RESOLVE = obj({ status: enumOf(["resolved", "ignored"]), note: MONEY_REASON }, ["status", "note"]);
+/** Курс USD: тийинов за 1 USD, 100 000..100 000 000 (admin.ts FxRateRequest). */
+export const FX_REQUEST = obj({ usd_in_tiyin: integer(100_000, 100_000_000), valid_from: DATE_Q, reason: MONEY_REASON }, ["usd_in_tiyin", "valid_from", "reason"]);
+/** Оценка вознаграждения за 1 Star, тийинов: 1..10 000 000 (admin.ts StarRateRequest). */
+export const STAR_RATE_REQUEST = obj({ star_in_tiyin: integer(1, 10_000_000), valid_from: DATE_Q, reason: MONEY_REASON }, ["star_in_tiyin", "valid_from", "reason"]);
+export const TRIALS_GRANT_ALL = obj({ reason: MONEY_REASON }, ["reason"]);
+
+// ---------------------------------------------------------------- контроль ИИ (спринт 8, ai.ts, INTERNAL_API §7)
+
+export const DEGRADATION_LEVELS = ["normal", "economy", "paid_only", "off"] as const;
+export const DEGRADATION_MODES = ["auto", "manual"] as const;
+export const DEGRADATION_REASONS = ["threshold", "manual", "emergency_stop", "month_reset"] as const;
+export const UNIT_COST_PERIODS = ["week", "month"] as const;
+/**
+ * AiDegradationUpdate: manual_level — уровень при mode manual (обязателен), null в auto; 1 ≤ economy_at_percent ≤
+ * paid_only_at_percent ≤ 100 (сравнение и связь режима с уровнем — в маршруте, до домена; ai-gateway — 422
+ * DEGRADATION_INVALID); причина 10..500 (аудит ai.degradation_updated).
+ */
+export const DEGRADATION_UPDATE = obj(
+  {
+    mode: enumOf(DEGRADATION_MODES),
+    manual_level: nullable(enumOf(DEGRADATION_LEVELS)),
+    economy_at_percent: integer(1, 100),
+    paid_only_at_percent: integer(1, 100),
+    reason: MONEY_REASON,
+  },
+  ["mode", "manual_level", "economy_at_percent", "paid_only_at_percent", "reason"],
+);

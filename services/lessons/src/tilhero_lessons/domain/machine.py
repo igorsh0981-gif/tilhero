@@ -6,6 +6,11 @@ INACTIVITY_MINUTES — авто-пауза с момента последнег�
 PAUSE_EXPIRY_HOURS и ready дольше READY_EXPIRY_HOURS → cancelled (лениво при запросе и tick-ом).
 Событие `lesson.session.completed.v1` — при каждом переходе в итоговый статус (ровно один раз: итоговый статус
 необратим); `lesson.session.started.v1` — при ready → in_progress.
+
+Спринт 8 (INTERNAL_API §5): ИИ-секунды (`ai_active_seconds`) копятся вместе с активным временем урока и сценария,
+пока ИИ работает — ai_mode full, нет деградации (ai_degraded) и отказа ИИ до конца занятия (ai_off all); деградация и
+отказ ИИ не списывают. При завершении `billable_minutes = ⌈ai_active_seconds / 60⌉ ≤ minutes` (≤ 240) уходит в событие
+вместе с `billing_hold_id` — по ним billing списывает минуты удержания (повтор события — без второго списания).
 """
 
 from __future__ import annotations
@@ -22,6 +27,9 @@ from tilhero_lessons.models import Session, StatusHistory
 from tilhero_lessons.settings import Settings
 
 TERMINAL = frozenset({"completed", "failed", "cancelled"})
+# спринт 8: занятия, где ИИ — платная функция (урок и сценарий; INTERNAL_API §0.6)
+BILLABLE_KINDS = frozenset({"lesson", "scenario"})
+BILLABLE_MAX = 240
 ACTIVE = frozenset({"ready", "in_progress", "paused"})
 ALLOWED: dict[str, frozenset[str]] = {
     # ready → completed — только сессия дуэли, закрытая по сроку набора (close_deadline)
@@ -51,8 +59,20 @@ def minutes_of(s: Session) -> int:
     return min(ceil_minutes(s.active_seconds), 2 * s.duration_min, 600)
 
 
+def ai_running(s: Session) -> bool:
+    """ИИ занятия работает: урок или сценарий в режиме full без деградации и без отказа ИИ до конца занятия."""
+    return (s.kind in BILLABLE_KINDS and s.ai_mode == "full" and not s.ai_degraded
+            and (s.state or {}).get("ai_off") != "all")
+
+
+def billable_of(s: Session) -> int:
+    """⌈ai_active_seconds / 60⌉, не больше минут занятия и 240."""
+    return min(ceil_minutes(s.ai_active_seconds or 0), s.minutes, BILLABLE_MAX)
+
+
 def accrue(s: Session, now: datetime, settings: Settings) -> None:
-    """Активное время между действиями ученика (in_progress): промежуток ≤ INACTIVITY_MINUTES."""
+    """Активное время между действиями ученика (in_progress): промежуток ≤ INACTIVITY_MINUTES. Спринт 8: те же
+    секунды — в ИИ-секунды, пока ИИ работает (деградация посреди урока — дальше без списания)."""
     if s.status != "in_progress":
         return
     if s.last_activity_at is not None:
@@ -62,6 +82,8 @@ def accrue(s: Session, now: datetime, settings: Settings) -> None:
             # иначе терялись бы целиком — e2e спринта 4: minutes = 0)
             whole = int(gap)
             s.active_seconds += whole
+            if ai_running(s):
+                s.ai_active_seconds = (s.ai_active_seconds or 0) + whole
             s.last_activity_at += timedelta(seconds=whole)
             return
     s.last_activity_at = now
@@ -99,6 +121,7 @@ async def finish(db: AsyncSession, s: Session, now: datetime, settings: Settings
     s.finished_at = now
     s.paused_at = None
     s.minutes = minutes_of(s)
+    s.billable_minutes = billable_of(s)
     await emit_completed(db, s)
 
 
@@ -109,6 +132,7 @@ async def close_deadline(db: AsyncSession, s: Session, now: datetime, settings: 
     s.finished_at = now
     s.paused_at = None
     s.minutes = minutes_of(s)
+    s.billable_minutes = billable_of(s)
     await emit_completed(db, s)
 
 
@@ -121,6 +145,7 @@ async def terminate(db: AsyncSession, s: Session, to: str, reason: str, now: dat
     s.finished_at = now
     s.paused_at = None
     s.minutes = minutes_of(s)
+    s.billable_minutes = billable_of(s)
     s.fail_reason = fail_reason
     await emit_completed(db, s)
 
@@ -135,7 +160,10 @@ async def emit_completed(db: AsyncSession, s: Session) -> None:
         "local_date": None,
         "evaluation_id": str(s.evaluation_id) if s.evaluation_id else None,
         "passed": passed if isinstance(passed, bool) else None,
-        "practice_only": s.practice_only, "finished_at": iso(s.finished_at)}
+        "practice_only": s.practice_only, "finished_at": iso(s.finished_at),
+        # спринт 8: к списанию (любой итог) и удержание billing; без удержания billing ничего не списывает
+        "billable_minutes": s.billable_minutes if s.billable_minutes is not None else billable_of(s),
+        "billing_hold_id": str(s.billing_hold_id) if s.billing_hold_id else None}
     if s.kind == "duel":  # спринт 7 (§3.1): счёт по ключам — в gamification; в assessment не идёт
         score = (s.summary or {}).get("score") if s.status == "completed" else None
         payload.update({"duel_id": str(s.duel_id), "practice_only": True, "evaluation_id": None, "passed": None,

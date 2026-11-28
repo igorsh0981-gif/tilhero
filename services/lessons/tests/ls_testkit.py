@@ -280,6 +280,7 @@ class FakeAI:
                                      "cooperative_lesson_coach": "ok"}
         self.requests: list[dict[str, Any]] = []
         self.available: bool | None = True  # GET /internal/v1/status; None — ai-gateway отвечает 500
+        self.paid_available: bool | None = None  # спринт 8: AiStatus.paid_available (None — старый шлюз без поля)
         self.speech_available = True
         self.status_delay = 0.0  # статус отвечает через N секунд
         self.hint_offered = False  # conversation_partner: персонаж подсказал в ответе
@@ -349,8 +350,10 @@ class FakeAI:
         if request.url.path == "/internal/v1/status":
             if self.available is None:
                 return error(500, "INTERNAL_ERROR")
-            resp = httpx.Response(200, json={"ai_available": self.available,
-                                             "speech_available": self.speech_available})
+            status: dict[str, Any] = {"ai_available": self.available, "speech_available": self.speech_available}
+            if self.paid_available is not None:
+                status["paid_available"] = self.paid_available
+            resp = httpx.Response(200, json=status)
             return slow(resp, self.status_delay) if self.status_delay else resp
         if request.url.path == "/internal/v1/speech:transcribe":
             return self._speech(request)
@@ -703,3 +706,135 @@ class FakeIdentity:
             "kind": "child" if band in ("6-9", "10-13") else "account", "age_band": band,
             "guardian_consent": None, "consent_accepted": True, "status": "ACTIVE",
             "purposes": ["service", *(["voice_recording"] if u in self.voice else [])]})
+
+
+# ---------------------------------------------------------------- спринт 8: billing (удержания, доступ, списание)
+
+
+class FakeBilling:
+    """billing по контракту INTERNAL_API спринта 8 §1.11 (поток A пишется параллельно):
+    - `POST /internal/v1/holds` — только lessons, `user_id` тела = `sub` (иначе 403 USER_CONTEXT_MISMATCH); повтор по
+      (ref_kind, ref_id) — тот же ответ; доступно ≥ min_start (урок) / pair_min (комната) → удержание
+      min(доступно, minutes_planned); иначе allowed: false {reason};
+    - `GET /internal/v1/access/{user_id}?feature=` — {allowed, reason, minutes_left};
+    - settle_* — списание по событию завершения, как consumer billing: debit = min(billable, удержано + доступно),
+      перерасход — за счёт сервиса, баланс ≥ 0, повтор события — без второго списания.
+    Режимы: ok | down (503) | slow (ответ через delay с) | garbage (ответ не по контракту)."""
+
+    def __init__(self) -> None:
+        self.accounts: dict[uuid.UUID, dict[str, Any]] = {}
+        self.owner: dict[uuid.UUID, uuid.UUID] = {}  # ученик → аккаунт (детский профиль — аккаунт опекуна)
+        self.kids: set[uuid.UUID] = set()
+        self.holds: dict[tuple[str, str], dict[str, Any]] = {}
+        self.by_id: dict[str, dict[str, Any]] = {}
+        self.calls: list[dict[str, Any]] = []
+        self.mode = "ok"
+        self.delay = 0.0
+        self.min_start = 1
+        self.pair_min = 10
+        self.overage = 0
+
+    # ---------- подписка
+    def subscribe(self, user: uuid.UUID, minutes: int = 300,
+                  features: tuple[str, ...] = ("ai_lessons", "pair_lessons")) -> None:
+        self.accounts[user] = {"granted": minutes, "spent": 0, "held": 0, "features": set(features)}
+
+    def account(self, user: uuid.UUID) -> dict[str, Any] | None:
+        return self.accounts.get(self.owner.get(user, user))
+
+    def available(self, user: uuid.UUID) -> int:
+        a = self.account(user)
+        return 0 if a is None else a["granted"] - a["spent"] - a["held"]
+
+    def hold_calls(self) -> list[dict[str, Any]]:
+        return [c for c in self.calls if c["path"] == "/internal/v1/holds"]
+
+    def access_calls(self) -> list[dict[str, Any]]:
+        return [c for c in self.calls if c["path"].startswith("/internal/v1/access/")]
+
+    def _deny(self, user: uuid.UUID, feature: str, minimum: int) -> str | None:
+        if user in self.kids:
+            return "kids"
+        a = self.account(user)
+        if a is None:
+            return "no_subscription"
+        if feature not in a["features"]:
+            return "feature_not_in_plan"
+        if self.available(user) < minimum:
+            return "minutes_exhausted"
+        return None
+
+    def handler(self, request: httpx.Request) -> Any:
+        token = request.headers.get("x-internal-token")
+        assert token, "internal JWT is required"
+        claims = jwt.decode(token, options={"verify_signature": False})
+        body = json.loads(request.content) if request.content else None
+        self.calls.append({"method": request.method, "path": request.url.path, "body": body,
+                           "params": dict(request.url.params), "sub": claims.get("sub"), "iss": claims.get("iss"),
+                           "idempotency_key": request.headers.get("idempotency-key")})
+        assert claims.get("iss") == "lessons" and claims.get("aud") == "billing"
+        if self.mode == "down":
+            return error(503, "UNAVAILABLE")
+        resp = self._route(request, body, str(claims.get("sub")))
+        if self.mode == "garbage":
+            resp = httpx.Response(200, json={"hello": "world"})
+        return slow(resp, self.delay) if self.mode == "slow" else resp
+
+    def _route(self, request: httpx.Request, body: Any, sub: str) -> httpx.Response:
+        if request.url.path == "/internal/v1/holds" and request.method == "POST":
+            if body["user_id"] != sub:
+                return error(403, "USER_CONTEXT_MISMATCH")
+            key = (str(body["ref_kind"]), str(body["ref_id"]))
+            if key in self.holds:
+                return httpx.Response(200, json=self.holds[key]["response"])
+            user = uuid.UUID(body["user_id"])
+            minimum = self.pair_min if body["feature"] == "pair_lessons" else self.min_start
+            reason = self._deny(user, body["feature"], minimum)
+            if reason is not None:
+                return httpx.Response(200, json={"allowed": False, "reason": reason})
+            held = min(self.available(user), int(body["minutes_planned"]))
+            acc = self.account(user)
+            assert acc is not None
+            acc["held"] += held
+            hold_id = str(uuid.uuid4())
+            response = {"allowed": True, "hold_id": hold_id, "minutes_held": held,
+                        "minutes_left": self.available(user), "period_ends_at": "2026-12-19T07:00:00Z"}
+            rec = {"hold_id": hold_id, "user": user, "minutes": held, "status": "active", "response": response,
+                   "ref": key, "settled": None}
+            self.holds[key] = rec
+            self.by_id[hold_id] = rec
+            return httpx.Response(200, json=response)
+        m = re.fullmatch(r"/internal/v1/access/([0-9a-f-]{36})", request.url.path)
+        if m and request.method == "GET":
+            if m.group(1) != sub:
+                return error(403, "USER_CONTEXT_MISMATCH")
+            user = uuid.UUID(m.group(1))
+            feature = request.url.params.get("feature", "pair_lessons")
+            reason = self._deny(user, feature, self.pair_min if feature == "pair_lessons" else self.min_start)
+            return httpx.Response(200, json={"allowed": reason is None, "reason": reason,
+                                             "minutes_left": self.available(user)})
+        return error(404, "NOT_FOUND")
+
+    # ---------- списание по событиям lessons (как consumer billing)
+    def _settle(self, hold_id: str | None, billable: int) -> int | None:
+        if hold_id is None:
+            return None
+        rec = self.by_id[hold_id]
+        if rec["status"] == "settled":
+            return 0  # повтор события — без второго списания
+        acc = self.account(rec["user"])
+        assert acc is not None
+        acc["held"] -= rec["minutes"]
+        debit = min(billable, acc["granted"] - acc["spent"] - acc["held"])
+        acc["spent"] += debit
+        self.overage += billable - debit
+        rec["status"], rec["settled"] = "settled", debit
+        assert acc["granted"] - acc["spent"] - acc["held"] >= 0
+        return debit
+
+    def settle_session(self, payload: dict[str, Any]) -> int | None:
+        return self._settle(payload.get("billing_hold_id"), int(payload.get("billable_minutes") or 0))
+
+    def settle_room(self, payload: dict[str, Any]) -> int | None:
+        b = payload.get("billing")
+        return None if b is None else self._settle(b["hold_id"], int(b["billable_minutes"]))

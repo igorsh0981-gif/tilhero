@@ -24,6 +24,7 @@ import { errText } from "../../ui/errors";
 import { setAiEnabled } from "./aiState";
 import { budgetForm, capPct, checkBudget, decimal, isOwnServer, mergeBudgetForm, speechHourPrice, speechHours, type BudgetForm } from "./model";
 import { AiOffBanner, BarChart, BudgetBar, Kv, useKeyed, useUsd } from "./parts";
+import { DegradationCard, UnitCostsCard } from "./Control";
 
 type UsagePeriod = AiUsageSummary["period"];
 
@@ -119,6 +120,9 @@ export function CostsPage() {
         {!sum ? <Spinner label={t("common.loading")} /> : <UsageBody s={sum} own={ownServer} />}
       </section>
       <SettingsCard budget={budget} error={budgetErr} onRetry={loadBudget} onSaved={onBudget} onConflict={rereadBudget} own={ownServer} />
+      {/* sprint 8: control of AI — the levels of degradation and the cost of activities and of an AI minute */}
+      <DegradationCard />
+      <UnitCostsCard />
     </div>
   );
 }
@@ -456,6 +460,8 @@ const FIELDS: ReadonlyArray<{ k: keyof BudgetForm; unit: "usd" | "pct" }> = [
   { k: "speech_monthly_cap_usd", unit: "usd" },
   // sprint 7: the coach of one pair room (cooperative_lesson_coach); exhausted — the room goes on by the scenario
   { k: "room_cap_usd", unit: "usd" },
+  // sprint 8 (В14): the daily cap of a learner with a subscription (tier paid)
+  { k: "paid_learner_daily_cap_usd", unit: "usd" },
 ];
 
 function SettingsCard({ budget, error, onRetry, onSaved, onConflict, own }: { budget: AiBudget | null; error: unknown; onRetry: () => void; onSaved: (b: AiBudget) => void; onConflict: () => Promise<AiBudget>; own: boolean | null }) {
@@ -593,7 +599,7 @@ function SettingsCard({ budget, error, onRetry, onSaved, onConflict, own }: { bu
       {ask && (
         <ConfirmCommand
           title={t("csf.saveT")}
-          text={t("csf.saveM", { m: money(ask.monthly_cap_usd), d: money(ask.learner_daily_cap_usd), l: money(ask.lesson_cap_usd), s: money(ask.speech_monthly_cap_usd), r: money(ask.room_cap_usd), a: ask.alert_percent })}
+          text={t("csf.saveM", { m: money(ask.monthly_cap_usd), d: money(ask.learner_daily_cap_usd), l: money(ask.lesson_cap_usd), s: money(ask.speech_monthly_cap_usd), r: money(ask.room_cap_usd), p: money(ask.paid_learner_daily_cap_usd), a: ask.alert_percent })}
           icon="gauge"
           ok={t("common.save")}
           testId="csf-dialog"

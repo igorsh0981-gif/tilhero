@@ -37,8 +37,8 @@ describe("release 6.1 routes", () => {
   });
 
   it("the game switched off (flag game) — routes into the game lead Home, the rest stay", () => {
-    // sprint 7: the leagues of the week and duels live in gamification too
-    expect([...GAME_ROUTES]).toEqual(["heroes", "shop", "badges", "game_history", "game_settings", "leagues", "duels"]);
+    // sprint 7: the leagues of the week and duels live in gamification too; sprint 8: tils for Stars — for the game shop
+    expect([...GAME_ROUTES]).toEqual(["heroes", "shop", "badges", "game_history", "game_settings", "leagues", "duels", "til_shop"]);
     for (const r of GAME_ROUTES) {
       expect(routeAllowed(r, false)).toBe("home");
       expect(routeAllowed(r, true)).toBe(r);

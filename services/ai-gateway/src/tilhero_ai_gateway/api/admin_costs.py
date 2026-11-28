@@ -3,6 +3,10 @@ ai.publish; снижение цены — ещё costs.manage, цена моде
 «ключ задан / не задан» и код последней ошибки), бюджет и аварийная остановка (costs.read / costs.manage), затраты
 (costs.read; сводка — ещё dashboard.read для обзора; вызовы сессии — ещё qa.read для карточки «Контроля диалогов»).
 Step-up правок проверяет admin-bff.
+
+Спринт 8 (INTERNAL_API §7, ai.ts «Контроль ИИ»): уровни деградации — `GET /degradation` (costs.read), `PUT
+/degradation` (costs.manage + step-up: admin-bff передаёт `X-Step-Up: ok`, домен проверяет и сам — защита в глубину;
+422 DEGRADATION_INVALID); стоимость занятий — `GET /unit-costs?period=week|month` (costs.read | dashboard.read).
 """
 
 from __future__ import annotations
@@ -24,7 +28,8 @@ from tilhero_ai_gateway.api.common import (
     speech_deps_of,
     staff_auth,
 )
-from tilhero_ai_gateway.domain import costs
+from tilhero_ai_gateway.contracts import AiDegradationUpdate
+from tilhero_ai_gateway.domain import costs, degradation, unit_costs
 from tilhero_ai_gateway.domain.common import (
     AI_PUBLISH,
     AI_READ,
@@ -39,8 +44,8 @@ from tilhero_ai_gateway.domain.speech import speech_available
 from tilhero_ai_gateway.schemas import BudgetIn, EmergencyStopIn, ModelUpdateIn
 from tilhero_ai_gateway.settings import Settings
 from tilhero_common.app import Runtime, get_runtime
-from tilhero_common.errors import unprocessable
-from tilhero_common.internal_auth import Principal
+from tilhero_common.errors import forbidden, unprocessable
+from tilhero_common.internal_auth import Actor, Principal
 
 router = APIRouter(prefix="/admin/v1/ai", tags=["staff"])
 
@@ -130,6 +135,8 @@ async def update_budget(body: BudgetIn, principal: Principal = Depends(staff_aut
     }
     if body.room_cap_usd is not None:
         values["room_cap_usd"] = Decimal(str(body.room_cap_usd)).quantize(Decimal("0.0001"))
+    if body.paid_learner_daily_cap_usd is not None:
+        values["paid_learner_daily_cap_usd"] = Decimal(str(body.paid_learner_daily_cap_usd)).quantize(Decimal("0.0001"))
     if body.ai_enabled is not None:
         values["ai_enabled"] = body.ai_enabled
 
@@ -204,3 +211,54 @@ async def list_usage(principal: Principal = Depends(staff_auth), rt: Runtime = D
                                             before_seq=int(after[0]) if after else None, limit=limit)
     return {"items": [costs.call_view(u) for u in rows],
             "next_cursor": encode_cursor(rows[-1].seq) if more and rows else None}
+
+
+# ---------------------------------------------------------------- контроль ИИ (спринт 8)
+
+STEP_UP_HEADER = "x-step-up"
+
+
+def _require_step_up(principal: Principal, request: Request, permission: str) -> Actor:
+    """Право и step-up (admin-bff проверил свежесть TOTP и передал `X-Step-Up: ok` или claim `step_up: true`)."""
+    actor = principal.require_permission(permission)
+    header = (request.headers.get(STEP_UP_HEADER) or "").strip().lower()
+    if header != "ok" and principal.claims.get("step_up") is not True:
+        raise forbidden("STEP_UP_REQUIRED", "Подтвердите действие кодом из приложения-аутентификатора",
+                        {"permission": permission})
+    return actor
+
+
+@router.get("/degradation")
+async def get_degradation(principal: Principal = Depends(staff_auth), rt: Runtime = Depends(get_runtime)) -> dict:
+    """AiDegradation (costs.read): режим, ручной уровень, пороги, действующий уровень, доля месяца, последние смены."""
+    principal.require_permission(COSTS_READ)
+    async with rt.transaction() as session:
+        return await degradation.view(session, now_of(rt))
+
+
+@router.put("/degradation", responses={403: {"description": "PERMISSION_DENIED | STEP_UP_REQUIRED"},
+                                        422: {"description": "DEGRADATION_INVALID {fields} | VALIDATION_ERROR"}})
+async def update_degradation(body: AiDegradationUpdate, request: Request, principal: Principal = Depends(staff_auth),
+                             rt: Runtime = Depends(get_runtime),
+                             idempotency_key: str | None = IdempotencyKey) -> JSONResponse:
+    """AiDegradationUpdate → AiDegradation (costs.manage + step-up). Смена действующего уровня — degradation_events,
+    ai.degradation.changed.v1 (reason manual, actor) и аудит ai.degradation_updated."""
+    actor = _require_step_up(principal, request, COSTS_MANAGE)
+
+    async def run() -> tuple[int, Any]:
+        async with rt.transaction() as session:
+            return 200, await degradation.update(
+                session, mode=body.mode, manual_level=body.manual_level, economy_at=body.economy_at_percent,
+                paid_only_at=body.paid_only_at_percent, reason=body.reason, actor=actor, now=now_of(rt))
+
+    return await idempotent(rt, scope=f"{actor.id}:ai:degradation", key=idempotency_key,
+                            request=body.model_dump(), run=run)
+
+
+@router.get("/unit-costs")
+async def get_unit_costs(principal: Principal = Depends(staff_auth), rt: Runtime = Depends(get_runtime),
+                         period: Literal["week", "month"] = Query(default="month")) -> dict:
+    """AiUnitCosts (costs.read | dashboard.read): стоимость занятий и ИИ-минуты по видам за период."""
+    require_any(principal, COSTS_READ, DASHBOARD_READ)
+    async with rt.transaction() as session:
+        return await unit_costs.report(session, period, now_of(rt), settings_of(rt).timezone)

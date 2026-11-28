@@ -1,6 +1,7 @@
 """gamification: реестр XP, тилов и заморозок, уровни, герои и ступени, задания дня, значки, магазин, события недели,
 правила игры с версиями (docs/sprint6/INTERNAL_API.md §1); спринт 7 — лиги недели, дуэли, реферальные награды по
-кампании, совместные достижения парных уроков (docs/sprint7/INTERNAL_API.md §2). Начисления — по событиям;
+кампании, совместные достижения парных уроков (docs/sprint7/INTERNAL_API.md §2); спринт 8 — пакеты тилов за деньги
+по событиям billing и пред-проверка возврата (docs/sprint8/INTERNAL_API.md §6). Начисления — по событиям;
 синхронно вызывает только social (связь учеников) и lessons (набор заданий дуэли) в командах дуэли; social и
 diagnostics — ещё выгрузки для разовой загрузки проекций."""
 
@@ -13,6 +14,7 @@ from tilhero_common.app import Runtime, create_app
 from tilhero_gamification import consumers
 from tilhero_gamification.api.admin import router as admin_router
 from tilhero_gamification.api.admin_social import router as admin_social_router
+from tilhero_gamification.api.billing import router as billing_router
 from tilhero_gamification.api.client import router as client_router
 from tilhero_gamification.api.scheduler import router as scheduler_router
 from tilhero_gamification.api.social import router as social_router
@@ -46,8 +48,8 @@ def build_app(settings: Settings | None = None, runtime: Runtime | None = None, 
             rt.on_startup(bootstrap.on_start)
 
     # маршруты лиг и дуэлей — раньше общих: /duels/stats не должен совпасть с /duels/{duel_id}
-    app = create_app(settings, routers=[social_router, admin_social_router, client_router, admin_router,
-                                        scheduler_router], runtime=runtime, configure=configure,
+    app = create_app(settings, routers=[social_router, admin_social_router, billing_router, client_router,
+                                        admin_router, scheduler_router], runtime=runtime, configure=configure,
                      title="TilHero gamification-service")
     # внешний слой: сырое тело картинки до ASSET_MAX_BYTES только для POST /internal/v1/admin/game/assets
     app.add_middleware(AssetBodyMiddleware, limit=settings.asset_max_bytes)

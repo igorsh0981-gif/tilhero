@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Permission, RoleCode } from "@tilhero/contracts/admin";
-import { homePage, NAV_ITEMS, orderedItems, pageAllowed, visibleNav } from "../src/state/nav";
+import { GROUPS, homePage, NAV_ITEMS, orderedItems, pageAllowed, visibleNav } from "../src/state/nav";
 import { parseHash, routeHash } from "../src/state/route";
 import { parseNewsRoute } from "../src/screens/news/News";
 
@@ -15,19 +15,22 @@ const ALL: Permission[] = [
   "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "costs.read", "costs.manage",
   "memory.read", "memory.manage", "glossary.manage",
   "game.read", "game.manage", "game.publish", "wallet.adjust",
+  "billing.read", "billing.manage", "billing.publish", "billing.approve", "billing.refund", "subscriptions.override",
 ];
-/** + sprint 5 (PLAN «Права и роли»): memory.read, memory.manage, glossary.manage; + sprint 6: game.*, wallet.adjust */
+/** + sprint 5 (PLAN «Права и роли»): memory.read, memory.manage, glossary.manage; + sprint 6: game.*, wallet.adjust;
+ *  + sprint 8 (PLAN «Права и роли»): finance; support + billing.read, subscriptions.override; operations + billing.*,
+ *  subscriptions.override; analyst, auditor + billing.read */
 const MATRIX: Record<RoleCode, Permission[]> = {
   super_admin: ALL,
-  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read", "memory.manage", "game.read", "game.manage", "game.publish", "wallet.adjust"],
+  operations: ["dashboard.read", "users.read", "support.read", "config.read", "config.edit", "config.publish", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "costs.manage", "memory.read", "memory.manage", "game.read", "game.manage", "game.publish", "wallet.adjust", "billing.read", "billing.manage", "billing.publish", "billing.approve", "billing.refund", "subscriptions.override"],
   communications: ["dashboard.read", "whatsnew.manage", "whatsnew.publish", "notif.templates.manage", "notif.campaigns.manage", "notif.campaigns.send"],
-  support: ["dashboard.read", "users.read", "support.read", "support.reply", "game.read"],
+  support: ["dashboard.read", "users.read", "support.read", "support.reply", "game.read", "billing.read", "subscriptions.override"],
   methodist: ["dashboard.read", "users.read", "content.read", "content.edit", "content.review", "content.publish", "ai.read", "ai.manage", "ai.publish", "qa.read", "qa.transcripts", "qa.review", "memory.read", "glossary.manage", "game.read"],
   content_manager: ["dashboard.read", "content.read", "content.edit", "media.rights", "glossary.manage", "game.read", "game.manage"],
   qa_analyst: ["dashboard.read", "content.read", "ai.read", "qa.read", "qa.transcripts", "memory.read"],
   finance: ["dashboard.read", "users.read", "costs.read", "billing.read", "billing.manage", "billing.publish", "billing.approve", "billing.refund"],
-  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
-  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read"],
+  analyst: ["dashboard.read", "users.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", "billing.read"],
+  auditor: ["dashboard.read", "audit.read", "content.read", "ai.read", "qa.read", "costs.read", "memory.read", "game.read", "billing.read"],
   read_only: ["dashboard.read"],
 };
 const ids = (role: RoleCode, menu?: Array<{ id: string; enabled: boolean }>) => visibleNav(new Set(MATRIX[role]), menu).flatMap((g) => g.items.map((i) => i.id));
@@ -37,7 +40,9 @@ const GAME = ["heroes", "game", "events"];
 /** sections not in the experience-config seed 1.0.0 — they follow the config's sections: «memory» (sprint 5) and the five
  *  of «Сообщество» (sprint 7: ADMIN_MENU friends, moderation, referrals, leagues, pair_rooms) */
 const SOCIAL = ["friends", "moderation", "referrals", "leagues", "pair_rooms"];
-const NOT_IN_SEED = ["memory", ...SOCIAL];
+/** sprint 8: the five of «Деньги» (ADMIN_MENU 1.8.0) — not in the seed 1.0.0 either */
+const MONEY = ["tariffs", "payments", "adjustments", "reconciliation", "finance"];
+const NOT_IN_SEED = ["memory", ...SOCIAL, ...MONEY];
 
 describe("menu: 15 sections of the experience-config seed + «memory» (sprint 5), filtered by role (UX only — admin-bff re-checks)", () => {
   it("the menu ids are the admin seed (services/experience-config 0002_seed.py) plus the sprint 5 section", () => {
@@ -48,19 +53,22 @@ describe("menu: 15 sections of the experience-config seed + «memory» (sprint 5
     expect(fromSeed).toHaveLength(15);
   });
   it("super_admin sees every section in the prototype order and groups («memory» in «Продукт» after the content)", () => {
-    expect(ids("super_admin")).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit"]);
-    expect(visibleNav(new Set(ALL)).map((g) => g.group)).toEqual(["product", "ai", "game", "comms", "manage"]);
+    expect(ids("super_admin")).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", "heroes", "game", "events", ...MONEY, "news", "support", "config", "langs", "roles", "audit"]);
+    expect(visibleNav(new Set(ALL)).map((g) => g.group)).toEqual(["product", "ai", "game", "money", "comms", "manage"]);
   });
   it("live sections per role («memory»: forgetting analytics for dashboard.read, the learner's memory for memory.read; the game — game.read)", () => {
-    expect(live("operations")).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", ...GAME, "support", "config", "langs", "audit"]);
-    expect(live("communications")).toEqual(["overview", "memory", "news"]);
-    expect(live("support")).toEqual(["overview", "users", "memory", ...GAME, "support"]);
-    expect(live("methodist")).toEqual(["overview", "users", "content", "memory", "agents", "qa", ...GAME, "langs"]);
-    expect(live("content_manager")).toEqual(["overview", "content", "memory", ...GAME, "langs"]);
-    expect(live("qa_analyst")).toEqual(["overview", "content", "memory", "agents", "qa", "langs"]);
-    expect(live("analyst")).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", ...GAME, "langs"]);
-    expect(live("auditor")).toEqual(["overview", "content", "memory", "agents", "qa", "costs", ...GAME, "langs", "audit"]);
-    expect(live("read_only")).toEqual(["overview", "memory"]);
+    // sprint 8: «Финансовый обзор» opens with billing.read or dashboard.read (admin.ts: finance/overview), the other
+    // four sections of «Деньги» — with billing.read
+    expect(live("operations")).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", ...GAME, ...MONEY, "support", "config", "langs", "audit"]);
+    expect(live("communications")).toEqual(["overview", "memory", "finance", "news"]);
+    expect(live("support")).toEqual(["overview", "users", "memory", ...GAME, ...MONEY, "support"]);
+    expect(live("methodist")).toEqual(["overview", "users", "content", "memory", "agents", "qa", ...GAME, "finance", "langs"]);
+    expect(live("content_manager")).toEqual(["overview", "content", "memory", ...GAME, "finance", "langs"]);
+    expect(live("qa_analyst")).toEqual(["overview", "content", "memory", "agents", "qa", "finance", "langs"]);
+    expect(live("finance")).toEqual(["overview", "users", "memory", "costs", ...MONEY]);
+    expect(live("analyst")).toEqual(["overview", "users", "content", "memory", "agents", "qa", "costs", ...GAME, ...MONEY, "langs"]);
+    expect(live("auditor")).toEqual(["overview", "content", "memory", "agents", "qa", "costs", ...GAME, ...MONEY, "langs", "audit"]);
+    expect(live("read_only")).toEqual(["overview", "memory", "finance"]);
   });
   it("sprint 6: «Герои», «Геймификация», «События и сезоны» open with game.read only (dashboard.read no longer)", () => {
     for (const p of GAME) {
@@ -132,11 +140,11 @@ describe("menu order and switches from the active admin config (layout.menu)", (
   });
   it("an empty menu falls back to the defaults", () => {
     expect(orderedItems([]).map((i) => i.id)).toEqual(NAV_ITEMS.map((i) => i.id));
-    expect(orderedItems(null)).toHaveLength(21);
+    expect(orderedItems(null)).toHaveLength(26);
   });
   it("a section the config does not know yet («memory») follows the config's sections and joins its group", () => {
     const seedMenu = ["overview", "users", "content", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config", "langs", "roles", "audit"].map((id) => ({ id, enabled: true }));
-    expect(orderedItems(seedMenu).map((i) => i.id).slice(-6)).toEqual(["memory", ...SOCIAL]);
+    expect(orderedItems(seedMenu).map((i) => i.id).slice(-11)).toEqual(["memory", ...SOCIAL, ...MONEY]);
     expect(visibleNav(new Set(ALL), seedMenu)[0]!.items.map((i) => i.id)).toEqual(["overview", "users", "content", "memory"]);
   });
 });
@@ -167,11 +175,34 @@ describe("sprint 7: «Сообщество» — five sections by their own read
     expect(social(roles.content_manager!)).toEqual(["leagues"]);
     expect(social(roles.analyst!)).toEqual(["friends", "referrals", "leagues", "pair_rooms"]);
     expect(social(MATRIX.communications)).toEqual([]);
-    expect(visibleNav(new Set([...ALL, ...S7])).map((g) => g.group)).toEqual(["product", "ai", "game", "social", "comms", "manage"]);
+    expect(visibleNav(new Set([...ALL, ...S7])).map((g) => g.group)).toEqual(["product", "ai", "game", "social", "money", "comms", "manage"]);
   });
   it("the hash keeps «_» of the menu id: #/pair_rooms/<id>", () => {
     expect(parseHash("#/pair_rooms/f7000000-0000-4000-8000-000000000002")).toEqual({ page: "pair_rooms", id: "f7000000-0000-4000-8000-000000000002" });
     expect(routeHash("pair_rooms", "x")).toBe("#/pair_rooms/x");
+  });
+});
+
+describe("sprint 8: «Деньги» — five sections by billing.read (PLAN «Права и роли»)", () => {
+  it("each section opens with billing.read; the write rights alone open nothing; the overview also with dashboard.read", () => {
+    for (const p of MONEY) {
+      expect(pageAllowed(p, new Set<Permission>(["billing.read"]))).toBe(true);
+      expect(pageAllowed(p, new Set<Permission>(["billing.manage", "billing.publish", "billing.approve", "billing.refund", "subscriptions.override", "costs.read"]))).toBe(false);
+    }
+    expect(pageAllowed("finance", new Set<Permission>(["dashboard.read"]))).toBe(true);
+    for (const p of MONEY.filter((x) => x !== "finance")) expect(pageAllowed(p, new Set<Permission>(["dashboard.read"]))).toBe(false);
+  });
+  it("the group «Деньги» follows «Сообщество»; switched off in the config — hidden and closed by link", () => {
+    expect(GROUPS).toEqual(["product", "ai", "game", "social", "money", "comms", "manage"]);
+    expect(NAV_ITEMS.filter((i) => i.group === "money").map((i) => i.id)).toEqual(MONEY);
+    const menu = NAV_ITEMS.map((i) => ({ id: i.id, enabled: i.id !== "tariffs" }));
+    expect(orderedItems(menu).map((i) => i.id)).not.toContain("tariffs");
+    expect(pageAllowed("tariffs", new Set(ALL), menu)).toBe(false);
+    expect(pageAllowed("payments", new Set(ALL), menu)).toBe(true);
+  });
+  it("routes: #/payments/orders/<id>, #/tariffs/v/<n>", () => {
+    expect(parseHash("#/payments/orders/f8000000-0000-4000-8000-000000000001")).toEqual({ page: "payments", id: "orders/f8000000-0000-4000-8000-000000000001" });
+    expect(parseHash("#/tariffs/v/7")).toEqual({ page: "tariffs", id: "v/7" });
   });
 });
 

@@ -648,7 +648,7 @@ export const enAi: Record<keyof typeof ruAi, string> = {
   "csf.gt_monthly": "At most the monthly cap",
   "csf.gt_daily": "At most the learner daily limit",
   "csf.saveT": "Save the AI limits?",
-  "csf.saveM": "Month {m}, learner per day {d}, lesson {l}, pronunciation {s} a month, pair room {r}, alert {a} %.",
+  "csf.saveM": "Month {m}, learner per day {d}, lesson {l}, pronunciation {s} a month, pair room {r}, subscriber per day {p}, alert {a} %.",
   "csf.saved": "Limits saved",
   "csf.conflict": "Another staff member changed the limits — check them and save again",
   "csf.savedNow": "Saved now: {v}",

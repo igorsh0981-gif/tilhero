@@ -438,7 +438,9 @@ export type ReleaseNoteRoute =
   // релиз 6.1: игра (спринт 6) — герои, магазин, значки, история, настройки; словарь и чтение (спринт 5)
   | "heroes" | "shop" | "badges" | "game_history" | "game_settings" | "dictionary" | "reading"
   // спринт 7: друзья (заявки, блокировки, санкции), лиги недели, дуэли, рефералы
-  | "friends" | "leagues" | "duels" | "referrals";
+  | "friends" | "leagues" | "duels" | "referrals"
+  // спринт 8: «Подписка» (за Stars) и «Купить тилы» (за Stars; детскому профилю экран без цен)
+  | "subscription" | "til_shop";
 export type ReleaseNoteIcon =
   | "spark" | "hero" | "calendar" | "clock" | "bell" | "book" | "chat" | "mic" | "star" | "flame" | "users" | "gift"
   | "shield" | "globe" | "trophy" | "news";

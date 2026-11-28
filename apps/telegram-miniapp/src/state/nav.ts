@@ -1,4 +1,4 @@
-import type { DiagnosticResult, LessonSummary, MemberId, ReviewSummary } from "@tilhero/contracts/bff";
+import type { DiagnosticResult, LessonSummary, MemberId, ReviewSummary, TicketCategory } from "@tilhero/contracts/bff";
 import type { Localized } from "@tilhero/contracts/content";
 import { useCallback, useMemo, useState } from "react";
 import type { AppRoute } from "../tg/deeplink";
@@ -20,7 +20,8 @@ export type Pushed =
   | { name: "privacy" }
   | { name: "parentCode"; cancel?: boolean }
   | { name: "delete" }
-  | { name: "support"; number?: string }
+  /** category / subject — a prefilled new request (sprint 8: «Вопрос по оплате» → SUBSCRIPTION_PAYMENT) */
+  | { name: "support"; number?: string; category?: TicketCategory; subject?: string }
   | { name: "ticket"; id: string }
   // sprint 3
   | { name: "diagnostics" }
@@ -66,7 +67,12 @@ export type Pushed =
   | { name: "pairInvite"; partner?: MemberId; partnerLabel?: string }
   | { name: "pairRoom"; id: string }
   | { name: "pairReport"; id: string }
-  | { name: "referrals" };
+  | { name: "referrals" }
+  // sprint 8: the subscription for Telegram Stars, the history of Stars payments, the history of AI minutes, tils for Stars
+  | { name: "subscription" }
+  | { name: "payments" }
+  | { name: "minutes" }
+  | { name: "tilShop" };
 
 export type PracticeTab = "scenarios" | "media" | "reading";
 
@@ -111,12 +117,15 @@ const ROUTE_SCREEN: Partial<Record<AppRoute, Pushed>> = {
   leagues: { name: "leagues" },
   duels: { name: "duels" },
   referrals: { name: "referrals" },
+  // sprint 8 (the notifications about payments lead to route_subscription)
+  subscription: { name: "subscription" },
+  til_shop: { name: "tilShop" },
 };
 /** Routes that open a tab root: the skill map lives on the «Прогресс» tab, the dictionary (release 6.1) is the root
  *  of the «Словарь» tab. */
 const ROUTE_TAB: Partial<Record<AppRoute, Tab>> = { skills: "progress", dictionary: "review" };
 /** Routes into the game: when the operator switched the game off (flag `game`), they lead Home. */
-export const GAME_ROUTES: readonly AppRoute[] = ["heroes", "shop", "badges", "game_history", "game_settings", "leagues", "duels"];
+export const GAME_ROUTES: readonly AppRoute[] = ["heroes", "shop", "badges", "game_history", "game_settings", "leagues", "duels", "til_shop"];
 export const routeAllowed = (r: AppRoute, gameOn: boolean): AppRoute => (!gameOn && GAME_ROUTES.includes(r) ? "home" : r);
 /** Sprint 5: route_review (the evening notification reviews_due, «Что нового») opens «Повторение дня» above the
  *  «Словарь» tab — «Назад» lands in the dictionary. */

@@ -1,4 +1,4 @@
-"""Модели lessons — зеркало миграций 0001–0003 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
+"""Модели lessons — зеркало миграций 0001–0004 (UNIQUE, индексы и CHECK объявлены и здесь: тест schema_drift).
 
 user_id везде — ученик (`lrn` внутреннего токена), account_id — аккаунт (`sub`). PII сервис не хранит; тексты
 учеников (свободные реплики и открытые ответы) хранятся 90 дней и стираются `lessons-tick` (redacted_at).
@@ -50,6 +50,8 @@ END_REASONS = ("completed", "participant_left", "inactivity", "stopped")
 ROOM_EVENT_KINDS = ("joined", "left", "offline", "online", "paused", "resumed", "roles", "coach", "turn",
                     "mode_changed", "finished", "stopped")
 SIDES = ("inviter", "invitee")
+# спринт 8: почему урок или сценарий идёт без ИИ по тарифу (bff.ts AiLockReason)
+AI_LOCK_REASONS = ("no_subscription", "feature_not_in_plan", "minutes_exhausted", "billing_unavailable")
 
 
 def _in(values: tuple[str, ...]) -> str:
@@ -80,6 +82,12 @@ class Session(Base):
         CheckConstraint("evaluation_status IN ('none','pending','done','failed')", name="ck_sessions_evaluation"),
         CheckConstraint("minutes BETWEEN 0 AND 600", name="ck_sessions_minutes"),
         CheckConstraint("active_seconds >= 0 AND hints_used >= 0 AND step_index >= 0", name="ck_sessions_counters"),
+        # спринт 8 (миграция 0004)
+        CheckConstraint("ai_active_seconds >= 0", name="ck_sessions_ai_seconds"),
+        CheckConstraint(f"ai_lock_reason IS NULL OR ai_lock_reason {_in(AI_LOCK_REASONS)}",
+                        name="ck_sessions_ai_lock_reason"),
+        CheckConstraint("billable_minutes IS NULL OR billable_minutes BETWEEN 0 AND 240",
+                        name="ck_sessions_billable_minutes"),
         CheckConstraint("(kind <> 'lesson' OR lesson_id IS NOT NULL) AND (kind <> 'scenario' OR scenario_id IS NOT "
                         "NULL) AND (kind <> 'media' OR asset_id IS NOT NULL) AND (kind <> 'review' OR "
                         "source_session_id IS NOT NULL) AND (kind <> 'reading' OR reading_id IS NOT NULL) AND "
@@ -148,6 +156,12 @@ class Session(Base):
     fail_reason: Mapped[str | None] = mapped_column(String(32))
     idempotency_key: Mapped[str | None] = mapped_column(String(128))
     request_hash: Mapped[str | None] = mapped_column(String(64))
+    # спринт 8 (миграция 0004): ИИ-секунды (in_progress, ai_mode full, без деградации и отказа ИИ), урок без ИИ по
+    # тарифу, удержание минут billing при старте, к списанию ⌈ai_active_seconds / 60⌉ ≤ minutes (при завершении)
+    ai_active_seconds: Mapped[int] = mapped_column(Integer(), nullable=False, server_default=sql_text("0"))
+    ai_lock_reason: Mapped[str | None] = mapped_column(String(24))
+    billing_hold_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    billable_minutes: Mapped[int | None] = mapped_column(SmallInteger())
 
 
 class StatusHistory(Base):
@@ -344,6 +358,11 @@ class PairRoom(Base):
         CheckConstraint("seq >= 0 AND turn_seq >= 0 AND progress_seconds >= 0 AND ai_cost_usd >= 0",
                         name="ck_pair_rooms_counters"),
         CheckConstraint(f"level IS NULL OR level {BAND_CHECK}", name="ck_pair_rooms_level"),
+        # спринт 8 (миграция 0004)
+        CheckConstraint("coach_active_seconds >= 0", name="ck_pair_rooms_coach_seconds"),
+        CheckConstraint("billable_minutes IS NULL OR billable_minutes BETWEEN 0 AND 240",
+                        name="ck_pair_rooms_billable_minutes"),
+        CheckConstraint("billing_hold_id IS NULL OR billing_payer_user_id IS NOT NULL", name="ck_pair_rooms_billing"),
         UniqueConstraint("inviter", "idempotency_key", name="uq_pair_rooms_inviter_idempotency"),
         Index("ix_pair_rooms_created", "created_at"),
         Index("ix_pair_rooms_active", "status", postgresql_where=sql_text(
@@ -395,12 +414,19 @@ class PairRoom(Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(128))
     request_hash: Mapped[str | None] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    # спринт 8 (миграция 0004): урок вдвоём оплачивает пригласивший (его подписка и минуты, один раз за комнату);
+    # удержание — при старте с коучем; к списанию ⌈coach_active_seconds / 60⌉ (время с работающим коучем)
+    billing_payer_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    billing_hold_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    coach_active_seconds: Mapped[int] = mapped_column(Integer(), nullable=False, server_default=sql_text("0"))
+    billable_minutes: Mapped[int | None] = mapped_column(SmallInteger())
 
 
 class RoomParticipant(Base):
-    """Участник комнаты (сторона inviter/invitee): роль, присутствие, время речи, минуты (учитываются, не
-    списываются — спринт 8), вклад, доказательства для независимой оценки, приватный отчёт, своя сессия
-    session_id = uuid5(room_id, str(user_id)). holds_slot — комната занимает «слот» ученика (≤ 1 активной)."""
+    """Участник комнаты (сторона inviter/invitee): роль, присутствие, время речи, минуты участника (учёт; списание
+    минут подписки — по комнате у пригласившего, спринт 8), вклад, доказательства для независимой оценки, приватный
+    отчёт, своя сессия session_id = uuid5(room_id, str(user_id)). holds_slot — комната занимает «слот» ученика
+    (≤ 1 активной)."""
 
     __tablename__ = "room_participants"
     __table_args__ = (

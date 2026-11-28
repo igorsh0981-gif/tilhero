@@ -39,10 +39,14 @@ TokenName = Annotated[str, StringConstraints(max_length=64)]
 # Спринт 7 (INTERNAL_API спринта 7 §6): группа «Сообщество» — friends («Друзья и жалобы»), moderation («Модерация»),
 # referrals («Реферальные кампании»), leagues («Лиги и дуэли»), pair_rooms («Парные комнаты»). Версия 1.7.0 (миграция
 # 0008) ставит её сразу после «Игры»; в 1.0.0 этих разделов нет — admin-web добавляет их в конец.
+# Спринт 8 (INTERNAL_API спринта 8 §9): группа «Деньги» — tariffs («Тарифы и товары»), payments («Заказы и платежи»),
+# adjustments («Корректировки»), reconciliation («Сверка»), finance («Финансовый обзор»). Версия 1.8.0 (миграция 0010)
+# ставит её сразу после «Сообщества».
 ADMIN_MENU: Final[tuple[str, ...]] = (
     "overview", "users", "content", "agents", "qa", "costs", "heroes", "game", "events", "news", "support", "config",
     "langs", "roles", "audit", "memory", "game_events",
     "friends", "moderation", "referrals", "leagues", "pair_rooms",
+    "tariffs", "payments", "adjustments", "reconciliation", "finance",
 )
 # id прототипа → id раздела (для проверки дублей)
 MENU_ALIASES: Final[dict[str, str]] = {"events": "game_events"}

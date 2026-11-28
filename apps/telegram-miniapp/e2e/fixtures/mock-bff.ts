@@ -23,6 +23,7 @@ import type {
   UserSummary,
   WhatsNew,
 } from "@tilhero/contracts/bff";
+import { MockBilling, type BillingCtx, type BillingScenario } from "./billing";
 import { MockContent, type ContentScenario } from "./content";
 import { MockGame, type GameScenario } from "./game";
 import { MockLessons, type LessonsScenario } from "./lessons";
@@ -97,6 +98,8 @@ export interface Scenario {
   doneDays?: string[];
   /** sprint 7: friends, sanctions, referrals, leagues, duels, pair rooms (fixtures/social.ts); absent — the defaults */
   social?: SocialScenario;
+  /** sprint 8: the subscription and purchases for Telegram Stars (fixtures/billing.ts); absent — the defaults */
+  billing?: BillingScenario;
 }
 
 /** ~0.1 s of silent MP3 (4 frames of MPEG-1 Layer III, 32 kbit/s, 48 kHz, mono) — the body of the mock speech. */
@@ -114,7 +117,7 @@ export interface Recorded {
   body: unknown;
 }
 
-const PUBLIC = [/^\/v1\/session\/(telegram|refresh)$/, /^\/v1\/legal\/policy/, /^\/v1\/experience\/config/, /^GET \/v1\/guardian-consents\//, /^GET \/v1\/game\/assets\//];
+const PUBLIC = [/^\/__e2e\//, /^\/v1\/session\/(telegram|refresh)$/, /^\/v1\/legal\/policy/, /^\/v1\/experience\/config/, /^GET \/v1\/guardian-consents\//, /^GET \/v1\/game\/assets\//];
 
 function localYmd(tz: string, d = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
@@ -158,6 +161,7 @@ export class MockBff {
   readonly memory: MockMemory;
   readonly game: MockGame;
   readonly social: MockSocial;
+  readonly billing: MockBilling;
   private dropOnce: Set<string>;
   private lateOnce: Record<string, [number, string]>;
   private access = 0;
@@ -203,6 +207,10 @@ export class MockBff {
     this.memory = new MockMemory(sc.memory ?? {}, this.lessons, { self: F.ACCOUNT_ID, kid: this.learners.find((l) => l.kind === "child")?.learner_id });
     this.game = new MockGame(sc.game ?? { mode: "down" }, (owner) => this.learners.some((l) => l.learner_id === owner && l.kind === "child"));
     this.social = new MockSocial(sc.social ?? {}, this.lessons, { owner: this.active, kid: !!sc.child });
+    // sprint 8: tils bought for Stars land in the game wallet of the recipient (gamification consumer of billing)
+    this.billing = new MockBilling(sc.billing ?? {}, (owner, til) => {
+      if (!this.game.down) this.game.state(owner).til += til;
+    });
     // sprint 7: a child profile has a family (the parent and a sibling, by member_id) unless the scenario says otherwise
     if (sc.child && sc.family === undefined) this.family = kidFamily(this.active, F.ACCOUNT_ID);
     this.syncVoice();
@@ -362,6 +370,12 @@ export class MockBff {
     const open = PUBLIC.some((r) => r.test(path) || r.test(key));
     if (!open && !(headers.authorization ?? "").startsWith("Bearer acc-")) return this.err(route, 401, "UNAUTHORIZED");
     const b = (body ?? {}) as Record<string, unknown>;
+
+    // ---- the fake Telegram paid / closed an invoice (fixtures/telegram.ts openInvoice) ----
+    if (key === "POST /__e2e/invoice") {
+      this.billing.invoice(String(b.link ?? ""), String(b.status ?? ""));
+      return route.fulfill({ status: 204, body: "" });
+    }
 
     // ---- session ----
     if (key === "POST /v1/session/telegram" || key === "POST /v1/session/refresh") return this.ok(route, this.session());
@@ -681,6 +695,19 @@ export class MockBff {
       return route.fulfill({ status: 200, contentType: "audio/mpeg", body: SPEECH_MP3, headers: { "cache-control": "private, max-age=86400" } });
     }
 
+    // ---- sprint 8: the subscription and purchases for Telegram Stars; the paywall of the pair lesson ----
+    const bctx = this.billingCtx();
+    if (key === "POST /v1/pair-rooms" && this.billing.sc.pairInvite) {
+      const r = this.billing.sc.pairInvite;
+      if (r === "billing_down") return this.err(route, 503, "BILLING_UNAVAILABLE", { service: "billing" });
+      return this.err(route, 403, "SUBSCRIPTION_REQUIRED", { feature: "pair_lessons", reason: r });
+    }
+    const s8 = this.billing.handle(method, path, b, headers, bctx);
+    if (s8) {
+      if (s8.code) return this.err(route, s8.status, s8.code, s8.details ?? {});
+      return this.ok(route, s8.body, s8.status);
+    }
+
     // ---- sprint 7: social, leagues and duels, pair rooms (the game down → /v1/game/* answers GAME_UNAVAILABLE below) ----
     if (!(this.game.down && path.startsWith("/v1/game/"))) {
       const ctx = this.socialCtx();
@@ -706,6 +733,10 @@ export class MockBff {
     }
     const s6 = this.game.handle(method, path, url.searchParams, b, headers, this.active);
     if (s6) {
+      // sprint 8: «Купить тилы» за Stars — as telegram-bff: by the catalogue of billing (a child — false)
+      const pa = this.billing.purchaseAvailable(bctx);
+      if (s6.body && typeof s6.body === "object" && "purchase_available" in (s6.body as object)) (s6.body as { purchase_available: boolean }).purchase_available = pa;
+      if (s6.code === "INSUFFICIENT_TILS" && s6.details) s6.details = { ...s6.details, purchase_available: pa };
       if (key === "POST /v1/game/shop/purchases" && s6.status === 200 && this.game.takeDrop()) return route.abort("failed");
       if (s6.code) return this.err(route, s6.status, s6.code, s6.details ?? {});
       return this.ok(route, s6.body, s6.status);
@@ -773,6 +804,19 @@ export class MockBff {
       return this.ok(route, { request_id: "77777777-aaaa-4bbb-8ccc-000000000001", status: "REQUESTED", domains: ["identity-consent", "learning-plan", "social", "notifications", "support", "experience-config"], learners: this.learners.length }, 202);
     }
     return this.err(route, 404, "NOT_FOUND");
+  }
+
+  /** What the billing mock needs: a child profile, the right to pay (18+, or 14–17 with the parent's consent), children. */
+  private billingCtx(): BillingCtx {
+    const teen = this.account.age_band === "14-17";
+    const consent = !teen || this.account.guardian_consent === "granted";
+    return {
+      kid: this.learner().kind === "child",
+      canPay: (this.account.age_band === "18+" || teen) && consent && !this.billing.sc.consentRequired,
+      consentRequired: (teen && !consent) || !!this.billing.sc.consentRequired,
+      account: F.ACCOUNT_ID,
+      children: this.learners.filter((l) => l.kind === "child").map((l) => ({ id: l.learner_id, name: l.display_name })),
+    };
   }
 
   /** What the social mock needs of the session: the learner, a teen without the parent, consents, the family, the

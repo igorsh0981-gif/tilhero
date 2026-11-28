@@ -69,6 +69,11 @@ def samples(uid: str, guardian: str) -> list:
                                                      "attempt": 1}, producer=ID),
         make_envelope("user.domain.deleted.v1", {"user_id": uid, "request_id": req, "domain": ID,
                                                  "mode": "anonymized"}, producer=ID),
+        # спринт 8: тариф ученика (billing)
+        make_envelope("billing.access.changed.v1", {"user_id": uid, "account_id": guardian, "tier": "paid",
+                                                    "features": ["ai_lessons", "pair_lessons"],
+                                                    "paid_until": iso(now() + timedelta(days=30)),
+                                                    "changed_at": iso(now())}, producer="billing"),
     ]
 
 

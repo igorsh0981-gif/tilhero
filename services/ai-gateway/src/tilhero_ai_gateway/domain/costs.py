@@ -21,6 +21,7 @@ from typing import Any, Final
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tilhero_ai_gateway.domain import degradation
 from tilhero_ai_gateway.domain.budget import month_spent
 from tilhero_ai_gateway.domain.common import (
     COSTS_MANAGE,
@@ -52,6 +53,7 @@ def budget_view(b: BudgetRow) -> dict[str, Any]:
     return {"ai_enabled": b.ai_enabled, "monthly_cap_usd": float(b.monthly_cap_usd),
             "learner_daily_cap_usd": float(b.learner_daily_cap_usd), "lesson_cap_usd": float(b.lesson_cap_usd),
             "speech_monthly_cap_usd": float(b.speech_monthly_cap_usd), "room_cap_usd": float(b.room_cap_usd),
+            "paid_learner_daily_cap_usd": float(b.paid_learner_daily_cap_usd),
             "alert_percent": b.alert_percent, "updated_at": iso_z(b.updated_at)}
 
 
@@ -158,10 +160,17 @@ async def update_budget(session: AsyncSession, values: dict[str, Any], expected_
         setattr(row, key, value)
     # подлимит речи — внутри потолка месяца (решение владельца 20.11.2026; в БД — CHECK ck_budget_speech)
     # спринт 7: потолок парной комнаты — тоже внутри потолка месяца (CHECK ck_budget_room)
+    # спринт 8 (В14): дневной лимит подписчика — не меньше бесплатного и не больше потолка месяца (CHECK
+    # ck_budget_paid_daily — только верхняя граница)
     over = [name for name, value in (("speech_monthly_cap_usd", row.speech_monthly_cap_usd),
-                                     ("room_cap_usd", row.room_cap_usd)) if value > row.monthly_cap_usd]
+                                     ("room_cap_usd", row.room_cap_usd),
+                                     ("paid_learner_daily_cap_usd", row.paid_learner_daily_cap_usd))
+            if value > row.monthly_cap_usd]
+    if row.paid_learner_daily_cap_usd < row.learner_daily_cap_usd and "paid_learner_daily_cap_usd" not in over:
+        over.append("paid_learner_daily_cap_usd")
     if over:
-        raise unprocessable("BUDGET_INVALID", "Подлимит больше потолка месяца", {"fields": over})
+        raise unprocessable("BUDGET_INVALID", "Подлимит больше потолка месяца или дневной лимит подписчика меньше "
+                            "бесплатного", {"fields": over})
     after = budget_view(row)
     if {k: v for k, v in after.items() if k != "updated_at"} == {k: v for k, v in before.items() if k != "updated_at"}:
         return row
@@ -180,6 +189,9 @@ async def update_budget(session: AsyncSession, values: dict[str, Any], expected_
     if caps_before != caps_after:
         await emit_audit(session, audit_payload(actor, "ai.budget_updated", "ai_budget", "budget",
                                                 before=caps_before, after=caps_after, reason=reason))
+    # спринт 8: остановка и потолок меняют действующий уровень деградации — смена записывается сразу
+    hint = degradation.REASON_EMERGENCY if before["ai_enabled"] != after["ai_enabled"] else None
+    await degradation.sync(session, now, budget=row, actor=actor, hint=hint)
     return row
 
 

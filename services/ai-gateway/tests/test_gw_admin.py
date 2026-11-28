@@ -242,8 +242,8 @@ async def test_model_price_drives_cost(env) -> None:
 async def test_budget_get_update_conflict(env) -> None:
     b = (await env.c.get("/admin/v1/ai/budget", headers=env.h(OPERATIONS))).json()
     assert b == {"ai_enabled": True, "monthly_cap_usd": 20.0, "learner_daily_cap_usd": 0.05, "lesson_cap_usd": 0.03,
-                 "speech_monthly_cap_usd": 5.0, "room_cap_usd": 0.1, "alert_percent": 80,
-                 "updated_at": b["updated_at"]}
+                 "speech_monthly_cap_usd": 5.0, "room_cap_usd": 0.1, "paid_learner_daily_cap_usd": 0.3,
+                 "alert_percent": 80, "updated_at": b["updated_at"]}
     body = {"monthly_cap_usd": 25, "learner_daily_cap_usd": 0.04, "lesson_cap_usd": 0.02, "alert_percent": 90,
             "speech_monthly_cap_usd": 5,
             "updated_at": b["updated_at"], "reason": "Пересмотр лимитов"}

@@ -1,7 +1,7 @@
-import type { ShopItemKind, ShopItemView } from "@tilhero/contracts/bff";
+import type { GameSummary, ShopItemKind, ShopItemView } from "@tilhero/contracts/bff";
 import { useRef, useState } from "react";
 import { newIdempotencyKey } from "../../api/client";
-import { errorText } from "../../api/errors";
+import { ApiError, errorText } from "../../api/errors";
 import { equippedCodes, keepPurchaseKey, missingTils, PurchaseKeys, purchaseProblem, shortageText, themeVars, type PurchaseProblem, type ShopResponse } from "../../domain/game";
 import { useI18n, type MessageKey } from "../../i18n";
 import { useApp } from "../../state/app";
@@ -19,14 +19,20 @@ const SECTIONS: readonly ShopItemKind[] = ["streak_freeze", "background", "hero_
  * The shop (APP-GAME-05, AT-67, AT-69): cosmetics (backgrounds of Home, hero frames) and the streak freeze, for tils only.
  * Prices, «Куплено», «Надето», the stock of freezes «N из max». A purchase is one server transaction with an
  * Idempotency-Key: a lost answer is repeated with the same key (no second charge), the client never changes the balance
- * itself. Not enough tils — «Не хватает N тилов. Заработайте в уроках — покупка тилов скоро»: there are no payment
- * screens in sprint 6 (tils for money — sprint 8; for children only through a parent).
+ * itself. Not enough tils — «Не хватает N тилов. Заработайте их в уроках» and, sprint 8, «Купить тилы» for Telegram Stars
+ * when the server says a pack can be bought (GameSummary.purchase_available / INSUFFICIENT_TILS.purchase_available);
+ * a child profile never sees it (tils for a child — only through a parent).
  */
 export function ShopScreen() {
   const { bff, nav, session } = useApp();
   const { t, tp, l, fmt } = useI18n();
   const kid = session.learner.kind === "child";
   const shop = useLoad<ShopResponse>(() => bff.gameShop(), [session.learner.learner_id]);
+  // sprint 8: «Купить тилы» for Stars — the server decides (sales on, the right to pay, a pack with a Stars price)
+  const summary = useLoad<GameSummary | null>(() => (kid ? Promise.resolve(null) : bff.gameSummary(true).catch(() => null)), [session.learner.learner_id]);
+  const [tilsForSale, setTilsForSale] = useState<boolean | null>(null);
+  const buyTils = !kid && (tilsForSale ?? summary.data?.purchase_available ?? false);
+  const toTilShop = () => nav.push({ name: "tilShop" });
   const keys = useRef(new PurchaseKeys(newIdempotencyKey));
   // synchronous lock: a second tap before React re-renders (or while the confirmation is open) does nothing
   const lock = useRef<string | null>(null);
@@ -82,6 +88,7 @@ export function ShopScreen() {
           return;
         }
         keys.current.drop(item.code);
+        if (e instanceof ApiError && e.code === "INSUFFICIENT_TILS" && typeof e.details.purchase_available === "boolean") setTilsForSale(e.details.purchase_available);
         const p = purchaseProblem(e, item.price_til, data.til_balance);
         if (p.kind === "other") note(item.code, null, errorText(e, t, fmt.mmss));
         else {
@@ -139,6 +146,12 @@ export function ShopScreen() {
                 </div>
                 <p className="sub small">{kid ? t("game.shop.earnKid") : t("game.shop.earn")}</p>
                 <p className="sub small">{t("game.shop.noLearn")}</p>
+                {buyTils ? (
+                  <Btn variant="secondary" onClick={toTilShop} data-testid="shop-buy-tils">
+                    <Icon name="coin" size={18} />
+                    {t("game.buyTils")}
+                  </Btn>
+                ) : null}
               </div>
             </div>
             {data.items.length === 0 ? (
@@ -164,6 +177,7 @@ export function ShopScreen() {
                         error={errors[item.code] ?? null}
                         onBuy={() => void buy(item)}
                         onEquip={() => void equip(item)}
+                        onGetTils={buyTils ? toTilShop : null}
                       />
                     ))}
                   </ul>
@@ -187,6 +201,8 @@ function ShopItem(props: {
   error: string | null;
   onBuy: () => void;
   onEquip: () => void;
+  /** sprint 8: not enough tils and a pack can be bought for Stars */
+  onGetTils: (() => void) | null;
 }) {
   const { item, shop, kid, problem } = props;
   const { t, tp, l, fmt } = useI18n();
@@ -217,6 +233,12 @@ function ShopItem(props: {
             <Icon name="info" size={16} />
             {why}
           </p>
+        ) : null}
+        {short > 0 && props.onGetTils ? (
+          <Btn variant="link" onClick={props.onGetTils} data-testid={`shop-get-tils-${item.code}`}>
+            <Icon name="coin" size={16} />
+            {t("game.buyTils")}
+          </Btn>
         ) : null}
         <ErrorLine text={props.error} />
         <div className="shop-acts">

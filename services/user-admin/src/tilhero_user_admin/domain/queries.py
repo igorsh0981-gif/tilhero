@@ -65,11 +65,28 @@ def mask_username(value: str | None) -> str | None:
     return value[:2] + MASK * 3 + value[-2:]
 
 
+def effective_tier(r: LearnerSummary, now: datetime | None = None) -> str | None:
+    """Тариф строки (admin.ts AdminLearnerRow.tier): paid — пока paid_until не наступил (событие об окончании доступа
+    могло ещё не прийти: tick billing раз в 5 минут); NULL — событий ещё не было."""
+    if r.tier == "paid" and r.paid_until is not None and r.paid_until <= (now or datetime.now(UTC)):
+        return "free"
+    return r.tier
+
+
+def tier_condition(tier: str, now: datetime) -> ColumnElement[bool]:
+    """Фильтр `?tier=` по действующему тарифу: free — в т. ч. NULL (событий не было) и истёкший paid."""
+    if tier == "paid":
+        return and_(L.tier == "paid", or_(L.paid_until.is_(None), L.paid_until > now))
+    # NOT(paid) с NULL дал бы NULL — условие расписано явно
+    return or_(L.tier.is_(None), L.tier != "paid", and_(L.paid_until.is_not(None), L.paid_until <= now))
+
+
 def row_view(r: LearnerSummary, children_count: int = 0, *, full_username: bool = False) -> AdminLearnerRow:
     """`full_username` — у сотрудника есть users.sensitive.read; иначе username маскируется."""
     return AdminLearnerRow(
         user_id=r.user_id,
         kind=r.kind,  # type: ignore[arg-type]  # CHECK ck_learner_kind
+        tier=effective_tier(r),  # type: ignore[arg-type]  # CHECK ck_learner_tier
         guardian_user_id=r.guardian_user_id,
         display_name=r.display_name,
         username=r.username if full_username else mask_username(r.username),
@@ -214,6 +231,7 @@ async def list_learners(
     cursor: str | None,
     can_search_tickets: bool,
     full_username: bool = False,
+    tier: str | None = None,
 ) -> tuple[list[AdminLearnerRow], str | None]:
     # Строка, созданная событием другого домена раньше профиля (profile_known=false), в списке не показывается:
     # до первого user.profile.created.v1 или снимка identity-consent о ученике ничего достоверного не известно.
@@ -235,6 +253,8 @@ async def list_learners(
         stmt = stmt.where(L.open_tickets > 0)
     elif has_open_tickets is False:
         stmt = stmt.where(L.open_tickets == 0)
+    if tier:
+        stmt = stmt.where(tier_condition(tier, datetime.now(UTC)))
     if cursor:
         created, uid = _decode_cursor(cursor)
         stmt = stmt.where(tuple_(L.created_at, L.user_id) < tuple_(created, uid))

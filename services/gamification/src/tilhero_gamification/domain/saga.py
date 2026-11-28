@@ -9,7 +9,10 @@
 исключения без ученика); активные дуэли ученика отменяются, все его дуэли обезличиваются (challenger / opponent /
 pair_key → null, счёт и результат остаются); реферальные награды обезличиваются. → ACK user.domain.deleted.v1 {domain:
 gamification, mode: deleted}. Идемпотентна: повтор снова подтверждается. Сотрудники в assets.uploaded_by,
-rules_versions, heroes, итогах и истории дуэлей не трогаются — это не данные учеников."""
+rules_versions, heroes, итогах и истории дуэлей не трогаются — это не данные учеников.
+
+Спринт 8: пакеты тилов по заказам (til_orders) удаляются вместе с реестром; заказы и деньги хранит billing
+(обезличенно)."""
 
 from __future__ import annotations
 
@@ -45,6 +48,7 @@ from tilhero_gamification.models import (
     SkillState,
     SocialBlock,
     SocialFriend,
+    TilOrder,
     Wallet,
 )
 
@@ -54,7 +58,8 @@ async def delete_user_data(session: AsyncSession, user_id: uuid.UUID, request_id
     await lock_user(session, user_id)
     await session.execute(text("SET LOCAL tilhero.deletion = 'on'"))
     for model in (Ledger, Badge, Wallet, Learner, SkillState, Quest, Ownership, Purchase, SessionReward,
-                  EvidenceReward, Community, FamilyMember, Sanction, LearnerLevel, LeagueMember, PairAward):
+                  EvidenceReward, Community, FamilyMember, Sanction, LearnerLevel, LeagueMember, PairAward,
+                  TilOrder):
         await session.execute(delete(model).where(model.user_id == user_id))
     await session.execute(delete(Referral).where(or_(Referral.invitee_user_id == user_id,
                                                      Referral.inviter_user_id == user_id)))

@@ -1,8 +1,8 @@
 """telegram-bot-gateway: два ASGI-приложения в одном процессе (ревью спринта 1, P1).
 
 - публичное (`PORT`, домен Railway) — только `POST /telegram/webhook` и `/health/*`;
-- внутреннее (`INTERNAL_PORT`, 8108, только приватная сеть) — `POST /internal/v1/messages` (только notifications)
-  и `/health/*`.
+- внутреннее (`INTERNAL_PORT`, 8108, только приватная сеть) — `POST /internal/v1/messages` (только notifications),
+  `/internal/v1/stars/*` (только billing, спринт 8: счета, возвраты, автопродление, выписка Stars) и `/health/*`.
 
 Оба приложения разделяют один Runtime (Redis, клиенты): его жизненным циклом управляет публичное приложение.
 Запуск обоих портов — `python -m tilhero_botgw` (tilhero_botgw.serve): один uvicorn-сервер на двух сокетах,
@@ -17,6 +17,7 @@ import httpx
 from fastapi import FastAPI
 
 from tilhero_botgw.api import internal, webhook
+from tilhero_botgw.api import stars as stars_api
 from tilhero_botgw.settings import Settings, get_settings
 from tilhero_botgw.telegram import TelegramClient, silence_http_logging
 from tilhero_common.app import Runtime, create_app
@@ -28,6 +29,7 @@ def build_apps(
     *,
     telegram_transport: httpx.AsyncBaseTransport | None = None,
     identity_transport: httpx.AsyncBaseTransport | None = None,
+    billing_transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[FastAPI, FastAPI]:
     """→ (публичное, внутреннее). Без БД (Runtime работает только с Redis). Транспорты — для тестов."""
     settings = settings or get_settings()
@@ -37,10 +39,14 @@ def build_apps(
         api_base=settings.telegram_api_base,
         timeout=settings.telegram_timeout_seconds,
         transport=telegram_transport,
+        test_env=settings.telegram_test_env,
     )
 
     def configure(rt: Runtime) -> None:
         rt.register_client("identity-consent", settings.identity_consent_url, transport=identity_transport)
+        # спринт 8: платёжные обновления Stars → billing; повтор и бюджет времени — в stars.py (не в клиенте)
+        rt.register_client("billing", settings.billing_url, timeout=settings.stars_billing_timeout_seconds,
+                           retries=0, transport=billing_transport)
 
         async def close_telegram(_: Runtime) -> None:
             await telegram.aclose()
@@ -56,7 +62,7 @@ def build_apps(
     )
     private = create_app(
         settings,
-        routers=[internal.router],
+        routers=[internal.router, stars_api.router],
         runtime=runtime,
         manage_runtime=False,
         title="TilHero telegram-bot-gateway (internal)",
